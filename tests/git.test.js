@@ -32,6 +32,13 @@ test('isRepo() distinguishes a repository from a plain directory', async () => {
   assert.equal(await git.isRepo(plain), false);
 });
 
+test('topLevel() resolves a subdirectory to the repository root', async () => {
+  const { dir } = await makeRepo();
+  await fs.mkdir(path.join(dir, 'nested', 'deeper'), { recursive: true });
+  const top = await git.topLevel(path.join(dir, 'nested', 'deeper'));
+  assert.equal(await fs.realpath(top), await fs.realpath(dir));
+});
+
 test('describe() reports branch, commit, and a clean tree', async () => {
   const { dir } = await makeRepo();
   const info = await git.describe(dir);

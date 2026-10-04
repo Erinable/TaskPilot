@@ -8,6 +8,7 @@ const { promisify } = require('node:util');
 const { CHANNELS, registerIpcHandlers } = require('../src/ipc');
 const { WorkPackageStore } = require('../src/work-package-store');
 const { listTasks } = require('../src/tasks');
+const workspace = require('../src/workspace');
 
 const run = promisify(execFile);
 
@@ -143,6 +144,72 @@ test('workspace:set rejects a root that is not a git repository', async () => {
   test.after(() => fs.rm(plain, { recursive: true, force: true }));
   const response = await call(CHANNELS.workspaceSet, { root: plain });
   assert.equal(response.error.code, 'not_a_repo');
+  assert.equal(response.error.field, 'root');
+});
+
+test('workspace:set does not persist a rejected config', async () => {
+  // Regression: validation used to run after the file was written, so a bad
+  // root survived and was reloaded on the next launch.
+  const { call, configDir } = await harness({ withRepo: false });
+  const response = await call(CHANNELS.workspaceSet, { root: '/definitely/not/here' });
+  assert.equal(response.error.code, 'root_not_found');
+  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
+});
+
+test('workspace:set rejects a relative root', async () => {
+  const { call } = await harness({ withRepo: false });
+  assert.equal((await call(CHANNELS.workspaceSet, { root: 'projects/app' })).error.code, 'root_not_absolute');
+});
+
+test('workspace:set normalizes a subdirectory to the repository root', async () => {
+  // git reports diff paths from the top level, so a subdirectory root would
+  // make every file scope miss.
+  const { call, root } = await harness();
+  const response = await call(CHANNELS.workspaceSet, { root: path.join(root, 'src', 'auth') });
+  assert.equal(response.ok, true);
+  assert.equal(await fs.realpath(response.data.root), await fs.realpath(root));
+});
+
+test('workspace:set saves command lines and workspace:get returns them as text', async () => {
+  const { call, root, configDir } = await harness();
+  const saved = await call(CHANNELS.workspaceSet, {
+    root,
+    commands: { test: 'node --test "tests/a b.test.js"', lint: '', build: 'npm run build' },
+  });
+  assert.equal(saved.ok, true);
+  assert.deepEqual((await workspace.load(configDir)).commands.test, { command: 'node', args: ['--test', 'tests/a b.test.js'] });
+
+  const { data } = await call(CHANNELS.workspaceGet);
+  assert.equal(data.lines.test, "node --test 'tests/a b.test.js'");
+  assert.equal(data.lines.lint, '');
+  assert.equal(data.lines.build, 'npm run build');
+});
+
+test('workspace:set reports shell syntax against the right field', async () => {
+  const { call, root, configDir } = await harness();
+  const response = await call(CHANNELS.workspaceSet, { root, commands: { lint: 'eslint . && prettier --check .' } });
+  assert.equal(response.error.code, 'shell_syntax');
+  assert.equal(response.error.field, 'lint');
+  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
+});
+
+test('workspace:check validates and resolves commands without saving', async () => {
+  const { call, root, configDir } = await harness();
+  const { data } = await call(CHANNELS.workspaceCheck, {
+    root,
+    commands: { test: 'git status', lint: 'taskpilot-no-such-tool', build: '' },
+  });
+  assert.equal(data.repo.branch, 'main');
+  assert.ok(data.commands.test.resolved, 'git should resolve through PATH');
+  assert.equal(data.commands.lint.configured, true);
+  assert.equal(data.commands.lint.resolved, null);
+  assert.equal(data.commands.build.configured, false);
+  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
+});
+
+test('workspace:pick-root returns the picker result or reports unsupported', async () => {
+  const { call } = await harness();
+  assert.equal((await call(CHANNELS.workspacePickRoot)).error.code, 'unsupported');
 });
 
 test('workspace:info reports branch and dirty state', async () => {

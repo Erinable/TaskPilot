@@ -17,7 +17,9 @@ contextBridge.exposeInMainWorld('taskpilot', {
 
   workspace: {
     get: () => invoke('workspace:get'),
-    set: (config) => invoke('workspace:set', config),
+    set: (form) => invoke('workspace:set', form),
+    check: (form) => invoke('workspace:check', form),
+    pickRoot: () => invoke('workspace:pick-root'),
     info: () => invoke('workspace:info'),
   },
 

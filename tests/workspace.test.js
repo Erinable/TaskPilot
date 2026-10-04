@@ -74,3 +74,83 @@ test('isInside() rejects escapes, the root itself, and absolute outsiders', () =
   assert.ok(!workspace.isInside('/repo', '/etc/passwd'));
   assert.ok(!workspace.isInside('/repo', '.'));
 });
+
+test('parseCommandLine() splits on whitespace', () => {
+  assert.deepEqual(workspace.parseCommandLine('  npm   run  lint ', 'lint'), { command: 'npm', args: ['run', 'lint'] });
+});
+
+test('parseCommandLine() treats a blank line as not configured', () => {
+  assert.equal(workspace.parseCommandLine('', 'test'), null);
+  assert.equal(workspace.parseCommandLine('   ', 'test'), null);
+  assert.equal(workspace.parseCommandLine(undefined, 'test'), null);
+});
+
+test('parseCommandLine() groups quoted words and honours escapes', () => {
+  assert.deepEqual(
+    workspace.parseCommandLine(`node --test "tests/a b.test.js" 'it''s' x\\ y ""`, 'test').args,
+    ['--test', 'tests/a b.test.js', 'its', 'x y', ''],
+  );
+  assert.deepEqual(workspace.parseCommandLine('echo "say \\"hi\\""', 'test').args, ['say "hi"']);
+});
+
+test('parseCommandLine() leaves $VARS and globs literal', () => {
+  // No expansion happens: these reach the program exactly as typed.
+  assert.deepEqual(workspace.parseCommandLine('jest $HOME *.ts ~', 'test').args, ['$HOME', '*.ts', '~']);
+});
+
+test('parseCommandLine() rejects unquoted shell operators', () => {
+  for (const line of ['npm test && npm run lint', 'npm test | tee log', 'npm test > out.txt', 'a ; b']) {
+    assert.throws(() => workspace.parseCommandLine(line, 'test'), { code: 'shell_syntax', field: 'test' }, line);
+  }
+});
+
+test('parseCommandLine() accepts a quoted operator as a literal argument', () => {
+  assert.deepEqual(workspace.parseCommandLine("grep '|' file", 'lint').args, ['|', 'file']);
+});
+
+test('parseCommandLine() reports an unterminated quote', () => {
+  assert.throws(() => workspace.parseCommandLine('npm "test', 'test'), { code: 'unterminated_quote', field: 'test' });
+});
+
+test('formatCommandLine() round-trips through parseCommandLine()', () => {
+  const entries = [
+    { command: 'npm', args: ['test'] },
+    { command: '/opt/my tools/run', args: ["it's", 'a b', '', '&&', 'back\\slash'] },
+  ];
+  for (const entry of entries) {
+    assert.deepEqual(workspace.parseCommandLine(workspace.formatCommandLine(entry), 'test'), entry);
+  }
+  assert.equal(workspace.formatCommandLine(null), '');
+});
+
+test('fromForm() converts command lines and tags errors with their field', () => {
+  const config = workspace.fromForm({ root: ' /repo ', commands: { test: 'npm test', lint: '', build: undefined } });
+  assert.deepEqual(config, { root: '/repo', commands: { test: { command: 'npm', args: ['test'] }, lint: null, build: null } });
+  assert.throws(() => workspace.fromForm({ commands: { build: 'make && make install' } }), { field: 'build' });
+});
+
+test('resolveExecutable() finds a bare name through PATH', async () => {
+  const dir = await tempDir();
+  const bin = path.join(dir, 'tp-tool');
+  await fs.writeFile(bin, '#!/bin/sh\n');
+  await fs.chmod(bin, 0o755);
+  assert.equal(await workspace.resolveExecutable('tp-tool', { envPath: dir, platform: 'linux' }), bin);
+  assert.equal(await workspace.resolveExecutable('tp-missing', { envPath: dir, platform: 'linux' }), null);
+});
+
+test('resolveExecutable() resolves a relative path against the workspace', async () => {
+  const dir = await tempDir();
+  await fs.mkdir(path.join(dir, 'bin'));
+  const bin = path.join(dir, 'bin', 'check');
+  await fs.writeFile(bin, '#!/bin/sh\n');
+  await fs.chmod(bin, 0o755);
+  assert.equal(await workspace.resolveExecutable('./bin/check', { cwd: dir, envPath: '', platform: 'linux' }), bin);
+});
+
+test('resolveExecutable() skips files that are not executable', { skip: process.platform === 'win32' }, async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, 'not-exec');
+  await fs.writeFile(file, 'data\n');
+  await fs.chmod(file, 0o644);
+  assert.equal(await workspace.resolveExecutable('not-exec', { envPath: dir, platform: 'linux' }), null);
+});

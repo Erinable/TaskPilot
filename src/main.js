@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
 const path = require('node:path');
 const { registerIpcHandlers } = require('./ipc');
 const { WorkPackageStore } = require('./work-package-store');
@@ -37,6 +37,12 @@ app.whenReady().then(async () => {
     configDir,
     getConfig: () => config,
     setConfig: (next) => { config = next; },
+    pickDirectory: async (defaultPath) => {
+      const options = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
+      const parent = BrowserWindow.getFocusedWindow();
+      const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
   });
 
   createWindow();

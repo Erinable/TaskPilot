@@ -17,13 +17,19 @@ const ERROR_HINTS = {
   not_configured: '工作区没有配置这个命令。',
   command_missing: '找不到可执行文件，请检查命令配置。',
   no_baseline: '请先领取工作包。',
-  not_a_repo: '该目录不是 git 仓库。',
+  not_a_repo: '该目录不在 git 仓库中。',
+  root_not_absolute: '请填写绝对路径。',
+  root_not_found: '目录不存在。',
+  shell_syntax: '不支持 shell 语法，请改用 package.json 脚本。',
+  unterminated_quote: '引号没有闭合。',
+  invalid_command: '命令格式不正确。',
 };
 
 const $ = (selector) => document.querySelector(selector);
 const taskList = $('#taskList');
 const queueView = $('#queueView');
 const executionView = $('#executionView');
+const settingsView = $('#settingsView');
 const deviationModal = $('#deviationModal');
 const toast = $('#toast');
 const toastText = $('#toastText');
@@ -46,6 +52,8 @@ async function call(promise) {
   if (!response?.ok) {
     const error = new Error(response?.error?.message ?? 'IPC 调用失败');
     error.code = response?.error?.code ?? 'unknown';
+    // Which settings input the failure belongs to, when the main process knows.
+    if (response?.error?.field) error.field = response.error.field;
     throw error;
   }
   return response.data;
@@ -108,10 +116,175 @@ function renderHeading(now = new Date()) {
     .toUpperCase();
 }
 
+const VIEWS = { queue: queueView, execution: executionView, settings: settingsView };
+
+/** Shows exactly one top-level view and syncs the sidebar highlight. */
+function showView(name) {
+  for (const [key, view] of Object.entries(VIEWS)) view.hidden = key !== name;
+  $('#queueNav').classList.toggle('active', name === 'queue' || name === 'execution');
+  $('#settingsLink').classList.toggle('active', name === 'settings');
+}
+
 function showQueue() {
   current = null;
-  executionView.hidden = true;
-  queueView.hidden = false;
+  showView('queue');
+}
+
+/** Reflects workspace status in the top bar and sidebar card. */
+function renderWorkspaceStatus(info) {
+  const configured = info?.configured === true;
+  $('#repoDot').classList.toggle('off', !configured);
+  $('#syncIcon').classList.toggle('off', !configured);
+  if (!configured) {
+    $('#workspaceName').textContent = '未配置工作区';
+    $('#syncTitle').textContent = '未配置工作区';
+    $('#syncDetail').textContent = '前往设置指定仓库';
+    return;
+  }
+  const name = info.root.split(/[\\/]/).filter(Boolean).pop() ?? info.root;
+  $('#workspaceName').textContent = info.branch ? `${name} / ${info.branch}` : name;
+  $('#syncTitle').textContent = info.dirty ? `${info.changedFiles} 个文件有改动` : '工作区干净';
+  $('#syncDetail').textContent = `${info.commit.slice(0, 8)} · ${info.branch ?? 'detached'}`;
+}
+
+async function refreshWorkspaceStatus() {
+  try {
+    const info = await call(window.taskpilot.workspace.info());
+    renderWorkspaceStatus(info);
+    return info;
+  } catch (error) {
+    // A configured root that has since vanished or broken lands here.
+    console.error('Failed to read workspace info', error);
+    renderWorkspaceStatus(null);
+    $('#syncDetail').textContent = describeError(error);
+    return null;
+  }
+}
+
+const settingsRoot = $('#settingsRoot');
+const commandInputs = [...document.querySelectorAll('#settingsForm [data-kind]')];
+const STATUS_IDS = { test: '#statusTest', lint: '#statusLint', build: '#statusBuild' };
+
+function readSettingsForm() {
+  const commands = {};
+  for (const input of commandInputs) commands[input.dataset.kind] = input.value;
+  return { root: settingsRoot.value, commands };
+}
+
+function setFieldStatus(input, status, tone, message) {
+  status.className = `field-status${tone ? ` ${tone}` : ''}`;
+  status.textContent = message ?? '';
+  input.setAttribute('aria-invalid', String(tone === 'error'));
+}
+
+function clearSettingsStatus() {
+  setFieldStatus(settingsRoot, $('#rootStatus'), null, '');
+  for (const input of commandInputs) setFieldStatus(input, $(STATUS_IDS[input.dataset.kind]), null, '');
+}
+
+/** Shows a validation failure next to the field it belongs to. */
+function showSettingsError(error) {
+  const kind = error.field;
+  if (kind === 'root') {
+    setFieldStatus(settingsRoot, $('#rootStatus'), 'error', describeError(error));
+    settingsRoot.focus();
+  } else if (STATUS_IDS[kind]) {
+    const input = commandInputs.find((candidate) => candidate.dataset.kind === kind);
+    setFieldStatus(input, $(STATUS_IDS[kind]), 'error', describeError(error));
+    input.focus();
+  } else {
+    showToast(`设置无效：${describeError(error)}`);
+  }
+}
+
+function renderSettingsCheck(result) {
+  clearSettingsStatus();
+  if (!result.root) {
+    setFieldStatus(settingsRoot, $('#rootStatus'), 'warn', '未配置仓库，diff 和验证不可用。');
+  } else {
+    const { branch, commit, dirty, changedFiles } = result.repo;
+    let message = `✓ ${branch ?? 'detached'} · ${commit.slice(0, 8)} · ${dirty ? `${changedFiles} 个文件有改动` : '工作区干净'}`;
+    if (result.normalizedFrom) message += `。所选目录在仓库内，已改用仓库根目录 ${result.root}`;
+    setFieldStatus(settingsRoot, $('#rootStatus'), 'ok', message);
+    settingsRoot.value = result.root;
+  }
+  for (const input of commandInputs) {
+    const kind = input.dataset.kind;
+    const entry = result.commands[kind];
+    const status = $(STATUS_IDS[kind]);
+    if (!entry.configured) setFieldStatus(input, status, null, '未配置');
+    else if (entry.resolved) setFieldStatus(input, status, 'ok', `✓ ${entry.resolved}`);
+    // A PATH miss is a warning, not an error: the app's PATH can differ from
+    // the user's shell (see the note on the page).
+    else setFieldStatus(input, status, 'warn', '在 PATH 中找不到这个可执行文件，运行时可能失败。可以改用绝对路径。');
+  }
+}
+
+async function loadSettings() {
+  clearSettingsStatus();
+  try {
+    const form = await call(window.taskpilot.workspace.get());
+    settingsRoot.value = form.root ?? '';
+    for (const input of commandInputs) input.value = form.lines[input.dataset.kind] ?? '';
+  } catch (error) {
+    showToast(`读取设置失败：${describeError(error)}`);
+  }
+}
+
+async function showSettings() {
+  current = null;
+  showView('settings');
+  await loadSettings();
+  settingsRoot.focus();
+}
+
+/** Runs `action` with the settings buttons disabled to block double submits. */
+async function withSettingsBusy(action) {
+  const buttons = [$('#checkSettings'), $('#saveSettings'), $('#pickRoot')];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    await action();
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+async function checkSettings() {
+  await withSettingsBusy(async () => {
+    clearSettingsStatus();
+    try {
+      renderSettingsCheck(await call(window.taskpilot.workspace.check(readSettingsForm())));
+    } catch (error) {
+      showSettingsError(error);
+    }
+  });
+}
+
+async function saveSettings() {
+  await withSettingsBusy(async () => {
+    clearSettingsStatus();
+    try {
+      const form = readSettingsForm();
+      const check = await call(window.taskpilot.workspace.check(form));
+      await call(window.taskpilot.workspace.set(form));
+      renderSettingsCheck(check);
+      await refreshWorkspaceStatus();
+      showToast('设置已保存。');
+    } catch (error) {
+      showSettingsError(error);
+    }
+  });
+}
+
+async function pickRoot() {
+  try {
+    const picked = await call(window.taskpilot.workspace.pickRoot());
+    if (!picked) return;
+    settingsRoot.value = picked;
+    await checkSettings();
+  } catch (error) {
+    showToast(`无法打开目录选择器：${describeError(error)}`);
+  }
 }
 
 function renderSteps(task) {
@@ -338,8 +511,7 @@ async function openExecution(id) {
   }
   $('#execVerify').replaceChildren(el('p', 'empty-hint', '尚未运行验证。'));
   renderExecution(current);
-  queueView.hidden = true;
-  executionView.hidden = false;
+  showView('execution');
   $('#backToQueue').focus();
   refreshDiff();
 }
@@ -541,6 +713,22 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+$('#queueNav').addEventListener('click', showQueue);
+$('#settingsLink').addEventListener('click', showSettings);
+$('#workspacePicker').addEventListener('click', showSettings);
+$('#workspacePicker').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    showSettings();
+  }
+});
+$('#settingsForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveSettings();
+});
+$('#checkSettings').addEventListener('click', checkSettings);
+$('#pickRoot').addEventListener('click', pickRoot);
+
 async function init() {
   renderHeading();
   try {
@@ -550,12 +738,8 @@ async function init() {
     console.error('Failed to load tasks', error);
     showToast(`工作包加载失败：${describeError(error)}`);
   }
-  try {
-    const info = await call(window.taskpilot.workspace.info());
-    if (!info.configured) showToast('尚未配置工作区，diff 和验证暫不可用。');
-  } catch (error) {
-    console.error('Failed to read workspace info', error);
-  }
+  const info = await refreshWorkspaceStatus();
+  if (info && !info.configured) showToast('尚未配置工作区，diff 和验证暂不可用。');
 }
 
 init();

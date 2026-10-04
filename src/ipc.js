@@ -1,6 +1,8 @@
 // The renderer's only route to the filesystem, git and command execution.
 // Every handler validates its arguments here: the renderer is treated as
 // untrusted input, since the content it displays originates from AI agents.
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const tasks = require('./tasks');
 const git = require('./git');
 const workspace = require('./workspace');
@@ -14,6 +16,8 @@ const CHANNELS = {
   setStepDone: 'package:set-step-done',
   workspaceGet: 'workspace:get',
   workspaceSet: 'workspace:set',
+  workspaceCheck: 'workspace:check',
+  workspacePickRoot: 'workspace:pick-root',
   workspaceInfo: 'workspace:info',
   diffStat: 'diff:stat',
   diffFile: 'diff:file',
@@ -22,7 +26,16 @@ const CHANNELS = {
 
 /** Shaped like an Error but safe to send over IPC. */
 function toFailure(error) {
-  return { ok: false, error: { code: error.code ?? 'unknown', message: error.message } };
+  const failure = { code: error.code ?? 'unknown', message: error.message };
+  if (error.field) failure.field = error.field;
+  return { ok: false, error: failure };
+}
+
+/** Config plus the command lines the settings form edits. */
+function toFormView(config) {
+  const lines = {};
+  for (const kind of workspace.COMMAND_KINDS) lines[kind] = workspace.formatCommandLine(config.commands[kind]);
+  return { root: config.root, commands: config.commands, lines };
 }
 
 function requireString(value, name) {
@@ -66,9 +79,45 @@ function buildTaskView(task, state) {
  * @param deps.store WorkPackageStore
  * @param deps.configDir where workspace.json lives
  * @param deps.getConfig/setConfig in-memory accessors for the loaded config
+ * @param deps.pickDirectory optional (defaultPath) => Promise<string|null>
  */
 function registerIpcHandlers(ipcMain, deps) {
-  const { store, configDir, getConfig, setConfig } = deps;
+  const { store, configDir, getConfig, setConfig, pickDirectory } = deps;
+
+  const failWith = (message, code, field) => {
+    const error = new Error(message);
+    error.code = code;
+    if (field) error.field = field;
+    throw error;
+  };
+
+  /**
+   * Parses and checks a settings form. The root must be an absolute path to
+   * an existing directory inside a git repository; it is then normalized to
+   * the repository's top level, because git reports diff paths relative to
+   * that and file scopes would otherwise never match.
+   */
+  const validateForm = async (form) => {
+    const config = workspace.fromForm(form);
+    const info = { normalizedFrom: null, repo: null };
+    if (!config.root) return { config, info };
+
+    if (!path.isAbsolute(config.root)) failWith('Workspace root must be an absolute path', 'root_not_absolute', 'root');
+    let stat;
+    try {
+      stat = await fs.stat(config.root);
+    } catch {
+      failWith(`Directory not found: ${config.root}`, 'root_not_found', 'root');
+    }
+    if (!stat.isDirectory()) failWith(`Not a directory: ${config.root}`, 'root_not_found', 'root');
+    if (!(await git.isRepo(config.root))) failWith('Workspace root is not a git repository', 'not_a_repo', 'root');
+
+    const top = await git.topLevel(config.root);
+    if (path.resolve(top) !== path.resolve(config.root)) info.normalizedFrom = config.root;
+    config.root = top;
+    info.repo = await git.describe(top);
+    return { config, info };
+  };
 
   const requireRoot = () => {
     const { root } = getConfig();
@@ -132,17 +181,38 @@ function registerIpcHandlers(ipcMain, deps) {
     return store.setStepDone(id, stepIndex, done === true);
   }));
 
-  ipcMain.handle(CHANNELS.workspaceGet, wrap(() => getConfig()));
+  ipcMain.handle(CHANNELS.workspaceGet, wrap(() => toFormView(getConfig())));
 
-  ipcMain.handle(CHANNELS.workspaceSet, wrap(async (_event, raw) => {
-    const saved = await workspace.save(configDir, raw);
-    if (saved.root && !(await git.isRepo(saved.root))) {
-      const error = new Error('Workspace root is not a git repository');
-      error.code = 'not_a_repo';
+  // Validates everything before writing, so a bad path or command is never
+  // persisted and reloaded on the next launch.
+  ipcMain.handle(CHANNELS.workspaceSet, wrap(async (_event, form) => {
+    const { config } = await validateForm(form);
+    const saved = await workspace.save(configDir, config);
+    setConfig(saved);
+    return toFormView(saved);
+  }));
+
+  // Same validation as saving, plus a PATH lookup for each command, without
+  // writing anything. Lets the settings page warn before the user commits.
+  ipcMain.handle(CHANNELS.workspaceCheck, wrap(async (_event, form) => {
+    const { config, info } = await validateForm(form);
+    const commands = {};
+    for (const kind of workspace.COMMAND_KINDS) {
+      const entry = config.commands[kind];
+      commands[kind] = entry
+        ? { configured: true, resolved: await workspace.resolveExecutable(entry.command, { cwd: config.root }) }
+        : { configured: false, resolved: null };
+    }
+    return { root: config.root, normalizedFrom: info.normalizedFrom, repo: info.repo, commands };
+  }));
+
+  ipcMain.handle(CHANNELS.workspacePickRoot, wrap(async () => {
+    if (!pickDirectory) {
+      const error = new Error('Directory picker is unavailable');
+      error.code = 'unsupported';
       throw error;
     }
-    setConfig(saved);
-    return saved;
+    return pickDirectory(getConfig().root);
   }));
 
   ipcMain.handle(CHANNELS.workspaceInfo, wrap(async () => {
@@ -176,4 +246,4 @@ function registerIpcHandlers(ipcMain, deps) {
   }));
 }
 
-module.exports = { CHANNELS, buildTaskView, registerIpcHandlers };
+module.exports = { CHANNELS, buildTaskView, toFormView, registerIpcHandlers };

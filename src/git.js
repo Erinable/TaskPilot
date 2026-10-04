@@ -48,6 +48,14 @@ async function isRepo(cwd) {
   }
 }
 
+/**
+ * The repository's top-level directory. Diff paths are always relative to it,
+ * so the workspace root is normalized to this to keep file scopes aligned.
+ */
+async function topLevel(cwd) {
+  return (await git(cwd, ['rev-parse', '--show-toplevel'])).trim();
+}
+
 async function head(cwd) {
   return (await git(cwd, ['rev-parse', 'HEAD'])).trim();
 }
@@ -160,6 +168,6 @@ async function describe(cwd) {
 }
 
 module.exports = {
-  GitError, isRepo, head, currentBranch, status, parseStatus,
+  GitError, isRepo, topLevel, head, currentBranch, status, parseStatus,
   diffStat, changesSince, diffFile, describe,
 };

@@ -17,9 +17,9 @@
             <div class="brand-caption">AI Team Workspace</div>
           </div>
         </div>
-        <div class="workspace-picker">
-          <span class="repo-dot"></span>
-          <span>taskpilot / human + ai</span>
+        <div class="workspace-picker" id="workspacePicker" role="button" tabindex="0" title="工作区设置">
+          <span class="repo-dot" id="repoDot"></span>
+          <span id="workspaceName">未配置工作区</span>
           <span class="chevron">⌄</span>
         </div>
         <div class="top-actions">
@@ -33,7 +33,7 @@
         <aside class="sidebar">
           <div class="side-section-label">WORKSPACE</div>
           <nav class="main-nav">
-            <button class="nav-item active"><span class="nav-icon">▦</span><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
+            <button class="nav-item active" id="queueNav"><span class="nav-icon">▦</span><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
             <button class="nav-item"><span class="nav-icon">◈</span><span>工程地图</span></button>
             <button class="nav-item"><span class="nav-icon">⌁</span><span>活动记录</span></button>
           </nav>
@@ -45,8 +45,8 @@
             <div class="team-member"><span class="agent-avatar rel">RM</span><span>Release Manager</span><span class="presence online"></span></div>
           </div>
           <div class="sidebar-bottom">
-            <div class="sync-card"><span class="sync-icon">↻</span><div><strong>已同步</strong><small>刚刚 · GitHub</small></div></div>
-            <button class="settings-link"><span>⚙</span> 设置</button>
+            <div class="sync-card"><span class="sync-icon" id="syncIcon" aria-hidden="true">↻</span><div><strong id="syncTitle">未配置工作区</strong><small id="syncDetail">前往设置指定仓库</small></div></div>
+            <button class="settings-link" id="settingsLink"><span aria-hidden="true">⚙</span> 设置</button>
           </div>
         </aside>
 
@@ -149,6 +149,54 @@
                 </section>
               </div>
             </div>
+          </div>
+
+          <div class="view" id="settingsView" hidden>
+            <div class="page-heading">
+              <div>
+                <div class="eyebrow">SETTINGS</div>
+                <h1>工作区设置</h1>
+                <p>TaskPilot 只读观察这个仓库，并且只会运行你在这里配置的命令。</p>
+              </div>
+            </div>
+
+            <form class="settings-form" id="settingsForm" novalidate>
+              <section class="panel">
+                <div class="panel-heading"><div><h2>仓库</h2><p>工作包的 diff 和文件范围都相对这个仓库计算</p></div></div>
+                <div class="settings-body">
+                  <label class="field-label" for="settingsRoot">仓库路径</label>
+                  <div class="field-row">
+                    <input class="field-input mono" id="settingsRoot" name="root" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/app" aria-describedby="rootStatus" />
+                    <button class="secondary-button" id="pickRoot" type="button">选择…</button>
+                  </div>
+                  <p class="field-status" id="rootStatus" aria-live="polite"></p>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-heading"><div><h2>验证命令</h2><p>执行页的「测试 / Lint / Build」按钮运行这些命令</p></div></div>
+                <div class="settings-body">
+                  <label class="field-label" for="commandTest">测试</label>
+                  <input class="field-input mono" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
+                  <p class="field-status" id="statusTest" aria-live="polite"></p>
+
+                  <label class="field-label" for="commandLint">Lint</label>
+                  <input class="field-input mono" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
+                  <p class="field-status" id="statusLint" aria-live="polite"></p>
+
+                  <label class="field-label" for="commandBuild">Build</label>
+                  <input class="field-input mono" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
+                  <p class="field-status" id="statusBuild" aria-live="polite"></p>
+
+                  <p class="settings-note">命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</p>
+                </div>
+              </section>
+
+              <div class="settings-actions">
+                <button class="secondary-button" id="checkSettings" type="button">检查</button>
+                <button class="primary-button" id="saveSettings" type="submit">保存</button>
+              </div>
+            </form>
           </div>
         </main>
       </div>
