@@ -51,6 +51,7 @@
         </aside>
 
         <main class="main-content">
+          <div class="view" id="queueView">
           <div class="page-heading">
             <div>
               <div class="eyebrow" id="todayLabel"></div>
@@ -84,20 +85,95 @@
               <button class="view-all-button">查看完整活动记录 <span>→</span></button>
             </section>
           </div>
+          </div>
+
+          <div class="view" id="executionView" hidden>
+            <button class="back-button" id="backToQueue"><span aria-hidden="true">←</span> 返回工作队列</button>
+
+            <div class="exec-heading">
+              <div class="exec-title-row">
+                <span class="status-badge" id="execStatus"></span>
+                <h1 id="execTitle"></h1>
+              </div>
+              <p id="execIntro"></p>
+              <div class="exec-meta">
+                <span><span class="priority-dot" id="execPriorityDot"></span> <span id="execPriority"></span></span>
+                <span class="meta-divider"></span><span id="execModule"></span>
+                <span class="meta-divider"></span><span id="execEstimate"></span>
+                <span class="meta-divider"></span><span id="execBaseline"></span>
+              </div>
+            </div>
+
+            <div class="exec-actions" id="execActions"></div>
+            <div class="exec-notice" id="execNotice" hidden></div>
+
+            <div class="exec-columns">
+              <div class="exec-column">
+                <section class="panel">
+                  <div class="panel-heading"><div><h2>执行指令</h2><p id="execStepProgress"></p></div></div>
+                  <ol class="step-list" id="execSteps"></ol>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-heading"><div><h2>验收条件</h2><p>关联测试通过后自动勾选</p></div></div>
+                  <div class="acceptance-list" id="execAcceptance"></div>
+                </section>
+
+                <section class="panel" id="deviationPanel" hidden>
+                  <div class="panel-heading"><div><h2>已报告的偏差</h2><p>AI 团队正在重新评估</p></div></div>
+                  <div class="deviation-list" id="execDeviations"></div>
+                </section>
+              </div>
+
+              <div class="exec-column">
+                <section class="panel">
+                  <div class="panel-heading"><div><h2>文件范围</h2><p>工作包允许改动的文件</p></div><button class="filter-button" id="refreshDiff">刷新</button></div>
+                  <div class="scope-list" id="execScope"></div>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-heading">
+                    <div><h2>验证</h2><p>运行工作区配置的命令</p></div>
+                    <div class="verify-buttons">
+                      <button class="filter-button" data-verify="test">测试</button>
+                      <button class="filter-button" data-verify="lint">Lint</button>
+                      <button class="filter-button" data-verify="build">Build</button>
+                    </div>
+                  </div>
+                  <div class="verify-result" id="execVerify"></div>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-heading"><div><h2>改动</h2><p id="execDiffHint">相对领取时的基线</p></div></div>
+                  <div class="diff-view" id="execDiff"></div>
+                </section>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
     </div>
 
-    <div class="modal-backdrop" id="taskModal" hidden>
-      <section class="task-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <button class="modal-close" id="closeModal" aria-label="关闭">×</button>
-        <div class="modal-kicker">HUMAN CODING WORK PACKAGE</div>
-        <h2 id="modalTitle"></h2>
-        <p class="modal-intro" id="modalIntro"></p>
-        <div class="modal-meta"><span class="priority-dot" id="modalPriorityDot"></span> <span id="modalPriority"></span> <span class="meta-divider"></span> <span id="modalModule"></span> <span class="meta-divider"></span> <span id="modalEstimate"></span></div>
-        <div class="instruction-block"><div class="instruction-title"><span aria-hidden="true">▣</span> 执行指令</div><ol id="modalSteps"></ol></div>
-        <div class="acceptance-block"><div class="instruction-title"><span aria-hidden="true">✓</span> 验收条件</div><div id="modalAcceptance"></div></div>
-        <div class="modal-actions"><button class="secondary-button" id="deviationButton">报告偏差</button><button class="primary-button" id="startTaskButton">开始执行 <span>→</span></button></div>
+    <div class="modal-backdrop" id="deviationModal" hidden>
+      <section class="task-modal" role="dialog" aria-modal="true" aria-labelledby="deviationTitle">
+        <button class="modal-close" id="closeDeviation" aria-label="关闭">×</button>
+        <div class="modal-kicker">REPORT A DEVIATION</div>
+        <h2 id="deviationTitle">报告偏差</h2>
+        <p class="modal-intro">设计和代码对不上时，在这里说明。提交后工作包会交回 AI 团队重新评估，不要自行偏离指令。</p>
+
+        <label class="field-label" for="deviationStep">相关指令（可选）</label>
+        <select id="deviationStep" class="field-input"></select>
+
+        <label class="field-label" for="deviationFile">相关文件（可选）</label>
+        <select id="deviationFile" class="field-input"></select>
+
+        <label class="field-label" for="deviationNote">偏差说明</label>
+        <textarea id="deviationNote" class="field-input" rows="4" placeholder="例如：ADR-014 要求 application 层不依赖 infrastructure，但现有 TokenService 已被 3 处直接引用。"></textarea>
+
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelDeviation">取消</button>
+          <button class="primary-button" id="submitDeviation">提交偏差</button>
+        </div>
       </section>
     </div>
 

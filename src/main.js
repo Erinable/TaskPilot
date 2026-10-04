@@ -1,6 +1,9 @@
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('node:path');
 const { registerIpcHandlers } = require('./ipc');
+const { WorkPackageStore } = require('./work-package-store');
+const { listTasks } = require('./tasks');
+const workspace = require('./workspace');
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -20,11 +23,22 @@ function createWindow() {
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // TaskPilot uses its own in-window controls. Removing Electron's default
   // application menu avoids AppKit representedObject warnings on macOS.
   Menu.setApplicationMenu(null);
-  registerIpcHandlers(ipcMain);
+
+  const configDir = app.getPath('userData');
+  let config = await workspace.load(configDir);
+  const store = await new WorkPackageStore(configDir).load(listTasks());
+
+  registerIpcHandlers(ipcMain, {
+    store,
+    configDir,
+    getConfig: () => config,
+    setConfig: (next) => { config = next; },
+  });
+
   createWindow();
 
   app.on('activate', () => {
