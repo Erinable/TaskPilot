@@ -20,7 +20,7 @@ const tasks = [
     tags: ['auth', 'backend'],
     priority: 'high',
     estimate: '预计 2 小时',
-    icon: '↗',
+    icon: 'key',
     steps: [
       '在 `src/auth/application/login-user.ts` 创建 `LoginUserUseCase`。',
       '调用 `UserRepository.findByEmail()` 并校验密码。',
@@ -44,7 +44,7 @@ const tasks = [
     tags: ['testing', 'auth'],
     priority: 'medium',
     estimate: '预计 1 小时',
-    icon: '◇',
+    icon: 'flask',
     steps: [
       '在 `tests/auth/login-user.test.ts` 添加邮箱大小写不敏感的用例。',
       '添加连续失败 5 次后账号被临时锁定的用例。',
@@ -66,7 +66,7 @@ const tasks = [
     tags: ['architecture'],
     priority: 'medium',
     estimate: '预计 3 小时',
-    icon: '⌘',
+    icon: 'blocks',
     steps: [
       '将 `TokenService` 实现移动到 `src/auth/infrastructure/token-service.ts`。',
       '在 `src/auth/application` 中只保留 `TokenIssuer` 接口。',
@@ -92,7 +92,7 @@ const tasks = [
     tags: ['release'],
     priority: 'low',
     estimate: '预计 30 分钟',
-    icon: '✓',
+    icon: 'rocket',
     steps: [
       '核对 `migrations/` 中的新迁移都有对应的回滚脚本。',
       '确认登录接口的监控告警已配置。',

@@ -4,12 +4,12 @@ const PRIORITY_LABELS = { high: '高优先级', medium: '中优先级', low: '�
 
 // Human-triggerable transitions, in the order they should appear.
 const ACTIONS = [
-  { name: 'claim', label: '开始执行', primary: true },
-  { name: 'submit_for_review', label: '提交审查', primary: true },
-  { name: 'unblock', label: '解除阻塞', primary: true },
-  { name: 'report_deviation', label: '报告偏差' },
-  { name: 'block', label: '标记阻塞' },
-  { name: 'release', label: '放回队列' },
+  { name: 'claim', label: '开始执行', icon: 'play', primary: true },
+  { name: 'submit_for_review', label: '提交审查', icon: 'send', primary: true },
+  { name: 'unblock', label: '解除阻塞', icon: 'unlock', primary: true },
+  { name: 'report_deviation', label: '报告偏差', icon: 'flag' },
+  { name: 'block', label: '标记阻塞', icon: 'ban' },
+  { name: 'release', label: '放回队列', icon: 'undo' },
 ];
 
 const ERROR_HINTS = {
@@ -46,6 +46,25 @@ function el(tag, className, text) {
   return node;
 }
 
+const { createIcon, hydrateIcons } = window.TaskPilotIcons;
+const icon = (name, className) => createIcon(document, name, className);
+
+/** An element holding an icon followed by text, e.g. a button label. */
+function withIcon(tag, className, iconName, text) {
+  const node = el(tag, className);
+  node.append(icon(iconName));
+  if (text !== undefined) node.append(text);
+  return node;
+}
+
+function emptyHint(iconName, text) {
+  return withIcon('p', 'empty-hint', iconName, text);
+}
+
+// Swap the static markup's <i data-icon> placeholders for SVGs before any
+// rendering code looks them up.
+hydrateIcons(document);
+
 /** Unwraps the {ok, data} | {ok, error} envelope every IPC call returns. */
 async function call(promise) {
   const response = await promise;
@@ -63,9 +82,17 @@ function describeError(error) {
   return ERROR_HINTS[error.code] ?? error.message;
 }
 
-function showToast(message) {
+const TOAST_ICONS = { success: 'check', error: 'alert', info: 'info' };
+
+/**
+ * `tone` defaults from the wording: messages ending in 失败 or carrying an
+ * error description read as errors. Pass it explicitly when that guess is off.
+ */
+function showToast(message, tone = /失败|无效|无法/.test(message) ? 'error' : 'success') {
   toastText.textContent = message;
-  toast.classList.add('show');
+  toast.classList.remove('success', 'error', 'info');
+  toast.classList.add('show', tone);
+  $('#toastIcon').replaceChildren(icon(TOAST_ICONS[tone] ?? 'check'));
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => toast.classList.remove('show'), 2800);
 }
@@ -83,19 +110,24 @@ function renderTaskItem(task) {
   item.type = 'button';
   item.dataset.taskId = task.id;
 
-  const state = el('div', 'task-state', task.icon);
-  state.setAttribute('aria-hidden', 'true');
+  // `task.icon` is an icon name from tasks.js; an unknown name renders blank
+  // rather than falling back to the raw string.
+  const state = el('div', `task-state priority-${task.priority}`);
+  state.append(icon(task.icon));
 
   const main = el('div', 'task-main');
   const tags = el('div', 'task-tags');
-  tags.append(el('span', `scope-tag ${task.status === 'in_progress' ? 'touched' : 'untouched'}`, task.statusLabel));
+  tags.append(el('span', `status-pill ${task.status}`, task.statusLabel));
   task.tags.forEach((tag) => tags.append(el('span', 'tag', tag)));
   main.append(el('div', 'task-title', task.title), el('div', 'task-description', task.description), tags);
 
-  const side = el('div', 'task-side');
+  const meta = el('div', 'task-side-meta');
   const priority = el('span', 'priority');
-  priority.append(el('i', `priority-dot ${task.priority}`), PRIORITY_LABELS[task.priority]);
-  side.append(priority, el('span', 'task-time', task.estimate));
+  priority.append(el('span', `priority-dot ${task.priority}`), PRIORITY_LABELS[task.priority]);
+  meta.append(priority, withIcon('span', 'task-time', 'clock', task.estimate));
+
+  const side = el('div', 'task-side');
+  side.append(meta, icon('chevron-right', 'task-go'));
 
   item.append(state, main, side);
   return item;
@@ -171,9 +203,15 @@ function readSettingsForm() {
   return { root: settingsRoot.value, commands };
 }
 
+const FIELD_STATUS_ICONS = { ok: 'check-circle', warn: 'alert', error: 'x-circle' };
+
 function setFieldStatus(input, status, tone, message) {
   status.className = `field-status${tone ? ` ${tone}` : ''}`;
-  status.textContent = message ?? '';
+  status.replaceChildren();
+  if (message) {
+    if (FIELD_STATUS_ICONS[tone]) status.append(icon(FIELD_STATUS_ICONS[tone]));
+    status.append(el('span', null, message));
+  }
   input.setAttribute('aria-invalid', String(tone === 'error'));
 }
 
@@ -203,7 +241,7 @@ function renderSettingsCheck(result) {
     setFieldStatus(settingsRoot, $('#rootStatus'), 'warn', '未配置仓库，diff 和验证不可用。');
   } else {
     const { branch, commit, dirty, changedFiles } = result.repo;
-    let message = `✓ ${branch ?? 'detached'} · ${commit.slice(0, 8)} · ${dirty ? `${changedFiles} 个文件有改动` : '工作区干净'}`;
+    let message = `${branch ?? 'detached'} · ${commit.slice(0, 8)} · ${dirty ? `${changedFiles} 个文件有改动` : '工作区干净'}`;
     if (result.normalizedFrom) message += `。所选目录在仓库内，已改用仓库根目录 ${result.root}`;
     setFieldStatus(settingsRoot, $('#rootStatus'), 'ok', message);
     settingsRoot.value = result.root;
@@ -213,7 +251,7 @@ function renderSettingsCheck(result) {
     const entry = result.commands[kind];
     const status = $(STATUS_IDS[kind]);
     if (!entry.configured) setFieldStatus(input, status, null, '未配置');
-    else if (entry.resolved) setFieldStatus(input, status, 'ok', `✓ ${entry.resolved}`);
+    else if (entry.resolved) setFieldStatus(input, status, 'ok', entry.resolved);
     // A PATH miss is a warning, not an error: the app's PATH can differ from
     // the user's shell (see the note on the page).
     else setFieldStatus(input, status, 'warn', '在 PATH 中找不到这个可执行文件，运行时可能失败。可以改用绝对路径。');
@@ -291,6 +329,7 @@ function renderSteps(task) {
   const done = new Set(task.completedSteps);
   const claimed = task.status === 'in_progress';
   $('#execStepProgress').textContent = `${done.size} / ${task.steps.length} 已完成`;
+  $('#execStepBar').style.width = `${task.steps.length ? (done.size / task.steps.length) * 100 : 0}%`;
 
   $('#execSteps').replaceChildren(...task.steps.map((step, index) => {
     const item = el('li', `step-item${done.has(index) ? ' done' : ''}`);
@@ -300,9 +339,13 @@ function renderSteps(task) {
     box.checked = done.has(index);
     box.disabled = !claimed; // progress only makes sense while executing
     box.dataset.stepIndex = String(index);
-    const text = el('span');
+    // The native checkbox stays in the DOM for keyboard and screen readers;
+    // .step-check is its visual stand-in (numbered until ticked).
+    const check = el('span', 'step-check');
+    check.append(icon('check'));
+    const text = el('span', 'step-text');
     appendInlineCode(text, step);
-    label.append(box, text);
+    label.append(box, check, text);
     item.append(label);
     return item;
   }));
@@ -316,15 +359,17 @@ function renderAcceptance(task, matched) {
     const verified = result?.verified === true;
     const failed = result !== undefined && !result.manual && !verified && !result.missing;
     const row = el('div', `criterion${verified ? ' verified' : failed ? ' failed' : ''}`);
-    row.append(el('span', 'criterion-mark', verified ? '✓' : failed ? '✕' : '○'));
+    const mark = el('span', 'criterion-mark');
+    mark.append(icon(verified ? 'check-circle' : failed ? 'x-circle' : 'circle'));
+    row.append(mark);
 
     const body = el('div');
     body.append(el('span', 'criterion-text', criterion.text));
     if (criterion.test) {
       const note = verified ? '已通过' : failed ? '未通过' : result?.missing ? '未找到该测试' : '待验证';
-      body.append(el('span', 'criterion-test', `${criterion.test} · ${note}`));
+      body.append(withIcon('span', 'criterion-test', 'flask', `${criterion.test} · ${note}`));
     } else {
-      body.append(el('span', 'criterion-test', '需人工确认'));
+      body.append(withIcon('span', 'criterion-test', 'info', '需人工确认'));
     }
     row.append(body);
     return row;
@@ -339,23 +384,28 @@ function renderDeviations(task) {
     const note = el('p');
     appendInlineCode(note, deviation.note);
     item.append(note);
-    const parts = [new Date(deviation.reportedAt).toLocaleString('zh-CN')];
-    if (deviation.stepIndex !== null) parts.push(`指令 ${deviation.stepIndex + 1}`);
-    if (deviation.filePath) parts.push(deviation.filePath);
-    item.append(el('small', null, parts.join(' · ')));
+    const meta = el('small');
+    meta.append(withIcon('span', null, 'clock', new Date(deviation.reportedAt).toLocaleString('zh-CN')));
+    if (deviation.stepIndex !== null) meta.append(withIcon('span', null, 'list-checks', `指令 ${deviation.stepIndex + 1}`));
+    if (deviation.filePath) meta.append(withIcon('span', null, 'file', deviation.filePath));
+    item.append(meta);
     return item;
   }));
 }
 
+function churnStat(change) {
+  const stat = el('span', 'scope-churn');
+  stat.append(el('span', 'added', `+${change.added}`), ' ', el('span', 'removed', `-${change.removed}`));
+  return stat;
+}
+
 function scopeRow(filePath, kind, churn) {
   const labels = { touched: '已改动', untouched: '未改动', out: '超出范围' };
-  const row = el('div', 'scope-row');
-  row.append(el('span', `scope-tag ${kind}`, labels[kind]), el('span', 'scope-path', filePath));
-  if (churn) {
-    const stat = el('span', 'scope-churn');
-    stat.append(el('span', 'added', `+${churn.added}`), ' ', el('span', 'removed', `-${churn.removed}`));
-    row.append(stat);
-  }
+  const row = el('div', `scope-row ${kind}`);
+  row.append(icon(kind === 'out' ? 'alert' : 'file', 'scope-file'), el('span', 'scope-path', filePath));
+  if (churn?.untracked) row.append(el('span', 'scope-tag new', '新文件'));
+  if (churn && !churn.binary) row.append(churnStat(churn));
+  row.append(el('span', `scope-tag ${kind}`, labels[kind]));
   return row;
 }
 
@@ -404,11 +454,11 @@ function renderDiff(task, diff) {
   const container = $('#execDiff');
   const changes = diff?.changes ?? [];
   if (!task.baseline) {
-    container.replaceChildren(el('p', 'empty-hint', '领取工作包后可查看改动。'));
+    container.replaceChildren(emptyHint('play', '领取工作包后可查看改动。'));
     return;
   }
   if (changes.length === 0) {
-    container.replaceChildren(el('p', 'empty-hint', '相对基线还没有改动。'));
+    container.replaceChildren(emptyHint('check-circle', '相对基线还没有改动。'));
     return;
   }
 
@@ -416,14 +466,9 @@ function renderDiff(task, diff) {
     const file = el('div', 'diff-file');
     const header = el('button', 'diff-file-header');
     header.type = 'button';
-    const chevron = el('span', 'diff-chevron', '⌄');
-    chevron.setAttribute('aria-hidden', 'true');
-    header.append(chevron, el('span', 'scope-path', change.path));
-    if (!change.binary) {
-      const stat = el('span', 'scope-churn');
-      stat.append(el('span', 'added', `+${change.added}`), ' ', el('span', 'removed', `-${change.removed}`));
-      header.append(stat);
-    }
+    header.append(icon('chevron-right', 'diff-chevron'), el('span', 'scope-path', change.path));
+    if (change.untracked) header.append(el('span', 'scope-tag new', '新文件'));
+    if (!change.binary) header.append(churnStat(change));
 
     const body = el('div', 'diff-body');
     body.hidden = true;
@@ -447,26 +492,26 @@ function renderDiff(task, diff) {
 function renderActions(task) {
   const allowed = new Set(task.humanTransitions);
   const buttons = ACTIONS.filter((action) => allowed.has(action.name)).map((action) => {
-    const button = el('button', action.primary ? 'primary-button' : 'secondary-button', action.label);
+    const className = action.primary ? 'primary-button' : `secondary-button${action.name === 'report_deviation' ? ' danger' : ''}`;
+    const button = withIcon('button', className, action.icon, action.label);
+    button.type = 'button';
     button.dataset.transition = action.name;
     return button;
   });
   $('#execActions').replaceChildren(...buttons);
 
   const notice = $('#execNotice');
-  if (buttons.length === 0) {
-    notice.hidden = false;
-    notice.textContent = `当前状态「${task.statusLabel}」由 AI 团队推进，你无需操作。`;
-  } else {
-    notice.hidden = true;
-  }
+  notice.hidden = buttons.length > 0;
+  $('#execNoticeText').textContent = buttons.length > 0
+    ? ''
+    : `当前状态「${task.statusLabel}」由 AI 团队推进，你无需操作。`;
 }
 
 function renderExecution(task, { diff, acceptance } = {}) {
   $('#execTitle').textContent = task.title;
   $('#execIntro').textContent = task.intro;
   const badge = $('#execStatus');
-  badge.className = `status-badge ${task.status}`;
+  badge.className = `status-badge status-pill ${task.status}`;
   badge.textContent = task.statusLabel;
   $('#execPriorityDot').className = `priority-dot ${task.priority}`;
   $('#execPriority').textContent = PRIORITY_LABELS[task.priority];
@@ -509,7 +554,8 @@ async function openExecution(id) {
     showToast(`打开工作包失败：${describeError(error)}`);
     return;
   }
-  $('#execVerify').replaceChildren(el('p', 'empty-hint', '尚未运行验证。'));
+  $('#execVerify').replaceChildren(emptyHint('terminal', '尚未运行验证。'));
+  document.querySelectorAll('[data-verify]').forEach((button) => button.classList.remove('selected'));
   renderExecution(current);
   showView('execution');
   $('#backToQueue').focus();
@@ -529,9 +575,9 @@ const VERIFY_LABELS = { test: '测试', lint: 'Lint', build: 'Build' };
 
 function renderVerifyResult(kind, result) {
   const container = $('#execVerify');
-  const summary = el('div', 'verify-summary');
   const ok = result.summary.ok;
-  summary.append(el('span', `verify-verdict ${ok ? 'pass' : 'fail'}`, ok ? '通过' : '失败'));
+  const summary = el('div', `verify-summary ${ok ? 'pass' : 'fail'}`);
+  summary.append(withIcon('span', 'verify-verdict', ok ? 'check-circle' : 'x-circle', ok ? '通过' : '失败'));
   if (result.summary.total > 0) {
     summary.append(el('span', 'verify-counts',
       `${result.summary.passed}/${result.summary.total} 通过` +
@@ -539,14 +585,14 @@ function renderVerifyResult(kind, result) {
   } else {
     summary.append(el('span', 'verify-counts', result.timedOut ? '超时' : `退出码 ${result.exitCode}`));
   }
-  summary.append(el('span', 'verify-duration', `${(result.durationMs / 1000).toFixed(1)}s`));
+  summary.append(withIcon('span', 'verify-duration', 'clock', `${(result.durationMs / 1000).toFixed(1)}s`));
 
-  const nodes = [summary, el('div', 'verify-command', `${VERIFY_LABELS[kind]} · ${result.command}`)];
+  const nodes = [summary, withIcon('div', 'verify-command', 'terminal', `${VERIFY_LABELS[kind]} · ${result.command}`)];
 
   const failures = result.results.filter((entry) => !entry.passed && !entry.skipped && !entry.todo);
   if (failures.length > 0) {
     const list = el('div', 'verify-failures');
-    failures.forEach((entry) => list.append(el('div', null, `✕ ${entry.name}`)));
+    failures.forEach((entry) => list.append(withIcon('div', null, 'x', entry.name)));
     nodes.push(list);
   }
   // The raw log is the fallback when nothing could be parsed.
@@ -558,15 +604,22 @@ function renderVerifyResult(kind, result) {
 
 async function runVerification(kind) {
   const buttons = [...document.querySelectorAll('[data-verify]')];
-  buttons.forEach((button) => { button.disabled = true; });
-  $('#execVerify').replaceChildren(el('p', 'empty-hint', `正在运行 ${VERIFY_LABELS[kind]}…`));
+  const active = buttons.find((button) => button.dataset.verify === kind);
+  buttons.forEach((button) => {
+    button.disabled = true;
+    button.classList.toggle('selected', button === active);
+  });
+  active.classList.add('running');
+  $('#execVerify').replaceChildren(emptyHint('spinner', `正在运行 ${VERIFY_LABELS[kind]}…`));
+  $('#execVerify .icon').classList.add('spin');
   try {
     const result = await call(window.taskpilot.verify.run(kind, current.id));
     renderVerifyResult(kind, result);
     if (result.acceptance) renderAcceptance(current, result.acceptance);
   } catch (error) {
-    $('#execVerify').replaceChildren(el('p', 'empty-hint', describeError(error)));
+    $('#execVerify').replaceChildren(emptyHint('alert', describeError(error)));
   } finally {
+    active.classList.remove('running');
     buttons.forEach((button) => { button.disabled = false; });
   }
 }
@@ -739,7 +792,7 @@ async function init() {
     showToast(`工作包加载失败：${describeError(error)}`);
   }
   const info = await refreshWorkspaceStatus();
-  if (info && !info.configured) showToast('尚未配置工作区，diff 和验证暂不可用。');
+  if (info && !info.configured) showToast('尚未配置工作区，diff 和验证暂不可用。', 'info');
 }
 
 init();

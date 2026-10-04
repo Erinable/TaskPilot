@@ -8,34 +8,38 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <!-- Soft colour fields behind every frosted surface; the glass blurs these. -->
+    <div class="backdrop" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span></div>
+
     <div class="window-shell">
-      <header class="topbar">
+      <header class="topbar glass">
         <div class="brand-area">
-          <div class="brand-mark"><span></span><span></span><span></span></div>
+          <div class="brand-mark"><i data-icon="logo"></i></div>
           <div>
             <div class="brand-name">TaskPilot</div>
             <div class="brand-caption">AI Team Workspace</div>
           </div>
         </div>
         <div class="workspace-picker" id="workspacePicker" role="button" tabindex="0" title="工作区设置">
-          <span class="repo-dot" id="repoDot"></span>
+          <i data-icon="git-branch"></i>
           <span id="workspaceName">未配置工作区</span>
-          <span class="chevron">⌄</span>
+          <span class="repo-dot off" id="repoDot"></span>
+          <i data-icon="chevron-down" class="chevron"></i>
         </div>
         <div class="top-actions">
-          <button class="icon-button" title="搜索" aria-label="搜索">⌕</button>
-          <button class="icon-button" title="通知" aria-label="通知"><span class="notification-dot"></span>♧</button>
+          <button class="icon-button" title="搜索" aria-label="搜索"><i data-icon="search"></i></button>
+          <button class="icon-button" title="通知" aria-label="通知"><i data-icon="bell"></i><span class="notification-dot"></span></button>
           <div class="avatar">HL</div>
         </div>
       </header>
 
       <div class="app-grid">
-        <aside class="sidebar">
+        <aside class="sidebar glass">
           <div class="side-section-label">WORKSPACE</div>
           <nav class="main-nav">
-            <button class="nav-item active" id="queueNav"><span class="nav-icon">▦</span><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
-            <button class="nav-item"><span class="nav-icon">◈</span><span>工程地图</span></button>
-            <button class="nav-item"><span class="nav-icon">⌁</span><span>活动记录</span></button>
+            <button class="nav-item active" id="queueNav"><i data-icon="queue" class="nav-icon"></i><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
+            <button class="nav-item"><i data-icon="map" class="nav-icon"></i><span>工程地图</span></button>
+            <button class="nav-item"><i data-icon="activity" class="nav-icon"></i><span>活动记录</span></button>
           </nav>
           <div class="side-section-label team-label">AI TEAM</div>
           <div class="team-list">
@@ -45,50 +49,53 @@
             <div class="team-member"><span class="agent-avatar rel">RM</span><span>Release Manager</span><span class="presence online"></span></div>
           </div>
           <div class="sidebar-bottom">
-            <div class="sync-card"><span class="sync-icon" id="syncIcon" aria-hidden="true">↻</span><div><strong id="syncTitle">未配置工作区</strong><small id="syncDetail">前往设置指定仓库</small></div></div>
-            <button class="settings-link" id="settingsLink"><span aria-hidden="true">⚙</span> 设置</button>
+            <div class="sync-card"><span class="sync-icon off" id="syncIcon"><i data-icon="refresh"></i></span><div><strong id="syncTitle">未配置工作区</strong><small id="syncDetail">前往设置指定仓库</small></div></div>
+            <button class="settings-link nav-item" id="settingsLink"><i data-icon="settings" class="nav-icon"></i><span>设置</span></button>
           </div>
         </aside>
 
         <main class="main-content">
           <div class="view" id="queueView">
-          <div class="page-heading">
-            <div>
-              <div class="eyebrow" id="todayLabel"></div>
-              <h1><span id="greeting">你好</span>，Hanguoliang <span class="wave">✦</span></h1>
-              <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
-            </div>
-            <div class="heading-actions"><div class="team-presence"><span></span> 4 个 AI 成员在线</div><button class="primary-button" id="newTaskButton"><span>＋</span> 新建需求</button></div>
-          </div>
-
-          <section class="metrics-row">
-            <div class="metric-card"><div class="metric-icon accent">⌘</div><div><span>待处理工作包</span><strong id="pendingCount">–</strong></div><small class="metric-trend up">↑ 2 本周</small></div>
-            <div class="metric-card"><div class="metric-icon success">✓</div><div><span>本周已完成</span><strong>12</strong></div><small class="metric-trend up">↑ 28%</small></div>
-            <div class="metric-card"><div class="metric-icon warning">◷</div><div><span>平均执行时长</span><strong>2.4h</strong></div><small class="metric-trend neutral">较上周稳定</small></div>
-          </section>
-
-          <div class="content-columns">
-            <section class="queue-panel panel">
-              <div class="panel-heading"><div><h2>你的工作队列</h2><p>按优先级排序的编码工作包</p></div><button class="filter-button">全部状态⌄</button></div>
-              <div class="task-list" id="taskList"></div>
-              <button class="view-all-button">查看全部工作包 <span>→</span></button>
-            </section>
-
-            <section class="activity-panel panel">
-              <div class="panel-heading"><div><h2>AI 团队动态</h2><p>项目上下文正在持续更新</p></div><button class="more-button">•••</button></div>
-              <div class="activity-list">
-                <div class="activity-item"><span class="activity-avatar arch">AR</span><div><p><strong>Architect</strong> 更新了架构决策</p><small>将 TokenService 移入 auth/infrastructure</small><time>8 分钟前</time></div></div>
-                <div class="activity-item"><span class="activity-avatar qa">QA</span><div><p><strong>QA Partner</strong> 完成测试分析</p><small>发现 2 个未覆盖的边界条件</small><time>34 分钟前</time></div></div>
-                <div class="activity-item"><span class="activity-avatar pm">PM</span><div><p><strong>Product Lead</strong> 澄清了需求</p><small>邮箱登录 · 验收标准已更新</small><time>1 小时前</time></div></div>
-                <div class="activity-item"><span class="activity-avatar rel">RM</span><div><p><strong>Release Manager</strong> 发布了 v0.8.0</p><small>登录模块 · 生产环境</small><time>昨天</time></div></div>
+            <div class="page-heading">
+              <div>
+                <div class="eyebrow" id="todayLabel"></div>
+                <h1><span id="greeting">你好</span>，Hanguoliang <i data-icon="sparkle" class="wave"></i></h1>
+                <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
               </div>
-              <button class="view-all-button">查看完整活动记录 <span>→</span></button>
+              <div class="heading-actions">
+                <div class="team-presence"><span></span> 4 个 AI 成员在线</div>
+                <button class="primary-button" id="newTaskButton"><i data-icon="plus"></i>新建需求</button>
+              </div>
+            </div>
+
+            <section class="metrics-row">
+              <div class="metric-card glass"><div class="metric-icon accent"><i data-icon="inbox"></i></div><div><span>待处理工作包</span><strong id="pendingCount">–</strong></div><small class="metric-trend up"><i data-icon="trend-up"></i>2 本周</small></div>
+              <div class="metric-card glass"><div class="metric-icon success"><i data-icon="check-circle"></i></div><div><span>本周已完成</span><strong>12</strong></div><small class="metric-trend up"><i data-icon="trend-up"></i>28%</small></div>
+              <div class="metric-card glass"><div class="metric-icon warning"><i data-icon="clock"></i></div><div><span>平均执行时长</span><strong>2.4h</strong></div><small class="metric-trend neutral">较上周稳定</small></div>
             </section>
-          </div>
+
+            <div class="content-columns">
+              <section class="queue-panel panel glass">
+                <div class="panel-heading"><div><h2>你的工作队列</h2><p>按优先级排序的编码工作包</p></div><button class="filter-button"><i data-icon="filter"></i>全部状态</button></div>
+                <div class="task-list" id="taskList"></div>
+                <button class="view-all-button">查看全部工作包<i data-icon="arrow-right"></i></button>
+              </section>
+
+              <section class="activity-panel panel glass">
+                <div class="panel-heading"><div><h2>AI 团队动态</h2><p>项目上下文正在持续更新</p></div><button class="icon-button small" aria-label="更多"><i data-icon="more"></i></button></div>
+                <div class="activity-list">
+                  <div class="activity-item"><span class="activity-avatar arch">AR</span><div><p><strong>Architect</strong> 更新了架构决策</p><small>将 TokenService 移入 auth/infrastructure</small><time>8 分钟前</time></div></div>
+                  <div class="activity-item"><span class="activity-avatar qa">QA</span><div><p><strong>QA Partner</strong> 完成测试分析</p><small>发现 2 个未覆盖的边界条件</small><time>34 分钟前</time></div></div>
+                  <div class="activity-item"><span class="activity-avatar pm">PM</span><div><p><strong>Product Lead</strong> 澄清了需求</p><small>邮箱登录 · 验收标准已更新</small><time>1 小时前</time></div></div>
+                  <div class="activity-item"><span class="activity-avatar rel">RM</span><div><p><strong>Release Manager</strong> 发布了 v0.8.0</p><small>登录模块 · 生产环境</small><time>昨天</time></div></div>
+                </div>
+                <button class="view-all-button">查看完整活动记录<i data-icon="arrow-right"></i></button>
+              </section>
+            </div>
           </div>
 
           <div class="view" id="executionView" hidden>
-            <button class="back-button" id="backToQueue"><span aria-hidden="true">←</span> 返回工作队列</button>
+            <button class="back-button" id="backToQueue"><i data-icon="arrow-left"></i>返回工作队列</button>
 
             <div class="exec-heading">
               <div class="exec-title-row">
@@ -97,54 +104,58 @@
               </div>
               <p id="execIntro"></p>
               <div class="exec-meta">
-                <span><span class="priority-dot" id="execPriorityDot"></span> <span id="execPriority"></span></span>
-                <span class="meta-divider"></span><span id="execModule"></span>
-                <span class="meta-divider"></span><span id="execEstimate"></span>
-                <span class="meta-divider"></span><span id="execBaseline"></span>
+                <span class="meta-chip"><span class="priority-dot" id="execPriorityDot"></span><span id="execPriority"></span></span>
+                <span class="meta-chip"><i data-icon="folder"></i><span id="execModule"></span></span>
+                <span class="meta-chip"><i data-icon="clock"></i><span id="execEstimate"></span></span>
+                <span class="meta-chip"><i data-icon="commit"></i><span id="execBaseline"></span></span>
               </div>
             </div>
 
             <div class="exec-actions" id="execActions"></div>
-            <div class="exec-notice" id="execNotice" hidden></div>
+            <div class="exec-notice" id="execNotice" hidden><i data-icon="info"></i><span id="execNoticeText"></span></div>
 
             <div class="exec-columns">
               <div class="exec-column">
-                <section class="panel">
-                  <div class="panel-heading"><div><h2>执行指令</h2><p id="execStepProgress"></p></div></div>
+                <section class="panel glass">
+                  <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="list-checks"></i></span><div><h2>执行指令</h2><p id="execStepProgress"></p></div></div></div>
+                  <div class="progress-track" aria-hidden="true"><span class="progress-fill" id="execStepBar"></span></div>
                   <ol class="step-list" id="execSteps"></ol>
                 </section>
 
-                <section class="panel">
-                  <div class="panel-heading"><div><h2>验收条件</h2><p>关联测试通过后自动勾选</p></div></div>
+                <section class="panel glass">
+                  <div class="panel-heading"><div class="panel-title"><span class="panel-icon success"><i data-icon="check-circle"></i></span><div><h2>验收条件</h2><p>关联测试通过后自动勾选</p></div></div></div>
                   <div class="acceptance-list" id="execAcceptance"></div>
                 </section>
 
-                <section class="panel" id="deviationPanel" hidden>
-                  <div class="panel-heading"><div><h2>已报告的偏差</h2><p>AI 团队正在重新评估</p></div></div>
+                <section class="panel glass" id="deviationPanel" hidden>
+                  <div class="panel-heading"><div class="panel-title"><span class="panel-icon danger"><i data-icon="flag"></i></span><div><h2>已报告的偏差</h2><p>AI 团队正在重新评估</p></div></div></div>
                   <div class="deviation-list" id="execDeviations"></div>
                 </section>
               </div>
 
               <div class="exec-column">
-                <section class="panel">
-                  <div class="panel-heading"><div><h2>文件范围</h2><p>工作包允许改动的文件</p></div><button class="filter-button" id="refreshDiff">刷新</button></div>
+                <section class="panel glass">
+                  <div class="panel-heading">
+                    <div class="panel-title"><span class="panel-icon"><i data-icon="folder"></i></span><div><h2>文件范围</h2><p>工作包允许改动的文件</p></div></div>
+                    <button class="icon-button small" id="refreshDiff" title="刷新" aria-label="刷新改动"><i data-icon="refresh"></i></button>
+                  </div>
                   <div class="scope-list" id="execScope"></div>
                 </section>
 
-                <section class="panel">
+                <section class="panel glass">
                   <div class="panel-heading">
-                    <div><h2>验证</h2><p>运行工作区配置的命令</p></div>
-                    <div class="verify-buttons">
-                      <button class="filter-button" data-verify="test">测试</button>
-                      <button class="filter-button" data-verify="lint">Lint</button>
-                      <button class="filter-button" data-verify="build">Build</button>
-                    </div>
+                    <div class="panel-title"><span class="panel-icon"><i data-icon="terminal"></i></span><div><h2>验证</h2><p>运行工作区配置的命令</p></div></div>
+                  </div>
+                  <div class="segmented" role="group" aria-label="验证命令">
+                    <button class="segment" data-verify="test"><i data-icon="flask"></i>测试</button>
+                    <button class="segment" data-verify="lint"><i data-icon="wand"></i>Lint</button>
+                    <button class="segment" data-verify="build"><i data-icon="box"></i>Build</button>
                   </div>
                   <div class="verify-result" id="execVerify"></div>
                 </section>
 
-                <section class="panel">
-                  <div class="panel-heading"><div><h2>改动</h2><p id="execDiffHint">相对领取时的基线</p></div></div>
+                <section class="panel glass">
+                  <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="diff"></i></span><div><h2>改动</h2><p id="execDiffHint">相对领取时的基线</p></div></div></div>
                   <div class="diff-view" id="execDiff"></div>
                 </section>
               </div>
@@ -161,39 +172,39 @@
             </div>
 
             <form class="settings-form" id="settingsForm" novalidate>
-              <section class="panel">
-                <div class="panel-heading"><div><h2>仓库</h2><p>工作包的 diff 和文件范围都相对这个仓库计算</p></div></div>
+              <section class="panel glass">
+                <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="git-branch"></i></span><div><h2>仓库</h2><p>工作包的 diff 和文件范围都相对这个仓库计算</p></div></div></div>
                 <div class="settings-body">
                   <label class="field-label" for="settingsRoot">仓库路径</label>
                   <div class="field-row">
                     <input class="field-input mono" id="settingsRoot" name="root" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/app" aria-describedby="rootStatus" />
-                    <button class="secondary-button" id="pickRoot" type="button">选择…</button>
+                    <button class="secondary-button" id="pickRoot" type="button"><i data-icon="folder"></i>选择…</button>
                   </div>
                   <p class="field-status" id="rootStatus" aria-live="polite"></p>
                 </div>
               </section>
 
-              <section class="panel">
-                <div class="panel-heading"><div><h2>验证命令</h2><p>执行页的「测试 / Lint / Build」按钮运行这些命令</p></div></div>
+              <section class="panel glass">
+                <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="terminal"></i></span><div><h2>验证命令</h2><p>执行页的「测试 / Lint / Build」按钮运行这些命令</p></div></div></div>
                 <div class="settings-body">
-                  <label class="field-label" for="commandTest">测试</label>
+                  <label class="field-label" for="commandTest"><i data-icon="flask"></i>测试</label>
                   <input class="field-input mono" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
                   <p class="field-status" id="statusTest" aria-live="polite"></p>
 
-                  <label class="field-label" for="commandLint">Lint</label>
+                  <label class="field-label" for="commandLint"><i data-icon="wand"></i>Lint</label>
                   <input class="field-input mono" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
                   <p class="field-status" id="statusLint" aria-live="polite"></p>
 
-                  <label class="field-label" for="commandBuild">Build</label>
+                  <label class="field-label" for="commandBuild"><i data-icon="box"></i>Build</label>
                   <input class="field-input mono" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
                   <p class="field-status" id="statusBuild" aria-live="polite"></p>
 
-                  <p class="settings-note">命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</p>
+                  <p class="settings-note"><i data-icon="info"></i><span>命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</span></p>
                 </div>
               </section>
 
               <div class="settings-actions">
-                <button class="secondary-button" id="checkSettings" type="button">检查</button>
+                <button class="secondary-button" id="checkSettings" type="button"><i data-icon="check-circle"></i>检查</button>
                 <button class="primary-button" id="saveSettings" type="submit">保存</button>
               </div>
             </form>
@@ -203,8 +214,9 @@
     </div>
 
     <div class="modal-backdrop" id="deviationModal" hidden>
-      <section class="task-modal" role="dialog" aria-modal="true" aria-labelledby="deviationTitle">
-        <button class="modal-close" id="closeDeviation" aria-label="关闭">×</button>
+      <section class="task-modal glass-strong" role="dialog" aria-modal="true" aria-labelledby="deviationTitle">
+        <button class="icon-button small modal-close" id="closeDeviation" aria-label="关闭"><i data-icon="x"></i></button>
+        <div class="modal-badge"><i data-icon="flag"></i></div>
         <div class="modal-kicker">REPORT A DEVIATION</div>
         <h2 id="deviationTitle">报告偏差</h2>
         <p class="modal-intro">设计和代码对不上时，在这里说明。提交后工作包会交回 AI 团队重新评估，不要自行偏离指令。</p>
@@ -220,12 +232,13 @@
 
         <div class="modal-actions">
           <button class="secondary-button" id="cancelDeviation">取消</button>
-          <button class="primary-button" id="submitDeviation">提交偏差</button>
+          <button class="primary-button" id="submitDeviation"><i data-icon="send"></i>提交偏差</button>
         </div>
       </section>
     </div>
 
-    <div class="toast" id="toast" role="status" aria-live="polite"><span class="toast-check">✓</span><span id="toastText">工作包已加入执行中</span></div>
+    <div class="toast glass-strong" id="toast" role="status" aria-live="polite"><span class="toast-icon" id="toastIcon"><i data-icon="check"></i></span><span id="toastText"></span></div>
+    <script src="./icons.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

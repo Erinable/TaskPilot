@@ -1,9 +1,13 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme } = require('electron');
 const path = require('node:path');
 const { registerIpcHandlers } = require('./ipc');
 const { WorkPackageStore } = require('./work-package-store');
 const { listTasks } = require('./tasks');
 const workspace = require('./workspace');
+
+// Matches --canvas in styles.css, so the first paint and any area the page
+// doesn't cover use the theme's colour rather than a white flash.
+const CANVAS = { light: '#eef1f8', dark: '#0d0f16' };
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -11,14 +15,22 @@ function createWindow() {
     height: 920,
     minWidth: 1100,
     minHeight: 720,
-    backgroundColor: '#f5f5f7',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light,
     titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 20, y: 22 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       sandbox: true,
     },
   });
+
+  // Keep the window background in step with a live light/dark switch.
+  const syncBackground = () => {
+    window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light);
+  };
+  nativeTheme.on('updated', syncBackground);
+  window.on('closed', () => nativeTheme.off('updated', syncBackground));
 
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
