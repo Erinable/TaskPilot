@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'" />
+    <title>TaskPilot · Human Coding Workbench</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="window-shell">
+      <header class="topbar">
+        <div class="brand-area">
+          <div class="brand-mark"><span></span><span></span><span></span></div>
+          <div>
+            <div class="brand-name">TaskPilot</div>
+            <div class="brand-caption">AI Team Workspace</div>
+          </div>
+        </div>
+        <div class="workspace-picker">
+          <span class="repo-dot"></span>
+          <span>taskpilot / human + ai</span>
+          <span class="chevron">⌄</span>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" title="搜索" aria-label="搜索">⌕</button>
+          <button class="icon-button" title="通知" aria-label="通知"><span class="notification-dot"></span>♧</button>
+          <div class="avatar">HL</div>
+        </div>
+      </header>
+
+      <div class="app-grid">
+        <aside class="sidebar">
+          <div class="side-section-label">WORKSPACE</div>
+          <nav class="main-nav">
+            <button class="nav-item active"><span class="nav-icon">▦</span><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
+            <button class="nav-item"><span class="nav-icon">◈</span><span>工程地图</span></button>
+            <button class="nav-item"><span class="nav-icon">⌁</span><span>活动记录</span></button>
+          </nav>
+          <div class="side-section-label team-label">AI TEAM</div>
+          <div class="team-list">
+            <div class="team-member"><span class="agent-avatar pm">PM</span><span>Product Lead</span><span class="presence online"></span></div>
+            <div class="team-member"><span class="agent-avatar arch">AR</span><span>Architect</span><span class="presence online"></span></div>
+            <div class="team-member"><span class="agent-avatar qa">QA</span><span>QA Partner</span><span class="presence idle"></span></div>
+            <div class="team-member"><span class="agent-avatar rel">RM</span><span>Release Manager</span><span class="presence online"></span></div>
+          </div>
+          <div class="sidebar-bottom">
+            <div class="sync-card"><span class="sync-icon">↻</span><div><strong>已同步</strong><small>刚刚 · GitHub</small></div></div>
+            <button class="settings-link"><span>⚙</span> 设置</button>
+          </div>
+        </aside>
+
+        <main class="main-content">
+          <div class="page-heading">
+            <div>
+              <div class="eyebrow" id="todayLabel"></div>
+              <h1><span id="greeting">你好</span>，Hanguoliang <span class="wave">✦</span></h1>
+              <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
+            </div>
+            <div class="heading-actions"><div class="team-presence"><span></span> 4 个 AI 成员在线</div><button class="primary-button" id="newTaskButton"><span>＋</span> 新建需求</button></div>
+          </div>
+
+          <section class="metrics-row">
+            <div class="metric-card"><div class="metric-icon accent">⌘</div><div><span>待处理工作包</span><strong id="pendingCount">–</strong></div><small class="metric-trend up">↑ 2 本周</small></div>
+            <div class="metric-card"><div class="metric-icon success">✓</div><div><span>本周已完成</span><strong>12</strong></div><small class="metric-trend up">↑ 28%</small></div>
+            <div class="metric-card"><div class="metric-icon warning">◷</div><div><span>平均执行时长</span><strong>2.4h</strong></div><small class="metric-trend neutral">较上周稳定</small></div>
+          </section>
+
+          <div class="content-columns">
+            <section class="queue-panel panel">
+              <div class="panel-heading"><div><h2>你的工作队列</h2><p>按优先级排序的编码工作包</p></div><button class="filter-button">全部状态⌄</button></div>
+              <div class="task-list" id="taskList"></div>
+              <button class="view-all-button">查看全部工作包 <span>→</span></button>
+            </section>
+
+            <section class="activity-panel panel">
+              <div class="panel-heading"><div><h2>AI 团队动态</h2><p>项目上下文正在持续更新</p></div><button class="more-button">•••</button></div>
+              <div class="activity-list">
+                <div class="activity-item"><span class="activity-avatar arch">AR</span><div><p><strong>Architect</strong> 更新了架构决策</p><small>将 TokenService 移入 auth/infrastructure</small><time>8 分钟前</time></div></div>
+                <div class="activity-item"><span class="activity-avatar qa">QA</span><div><p><strong>QA Partner</strong> 完成测试分析</p><small>发现 2 个未覆盖的边界条件</small><time>34 分钟前</time></div></div>
+                <div class="activity-item"><span class="activity-avatar pm">PM</span><div><p><strong>Product Lead</strong> 澄清了需求</p><small>邮箱登录 · 验收标准已更新</small><time>1 小时前</time></div></div>
+                <div class="activity-item"><span class="activity-avatar rel">RM</span><div><p><strong>Release Manager</strong> 发布了 v0.8.0</p><small>登录模块 · 生产环境</small><time>昨天</time></div></div>
+              </div>
+              <button class="view-all-button">查看完整活动记录 <span>→</span></button>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="taskModal" hidden>
+      <section class="task-modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <button class="modal-close" id="closeModal" aria-label="关闭">×</button>
+        <div class="modal-kicker">HUMAN CODING WORK PACKAGE</div>
+        <h2 id="modalTitle"></h2>
+        <p class="modal-intro" id="modalIntro"></p>
+        <div class="modal-meta"><span class="priority-dot" id="modalPriorityDot"></span> <span id="modalPriority"></span> <span class="meta-divider"></span> <span id="modalModule"></span> <span class="meta-divider"></span> <span id="modalEstimate"></span></div>
+        <div class="instruction-block"><div class="instruction-title"><span aria-hidden="true">▣</span> 执行指令</div><ol id="modalSteps"></ol></div>
+        <div class="acceptance-block"><div class="instruction-title"><span aria-hidden="true">✓</span> 验收条件</div><div id="modalAcceptance"></div></div>
+        <div class="modal-actions"><button class="secondary-button" id="deviationButton">报告偏差</button><button class="primary-button" id="startTaskButton">开始执行 <span>→</span></button></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"><span class="toast-check">✓</span><span id="toastText">工作包已加入执行中</span></div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
