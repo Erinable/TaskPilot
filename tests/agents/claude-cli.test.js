@@ -93,6 +93,22 @@ test('runStructured() reads the error envelope even when the CLI exits non-zero'
   await assert.rejects(() => cli.runStructured({ ...base, spawnFn }), { code: 'agent_budget' });
 });
 
+test('runStructured() retries once when the CLI exhausts its schema retries', async () => {
+  const exhausted = envelope({ is_error: true, subtype: 'error_max_structured_output_retries' });
+  let calls = 0;
+  const flaky = (...args) => {
+    calls += 1;
+    return fakeSpawn({ stdout: calls === 1 ? exhausted : envelope({ structured_output: { ok: 1 } }) }).spawnFn(...args);
+  };
+  assert.deepEqual((await cli.runStructured({ ...base, spawnFn: flaky })).output, { ok: 1 });
+  assert.equal(calls, 2);
+
+  let always = 0;
+  const broken = (...args) => { always += 1; return fakeSpawn({ stdout: exhausted }).spawnFn(...args); };
+  await assert.rejects(() => cli.runStructured({ ...base, spawnFn: broken }), { code: 'agent_bad_output' });
+  assert.equal(always, 2, 'only one retry');
+});
+
 test('runStructured() times out and can be cancelled', async () => {
   const slow = fakeSpawn({ hang: true });
   await assert.rejects(() => cli.runStructured({ ...base, spawnFn: slow.spawnFn, timeoutMs: 20 }), { code: 'agent_timeout' });

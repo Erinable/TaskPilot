@@ -68,7 +68,10 @@ function parseEnvelope(stdout) {
     throw new AgentRunError('Agent returned output that is not JSON', 'agent_bad_output', stdout.slice(0, 500));
   }
   if (envelope.is_error || envelope.subtype !== 'success') {
-    const reason = envelope.subtype === 'error_max_budget_usd' ? 'agent_budget' : 'agent_failed';
+    const reason = envelope.subtype === 'error_max_budget_usd' ? 'agent_budget'
+      // The CLI gave up after its own schema-repair attempts; worth one fresh try.
+      : envelope.subtype === 'error_max_structured_output_retries' ? 'agent_schema_retry'
+      : 'agent_failed';
     throw new AgentRunError(envelope.result || `Agent run ended with ${envelope.subtype}`, reason);
   }
   let output = envelope.structured_output;
@@ -84,6 +87,27 @@ function parseEnvelope(stdout) {
 }
 
 /**
+ * Runs once, retrying a single time when the CLI exhausted its schema
+ * retries: that failure is intermittent and a fresh run usually succeeds.
+ * The second failure is reported as agent_bad_output.
+ */
+async function runStructured(options) {
+  try {
+    return await runOnce(options);
+  } catch (error) {
+    if (error.code !== 'agent_schema_retry') throw error;
+    try {
+      return await runOnce(options);
+    } catch (retryError) {
+      if (retryError.code === 'agent_schema_retry') {
+        throw new AgentRunError('Agent could not produce output in the required format', 'agent_bad_output');
+      }
+      throw retryError;
+    }
+  }
+}
+
+/**
  * @param options.prompt user turn, sent on stdin
  * @param options.systemPrompt
  * @param options.schema JSON Schema for the structured output
@@ -93,7 +117,7 @@ function parseEnvelope(stdout) {
  * @param options.spawnFn injectable for tests
  * @returns {Promise<{output, costUsd}>}
  */
-async function runStructured({
+async function runOnce({
   prompt, systemPrompt, schema, command = 'claude', model = null, envPath = null,
   budgetUsd = DEFAULT_BUDGET_USD, timeoutMs = DEFAULT_TIMEOUT_MS, signal, spawnFn = spawn,
 }) {
