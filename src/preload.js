@@ -13,7 +13,13 @@ contextBridge.exposeInMainWorld('taskpilot', {
   getTask: (id) => invoke('tasks:get', id),
 
   transition: (id, name, options) => invoke('package:transition', id, name, options),
+  measureBaseline: (id) => invoke('baseline:measure', id),
   setStepDone: (id, stepIndex, done) => invoke('package:set-step-done', id, stepIndex, done),
+
+  review: {
+    retry: (id) => invoke('review:retry', id),
+    cancel: (id) => invoke('review:cancel', id),
+  },
 
   workspace: {
     get: () => invoke('workspace:get'),
@@ -61,5 +67,14 @@ contextBridge.exposeInMainWorld('taskpilot', {
 
   agent: {
     status: () => invoke('agent:status'),
+  },
+
+  env: {
+    get: () => invoke('env:get'),
+    plan: (options) => invoke('env:plan', options),
+    setAllowScripts: (allow) => invoke('env:set-allow-scripts', allow),
+    runStep: (stepId) => invoke('env:run-step', stepId),
+    apply: (kinds) => invoke('env:apply', kinds),
+    cancel: () => invoke('env:cancel'),
   },
 });

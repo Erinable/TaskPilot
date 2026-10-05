@@ -14,10 +14,16 @@ TaskPilot is an Electron app using plain HTML, CSS, and JavaScript (no bundler).
 - `src/agents/` — the AI team. Each agent sees only its layer:
   - `architect.js` reads code (through `src/repo-reader.js`) and publishes a module interface summary;
   - `product-lead.js` plans from the summary and the file list, and never sees source code;
-  - `pipeline.js` runs Architect's steps; `claude-cli.js` runs the isolated, tool-less CLI.
+  - `qa.js` reviews a submitted package against its steps, scope and acceptance criteria. `decide()` combines the model's verdict with TaskPilot's own evidence: a failing blocking check or a failed/missing linked test rejects regardless of the model, and the model can only make a review stricter;
+  - `env-steward.js` (Environment Steward) reads the facts `env-setup.js` gathers and picks an install mode and existing `package.json` script names. It never writes a command, and its suggested fixes are shown to the user but never run;
+  - `pipeline.js` runs Architect's steps, QA's review and the steward's plan; `claude-cli.js` runs the isolated, tool-less CLI.
 
   All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect` (see `evals/product-lead/README.md`).
 - `src/repo-reader.js` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.
+- `src/review-diff.js` — the only source of working-tree diffs for QA. It reads only paths git reports as changed since the baseline (untracked included), refuses secret-looking paths with the same patterns as `repo-reader.js`, skips binaries, caps sizes, and reports every skipped file.
+- `src/env-setup.js` — Node/npm environment setup. It probes tracked manifests, lockfiles, version pins and CI workflows, and builds every setup command from fixed npm options plus validated script names (`--ignore-scripts` unless the user allows lifecycle scripts). The renderer only sends a step id; `ipc.js` rebuilds the command from the stored plan and runs it after the user's click.
+- `src/workspace.js` / `src/verification.js` — verification checks (`test`, `lint`, `build`, `smoke`), each with a stage (`step` = manual, `submit` = runs before QA), a blocking flag, and a report format (`stdout` TAP/spec, or a JUnit file read by `src/test-report.js`). `workspace.json` is version 2 (`checks`); v1 `commands` are upgraded on load.
+- `src/evidence.js` — pure rules that turn check runs into `pass / fail / unverifiable` evidence, comparing against the baseline measured when a package is claimed (clean tree only, in the background; see `measureBaseline` in `ipc.js`). Failures already present at the baseline do not reject; unverifiable evidence never rejects but is listed as `attention` for the human at acceptance. Its decision table is tested row by row in `tests/evidence.test.js`.
 - `src/preferences.js` / `src/shell-env.js` — per-machine preferences and the login-shell PATH lookup used by verification commands.
 - `src/renderer/styles.css` — frosted-glass theme. Surfaces use the `.glass` / `.glass-strong` classes and the CSS variables at the top; light and dark follow the system.
 

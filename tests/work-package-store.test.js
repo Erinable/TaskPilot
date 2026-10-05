@@ -149,3 +149,77 @@ test('saved entries for unknown ids or unknown statuses are ignored', async () =
   assert.throws(() => store.get('removed'), { code: 'unknown_package' });
   assert.equal(store.get('a').status, 'pending');
 });
+
+/* QA review */
+
+async function inReview(store, id = 'a') {
+  await store.transition(id, 'claim', 'human', { baseline: 'abc123' });
+  await store.transition(id, 'submit_for_review', 'human');
+}
+const reviewResult = (passed) => ({
+  passed,
+  reasons: passed ? [] : ['qa_rejected'],
+  verification: null,
+  acceptance: [],
+  report: { verdict: passed ? 'pass' : 'reject', summary: 's', criteria: [], issues: [] },
+  diff: { files: [], skipped: [], outOfScope: [] },
+  costUsd: 0.01,
+});
+
+test('a passing review moves the package to acceptance as the agent', async () => {
+  const { store } = await newStore();
+  await assert.rejects(() => store.beginReview('a'), { code: 'invalid_state' });
+  await inReview(store);
+  const running = await store.beginReview('a');
+  assert.equal(running.review.status, 'running');
+  await assert.rejects(() => store.beginReview('a'), { code: 'review_running' });
+
+  const done = await store.completeReview('a', reviewResult(true));
+  assert.equal(done.status, 'accepting');
+  assert.equal(done.review.status, 'passed');
+  assert.equal(done.review.costUsd, 0.01);
+  await assert.rejects(() => store.completeReview('a', reviewResult(true)), { code: 'review_not_running' });
+});
+
+test('a rejected review sends the package back and keeps the report', async () => {
+  const { store } = await newStore();
+  await inReview(store);
+  await store.beginReview('a');
+  const done = await store.completeReview('a', reviewResult(false));
+  assert.equal(done.status, 'in_progress');
+  assert.equal(done.review.status, 'rejected');
+  assert.equal(done.baseline, 'abc123');
+  // Releasing the package discards the old review.
+  assert.equal((await store.transition('a', 'release', 'human')).review, null);
+});
+
+test('a failed review leaves the package in review, and an interrupted one fails on reload', async () => {
+  const { store, configDir } = await newStore();
+  await inReview(store);
+  await store.beginReview('a');
+  const failed = await store.failReview('a', Object.assign(new Error('boom'), { code: 'agent_timeout' }));
+  assert.equal(failed.status, 'in_review');
+  assert.deepEqual(failed.review.error, { code: 'agent_timeout', message: 'boom' });
+
+  await store.beginReview('a');
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get('a').review.status, 'failed');
+  assert.equal(reloaded.get('a').review.error.code, 'agent_interrupted');
+});
+
+test('setBaselineChecks() records only for the claimed commit and clears on release', async () => {
+  const { store, configDir } = await newStore();
+  await store.transition('a', 'claim', 'human', { baseline: 'c1' });
+  assert.equal(await store.setBaselineChecks('a', { status: 'measured', commit: 'other', checks: {} }), null);
+  const saved = await store.setBaselineChecks('a', { status: 'measuring', commit: 'c1', checks: {} });
+  assert.equal(saved.baselineChecks.status, 'measuring');
+  await assert.rejects(() => store.setBaselineChecks('a', { status: 'bogus', commit: 'c1' }), { code: 'invalid_argument' });
+
+  // A measurement in flight when the app closed is not trusted on reload.
+  const reloaded = await new WorkPackageStore(configDir).load(SAMPLE);
+  assert.equal(reloaded.get('a').baselineChecks.status, 'unavailable');
+  assert.equal(reloaded.get('a').baselineChecks.reason, 'interrupted');
+
+  await store.transition('a', 'release', 'human');
+  assert.equal(store.get('a').baselineChecks, null);
+});

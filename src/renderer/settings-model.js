@@ -12,6 +12,7 @@
     environment: 'preferences',
     repository: 'workspace',
     commands: 'workspace',
+    setup: null, // runs steps and writes commands through its own IPC
     data: null, // actions only, nothing to save
   };
 
@@ -32,7 +33,13 @@
   function workspaceDraft(form) {
     const commands = {};
     for (const [kind, line] of Object.entries(form.commands ?? {})) commands[kind] = (line ?? '').trim();
-    return { root: (form.root ?? '').trim(), commands };
+    // Options only matter for a configured command; an empty line ignores them.
+    const options = {};
+    for (const [kind, value] of Object.entries(form.options ?? {})) {
+      if (!commands[kind]) continue;
+      options[kind] = { stage: value.stage, blocking: value.blocking === true, reportPath: (value.reportPath ?? '').trim() };
+    }
+    return { root: (form.root ?? '').trim(), commands, options };
   }
 
   function preferencesDraft(prefs) {
@@ -68,7 +75,7 @@
       preferences: !sameValue(sp.appearance, dp.appearance),
       environment: !sameValue(sp.environment, dp.environment),
       repository: sw.root !== dw.root,
-      commands: !sameValue(sw.commands, dw.commands),
+      commands: !sameValue(sw.commands, dw.commands) || !sameValue(sw.options, dw.options),
       data: false,
     };
   }

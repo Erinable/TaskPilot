@@ -184,6 +184,14 @@
 
             <div class="exec-columns">
               <div class="exec-column">
+                <section class="panel glass review-panel" id="reviewPanel" hidden aria-live="polite">
+                  <div class="panel-heading">
+                    <div class="panel-title"><span class="panel-icon" id="reviewIcon"><i data-icon="bot"></i></span><div><h2>QA 审查</h2><p id="reviewHint"></p></div></div>
+                    <div class="review-actions" id="reviewActions"></div>
+                  </div>
+                  <div class="review-body" id="reviewBody"></div>
+                </section>
+
                 <section class="panel glass">
                   <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="list-checks"></i></span><div><h2>执行指令</h2><p id="execStepProgress"></p></div></div></div>
                   <div class="progress-track" aria-hidden="true"><span class="progress-fill" id="execStepBar"></span></div>
@@ -218,6 +226,11 @@
                     <button class="segment" data-verify="test"><i data-icon="flask"></i>测试</button>
                     <button class="segment" data-verify="lint"><i data-icon="wand"></i>Lint</button>
                     <button class="segment" data-verify="build"><i data-icon="box"></i>Build</button>
+                    <button class="segment" data-verify="smoke"><i data-icon="rocket"></i>冒烟</button>
+                  </div>
+                  <div class="baseline-status" id="execBaselineChecks" hidden>
+                    <p id="execBaselineText"></p>
+                    <button class="secondary-button small" id="remeasureBaseline" type="button" hidden><i data-icon="refresh"></i>重新测量基线</button>
                   </div>
                   <div class="verify-result" id="execVerify"></div>
                 </section>
@@ -245,6 +258,7 @@
                 <div class="settings-group-label" data-group="workspace"><i data-icon="git-branch"></i><span id="navWorkspaceName">工作区</span><span class="group-tag">工作区</span></div>
                 <button class="settings-nav-item" data-page="repository" data-keywords="仓库 路径 目录 git repo root"><i data-icon="folder"></i>仓库</button>
                 <button class="settings-nav-item" data-page="commands" data-keywords="命令 测试 lint build npm test 验证"><i data-icon="terminal"></i>验证命令</button>
+                <button class="settings-nav-item" data-page="setup" data-keywords="环境初始化 环境管家 安装 依赖 npm install ci node_modules setup 配环境"><i data-icon="wand"></i>环境初始化</button>
 
                 <div class="settings-group-label" data-group="device"><i data-icon="laptop"></i><span>本设备</span></div>
                 <button class="settings-nav-item" data-page="environment" data-keywords="环境 PATH shell nvm homebrew 版本 electron node"><i data-icon="cpu"></i>运行环境</button>
@@ -324,26 +338,90 @@
                   <h2>验证命令</h2>
                   <span class="scope-badge"><i data-icon="laptop"></i>本机配置 · 不写入仓库</span>
                 </header>
-                <p class="settings-page-intro">执行页的「测试 / Lint / Build」按钮运行这些命令。TaskPilot 只会运行这里配置的命令，从不执行工作包里出现的命令。</p>
+                <p class="settings-page-intro">执行页的按钮运行这些命令；标为「提交前运行」的会在 QA 审查前自动运行，并在领取工作包时于基线上先跑一次，用来区分既有失败和新引入的失败。TaskPilot 只会运行这里配置的命令，从不执行工作包里出现的命令。</p>
                 <div class="settings-card glass">
-                  <div class="setting-row stacked">
-                    <label class="setting-label" for="commandTest"><strong><i data-icon="flask"></i>测试</strong><small>输出 TAP 或 node --test 格式时，结果会关联到验收条件</small></label>
-                    <input class="field-input mono" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
+                  <div class="setting-row stacked check-row">
+                    <label class="setting-label" for="commandTest"><strong><i data-icon="flask"></i>测试</strong><small>单元测试。输出 TAP 或 node --test 格式，或配置 JUnit 报告时，结果会关联到验收条件</small></label>
+                    <input class="field-input mono command-line" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
                     <p class="field-status" id="statusTest" aria-live="polite"></p>
+                    <div class="check-options" role="group" aria-label="测试的运行方式">
+                      <label class="check-option"><span>运行时机</span><select class="field-input small" data-option="stage" data-for="test"><option value="submit">提交前运行</option><option value="step">仅手动运行</option></select></label>
+                      <label class="check-option"><input type="checkbox" data-option="blocking" data-for="test" /><span>失败时拒绝</span></label>
+                      <label class="check-option grow"><span>JUnit 报告</span><input class="field-input mono small" data-option="reportPath" data-for="test" type="text" spellcheck="false" autocomplete="off" placeholder="留空则解析输出，如 .taskpilot/reports/test.xml" /></label>
+                    </div>
                   </div>
-                  <div class="setting-row stacked">
+                  <div class="setting-row stacked check-row">
                     <label class="setting-label" for="commandLint"><strong><i data-icon="wand"></i>Lint</strong></label>
-                    <input class="field-input mono" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
+                    <input class="field-input mono command-line" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
                     <p class="field-status" id="statusLint" aria-live="polite"></p>
+                    <div class="check-options" role="group" aria-label="Lint的运行方式">
+                      <label class="check-option"><span>运行时机</span><select class="field-input small" data-option="stage" data-for="lint"><option value="submit">提交前运行</option><option value="step">仅手动运行</option></select></label>
+                      <label class="check-option"><input type="checkbox" data-option="blocking" data-for="lint" /><span>失败时拒绝</span></label>
+                      <label class="check-option grow"><span>JUnit 报告</span><input class="field-input mono small" data-option="reportPath" data-for="lint" type="text" spellcheck="false" autocomplete="off" placeholder="留空则解析输出，如 .taskpilot/reports/lint.xml" /></label>
+                    </div>
                   </div>
-                  <div class="setting-row stacked">
+                  <div class="setting-row stacked check-row">
                     <label class="setting-label" for="commandBuild"><strong><i data-icon="box"></i>Build</strong></label>
-                    <input class="field-input mono" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
+                    <input class="field-input mono command-line" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
                     <p class="field-status" id="statusBuild" aria-live="polite"></p>
+                    <div class="check-options" role="group" aria-label="Build的运行方式">
+                      <label class="check-option"><span>运行时机</span><select class="field-input small" data-option="stage" data-for="build"><option value="submit">提交前运行</option><option value="step">仅手动运行</option></select></label>
+                      <label class="check-option"><input type="checkbox" data-option="blocking" data-for="build" /><span>失败时拒绝</span></label>
+                      <label class="check-option grow"><span>JUnit 报告</span><input class="field-input mono small" data-option="reportPath" data-for="build" type="text" spellcheck="false" autocomplete="off" placeholder="留空则解析输出，如 .taskpilot/reports/build.xml" /></label>
+                    </div>
+                  </div>
+                  <div class="setting-row stacked check-row">
+                    <label class="setting-label" for="commandSmoke"><strong><i data-icon="rocket"></i>冒烟测试</strong><small>构建后快速确认应用能启动、核心路径可用</small></label>
+                    <input class="field-input mono command-line" id="commandSmoke" data-kind="smoke" type="text" spellcheck="false" autocomplete="off" placeholder="npm run smoke" aria-describedby="statusSmoke" />
+                    <p class="field-status" id="statusSmoke" aria-live="polite"></p>
+                    <div class="check-options" role="group" aria-label="冒烟测试的运行方式">
+                      <label class="check-option"><span>运行时机</span><select class="field-input small" data-option="stage" data-for="smoke"><option value="submit">提交前运行</option><option value="step">仅手动运行</option></select></label>
+                      <label class="check-option"><input type="checkbox" data-option="blocking" data-for="smoke" /><span>失败时拒绝</span></label>
+                      <label class="check-option grow"><span>JUnit 报告</span><input class="field-input mono small" data-option="reportPath" data-for="smoke" type="text" spellcheck="false" autocomplete="off" placeholder="留空则解析输出，如 .taskpilot/reports/smoke.xml" /></label>
+                    </div>
                   </div>
                 </div>
                 <p class="settings-note"><i data-icon="info"></i><span>命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</span></p>
               </form>
+
+              <section class="settings-page" data-page="setup" id="setupPage" hidden>
+                <header class="settings-page-header">
+                  <h2>环境初始化</h2>
+                  <span class="scope-badge"><i data-icon="bot"></i>环境管家</span>
+                </header>
+                <p class="settings-page-intro">环境管家读取仓库里已提交的 package.json、lockfile、版本文件和 CI 配置，给出安装与验证步骤。每一步都要你点击确认后才由 TaskPilot 运行，命令只会从 npm 的固定选项和 package.json 脚本名中拼出。</p>
+                <div class="setup-toolbar">
+                  <p class="setup-status" id="setupStatus" aria-live="polite"></p>
+                  <div class="setup-actions">
+                    <button class="secondary-button small" id="setupCancel" type="button" hidden><i data-icon="x"></i>取消</button>
+                    <button class="primary-button" id="setupPlan" type="button"><i data-icon="sparkle"></i>分析环境</button>
+                  </div>
+                </div>
+                <div id="setupBody" hidden>
+                  <h3 class="settings-section-title">仓库事实</h3>
+                  <div class="settings-card glass"><dl class="fact-list" id="setupFacts"></dl></div>
+                  <div id="setupNotices"></div>
+                  <h3 class="settings-section-title">步骤</h3>
+                  <div class="settings-card glass">
+                    <div class="setting-row">
+                      <label class="setting-label" for="setupAllowScripts"><strong>允许依赖的安装脚本</strong><small>默认带 --ignore-scripts 安装，依赖包的 preinstall/postinstall 不会运行。原生模块（如 node-gyp 编译）可能因此失败。</small></label>
+                      <div class="setting-control end"><input class="switch" id="setupAllowScripts" type="checkbox" role="switch" /></div>
+                    </div>
+                    <ol class="setup-steps" id="setupSteps"></ol>
+                  </div>
+                  <div class="setup-retry" id="setupRetry" hidden>
+                    <p id="setupRetryText"></p>
+                    <button class="secondary-button small" id="setupReplan" type="button"><i data-icon="bot"></i>让环境管家分析失败</button>
+                  </div>
+                  <h3 class="settings-section-title">写入验证命令</h3>
+                  <div class="settings-card glass">
+                    <ul class="setup-apply" id="setupApply"></ul>
+                    <div class="setup-apply-footer">
+                      <button class="secondary-button small" id="setupApplyButton" type="button"><i data-icon="check"></i>写入所选命令</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
               <form class="settings-page" data-page="environment" id="environmentForm" novalidate hidden>
                 <header class="settings-page-header">
@@ -451,8 +529,10 @@
     <div class="toast glass-strong" id="toast" role="status" aria-live="polite"><span class="toast-icon" id="toastIcon"><i data-icon="check"></i></span><span id="toastText"></span></div>
     <script src="./icons.js"></script>
     <script src="./settings-model.js"></script>
+    <script src="./review-model.js"></script>
     <script src="./renderer.js"></script>
     <script src="./settings.js"></script>
+    <script src="./setup.js"></script>
     <script src="./requirements.js"></script>
   </body>
 </html>

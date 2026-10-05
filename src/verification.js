@@ -5,6 +5,7 @@
 // ./workspace.js), runs through execFile with an argument array, and never
 // touches a shell.
 const { execFile } = require('node:child_process');
+const testReport = require('./test-report');
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BUFFER = 20 * 1024 * 1024;
@@ -89,41 +90,30 @@ function spawn(command, args, options) {
   });
 }
 
-/**
- * Executes one verification command.
- * @returns {Promise<{kind, command, exitCode, timedOut, durationMs, output, results, summary}>}
- */
-async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath } = {}) {
-  const entry = config.commands?.[kind];
-  if (!entry) {
-    throw new VerificationError(`No ${kind} command is configured`, 'not_configured');
-  }
-  if (!config.root) {
-    throw new VerificationError('No workspace root is configured', 'no_workspace');
-  }
-
+/** Runs {command, args} in the workspace; shared by run() and runCheck(). */
+async function execute(root, entry, kind, { signal, timeoutMs, envPath, env = {} }) {
   const startedAt = Date.now();
   const { error, stdout, stderr } = await spawn(entry.command, entry.args, {
-    cwd: config.root,
+    cwd: root,
     maxBuffer: MAX_BUFFER,
     timeout: timeoutMs,
     signal,
     // A test runner that inherits a TTY may emit colour codes; ask it not to.
     // envPath (from ./shell-env.js) overrides the inherited PATH, which is
     // minimal when the app is launched from Finder rather than a terminal.
-    env: { ...process.env, ...(envPath ? { PATH: envPath } : {}), NO_COLOR: '1', FORCE_COLOR: '0' },
+    // `env` is the check's own variables, validated in workspace.js.
+    env: { ...process.env, ...env, ...(envPath ? { PATH: envPath } : {}), NO_COLOR: '1', FORCE_COLOR: '0' },
   });
 
   if (error?.code === 'ENOENT') {
     throw new VerificationError(`Executable not found: ${entry.command}`, 'command_missing');
   }
+  if (error?.name === 'AbortError') throw error;
 
   const output = `${stdout}${stderr}`;
   const timedOut = error?.killed === true && error?.signal === 'SIGTERM';
   // execFile reports a non-zero exit through error.code (a number).
   const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
-  const results = parseResults(output);
-
   return {
     kind,
     command: `${entry.command} ${entry.args.join(' ')}`.trim(),
@@ -131,9 +121,51 @@ async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPa
     timedOut,
     durationMs: Date.now() - startedAt,
     output,
-    results,
-    summary: summarize(results, exitCode),
   };
+}
+
+function requireEntry(config, kind) {
+  const entry = config.checks?.[kind] ?? config.commands?.[kind];
+  if (!entry) throw new VerificationError(`No ${kind} command is configured`, 'not_configured');
+  if (!config.root) throw new VerificationError('No workspace root is configured', 'no_workspace');
+  return entry;
+}
+
+/**
+ * Executes one verification command and parses its stdout.
+ * @returns {Promise<{kind, command, exitCode, timedOut, durationMs, output, results, summary}>}
+ */
+async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath } = {}) {
+  const entry = requireEntry(config, kind);
+  const outcome = await execute(config.root, entry, kind, { signal, timeoutMs, envPath, env: entry.env });
+  const results = parseResults(outcome.output);
+  return { ...outcome, results, summary: summarize(results, outcome.exitCode) };
+}
+
+/**
+ * Executes a configured check and reads its results from the report it is
+ * configured with. Results always carry `fullName`, the key baselines use.
+ * @returns run() result plus `report: {format, trusted, problem}`; for an
+ *   untrusted JUnit report `results` is empty.
+ */
+async function runCheck(config, kind, { signal, timeoutMs, envPath } = {}) {
+  const check = requireEntry(config, kind);
+  const report = check.report ?? { format: 'stdout' };
+  const before = report.format === 'junit' ? await testReport.statReport(config.root, report.path) : null;
+  const outcome = await execute(config.root, check, kind, {
+    signal, timeoutMs: timeoutMs ?? check.timeoutMs ?? DEFAULT_TIMEOUT_MS, envPath, env: check.env,
+  });
+  let results;
+  let reportInfo;
+  if (report.format === 'junit') {
+    const read = await testReport.readReport(config.root, report, before);
+    results = read.results;
+    reportInfo = { format: 'junit', trusted: read.trusted, problem: read.problem };
+  } else {
+    results = parseResults(outcome.output).map((r) => ({ ...r, fullName: r.fullName ?? r.name }));
+    reportInfo = { format: 'stdout', trusted: true, problem: null };
+  }
+  return { ...outcome, results, summary: summarize(results, outcome.exitCode), report: reportInfo, check: { stage: check.stage, blocking: check.blocking } };
 }
 
 /**
@@ -142,7 +174,11 @@ async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPa
  * manual, so a package can never auto-accept on criteria nobody checked.
  */
 function matchAcceptance(criteria, results) {
-  const byName = new Map(results.map((r) => [r.name, r]));
+  const byName = new Map();
+  for (const r of results) {
+    if (!byName.has(r.name)) byName.set(r.name, r);
+    if (r.fullName) byName.set(r.fullName, r);
+  }
   return criteria.map((criterion) => {
     if (!criterion.test) return { ...criterion, verified: false, manual: true };
     const result = byName.get(criterion.test);
@@ -157,6 +193,7 @@ function matchAcceptance(criteria, results) {
 
 module.exports = {
   DEFAULT_TIMEOUT_MS,
+  runCheck,
   VerificationError,
   parseTap,
   parseSpec,

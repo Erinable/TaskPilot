@@ -10,7 +10,23 @@ const { constants: fsConstants } = require('node:fs');
 const path = require('node:path');
 
 const CONFIG_FILENAME = 'workspace.json';
-const COMMAND_KINDS = ['test', 'lint', 'build'];
+const CONFIG_VERSION = 2;
+// Fixed check slots. `test` holds the unit tests; `smoke` runs after a build.
+const COMMAND_KINDS = ['test', 'lint', 'build', 'smoke'];
+const STAGES = ['step', 'submit'];
+const REPORT_FORMATS = ['stdout', 'junit'];
+// Defaults keep a v1 config behaving exactly as before: only tests ran
+// before review, and they decided it.
+const CHECK_DEFAULTS = {
+  test: { stage: 'submit', blocking: true },
+  lint: { stage: 'step', blocking: false },
+  build: { stage: 'step', blocking: false },
+  smoke: { stage: 'submit', blocking: true },
+};
+const ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
+const MAX_ENV = 8;
+const MIN_TIMEOUT_MS = 1000;
+const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 
 // Unquoted tokens a user might type expecting shell behaviour. They would
 // reach the program as literal arguments and fail confusingly, so they are
@@ -28,7 +44,64 @@ class WorkspaceError extends Error {
 }
 
 function emptyConfig() {
-  return { root: null, commands: { test: null, lint: null, build: null } };
+  const checks = Object.fromEntries(COMMAND_KINDS.map((kind) => [kind, null]));
+  return { version: CONFIG_VERSION, root: null, checks, commands: { ...checks } };
+}
+
+/** A workspace-relative report path: no absolute paths, no `..`, no odd bytes. */
+function normalizeReportPath(value, kind) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new WorkspaceError(`${kind} junit report needs a path`, 'invalid_report', kind);
+  }
+  const clean = value.trim();
+  const parts = clean.split(/[\\/]/);
+  if (clean.length > 200 || path.isAbsolute(clean) || /^[A-Za-z]:/.test(clean)
+    || parts.some((part) => part === '..' || part === '') || /[\0-\x1f]/.test(clean)) {
+    throw new WorkspaceError(`${kind} report path must stay inside the workspace`, 'invalid_report', kind);
+  }
+  return parts.join('/');
+}
+
+/**
+ * A check is a verification command plus when it runs and whether it can
+ * reject a review on its own. Like a bare command it is user configuration
+ * only; nothing here ever comes from a work package or an agent.
+ */
+function normalizeCheck(value, kind) {
+  if (value === null || value === undefined) return null;
+  const entry = normalizeCommand(value, kind);
+  const defaults = CHECK_DEFAULTS[kind];
+  const stage = value.stage ?? defaults.stage;
+  if (!STAGES.includes(stage)) throw new WorkspaceError(`${kind} stage must be step or submit`, 'invalid_check', kind);
+  const blocking = value.blocking ?? defaults.blocking;
+  if (typeof blocking !== 'boolean') throw new WorkspaceError(`${kind} blocking must be true or false`, 'invalid_check', kind);
+
+  const format = value.report?.format ?? 'stdout';
+  if (!REPORT_FORMATS.includes(format)) throw new WorkspaceError(`${kind} report format is not supported`, 'invalid_report', kind);
+  const report = format === 'junit' ? { format, path: normalizeReportPath(value.report.path, kind) } : { format };
+
+  const env = {};
+  if (value.env !== undefined && value.env !== null) {
+    if (typeof value.env !== 'object' || Array.isArray(value.env)) throw new WorkspaceError(`${kind} env must be an object`, 'invalid_check', kind);
+    const pairs = Object.entries(value.env);
+    if (pairs.length > MAX_ENV) throw new WorkspaceError(`${kind} sets too many environment variables`, 'invalid_check', kind);
+    for (const [name, text] of pairs) {
+      // PATH and friends stay under TaskPilot's control (see shell-env.js).
+      if (!ENV_NAME.test(name) || name === 'PATH' || name.startsWith('NODE_OPTIONS') || typeof text !== 'string' || text.length > 500) {
+        throw new WorkspaceError(`${kind} env ${name} is not allowed`, 'invalid_check', kind);
+      }
+      env[name] = text;
+    }
+  }
+
+  const check = { ...entry, stage, blocking, report, env };
+  if (value.timeoutMs !== undefined && value.timeoutMs !== null) {
+    if (!Number.isInteger(value.timeoutMs) || value.timeoutMs < MIN_TIMEOUT_MS || value.timeoutMs > MAX_TIMEOUT_MS) {
+      throw new WorkspaceError(`${kind} timeout must be 1 s to 60 min`, 'invalid_check', kind);
+    }
+    check.timeoutMs = value.timeoutMs;
+  }
+  return check;
 }
 
 /**
@@ -122,11 +195,43 @@ function formatCommandLine(entry) {
     .join(' ');
 }
 
-/** Turns the settings form ({root, commands: {kind: line}}) into a config. */
-function fromForm(form) {
+/**
+ * Turns the settings form into a config. `commands` holds one typed line per
+ * kind; `options` (optional) holds {stage, blocking, reportPath} per kind.
+ * Settings the form does not show (env, timeout) are kept from `previous`.
+ */
+function fromForm(form, previous = null) {
+  const checks = {};
+  for (const kind of COMMAND_KINDS) {
+    const entry = parseCommandLine(form?.commands?.[kind], kind);
+    if (!entry) { checks[kind] = null; continue; }
+    const options = form?.options?.[kind] ?? {};
+    const kept = previous?.checks?.[kind];
+    const reportPath = typeof options.reportPath === 'string' ? options.reportPath.trim() : null;
+    checks[kind] = {
+      ...entry,
+      stage: options.stage ?? kept?.stage,
+      blocking: options.blocking ?? kept?.blocking,
+      report: reportPath === null ? kept?.report : reportPath ? { format: 'junit', path: reportPath } : { format: 'stdout' },
+      env: kept?.env,
+      timeoutMs: kept?.timeoutMs,
+    };
+  }
+  return normalize({ root: form?.root, checks });
+}
+
+/** What the settings form edits, the inverse of fromForm(). */
+function toForm(config) {
   const commands = {};
-  for (const kind of COMMAND_KINDS) commands[kind] = parseCommandLine(form?.commands?.[kind], kind);
-  return normalize({ root: form?.root, commands });
+  const options = {};
+  for (const kind of COMMAND_KINDS) {
+    const check = config.checks[kind];
+    commands[kind] = formatCommandLine(check);
+    options[kind] = check
+      ? { stage: check.stage, blocking: check.blocking, reportPath: check.report.format === 'junit' ? check.report.path : '' }
+      : { ...CHECK_DEFAULTS[kind], reportPath: '' };
+  }
+  return { root: config.root ?? '', commands, options };
 }
 
 /**
@@ -165,15 +270,28 @@ async function resolveExecutable(command, {
   return null;
 }
 
+/**
+ * Accepts a v2 config ({checks}) or a v1 one ({commands}); v1 commands get
+ * the defaults for their kind. `commands` is kept on the result as a plain
+ * {command, args} view for callers that only run a command.
+ */
 function normalize(raw) {
   const config = emptyConfig();
   if (raw && typeof raw === 'object') {
     if (typeof raw.root === 'string' && raw.root.trim()) config.root = raw.root.trim();
+    const source = raw.checks && typeof raw.checks === 'object' ? raw.checks : raw.commands;
     for (const kind of COMMAND_KINDS) {
-      config.commands[kind] = normalizeCommand(raw.commands?.[kind], kind);
+      const check = normalizeCheck(source?.[kind], kind);
+      config.checks[kind] = check;
+      config.commands[kind] = check && { command: check.command, args: [...check.args] };
     }
   }
   return config;
+}
+
+/** The persisted shape: `commands` is derived, so it is not written. */
+function serialize(config) {
+  return { version: CONFIG_VERSION, root: config.root, checks: config.checks };
 }
 
 async function load(configDir) {
@@ -193,7 +311,7 @@ async function save(configDir, raw) {
   const config = normalize(raw);
   await fs.mkdir(configDir, { recursive: true });
   const file = path.join(configDir, CONFIG_FILENAME);
-  await fs.writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
+  await fs.writeFile(file, `${JSON.stringify(serialize(config), null, 2)}\n`);
   return config;
 }
 
@@ -208,14 +326,21 @@ function isInside(root, candidate) {
 
 module.exports = {
   CONFIG_FILENAME,
+  CONFIG_VERSION,
   COMMAND_KINDS,
+  STAGES,
+  CHECK_DEFAULTS,
   WorkspaceError,
   emptyConfig,
   normalize,
   normalizeCommand,
+  normalizeCheck,
+  normalizeReportPath,
   parseCommandLine,
   formatCommandLine,
   fromForm,
+  toForm,
+  serialize,
   resolveExecutable,
   load,
   save,

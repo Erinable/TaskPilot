@@ -9,23 +9,25 @@
 
   const AVATAR_LABELS = { sunset: '日落', ocean: '海洋', violet: '紫罗兰', forest: '森林', graphite: '石墨' };
   const MAX_NAME_LENGTH = 40;
-  const STATUS_IDS = { test: '#statusTest', lint: '#statusLint', build: '#statusBuild' };
+  const STATUS_IDS = { test: '#statusTest', lint: '#statusLint', build: '#statusBuild', smoke: '#statusSmoke' };
   const FIELD_INPUTS = {
     root: '#settingsRoot',
     test: '#commandTest',
     lint: '#commandLint',
     build: '#commandBuild',
+    smoke: '#commandSmoke',
     displayName: '#profileName',
   };
   // Which page shows a validation error for a given field.
   const FIELD_PAGES = {
-    root: 'repository', test: 'commands', lint: 'commands', build: 'commands',
+    root: 'repository', test: 'commands', lint: 'commands', build: 'commands', smoke: 'commands',
     displayName: 'profile', avatarColor: 'profile', theme: 'preferences', vibrancy: 'preferences', pathSource: 'environment',
   };
 
   const navItems = [...document.querySelectorAll('.settings-nav-item')];
   const pages = [...document.querySelectorAll('.settings-page')];
-  const commandInputs = [...document.querySelectorAll('#commandsForm [data-kind]')];
+  const commandInputs = [...document.querySelectorAll('#commandsForm .command-line')];
+  const optionInputs = [...document.querySelectorAll('#commandsForm [data-option]')];
   const settingsRoot = $('#settingsRoot');
   const savebar = $('#settingsSavebar');
 
@@ -52,7 +54,12 @@
   function readWorkspaceDraft() {
     const commands = {};
     for (const input of commandInputs) commands[input.dataset.kind] = input.value;
-    return { root: settingsRoot.value, commands };
+    const options = {};
+    for (const input of optionInputs) {
+      const entry = (options[input.dataset.for] ??= {});
+      entry[input.dataset.option] = input.type === 'checkbox' ? input.checked : input.value;
+    }
+    return { root: settingsRoot.value, commands, options };
   }
 
   function fillPreferences(prefs) {
@@ -70,6 +77,11 @@
   function fillWorkspace(form) {
     settingsRoot.value = form.root ?? '';
     for (const input of commandInputs) input.value = form.commands[input.dataset.kind] ?? '';
+    for (const input of optionInputs) {
+      const value = form.options?.[input.dataset.for]?.[input.dataset.option];
+      if (input.type === 'checkbox') input.checked = value === true;
+      else input.value = value ?? (input.dataset.option === 'stage' ? 'step' : '');
+    }
   }
 
   /* Field status messages */
@@ -366,7 +378,7 @@
         // check first, so a failure is shown beside its field before anything is written
         if (!(await checkWorkspace())) return false;
         const form = await call(window.taskpilot.workspace.set(readWorkspaceDraft()));
-        saved.workspace = { root: form.root ?? '', commands: { ...form.lines } };
+        saved.workspace = { root: form.root ?? '', commands: { ...form.lines }, options: structuredClone(form.options) };
         fillWorkspace(saved.workspace);
         await refreshWorkspaceStatus();
         renderNavWorkspace();
@@ -432,6 +444,7 @@
     for (const section of pages) section.hidden = section.dataset.page !== page;
     if (page === 'environment') renderEnvironment();
     if (page === 'data') renderData();
+    if (page === 'setup') window.TaskPilotSetup?.render();
   }
 
   $('#settingsNav').addEventListener('click', (event) => {
@@ -465,7 +478,7 @@
         call(window.taskpilot.workspace.get()),
       ]);
       saved.preferences = prefs;
-      saved.workspace = { root: form.root ?? '', commands: { ...form.lines } };
+      saved.workspace = { root: form.root ?? '', commands: { ...form.lines }, options: structuredClone(form.options) };
       fillPreferences(prefs);
       fillWorkspace(saved.workspace);
       clearWorkspaceStatus();
@@ -486,5 +499,5 @@
     navItems.find((item) => item.dataset.page === page)?.focus();
   }
 
-  window.TaskPilotSettings = { open, hasUnsavedChanges, saveAll, discardAll };
+  window.TaskPilotSettings = { open, hasUnsavedChanges, saveAll, discardAll, reload: load };
 })();

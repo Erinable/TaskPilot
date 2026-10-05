@@ -106,7 +106,10 @@ function parseStatus(raw) {
 }
 
 async function status(cwd) {
-  return parseStatus(await git(cwd, ['status', '--porcelain=v1', '-z']));
+  // --untracked-files=all lists each file in a new directory; the default
+  // collapses it to "dir/", which no file scope can match and which hides
+  // the new files from review.
+  return parseStatus(await git(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=all']));
 }
 
 /** Per-file added/removed line counts since `baseline`, including the worktree. */

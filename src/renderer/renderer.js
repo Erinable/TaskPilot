@@ -28,16 +28,21 @@ const ERROR_HINTS = {
   invalid_choice: '选项无效。',
   open_failed: '系统无法打开这个目录。',
   agent_unavailable: '找不到 Claude Code CLI。请确认已安装 `claude`，或在「设置 → 运行环境」里改为从登录 shell 读取 PATH。',
-  agent_timeout: 'Product Lead 超过 3 分钟没有完成，已停止。',
+  agent_timeout: '智能体超过 3 分钟没有完成，已停止。',
   agent_cancelled: '已取消。',
   agent_budget: '本次调用超出了 1 美元的费用上限，已停止。',
-  agent_bad_output: 'Product Lead 返回的内容不符合格式要求，已丢弃。可以重试。',
-  agent_interrupted: 'TaskPilot 在 Product Lead 运行时退出了。',
-  agent_failed: 'Product Lead 运行失败。',
+  agent_bad_output: '智能体返回的内容不符合格式要求，已丢弃。可以重试。',
+  agent_interrupted: 'TaskPilot 在智能体运行时退出了。',
+  agent_failed: '智能体运行失败。',
+  review_running: 'QA 正在审查。',
   invalid_state: '当前状态下不能执行这个操作。',
   required: '请填写这一项。',
   too_long: '内容太长了。',
   invalid_text: '内容包含控制字符。',
+  env_no_plan: '请先让环境管家分析环境。',
+  env_stale: '工作区已经换了仓库，请重新分析环境。',
+  env_busy: '环境管家正在忙，请等当前操作结束。',
+  env_blocked: '仓库还有阻塞问题，这一步不能运行。',
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -359,23 +364,26 @@ function renderSteps(task) {
   }));
 }
 
-/** Acceptance rows; `matched` comes from the last verification run, if any. */
+/** Acceptance rows; `matched` comes from the last verification run or review, if any. */
 function renderAcceptance(task, matched) {
   const byText = new Map((matched ?? []).map((entry) => [entry.text, entry]));
   $('#execAcceptance').replaceChildren(...task.acceptance.map((criterion) => {
     const result = byText.get(criterion.text);
-    const verified = result?.verified === true;
-    const failed = result !== undefined && !result.manual && !verified && !result.missing;
-    const row = el('div', `criterion${verified ? ' verified' : failed ? ' failed' : ''}`);
+    // Reviews stored before evidence statuses existed carry only the flags.
+    const legacy = result && (result.manual ? 'manual' : result.verified ? 'verified' : result.missing ? 'missing' : 'failed');
+    const status = result?.status ?? legacy ?? (criterion.test ? null : 'manual');
+    const tone = { verified: ' verified', failed: ' failed', missing: ' failed', unverifiable: ' unverifiable' }[status] ?? '';
+    const row = el('div', `criterion${tone}`);
     const mark = el('span', 'criterion-mark');
-    mark.append(icon(verified ? 'check-circle' : failed ? 'x-circle' : 'circle'));
+    mark.append(icon({ verified: 'check-circle', failed: 'x-circle', missing: 'x-circle', unverifiable: 'alert' }[status] ?? 'circle'));
     row.append(mark);
 
     const body = el('div');
     body.append(el('span', 'criterion-text', criterion.text));
     if (criterion.test) {
-      const note = verified ? '已通过' : failed ? '未通过' : result?.missing ? '未找到该测试' : '待验证';
+      const note = status ? reviewModel.CRITERION_EVIDENCE[status] : '待验证';
       body.append(withIcon('span', 'criterion-test', 'flask', `${criterion.test} · ${note}`));
+      if (result?.alreadyPassing) body.append(withIcon('span', 'criterion-test warn-text', 'info', '改动前就已通过，不能证明这次改动有效'));
     } else {
       body.append(withIcon('span', 'criterion-test', 'info', '需人工确认'));
     }
@@ -383,6 +391,66 @@ function renderAcceptance(task, matched) {
     return row;
   }));
 }
+
+function evidenceRow(item) {
+  const line = reviewModel.evidenceLine(item);
+  const row = el('div', 'evidence-row');
+  const pill = el('span', `status-pill ${line.tone}`, reviewModel.EVIDENCE_STATUS[item.status]?.label ?? item.status);
+  row.append(pill, el('span', 'evidence-text', line.text));
+  const lists = [['新增失败', item.newFailures], ['基线上已失败', item.preexisting], ['本次修复', item.fixed]];
+  for (const [title, names] of lists) {
+    if (!names?.length) continue;
+    const details = el('details', 'evidence-list');
+    details.append(el('summary', null, `${title}（${names.length}）`));
+    names.forEach((name) => details.append(el('div', null, name)));
+    row.append(details);
+  }
+  return row;
+}
+
+/* Baseline */
+
+let baselineTimer = null;
+
+function renderBaseline(task) {
+  const box = $('#execBaselineChecks');
+  const { text, canRemeasure } = reviewModel.baselineText(task.baselineChecks);
+  box.hidden = !task.baseline || !text;
+  $('#execBaselineText').textContent = text;
+  box.classList.toggle('measuring', task.baselineChecks?.status === 'measuring');
+  $('#remeasureBaseline').hidden = !(canRemeasure && task.status === 'in_progress');
+
+  window.clearTimeout(baselineTimer);
+  baselineTimer = null;
+  // Claiming starts the measurement in the background; follow it.
+  const pending = task.baseline && (!task.baselineChecks || task.baselineChecks.status === 'measuring');
+  if (pending) {
+    const id = task.id;
+    baselineTimer = window.setTimeout(async () => {
+      if (current?.id !== id) return;
+      try {
+        const fresh = await call(window.taskpilot.getTask(id));
+        if (current?.id !== id) return;
+        current = { ...current, baselineChecks: fresh.baselineChecks };
+        renderBaseline(current);
+      } catch {
+        // Try again on the next render.
+      }
+    }, 1000);
+  }
+}
+
+$('#remeasureBaseline').addEventListener('click', async () => {
+  if (!current) return;
+  try {
+    current = await call(window.taskpilot.measureBaseline(current.id));
+    // The new measurement replaces the old record once it starts.
+    current = { ...current, baselineChecks: { status: 'measuring', checks: {} } };
+    renderBaseline(current);
+  } catch (error) {
+    showToast(`无法重新测量：${describeError(error)}`, 'error');
+  }
+});
 
 function renderDeviations(task) {
   const panel = $('#deviationPanel');
@@ -399,6 +467,201 @@ function renderDeviations(task) {
     item.append(meta);
     return item;
   }));
+}
+
+/* QA review */
+
+const REVIEW_POLL_MS = 1500;
+const REVIEW_REASONS = {
+  no_changes: '相对基线没有任何改动',
+  tests_failed: '测试未通过',
+  acceptance_tests: '有验收条件的关联测试未通过',
+  qa_rejected: 'QA 判定不通过',
+  blocker: 'QA 发现了阻断问题',
+  criteria_unmet: '有验收条件未满足',
+};
+const SEVERITY_LABELS = { blocker: '阻断', major: '重要', minor: '次要' };
+const CRITERION_LABELS = { met: '满足', unmet: '未满足', unclear: '无法判断' };
+const CRITERION_ICONS = { met: 'check-circle', unmet: 'x-circle', unclear: 'circle' };
+const SKIP_LABELS = {
+  rename: '重命名',
+  outside_workspace: '在工作区外',
+  secret: '疑似敏感文件',
+  binary: '二进制文件',
+  file_limit: '超出文件数上限',
+  unreadable: '无法读取',
+  too_large: '改动过大',
+  budget: '超出审查总量',
+};
+let reviewTimer = null;
+
+function reviewButton(action, iconName, label) {
+  const button = withIcon('button', 'secondary-button small', iconName, label);
+  button.type = 'button';
+  button.dataset.review = action;
+  return button;
+}
+
+function reviewSection(title, children) {
+  const section = el('div', 'review-section');
+  section.append(el('h3', null, title), ...children);
+  return section;
+}
+
+function renderReviewResult(task, review) {
+  const nodes = [];
+  if (review.reasons.length > 0) {
+    const list = el('ul', 'review-reasons');
+    review.reasons.forEach((reason) => list.append(withIcon('li', null, 'x', REVIEW_REASONS[reason] ?? reason)));
+    nodes.push(list);
+  }
+  if (review.report) {
+    const summary = el('p', 'review-summary');
+    appendInlineCode(summary, review.report.summary);
+    nodes.push(summary);
+
+    const criteria = review.report.criteria.map((criterion) => {
+      const row = el('div', `review-criterion ${criterion.status}`);
+      row.append(icon(CRITERION_ICONS[criterion.status]));
+      const body = el('div');
+      body.append(el('span', 'criterion-text', task.acceptance[criterion.index]?.text ?? `条件 ${criterion.index + 1}`));
+      const note = el('small');
+      note.append(`${CRITERION_LABELS[criterion.status]}${criterion.note ? '：' : ''}`);
+      if (criterion.note) appendInlineCode(note, criterion.note);
+      body.append(note);
+      row.append(body);
+      return row;
+    });
+    if (criteria.length) nodes.push(reviewSection('验收条件', criteria));
+
+    const issues = review.report.issues.map((issue) => {
+      const row = el('div', `review-issue ${issue.severity}`);
+      row.append(el('span', `severity-tag ${issue.severity}`, SEVERITY_LABELS[issue.severity]));
+      const body = el('div');
+      const text = el('p');
+      appendInlineCode(text, issue.text);
+      body.append(text);
+      if (issue.file) body.append(withIcon('small', null, 'file', issue.line ? `${issue.file}:${issue.line}` : issue.file));
+      row.append(body);
+      return row;
+    });
+    nodes.push(reviewSection(`问题（${issues.length}）`, issues.length ? issues : [emptyHint('check', 'QA 没有发现问题。')]));
+  }
+  if (review.checks?.length) {
+    nodes.push(reviewSection('检查证据', review.checks.map((item) => evidenceRow(item))));
+  }
+  if (review.attention?.length) {
+    nodes.push(reviewSection('需要人工确认', review.attention.map((item) =>
+      withIcon('div', 'review-attention', 'alert', reviewModel.attentionText(item, task.acceptance)))));
+  }
+  if (review.diff.skipped.length > 0) {
+    nodes.push(reviewSection('未审查的文件', review.diff.skipped.map((skip) =>
+      withIcon('div', 'review-skipped', 'file', `${skip.path} · ${SKIP_LABELS[skip.reason] ?? skip.reason}`))));
+  }
+
+  const meta = el('div', 'review-meta');
+  const v = review.verification;
+  meta.append(withIcon('span', null, 'flask', v
+    ? `测试 ${v.summary.passed}/${v.summary.total} 通过${v.summary.ok ? '' : `（退出码 ${v.exitCode}${v.timedOut ? '，超时' : ''}）`}`
+    : '未配置测试命令'));
+  meta.append(withIcon('span', null, 'diff', `审查了 ${review.diff.files.length} 个文件`));
+  if (review.costUsd > 0) meta.append(withIcon('span', null, 'activity', `费用 $${review.costUsd.toFixed(4)}`));
+  if (review.finishedAt) meta.append(withIcon('span', null, 'clock', new Date(review.finishedAt).toLocaleString('zh-CN')));
+  nodes.push(meta);
+  if (v?.failing.length) {
+    const list = el('div', 'verify-failures');
+    v.failing.forEach((name) => list.append(withIcon('div', null, 'x', name)));
+    nodes.push(list);
+  }
+  return nodes;
+}
+
+function renderReview(task) {
+  const panel = $('#reviewPanel');
+  const review = task.review;
+  panel.hidden = !review;
+  if (!review) return;
+  const iconBox = $('#reviewIcon');
+  const actions = [];
+  let body = [];
+  let hint;
+  let tone = '';
+  let iconName = 'bot';
+
+  if (review.status === 'running') {
+    hint = '正在运行测试并审查改动…';
+    iconName = 'spinner';
+    actions.push(reviewButton('cancel', 'x', '取消'));
+  } else if (review.status === 'failed') {
+    hint = `审查没有完成：${describeError(review.error)}`;
+    tone = 'danger';
+    iconName = 'alert';
+  } else if (review.status === 'passed') {
+    hint = '已通过，进入验收。';
+    tone = 'success';
+    iconName = 'check-circle';
+    body = renderReviewResult(task, review);
+  } else {
+    hint = '未通过，已退回给你修改。修改后可再次提交审查。';
+    tone = 'danger';
+    iconName = 'x-circle';
+    body = renderReviewResult(task, review);
+  }
+  // Retry is only possible while the package still waits in review.
+  if (review.status === 'failed' && task.status === 'in_review') actions.push(reviewButton('retry', 'refresh', '重新审查'));
+
+  iconBox.className = `panel-icon${tone ? ` ${tone}` : ''}`;
+  iconBox.replaceChildren(icon(iconName, review.status === 'running' ? 'spin' : undefined));
+  $('#reviewHint').textContent = hint;
+  $('#reviewActions').replaceChildren(...actions);
+  $('#reviewBody').replaceChildren(...body);
+}
+
+function stopReviewPolling() {
+  window.clearTimeout(reviewTimer);
+  reviewTimer = null;
+}
+
+/** Re-reads the open package while QA runs, until the review settles. */
+function watchReview() {
+  stopReviewPolling();
+  if (current?.review?.status !== 'running') return;
+  const id = current.id;
+  reviewTimer = window.setTimeout(async () => {
+    reviewTimer = null;
+    let task;
+    try {
+      task = await call(window.taskpilot.getTask(id));
+    } catch {
+      if (current?.id === id) watchReview();
+      return;
+    }
+    if (current?.id !== id) return; // the user moved on
+    if (task.review?.status === 'running') {
+      current = task;
+      watchReview();
+      return;
+    }
+    await reloadCurrent();
+    announceReview(task.review);
+  }, REVIEW_POLL_MS);
+}
+
+function announceReview(review) {
+  if (!review) return;
+  if (review.status === 'passed') showToast('QA 审查通过，进入验收。');
+  else if (review.status === 'rejected') showToast('QA 审查未通过，请查看问题。', 'error');
+  else if (review.status === 'failed' && review.error?.code !== 'agent_cancelled') showToast(`QA 审查失败：${describeError(review.error)}`);
+}
+
+async function runReviewAction(action) {
+  try {
+    if (action === 'cancel') await call(window.taskpilot.review.cancel(current.id));
+    else await call(window.taskpilot.review.retry(current.id));
+    await reloadCurrent();
+  } catch (error) {
+    showToast(`操作失败：${describeError(error)}`);
+  }
 }
 
 function churnStat(change) {
@@ -528,8 +791,11 @@ function renderExecution(task, { diff, acceptance } = {}) {
   $('#execBaseline').textContent = task.baseline ? `基线 ${task.baseline.slice(0, 8)}` : '未领取';
 
   renderActions(task);
+  renderReview(task);
+  watchReview();
+  renderBaseline(task);
   renderSteps(task);
-  renderAcceptance(task, acceptance);
+  renderAcceptance(task, acceptance ?? task.review?.acceptance);
   renderDeviations(task);
   renderScope(task, diff);
   renderDiff(task, diff);
@@ -578,7 +844,8 @@ async function reloadCurrent() {
   await reloadQueue();
 }
 
-const VERIFY_LABELS = { test: '测试', lint: 'Lint', build: 'Build' };
+const VERIFY_LABELS = { test: '测试', lint: 'Lint', build: 'Build', smoke: '冒烟测试' };
+const reviewModel = window.TaskPilotReviewModel;
 
 function renderVerifyResult(kind, result) {
   const container = $('#execVerify');
@@ -595,11 +862,15 @@ function renderVerifyResult(kind, result) {
   summary.append(withIcon('span', 'verify-duration', 'clock', `${(result.durationMs / 1000).toFixed(1)}s`));
 
   const nodes = [summary, withIcon('div', 'verify-command', 'terminal', `${VERIFY_LABELS[kind]} · ${result.command}`)];
+  if (result.evidence) nodes.push(evidenceRow(result.evidence));
+  if (result.report && !result.report.trusted) {
+    nodes.push(withIcon('div', 'verify-note warn-text', 'alert', reviewModel.REASONS[`report_${result.report.problem}`] ?? result.report.problem));
+  }
 
   const failures = result.results.filter((entry) => !entry.passed && !entry.skipped && !entry.todo);
   if (failures.length > 0) {
     const list = el('div', 'verify-failures');
-    failures.forEach((entry) => list.append(withIcon('div', null, 'x', entry.name)));
+    failures.forEach((entry) => list.append(withIcon('div', null, 'x', entry.fullName ?? entry.name)));
     nodes.push(list);
   }
   // The raw log is the fallback when nothing could be parsed.
@@ -695,7 +966,7 @@ async function submitDeviation() {
 
 const TRANSITION_TOASTS = {
   claim: '已领取，基线已记录。',
-  submit_for_review: '已提交审查。',
+  submit_for_review: '已提交，QA 正在审查。',
   block: '已标记为阻塞。',
   unblock: '已解除阻塞。',
   release: '已放回队列。',
@@ -721,6 +992,10 @@ taskList.addEventListener('click', async (event) => {
 });
 
 $('#backToQueue').addEventListener('click', showQueue);
+$('#reviewActions').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-review]');
+  if (button) runReviewAction(button.dataset.review);
+});
 $('#refreshDiff').addEventListener('click', refreshDiff);
 
 $('#execActions').addEventListener('click', (event) => {

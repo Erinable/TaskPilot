@@ -179,3 +179,36 @@ test('matchAcceptance() marks a criterion without a test as manual, never auto-v
   assert.equal(matched[0].manual, true);
   assert.equal(matched[0].verified, false);
 });
+
+test('runCheck() reads a fresh JUnit report and ignores a stale one', async (t) => {
+  const fs = require('node:fs/promises');
+  const os = require('node:os');
+  const path = require('node:path');
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-check-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const xml = '<testsuite name="s"><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>';
+  const writer = `require('fs').mkdirSync('out',{recursive:true});require('fs').writeFileSync('out/r.xml',${JSON.stringify(xml)});process.exit(1)`;
+  const config = {
+    root,
+    checks: { test: { command: process.execPath, args: ['-e', writer], stage: 'submit', blocking: true, report: { format: 'junit', path: 'out/r.xml' }, env: { TP_MARK: '1' } } },
+  };
+  const fresh = await verification.runCheck(config, 'test');
+  assert.deepEqual(fresh.report, { format: 'junit', trusted: true, problem: null });
+  assert.deepEqual(fresh.results.map((r) => [r.fullName, r.passed]), [['s › a', true], ['s › b', false]]);
+  assert.equal(fresh.summary.failed, 1);
+
+  // A command that does not rewrite the report leaves the old one behind.
+  config.checks.test.args = ['-e', 'process.exit(0)'];
+  const stale = await verification.runCheck(config, 'test');
+  assert.deepEqual(stale.report, { format: 'junit', trusted: false, problem: 'stale' });
+  assert.deepEqual(stale.results, []);
+});
+
+test('runCheck() passes the check env but never lets it replace PATH', async () => {
+  const config = {
+    root: process.cwd(),
+    checks: { test: { command: process.execPath, args: ['-e', 'console.log(process.env.TP_MARK + "|" + process.env.PATH)'], report: { format: 'stdout' }, env: { TP_MARK: 'yes', PATH: '/evil' } } },
+  };
+  const result = await verification.runCheck(config, 'test', { envPath: '/tp/bin' });
+  assert.equal(result.output.trim(), 'yes|/tp/bin');
+});

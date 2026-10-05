@@ -11,7 +11,9 @@ const preferences = require('./preferences');
 const { createPathResolver } = require('./shell-env');
 const claudeCli = require('./agents/claude-cli');
 const productLead = require('./agents/product-lead');
-const { summarizeForRequirement, throwIfCancelled } = require('./agents/pipeline');
+const envSetup = require('./env-setup');
+const evidence = require('./evidence');
+const { summarizeForRequirement, reviewWorkPackage, planEnvironment, throwIfCancelled } = require('./agents/pipeline');
 const { STATE_FILENAME } = require('./work-package-store');
 const { label, available } = require('./work-package-status');
 
@@ -20,6 +22,8 @@ const CHANNELS = {
   getTask: 'tasks:get',
   transition: 'package:transition',
   setStepDone: 'package:set-step-done',
+  reviewRetry: 'review:retry',
+  reviewCancel: 'review:cancel',
   workspaceGet: 'workspace:get',
   workspaceSet: 'workspace:set',
   workspaceCheck: 'workspace:check',
@@ -44,6 +48,13 @@ const CHANNELS = {
   requirementsRemove: 'requirements:remove',
   requirementsCancel: 'requirements:cancel',
   agentStatus: 'agent:status',
+  envGet: 'env:get',
+  envPlan: 'env:plan',
+  envSetAllowScripts: 'env:set-allow-scripts',
+  envRunStep: 'env:run-step',
+  envApply: 'env:apply',
+  envCancel: 'env:cancel',
+  baselineMeasure: 'baseline:measure',
 };
 
 /** Shaped like an Error but safe to send over IPC. */
@@ -53,11 +64,38 @@ function toFailure(error) {
   return { ok: false, error: failure };
 }
 
-/** Config plus the command lines the settings form edits. */
+/** Config plus the command lines and check options the settings form edits. */
 function toFormView(config) {
-  const lines = {};
-  for (const kind of workspace.COMMAND_KINDS) lines[kind] = workspace.formatCommandLine(config.commands[kind]);
-  return { root: config.root, commands: config.commands, lines };
+  const form = workspace.toForm(config);
+  return { root: config.root, commands: config.commands, checks: config.checks, lines: form.commands, options: form.options };
+}
+
+/** Checks that run before review, with the line their baselines are keyed by. */
+function submitChecks(config) {
+  return workspace.COMMAND_KINDS
+    .filter((kind) => config.checks?.[kind]?.stage === 'submit')
+    .map((kind) => {
+      const check = config.checks[kind];
+      return { kind, stage: check.stage, blocking: check.blocking, line: checkLine(check) };
+    });
+}
+
+/** The command line plus whatever else changes what a check measures. */
+function checkLine(check) {
+  const extras = [];
+  if (check.report.format === 'junit') extras.push(`[junit ${check.report.path}]`);
+  const env = Object.entries(check.env ?? {}).map(([k, v]) => `${k}=${v}`).sort();
+  if (env.length) extras.push(`[env ${env.join(' ')}]`);
+  return [workspace.formatCommandLine(check), ...extras].join(' ');
+}
+
+/** Report files the checks write are not the package's changes. */
+function reportIgnore(config) {
+  const paths = new Set(workspace.COMMAND_KINDS
+    .map((kind) => config.checks?.[kind])
+    .filter((check) => check?.report.format === 'junit')
+    .map((check) => check.report.path));
+  return (candidate) => paths.has(candidate) || candidate.startsWith('.taskpilot/');
 }
 
 function requireString(value, name) {
@@ -92,6 +130,8 @@ function buildTaskView(task, state) {
     claimedAt: state.claimedAt,
     completedSteps: state.completedSteps,
     deviations: state.deviations,
+    review: state.review ?? null,
+    baselineChecks: state.baselineChecks ?? null,
     humanTransitions: available(state.status, 'human').map((t) => t.name),
   };
 }
@@ -142,7 +182,7 @@ function registerIpcHandlers(ipcMain, deps) {
    * that and file scopes would otherwise never match.
    */
   const validateForm = async (form) => {
-    const config = workspace.fromForm(form);
+    const config = workspace.fromForm(form, getConfig());
     const info = { normalizedFrom: null, repo: null };
     if (!config.root) return { config, info };
 
@@ -209,6 +249,149 @@ function registerIpcHandlers(ipcMain, deps) {
     return buildTaskView(task, store.get(id));
   }));
 
+  // Background run promises, so shutdown (and tests) can wait for writes.
+  const pendingRuns = new Set();
+  const track = (promise) => {
+    pendingRuns.add(promise);
+    promise.finally(() => pendingRuns.delete(promise));
+  };
+
+  /* QA: reviews a package once it is submitted. */
+
+  // One in-flight review per work package, so it can be cancelled.
+  const reviews = new Map();
+
+  /** The Architect summary of the requirement a package came from, if any. */
+  const interfacesFor = (task) => {
+    if (!requirements || !task.requirementId) return null;
+    try {
+      return requirements.get(task.requirementId).interfaces?.text ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Starts QA in the background. The renderer polls tasks:get for the
+   * outcome; QA moves the package on itself when it finishes.
+   */
+  const startReview = async (id) => {
+    const task = tasks.getTask(id);
+    const root = requireRoot();
+    const baseline = requireBaseline(id);
+    const entry = await store.beginReview(id);
+    const controller = new AbortController();
+    reviews.set(id, controller);
+    const config = getConfig();
+    const settled = (async () => {
+      let outcome;
+      try {
+        const { path: envPath } = await commandPath();
+        const result = await reviewWorkPackage(task, {
+          root,
+          baseline,
+          runAgent,
+          checks: submitChecks(config),
+          runCheck: (kind, signal) => verification.runCheck(config, kind, { signal, envPath }),
+          baselines: store.get(id).baselineChecks?.checks ?? {},
+          ignore: reportIgnore(config),
+          interfaces: interfacesFor(task),
+          envPath,
+          signal: controller.signal,
+        });
+        throwIfCancelled(controller.signal);
+        outcome = { result };
+      } catch (error) {
+        outcome = { error: controller.signal.aborted ? Object.assign(new Error('The review was cancelled'), { code: 'agent_cancelled' }) : error };
+      }
+      // Drop the run first, so nobody sees a finished review that still
+      // looks cancellable.
+      reviews.delete(id);
+      if (outcome.error) await store.failReview(id, outcome.error).catch(() => {});
+      else await store.completeReview(id, outcome.result).catch((error) => store.failReview(id, error).catch(() => {}));
+    })();
+    track(settled);
+    return entry;
+  };
+
+  /* Baselines: the submit-stage checks run on the claimed commit. */
+
+  const baselineRuns = new Map(); // package id -> AbortController
+
+  /** Tracked files and HEAD; untracked files (build output) are allowed to appear. */
+  const treeState = async (root) => {
+    const entries = await git.status(root);
+    return {
+      head: await git.head(root),
+      dirty: entries.filter((entry) => !entry.untracked).map((entry) => `${entry.status} ${entry.path}`).sort(),
+    };
+  };
+
+  /**
+   * Measures the baseline in the background. It only counts when the tree was
+   * clean at the claimed commit before and after: a run over half-edited code
+   * would blame or excuse the wrong tests.
+   */
+  const measureBaseline = async (id) => {
+    const config = getConfig();
+    const commit = store.get(id).baseline;
+    if (!config.root || !commit) return;
+    baselineRuns.get(id)?.abort();
+    const controller = new AbortController();
+    baselineRuns.set(id, controller);
+    const checks = submitChecks(config);
+    const startedAt = new Date().toISOString();
+    const record = (status, extra = {}) => store.setBaselineChecks(id, {
+      status, reason: null, commit, checks: {}, startedAt, finishedAt: new Date().toISOString(), ...extra,
+    }).catch(() => null);
+
+    const settled = (async () => {
+      try {
+        if (!checks.length) return void await record('unavailable', { reason: 'no_checks' });
+        const before = await treeState(config.root);
+        if (before.head !== commit) return void await record('unavailable', { reason: 'head_moved' });
+        if (before.dirty.length) return void await record('unavailable', { reason: 'dirty_tree' });
+        await record('measuring', { finishedAt: null });
+
+        const { path: envPath } = await commandPath();
+        const results = {};
+        for (const check of checks) {
+          if (controller.signal.aborted) break;
+          try {
+            const run = await verification.runCheck(config, check.kind, { signal: controller.signal, envPath });
+            results[check.kind] = evidence.baselineRecord(run, check.line);
+          } catch (error) {
+            if (controller.signal.aborted) break;
+            results[check.kind] = { status: 'unavailable', reason: error.code ?? 'failed', line: check.line };
+          }
+        }
+        if (controller.signal.aborted) return void await record('unavailable', { reason: 'cancelled' });
+
+        const after = await treeState(config.root);
+        const same = after.head === commit && after.dirty.join('\n') === before.dirty.join('\n');
+        await record(same ? 'measured' : 'contaminated', same ? { checks: results } : { reason: 'tree_changed' });
+      } catch (error) {
+        await record('unavailable', { reason: error.code ?? 'failed' });
+      } finally {
+        if (baselineRuns.get(id) === controller) baselineRuns.delete(id);
+      }
+    })();
+    track(settled);
+    return settled;
+  };
+
+  // Re-measuring is for a package claimed on a dirty tree, once it is clean.
+  // It is only allowed before the developer has submitted anything.
+  ipcMain.handle(CHANNELS.baselineMeasure, wrap(async (_event, id) => {
+    requireString(id, 'id');
+    requireBaseline(id);
+    const state = store.get(id);
+    if (state.status !== 'in_progress') failWith('Baselines can only be measured while the package is in progress', 'invalid_state');
+    if (baselineRuns.has(id)) failWith('The baseline is already being measured', 'baseline_running');
+    measureBaseline(id);
+    return buildTaskView(tasks.getTask(id), store.get(id));
+  }));
+
   // `actor` is fixed to 'human': anything arriving from the renderer is a
   // human action by definition, so the renderer cannot claim to be an agent.
   ipcMain.handle(CHANNELS.transition, wrap(async (_event, id, name, options) => {
@@ -217,7 +400,30 @@ function registerIpcHandlers(ipcMain, deps) {
     const extra = {};
     if (name === 'claim') extra.baseline = await git.head(requireRoot());
     if (name === 'report_deviation') extra.deviation = options?.deviation;
-    return store.transition(id, name, 'human', extra);
+    if (name === 'release') baselineRuns.get(id)?.abort();
+    const entry = await store.transition(id, name, 'human', extra);
+    if (name === 'claim') {
+      measureBaseline(id);
+      return entry;
+    }
+    if (name !== 'submit_for_review') return entry;
+    // The submission stands even if QA cannot start (no workspace, say);
+    // the failure is recorded on the review and the user can retry.
+    try {
+      return await startReview(id);
+    } catch (error) {
+      await store.beginReview(id).then(() => store.failReview(id, error)).catch(() => {});
+      return store.get(id);
+    }
+  }));
+
+  ipcMain.handle(CHANNELS.reviewRetry, wrap((_event, id) => startReview(requireString(id, 'id'))));
+
+  ipcMain.handle(CHANNELS.reviewCancel, wrap((_event, id) => {
+    const controller = reviews.get(requireString(id, 'id'));
+    if (!controller) return false;
+    controller.abort();
+    return true;
   }));
 
   ipcMain.handle(CHANNELS.setStepDone, wrap((_event, id, stepIndex, done) => {
@@ -292,6 +498,9 @@ function registerIpcHandlers(ipcMain, deps) {
 
   // Only resets execution progress; workspace config and preferences stay.
   ipcMain.handle(CHANNELS.dataResetProgress, wrap(async () => {
+    // Running reviews would otherwise write their result over the reset.
+    for (const controller of reviews.values()) controller.abort();
+    await Promise.allSettled([...pendingRuns]);
     await store.reset();
     return store.summary();
   }));
@@ -309,8 +518,6 @@ function registerIpcHandlers(ipcMain, deps) {
   const workPackages = store;
   // One in-flight run per requirement, so it can be cancelled.
   const runs = new Map();
-  // Background run promises, so shutdown (and tests) can wait for writes.
-  const pendingRuns = new Set();
 
   const requireRequirements = () => {
     if (!requirements) failWith('Requirements are unavailable', 'unsupported');
@@ -377,8 +584,7 @@ function registerIpcHandlers(ipcMain, deps) {
       if (outcome.error) await store.failRun(id, step, outcome.error).catch(() => {});
       else await finish(id, outcome.output, outcome.costUsd).catch((error) => store.failRun(id, step, error).catch(() => {}));
     })();
-    pendingRuns.add(settled);
-    settled.finally(() => pendingRuns.delete(settled));
+    track(settled);
     return item;
   };
 
@@ -477,16 +683,191 @@ function registerIpcHandlers(ipcMain, deps) {
       error.code = 'invalid_argument';
       throw error;
     }
-    const result = await verification.run(getConfig(), kind, { envPath: (await commandPath()).path });
+    const config = getConfig();
+    const result = await verification.runCheck(config, kind, { envPath: (await commandPath()).path });
     if (!taskId) return result;
     const task = tasks.getTask(requireString(taskId, 'taskId'));
-    return { ...result, acceptance: verification.matchAcceptance(task.acceptance, result.results) };
+    // The same comparison a review makes, so a manual run reads the same way.
+    const check = { kind, stage: config.checks[kind].stage, blocking: config.checks[kind].blocking, line: checkLine(config.checks[kind]) };
+    const baselines = store.get(task.id).baselineChecks?.checks ?? {};
+    const item = evidence.evaluate(check, result, evidence.usableBaseline(baselines[kind], check.line));
+    return {
+      ...result,
+      evidence: item,
+      acceptance: evidence.criteriaStatus(task.acceptance ?? [], { [kind]: result }, [item], baselines),
+    };
+  }));
+
+  /* Environment Steward */
+
+  // One session per app run, in memory only: the plan is cheap to redo and
+  // must not outlive the toolchain it was made for.
+  let env = { root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, allowScripts: false, results: {}, running: null };
+  let envController = null;
+  const ENV_OUTPUT_CHARS = 4000;
+
+  const envSteps = () => (env.plan ? envSetup.buildSteps(env.plan, env.facts, { allowScripts: env.allowScripts }) : []);
+
+  const envView = () => ({
+    root: env.root,
+    status: env.status,
+    stale: Boolean(env.root && env.root !== getConfig().root),
+    facts: env.facts && {
+      ...env.facts,
+      workflows: env.facts.workflows.map((file) => file.path),
+      versionFiles: env.facts.versionFiles,
+    },
+    blockers: env.blockers,
+    plan: env.plan,
+    error: env.error,
+    costUsd: env.costUsd,
+    allowScripts: env.allowScripts,
+    running: env.running,
+    steps: envSteps().map((step) => ({
+      id: step.id,
+      kind: step.kind,
+      script: step.script ?? null,
+      line: workspace.formatCommandLine(step),
+      result: env.results[step.id] ?? null,
+    })),
+    configured: Object.fromEntries(workspace.COMMAND_KINDS.map((kind) => [kind, workspace.formatCommandLine(getConfig().commands[kind])])),
+  });
+
+  const requireEnvPlan = () => {
+    if (env.status !== 'ready' || !env.plan) failWith('No environment plan is ready', 'env_no_plan');
+    if (env.root !== getConfig().root) failWith('The workspace changed since this plan was made', 'env_stale');
+    if (env.running) failWith('A setup step is already running', 'env_busy');
+  };
+
+  ipcMain.handle(CHANNELS.envGet, wrap(() => envView()));
+
+  ipcMain.handle(CHANNELS.envPlan, wrap(async (_event, options) => {
+    const root = requireRoot();
+    if (env.status === 'planning' || env.running) failWith('The Environment Steward is busy', 'env_busy');
+    // Re-planning after a failure hands the steward that step's output.
+    let failure = null;
+    if (options?.withFailure === true && env.root === root) {
+      const failed = envSteps().find((step) => env.results[step.id] && !env.results[step.id].ok);
+      if (failed) {
+        const result = env.results[failed.id];
+        failure = { step: failed.id, command: workspace.formatCommandLine(failed), exitCode: result.exitCode, timedOut: result.timedOut, output: result.output };
+      }
+    }
+    const keepResults = failure !== null;
+    env = {
+      root, status: 'planning', facts: null, blockers: [], plan: null, error: null, costUsd: 0,
+      allowScripts: keepResults ? env.allowScripts : false, results: keepResults ? env.results : {}, running: null,
+    };
+    const session = env;
+    const controller = new AbortController();
+    envController = controller;
+    const { path: envPath } = await commandPath();
+    track((async () => {
+      try {
+        const outcome = await planEnvironment({ root, runAgent, envPath, signal: controller.signal, failure });
+        Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
+        // Results only carry over for steps the new plan still runs unchanged.
+        const lines = new Map(envSteps().map((step) => [step.id, workspace.formatCommandLine(step)]));
+        for (const id of Object.keys(session.results)) {
+          if (session.results[id].line !== lines.get(id)) delete session.results[id];
+        }
+      } catch (error) {
+        Object.assign(session, { status: 'failed', error: toFailure(error).error });
+      } finally {
+        if (envController === controller) envController = null;
+      }
+    })());
+    return envView();
+  }));
+
+  ipcMain.handle(CHANNELS.envSetAllowScripts, wrap((_event, allow) => {
+    if (env.running) failWith('A setup step is already running', 'env_busy');
+    env.allowScripts = allow === true;
+    delete env.results.install;
+    return envView();
+  }));
+
+  // The click is the user's confirmation; the command itself is rebuilt here
+  // from the stored plan, never taken from the renderer.
+  ipcMain.handle(CHANNELS.envRunStep, wrap(async (_event, stepId) => {
+    requireString(stepId, 'stepId');
+    requireEnvPlan();
+    const step = envSteps().find((candidate) => candidate.id === stepId);
+    if (!step) failWith(`Unknown setup step: ${stepId}`, 'invalid_argument');
+    const blocking = env.blockers.filter((code) => code !== 'unsupported_manager' || step.kind === 'install');
+    if (blocking.length) failWith(`Setup is blocked: ${blocking.join(', ')}`, 'env_blocked');
+
+    const session = env;
+    const controller = new AbortController();
+    envController = controller;
+    session.running = step.id;
+    const line = workspace.formatCommandLine(step);
+    const run = (async () => {
+      try {
+        const result = await verification.run(
+          { root: session.root, commands: { [step.kind]: { command: step.command, args: step.args } } },
+          step.kind,
+          { signal: controller.signal, envPath: (await commandPath()).path, timeoutMs: 15 * 60 * 1000 },
+        );
+        session.results[step.id] = {
+          line,
+          ok: result.exitCode === 0 && !result.timedOut,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          durationMs: result.durationMs,
+          summary: step.kind === 'install' ? null : result.summary,
+          output: result.output.slice(-ENV_OUTPUT_CHARS),
+          at: new Date().toISOString(),
+        };
+      } finally {
+        session.running = null;
+        if (envController === controller) envController = null;
+      }
+    })();
+    track(run.catch(() => {}));
+    try {
+      await run;
+    } catch (error) {
+      if (controller.signal.aborted) failWith('Setup step was cancelled', 'agent_cancelled');
+      throw error;
+    }
+    return envView();
+  }));
+
+  // Copies the plan's verification scripts into workspace.json, for the
+  // kinds the user ticked. Lines are rebuilt here, as in envRunStep.
+  ipcMain.handle(CHANNELS.envApply, wrap(async (_event, kinds) => {
+    requireEnvPlan();
+    if (!Array.isArray(kinds) || kinds.some((kind) => !envSetup.SCRIPT_KINDS.includes(kind))) {
+      failWith('kinds must be a list of test, lint or build', 'invalid_argument');
+    }
+    const config = getConfig();
+    const checks = { ...config.checks };
+    for (const kind of new Set(kinds)) {
+      const name = env.plan.scripts[kind];
+      if (!name) failWith(`The plan has no ${kind} script`, 'invalid_argument');
+      // A new command keeps the slot's stage and blocking choice; its report
+      // format resets, since the old one described a different command.
+      const kept = checks[kind];
+      checks[kind] = { ...envSetup.scriptCommand(name), stage: kept?.stage, blocking: kept?.blocking };
+    }
+    setConfig(await workspace.save(configDir, { ...config, checks }));
+    return envView();
+  }));
+
+  ipcMain.handle(CHANNELS.envCancel, wrap(() => {
+    if (!envController) return false;
+    envController.abort();
+    return true;
   }));
 
   return {
     /** Cancels running agents and waits for their final writes. */
     async shutdown() {
+      envController?.abort();
+      for (const controller of baselineRuns.values()) controller.abort();
       for (const controller of runs.values()) controller.abort();
+      for (const controller of reviews.values()) controller.abort();
       await Promise.allSettled([...pendingRuns]);
     },
   };

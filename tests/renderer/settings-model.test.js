@@ -77,3 +77,13 @@ test('charCount() counts code points after trimming', () => {
   assert.equal(model.charCount('😀😀'), 2);
   assert.equal(model.charCount(undefined), 0);
 });
+
+test('changing a check option marks the commands page dirty, but not for an empty command', () => {
+  const opts = (blocking) => ({ test: { stage: 'submit', blocking, reportPath: '' }, lint: { stage: 'step', blocking, reportPath: '' } });
+  const saved = { preferences: prefs(), workspace: ws({ options: opts(true) }) };
+  const changed = model.dirtyPages(saved, { preferences: prefs(), workspace: ws({ options: { ...opts(true), test: { stage: 'submit', blocking: false, reportPath: '' } } }) });
+  assert.equal(changed.commands, true);
+  // lint has no command, so toggling its options is not an edit.
+  const ignored = model.dirtyPages(saved, { preferences: prefs(), workspace: ws({ options: { ...opts(true), lint: { stage: 'step', blocking: false, reportPath: '' } } }) });
+  assert.equal(ignored.commands, false);
+});

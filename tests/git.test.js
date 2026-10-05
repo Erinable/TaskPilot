@@ -115,6 +115,18 @@ test('changesSince() includes untracked files that git diff omits', async () => 
   assert.equal(byPath['a.txt'].untracked, false);
 });
 
+test('changesSince() lists each file in a new untracked directory', async () => {
+  // git status collapses an untracked directory to "dir/" by default, which
+  // no file scope matches and which hid the new files from QA.
+  const { dir } = await makeRepo();
+  const baseline = await git.head(dir);
+  await fs.mkdir(path.join(dir, 'src/new'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'src/new/a.ts'), 'export {};\n');
+  await fs.writeFile(path.join(dir, 'src/new/b.ts'), 'export {};\n');
+  const paths = (await git.changesSince(dir, baseline)).map((c) => c.path).sort();
+  assert.deepEqual(paths, ['src/new/a.ts', 'src/new/b.ts']);
+});
+
 test('changesSince() does not double-count a staged new file', async () => {
   const { dir, g } = await makeRepo();
   const baseline = await git.head(dir);

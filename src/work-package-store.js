@@ -25,8 +25,17 @@ function initialState(task) {
     claimedAt: null,
     completedSteps: [], // indices into task.steps
     deviations: [],
+    review: null, // QA's latest review of the package; see beginReview()
+    // Submit-stage checks run on the claimed commit; see setBaselineChecks().
+    // {status: measuring|measured|unavailable|contaminated, reason, commit, checks: {kind: record}, startedAt, finishedAt}
+    baselineChecks: null,
   };
 }
+
+const BASELINE_STATUSES = ['measuring', 'measured', 'unavailable', 'contaminated'];
+
+// The transition QA's outcome applies.
+const REVIEW_TRANSITIONS = { passed: 'review_passed', rejected: 'review_rejected' };
 
 class WorkPackageStore {
   #file;
@@ -47,7 +56,21 @@ class WorkPackageStore {
         // Ignore ids that no longer exist and statuses we don't recognise:
         // the definitions are the authority on what a package is.
         if (!this.#state.has(id) || !status.isStatus(entry?.status)) continue;
-        this.#state.set(id, { ...this.#state.get(id), ...entry });
+        const merged = { ...this.#state.get(id), ...entry };
+        // A review still running when the app closed will never finish.
+        if (merged.review?.status === 'running') {
+          merged.review = {
+            ...merged.review,
+            status: 'failed',
+            finishedAt: null,
+            error: { code: 'agent_interrupted', message: 'The review was interrupted when the app closed' },
+          };
+        }
+        // Nor will a baseline measurement.
+        if (merged.baselineChecks?.status === 'measuring') {
+          merged.baselineChecks = { ...merged.baselineChecks, status: 'unavailable', reason: 'interrupted', finishedAt: null };
+        }
+        this.#state.set(id, merged);
       }
     } catch (error) {
       if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
@@ -94,11 +117,14 @@ class WorkPackageStore {
       if (!baseline) throw new StoreError('Claiming requires a baseline commit', 'baseline_required');
       entry.baseline = baseline;
       entry.claimedAt = new Date().toISOString();
+      entry.baselineChecks = null;
     }
     if (name === 'release') {
       entry.baseline = null;
       entry.claimedAt = null;
       entry.completedSteps = [];
+      entry.review = null;
+      entry.baselineChecks = null;
     }
     if (name === 'report_deviation') {
       if (!deviation?.note?.trim()) {
@@ -128,6 +154,23 @@ class WorkPackageStore {
     return this.all();
   }
 
+  /**
+   * Records baseline check results for the commit the package was claimed
+   * at. A result for any other commit is dropped (the package was released
+   * or re-claimed meanwhile) and null is returned.
+   */
+  async setBaselineChecks(id, value) {
+    const entry = this.get(id);
+    if (!BASELINE_STATUSES.includes(value?.status)) {
+      throw new StoreError(`Unknown baseline status: ${value?.status}`, 'invalid_argument');
+    }
+    if (!entry.baseline || entry.baseline !== value.commit) return null;
+    entry.baselineChecks = structuredClone(value);
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
   /** Counts for the data settings page. */
   summary() {
     const entries = [...this.#state.values()];
@@ -136,6 +179,73 @@ class WorkPackageStore {
       claimed: entries.filter((entry) => entry.baseline).length,
       deviations: entries.reduce((sum, entry) => sum + entry.deviations.length, 0),
     };
+  }
+
+  /**
+   * Starts a QA review. Only a package in review can be reviewed, and only
+   * one review runs at a time; a new one replaces the previous report.
+   */
+  async beginReview(id) {
+    const entry = this.get(id);
+    if (entry.status !== 'in_review') {
+      throw new StoreError('Only a package in review can be reviewed', 'invalid_state');
+    }
+    if (entry.review?.status === 'running') {
+      throw new StoreError('A review is already running', 'review_running');
+    }
+    entry.review = { status: 'running', startedAt: new Date().toISOString(), finishedAt: null, error: null };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  /**
+   * Records QA's result and moves the package on: to acceptance when it
+   * passed, back to the developer when it did not. The transition is applied
+   * as the agent actor, so it goes through the same rules as everything else.
+   * @param result pipeline.reviewWorkPackage() result
+   */
+  async completeReview(id, result) {
+    const entry = this.get(id);
+    if (entry.review?.status !== 'running') {
+      throw new StoreError('No review is running', 'review_not_running');
+    }
+    const outcome = result.passed ? 'passed' : 'rejected';
+    // Validate the transition before writing anything.
+    const next = status.apply(entry.status, REVIEW_TRANSITIONS[outcome], 'agent');
+    entry.review = {
+      status: outcome,
+      startedAt: entry.review.startedAt,
+      finishedAt: new Date().toISOString(),
+      error: null,
+      reasons: result.reasons,
+      attention: result.attention ?? [],
+      checks: result.checks ?? [],
+      verification: result.verification,
+      acceptance: result.acceptance,
+      report: result.report,
+      diff: result.diff,
+      costUsd: result.costUsd,
+    };
+    entry.status = next;
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  /** Records a review that could not finish; the package stays in review. */
+  async failReview(id, error) {
+    const entry = this.get(id);
+    if (entry.review?.status !== 'running') return structuredClone(entry);
+    entry.review = {
+      ...entry.review,
+      status: 'failed',
+      finishedAt: new Date().toISOString(),
+      error: { code: error.code ?? 'agent_failed', message: error.message },
+    };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
   }
 
   /** Marks one instruction step done or not done. */
