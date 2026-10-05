@@ -31,6 +31,7 @@ function initialState(task) {
 class WorkPackageStore {
   #file;
   #state = new Map();
+  #tasks = [];
 
   constructor(configDir) {
     this.#file = path.join(configDir, STATE_FILENAME);
@@ -38,6 +39,7 @@ class WorkPackageStore {
 
   /** Seeds from task definitions, then overlays anything already on disk. */
   async load(tasks) {
+    this.#tasks = tasks;
     for (const task of tasks) this.#state.set(task.id, initialState(task));
     try {
       const saved = JSON.parse(await fs.readFile(this.#file, 'utf8'));
@@ -102,6 +104,26 @@ class WorkPackageStore {
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);
+  }
+
+  /**
+   * Discards all execution state — status, baselines, step progress and
+   * deviations — returning every package to its definition's seed state.
+   */
+  async reset() {
+    this.#state = new Map(this.#tasks.map((task) => [task.id, initialState(task)]));
+    await fs.rm(this.#file, { force: true });
+    return this.all();
+  }
+
+  /** Counts for the data settings page. */
+  summary() {
+    const entries = [...this.#state.values()];
+    return {
+      total: entries.length,
+      claimed: entries.filter((entry) => entry.baseline).length,
+      deviations: entries.reduce((sum, entry) => sum + entry.deviations.length, 0),
+    };
   }
 
   /** Marks one instruction step done or not done. */

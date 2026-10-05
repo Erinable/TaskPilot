@@ -29,7 +29,7 @@
         <div class="top-actions">
           <button class="icon-button" title="搜索" aria-label="搜索"><i data-icon="search"></i></button>
           <button class="icon-button" title="通知" aria-label="通知"><i data-icon="bell"></i><span class="notification-dot"></span></button>
-          <div class="avatar">HL</div>
+          <button class="avatar" id="topAvatar" type="button" title="个人资料" aria-label="打开个人资料设置"></button>
         </div>
       </header>
 
@@ -59,7 +59,7 @@
             <div class="page-heading">
               <div>
                 <div class="eyebrow" id="todayLabel"></div>
-                <h1><span id="greeting">你好</span>，Hanguoliang <i data-icon="sparkle" class="wave"></i></h1>
+                <h1><span id="greeting">你好</span><span id="greetingName"></span> <i data-icon="sparkle" class="wave"></i></h1>
                 <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
               </div>
               <div class="heading-actions">
@@ -162,52 +162,183 @@
             </div>
           </div>
 
-          <div class="view" id="settingsView" hidden>
-            <div class="page-heading">
-              <div>
-                <div class="eyebrow">SETTINGS</div>
-                <h1>工作区设置</h1>
-                <p>TaskPilot 只读观察这个仓库，并且只会运行你在这里配置的命令。</p>
+          <div class="view settings-view" id="settingsView" hidden>
+            <aside class="settings-nav glass" aria-label="设置分类">
+              <h1 class="settings-nav-title">设置</h1>
+              <label class="settings-search">
+                <i data-icon="search"></i>
+                <input id="settingsSearch" type="search" placeholder="搜索设置" autocomplete="off" spellcheck="false" aria-label="搜索设置" />
+              </label>
+              <nav id="settingsNav">
+                <div class="settings-group-label" data-group="personal"><span class="group-avatar" id="navAvatar"></span><span>个人</span></div>
+                <button class="settings-nav-item" data-page="profile" data-keywords="名字 姓名 头像 颜色 name avatar"><i data-icon="user"></i>个人资料</button>
+                <button class="settings-nav-item" data-page="preferences" data-keywords="主题 外观 深色 浅色 毛玻璃 透明 theme dark light vibrancy"><i data-icon="sliders"></i>偏好设置</button>
+
+                <div class="settings-group-label" data-group="workspace"><i data-icon="git-branch"></i><span id="navWorkspaceName">工作区</span><span class="group-tag">工作区</span></div>
+                <button class="settings-nav-item" data-page="repository" data-keywords="仓库 路径 目录 git repo root"><i data-icon="folder"></i>仓库</button>
+                <button class="settings-nav-item" data-page="commands" data-keywords="命令 测试 lint build npm test 验证"><i data-icon="terminal"></i>验证命令</button>
+
+                <div class="settings-group-label" data-group="device"><i data-icon="laptop"></i><span>本设备</span></div>
+                <button class="settings-nav-item" data-page="environment" data-keywords="环境 PATH shell nvm homebrew 版本 electron node"><i data-icon="cpu"></i>运行环境</button>
+                <button class="settings-nav-item" data-page="data" data-keywords="数据 目录 重置 进度 清空 reset"><i data-icon="database"></i>数据</button>
+              </nav>
+              <p class="settings-search-empty" id="settingsSearchEmpty" hidden>没有匹配的设置</p>
+            </aside>
+
+            <div class="settings-content">
+              <form class="settings-page" data-page="profile" id="profileForm" novalidate hidden>
+                <header class="settings-page-header">
+                  <h2>个人资料</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>仅保存在本机</span>
+                </header>
+                <h3 class="settings-section-title">个人信息</h3>
+                <div class="settings-card glass">
+                  <div class="setting-row">
+                    <div class="setting-label"><strong>头像</strong><small>显示在顶栏，文字取自你的名字</small></div>
+                    <div class="setting-control avatar-control">
+                      <div class="avatar-swatches" role="radiogroup" aria-label="头像颜色" id="avatarSwatches"></div>
+                      <span class="avatar large" id="profileAvatarPreview"></span>
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <label class="setting-label" for="profileName"><strong>名字</strong><small>用于首页问候语</small></label>
+                    <div class="setting-control">
+                      <input class="field-input" id="profileName" name="displayName" type="text" autocomplete="name" placeholder="怎么称呼你" aria-describedby="profileNameStatus" />
+                      <div class="field-meta"><p class="field-status" id="profileNameStatus" aria-live="polite"></p><span class="char-count" id="profileNameCount"></span></div>
+                    </div>
+                  </div>
+                </div>
+              </form>
+
+              <form class="settings-page" data-page="preferences" id="appearanceForm" novalidate hidden>
+                <header class="settings-page-header">
+                  <h2>偏好设置</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>仅保存在本机</span>
+                </header>
+                <h3 class="settings-section-title">外观</h3>
+                <div class="settings-card glass">
+                  <div class="setting-row stacked">
+                    <div class="setting-label"><strong>主题</strong><small>切换后立即生效</small></div>
+                    <div class="theme-options" role="radiogroup" aria-label="主题">
+                      <label class="theme-option"><input type="radio" name="theme" value="system" /><span class="theme-preview system" aria-hidden="true"><span></span><span></span></span><span class="theme-name"><i data-icon="monitor"></i>跟随系统</span></label>
+                      <label class="theme-option"><input type="radio" name="theme" value="light" /><span class="theme-preview light" aria-hidden="true"><span></span><span></span></span><span class="theme-name"><i data-icon="sun"></i>浅色</span></label>
+                      <label class="theme-option"><input type="radio" name="theme" value="dark" /><span class="theme-preview dark" aria-hidden="true"><span></span><span></span></span><span class="theme-name"><i data-icon="moon"></i>深色</span></label>
+                    </div>
+                  </div>
+                  <div class="setting-row" id="vibrancyRow">
+                    <label class="setting-label" for="prefVibrancy"><strong>原生毛玻璃</strong><small>让桌面透过窗口显示。文字对比度会随壁纸变化，仅 macOS 可用。</small></label>
+                    <div class="setting-control end"><input class="switch" id="prefVibrancy" type="checkbox" role="switch" /></div>
+                  </div>
+                </div>
+              </form>
+
+              <form class="settings-page" data-page="repository" id="repositoryForm" novalidate hidden>
+                <header class="settings-page-header">
+                  <h2>仓库</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>本机配置 · 不写入仓库</span>
+                </header>
+                <p class="settings-page-intro">TaskPilot 只读观察这个仓库：计算 diff、检查文件范围，不会修改工作树或提交历史。</p>
+                <div class="settings-card glass">
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="settingsRoot"><strong>仓库路径</strong><small>选择仓库内的子目录时，会自动改用仓库根目录</small></label>
+                    <div class="field-row">
+                      <input class="field-input mono" id="settingsRoot" name="root" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/app" aria-describedby="rootStatus" />
+                      <button class="secondary-button" id="pickRoot" type="button"><i data-icon="folder"></i>选择…</button>
+                    </div>
+                    <p class="field-status" id="rootStatus" aria-live="polite"></p>
+                  </div>
+                  <div class="repo-facts" id="repoFacts" hidden></div>
+                </div>
+              </form>
+
+              <form class="settings-page" data-page="commands" id="commandsForm" novalidate hidden>
+                <header class="settings-page-header">
+                  <h2>验证命令</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>本机配置 · 不写入仓库</span>
+                </header>
+                <p class="settings-page-intro">执行页的「测试 / Lint / Build」按钮运行这些命令。TaskPilot 只会运行这里配置的命令，从不执行工作包里出现的命令。</p>
+                <div class="settings-card glass">
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="commandTest"><strong><i data-icon="flask"></i>测试</strong><small>输出 TAP 或 node --test 格式时，结果会关联到验收条件</small></label>
+                    <input class="field-input mono" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
+                    <p class="field-status" id="statusTest" aria-live="polite"></p>
+                  </div>
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="commandLint"><strong><i data-icon="wand"></i>Lint</strong></label>
+                    <input class="field-input mono" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
+                    <p class="field-status" id="statusLint" aria-live="polite"></p>
+                  </div>
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="commandBuild"><strong><i data-icon="box"></i>Build</strong></label>
+                    <input class="field-input mono" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
+                    <p class="field-status" id="statusBuild" aria-live="polite"></p>
+                  </div>
+                </div>
+                <p class="settings-note"><i data-icon="info"></i><span>命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</span></p>
+              </form>
+
+              <form class="settings-page" data-page="environment" id="environmentForm" novalidate hidden>
+                <header class="settings-page-header">
+                  <h2>运行环境</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>仅本设备</span>
+                </header>
+                <h3 class="settings-section-title">PATH</h3>
+                <div class="settings-card glass">
+                  <div class="setting-row stacked">
+                    <div class="setting-label"><strong>验证命令的 PATH 来源</strong><small>从 Finder 或 Dock 启动时，应用拿到的 PATH 通常不包含 nvm、Homebrew 等安装的命令</small></div>
+                    <div class="choice-list" role="radiogroup" aria-label="PATH 来源">
+                      <label class="choice"><input type="radio" name="pathSource" value="inherit" /><span><strong>继承应用启动时的 PATH</strong><small id="inheritSummary">从终端启动时与终端一致</small></span></label>
+                      <label class="choice"><input type="radio" name="pathSource" value="login-shell" /><span><strong>从登录 shell 读取</strong><small id="shellSummary">启动一次你的 shell 并读取它的 PATH</small></span></label>
+                    </div>
+                  </div>
+                  <div class="setting-row stacked">
+                    <div class="path-header">
+                      <div class="setting-label"><strong>当前生效的 PATH</strong><small id="pathSourceNote"></small></div>
+                      <button class="secondary-button small" id="refreshPath" type="button"><i data-icon="refresh"></i>重新读取</button>
+                    </div>
+                    <ol class="path-list" id="pathList"></ol>
+                  </div>
+                </div>
+                <h3 class="settings-section-title">版本</h3>
+                <div class="settings-card glass">
+                  <dl class="fact-list" id="versionFacts"></dl>
+                </div>
+              </form>
+
+              <section class="settings-page" data-page="data" id="dataPage" hidden>
+                <header class="settings-page-header">
+                  <h2>数据</h2>
+                  <span class="scope-badge"><i data-icon="laptop"></i>仅本设备</span>
+                </header>
+                <h3 class="settings-section-title">存储位置</h3>
+                <div class="settings-card glass">
+                  <div class="setting-row stacked">
+                    <div class="path-header">
+                      <div class="setting-label"><strong>数据目录</strong><small>工作区配置、偏好设置和工作包进度都保存在这里</small></div>
+                      <button class="secondary-button small" id="revealData" type="button"><i data-icon="folder"></i>在访达中显示</button>
+                    </div>
+                    <code class="path-chip" id="dataDir"></code>
+                    <ul class="file-list" id="dataFiles"></ul>
+                  </div>
+                </div>
+                <h3 class="settings-section-title danger">危险操作</h3>
+                <div class="settings-card glass danger-zone">
+                  <div class="setting-row">
+                    <div class="setting-label"><strong>重置工作包进度</strong><small id="resetSummary">清除领取状态、基线、步骤进度和偏差记录。工作区配置和偏好设置保留。</small></div>
+                    <div class="setting-control end"><button class="secondary-button danger" id="resetProgress" type="button"><i data-icon="trash"></i>重置…</button></div>
+                  </div>
+                </div>
+              </section>
+
+              <div class="settings-savebar glass-strong" id="settingsSavebar" hidden>
+                <span class="savebar-text"><i data-icon="info"></i><span id="savebarText">有未保存的修改</span></span>
+                <div class="savebar-actions">
+                  <button class="secondary-button" id="discardSettings" type="button">放弃</button>
+                  <button class="secondary-button" id="checkSettings" type="button"><i data-icon="check-circle"></i>检查</button>
+                  <button class="primary-button" id="saveSettings" type="button">保存</button>
+                </div>
               </div>
             </div>
-
-            <form class="settings-form" id="settingsForm" novalidate>
-              <section class="panel glass">
-                <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="git-branch"></i></span><div><h2>仓库</h2><p>工作包的 diff 和文件范围都相对这个仓库计算</p></div></div></div>
-                <div class="settings-body">
-                  <label class="field-label" for="settingsRoot">仓库路径</label>
-                  <div class="field-row">
-                    <input class="field-input mono" id="settingsRoot" name="root" type="text" spellcheck="false" autocomplete="off" placeholder="/Users/you/projects/app" aria-describedby="rootStatus" />
-                    <button class="secondary-button" id="pickRoot" type="button"><i data-icon="folder"></i>选择…</button>
-                  </div>
-                  <p class="field-status" id="rootStatus" aria-live="polite"></p>
-                </div>
-              </section>
-
-              <section class="panel glass">
-                <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><i data-icon="terminal"></i></span><div><h2>验证命令</h2><p>执行页的「测试 / Lint / Build」按钮运行这些命令</p></div></div></div>
-                <div class="settings-body">
-                  <label class="field-label" for="commandTest"><i data-icon="flask"></i>测试</label>
-                  <input class="field-input mono" id="commandTest" data-kind="test" type="text" spellcheck="false" autocomplete="off" placeholder="npm test" aria-describedby="statusTest" />
-                  <p class="field-status" id="statusTest" aria-live="polite"></p>
-
-                  <label class="field-label" for="commandLint"><i data-icon="wand"></i>Lint</label>
-                  <input class="field-input mono" id="commandLint" data-kind="lint" type="text" spellcheck="false" autocomplete="off" placeholder="npm run lint" aria-describedby="statusLint" />
-                  <p class="field-status" id="statusLint" aria-live="polite"></p>
-
-                  <label class="field-label" for="commandBuild"><i data-icon="box"></i>Build</label>
-                  <input class="field-input mono" id="commandBuild" data-kind="build" type="text" spellcheck="false" autocomplete="off" placeholder="npm run build" aria-describedby="statusBuild" />
-                  <p class="field-status" id="statusBuild" aria-live="polite"></p>
-
-                  <p class="settings-note"><i data-icon="info"></i><span>命令直接启动，不经过 shell：<code>&amp;&amp;</code>、<code>|</code>、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成 <code>package.json</code> 里的脚本。留空表示不配置。</span></p>
-                </div>
-              </section>
-
-              <div class="settings-actions">
-                <button class="secondary-button" id="checkSettings" type="button"><i data-icon="check-circle"></i>检查</button>
-                <button class="primary-button" id="saveSettings" type="submit">保存</button>
-              </div>
-            </form>
           </div>
         </main>
       </div>
@@ -237,8 +368,22 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="confirmModal" hidden>
+      <section class="task-modal glass-strong confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+        <div class="modal-badge" id="confirmBadge"><i data-icon="alert"></i></div>
+        <h2 id="confirmTitle"></h2>
+        <p class="modal-intro" id="confirmBody"></p>
+        <div class="modal-actions">
+          <button class="secondary-button" id="confirmCancel" type="button">取消</button>
+          <button class="primary-button" id="confirmAccept" type="button"></button>
+        </div>
+      </section>
+    </div>
+
     <div class="toast glass-strong" id="toast" role="status" aria-live="polite"><span class="toast-icon" id="toastIcon"><i data-icon="check"></i></span><span id="toastText"></span></div>
     <script src="./icons.js"></script>
+    <script src="./settings-model.js"></script>
     <script src="./renderer.js"></script>
+    <script src="./settings.js"></script>
   </body>
 </html>

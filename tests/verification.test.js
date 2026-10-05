@@ -105,6 +105,14 @@ test('run() flags a command that exceeds its timeout', async () => {
   assert.equal(result.summary.ok, false);
 });
 
+test('run() hands envPath to the command as PATH', async () => {
+  const config = await workspaceWith({
+    test: { command: process.execPath, args: ['-e', 'console.log(process.env.PATH)'] },
+  });
+  const result = await verification.run(config, 'test', { envPath: '/tp/custom/bin' });
+  assert.equal(result.output.trim(), '/tp/custom/bin');
+});
+
 test('run() does not interpret arguments through a shell', async () => {
   const marker = 'taskpilot-shell-canary';
   const config = await workspaceWith({

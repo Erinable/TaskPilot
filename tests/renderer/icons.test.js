@@ -20,6 +20,12 @@ function fakeDocument() {
   return { createElementNS: (_ns, tag) => make(tag) };
 }
 
+test('every icon name settings.js passes literally is defined', () => {
+  const source = read('settings.js');
+  const names = new Set([...source.matchAll(/\bicon\('([^']+)'/g)].map((m) => m[1]));
+  for (const name of names) assert.ok(ICONS[name], `settings.js uses unknown icon "${name}"`);
+});
+
 test('every data-icon in the markup names a defined icon', () => {
   const names = [...read('index.html').matchAll(/data-icon="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(names.length > 20, 'expected the markup to use icons');

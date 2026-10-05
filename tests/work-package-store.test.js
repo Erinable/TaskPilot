@@ -120,6 +120,24 @@ test('a corrupt state file falls back to seeded defaults', async () => {
   assert.equal(store.get('a').status, 'pending');
 });
 
+test('reset() returns every package to its seed state and removes the file', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
+  test.after(() => fs.rm(configDir, { recursive: true, force: true }));
+  const { store } = await newStore(configDir);
+  await store.transition('a', 'claim', 'human', { baseline: 'abc123' });
+  await store.transition('a', 'report_deviation', 'human', { deviation: { note: 'x' } });
+  assert.deepEqual(store.summary(), { total: 2, claimed: 1, deviations: 1 });
+
+  await store.reset();
+  assert.equal(store.get('a').status, 'pending');
+  assert.equal(store.get('a').baseline, null);
+  assert.deepEqual(store.summary(), { total: 2, claimed: 0, deviations: 0 });
+  await assert.rejects(() => fs.access(path.join(configDir, STATE_FILENAME)));
+
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get('a').status, 'pending');
+});
+
 test('saved entries for unknown ids or unknown statuses are ignored', async () => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
   test.after(() => fs.rm(configDir, { recursive: true, force: true }));

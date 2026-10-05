@@ -1,0 +1,79 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const model = require('../../src/renderer/settings-model');
+
+const prefs = (overrides = {}) => ({
+  profile: { displayName: 'Ada', avatarColor: 'ocean', ...overrides.profile },
+  appearance: { theme: 'system', vibrancy: false, ...overrides.appearance },
+  environment: { pathSource: 'inherit', ...overrides.environment },
+});
+const ws = (overrides = {}) => ({ root: '/repo', commands: { test: 'npm test', lint: '', build: '' }, ...overrides });
+
+test('a page maps to the store it saves through', () => {
+  assert.equal(model.PAGE_STORES.profile, 'preferences');
+  assert.equal(model.PAGE_STORES.environment, 'preferences');
+  assert.equal(model.PAGE_STORES.commands, 'workspace');
+  assert.equal(model.PAGE_STORES.data, null);
+});
+
+test('dirtyStores() is clean when nothing changed', () => {
+  const saved = { preferences: prefs(), workspace: ws() };
+  assert.deepEqual(model.dirtyStores(saved, structuredClone(saved)), { preferences: false, workspace: false });
+});
+
+test('dirtyStores() ignores whitespace that saving would trim', () => {
+  const saved = { preferences: prefs(), workspace: ws() };
+  const draft = {
+    preferences: prefs({ profile: { displayName: '  Ada ' } }),
+    workspace: ws({ root: '/repo  ', commands: { test: ' npm test', lint: '  ', build: '' } }),
+  };
+  assert.deepEqual(model.dirtyStores(saved, draft), { preferences: false, workspace: false });
+});
+
+test('dirtyStores() flags each store independently', () => {
+  const saved = { preferences: prefs(), workspace: ws() };
+  assert.deepEqual(
+    model.dirtyStores(saved, { preferences: prefs({ appearance: { theme: 'dark' } }), workspace: ws() }),
+    { preferences: true, workspace: false },
+  );
+  assert.deepEqual(
+    model.dirtyStores(saved, { preferences: prefs(), workspace: ws({ commands: { test: 'npm test', lint: 'eslint .', build: '' } }) }),
+    { preferences: false, workspace: true },
+  );
+});
+
+test('dirtyPages() marks only the page whose slice changed', () => {
+  const saved = { preferences: prefs(), workspace: ws() };
+  const onlyName = model.dirtyPages(saved, { preferences: prefs({ profile: { displayName: 'Grace' } }), workspace: ws() });
+  assert.deepEqual(Object.entries(onlyName).filter(([, dirty]) => dirty).map(([page]) => page), ['profile']);
+
+  const onlyLint = model.dirtyPages(saved, {
+    preferences: prefs(),
+    workspace: ws({ commands: { test: 'npm test', lint: 'eslint .', build: '' } }),
+  });
+  assert.deepEqual(Object.entries(onlyLint).filter(([, dirty]) => dirty).map(([page]) => page), ['commands']);
+});
+
+test('sameValue() does not depend on key order', () => {
+  assert.ok(model.sameValue({ a: 1, b: { c: 2, d: 3 } }, { b: { d: 3, c: 2 }, a: 1 }));
+  assert.ok(!model.sameValue({ a: [1, 2] }, { a: [2, 1] }));
+});
+
+test('matchPages() matches labels and keywords, every term required', () => {
+  const entries = [
+    { page: 'profile', label: '个人资料', keywords: '名字 头像 name avatar' },
+    { page: 'preferences', label: '偏好设置', keywords: '主题 深色 theme dark' },
+    { page: 'environment', label: '运行环境', keywords: 'PATH shell nvm' },
+  ];
+  assert.deepEqual(model.matchPages(entries, ''), ['profile', 'preferences', 'environment']);
+  assert.deepEqual(model.matchPages(entries, '头像'), ['profile']);
+  assert.deepEqual(model.matchPages(entries, 'DARK'), ['preferences']);
+  assert.deepEqual(model.matchPages(entries, 'path nvm'), ['environment']);
+  assert.deepEqual(model.matchPages(entries, 'path theme'), []);
+});
+
+test('charCount() counts code points after trimming', () => {
+  assert.equal(model.charCount('  ab  '), 2);
+  assert.equal(model.charCount('😀😀'), 2);
+  assert.equal(model.charCount(undefined), 0);
+});

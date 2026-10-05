@@ -9,6 +9,8 @@ const { CHANNELS, registerIpcHandlers } = require('../src/ipc');
 const { WorkPackageStore } = require('../src/work-package-store');
 const { listTasks } = require('../src/tasks');
 const workspace = require('../src/workspace');
+const preferences = require('../src/preferences');
+const { createPathResolver } = require('../src/shell-env');
 
 const run = promisify(execFile);
 
@@ -33,14 +35,116 @@ async function harness({ withRepo = true } = {}) {
   let config = { root, commands: { test: null, lint: null, build: null } };
   const handlers = new Map();
   const store = await new WorkPackageStore(configDir).load(listTasks());
+  let prefs = preferences.defaults();
+  const changes = [];
+  const revealed = [];
+  let shellReads = 0;
+  // A fake login shell so tests never launch the user's real one.
+  const pathResolver = createPathResolver({
+    inherited: '/usr/bin:/bin',
+    read: async () => { shellReads += 1; return `/tp/shell/bin:${process.env.PATH}`; },
+  });
   registerIpcHandlers(
     { handle: (channel, handler) => handlers.set(channel, handler) },
-    { store, configDir, getConfig: () => config, setConfig: (next) => { config = next; } },
+    {
+      store, configDir, getConfig: () => config, setConfig: (next) => { config = next; },
+      getPreferences: () => prefs, setPreferences: (next) => { prefs = next; },
+      pathResolver,
+      onPreferencesChanged: (next, previous) => changes.push({ next, previous }),
+      revealPath: async (dir) => { revealed.push(dir); },
+      appVersion: '9.9.9',
+    },
   );
 
   const call = (channel, ...args) => handlers.get(channel)({}, ...args);
   const setCommands = (commands) => { config = { ...config, commands }; };
-  return { call, store, root, configDir, setCommands };
+  return { call, store, root, configDir, setCommands, changes, revealed, shellReads: () => shellReads };
+}
+
+const validPrefs = (overrides = {}) => ({
+  profile: { displayName: 'Ada Lovelace', avatarColor: 'ocean', ...overrides.profile },
+  appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
+  environment: { pathSource: 'inherit', ...overrides.environment },
+});
+
+test('preferences:set saves, returns initials, and notifies the main process', async () => {
+  const { call, configDir, changes } = await harness();
+  const { data } = await call(CHANNELS.preferencesSet, validPrefs());
+  assert.equal(data.profile.initials, 'AL');
+  assert.equal((await preferences.load(configDir)).appearance.theme, 'dark');
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0].previous.appearance.theme, 'system');
+  assert.equal((await call(CHANNELS.preferencesGet)).data.profile.displayName, 'Ada Lovelace');
+});
+
+test('preferences:set rejects a bad value without saving or notifying', async () => {
+  const { call, configDir, changes } = await harness();
+  const response = await call(CHANNELS.preferencesSet, validPrefs({ profile: { displayName: 'x'.repeat(41) } }));
+  assert.equal(response.error.code, 'name_too_long');
+  assert.equal(response.error.field, 'displayName');
+  assert.deepEqual(await preferences.load(configDir), preferences.defaults());
+  assert.equal(changes.length, 0);
+});
+
+test('environment:info previews a PATH source and falls back on shell failure', async () => {
+  const { call } = await harness();
+  const inherit = (await call(CHANNELS.environmentInfo)).data;
+  assert.equal(inherit.source, 'inherit');
+  assert.deepEqual(inherit.entries, ['/usr/bin', '/bin']);
+  assert.equal(inherit.versions.app, '9.9.9');
+
+  const login = (await call(CHANNELS.environmentInfo, { source: 'login-shell' })).data;
+  assert.equal(login.source, 'login-shell');
+  assert.equal(login.entries[0], '/tp/shell/bin');
+
+  assert.equal((await call(CHANNELS.environmentInfo, { source: 'bogus' })).error.code, 'invalid_argument');
+});
+
+test('environment:info refresh re-reads the login shell', async () => {
+  const { call, shellReads } = await harness();
+  await call(CHANNELS.environmentInfo, { source: 'login-shell' });
+  await call(CHANNELS.environmentInfo, { source: 'login-shell' });
+  assert.equal(shellReads(), 1, 'second call is cached');
+  await call(CHANNELS.environmentInfo, { source: 'login-shell', refresh: true });
+  assert.equal(shellReads(), 2);
+});
+
+test('verify:run uses the login-shell PATH once that preference is saved', async () => {
+  const { call, setCommands } = await harness();
+  setCommands({ test: { command: process.execPath, args: ['-e', 'console.log(process.env.PATH)'] } });
+  const before = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
+  assert.equal(before, '/usr/bin:/bin');
+
+  await call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }));
+  const after = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
+  assert.ok(after.startsWith('/tp/shell/bin:'), after);
+});
+
+test('data:reset-progress clears execution state but keeps config and preferences', async () => {
+  const { call, configDir, root } = await harness();
+  await call(CHANNELS.workspaceSet, { root, commands: { test: 'npm test' } });
+  await call(CHANNELS.preferencesSet, validPrefs());
+  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  assert.equal((await call(CHANNELS.dataInfo)).data.packages.claimed, 1);
+
+  const { data } = await call(CHANNELS.dataResetProgress);
+  assert.equal(data.claimed, 0);
+  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
+  assert.equal((await workspace.load(configDir)).commands.test.command, 'npm');
+  assert.equal((await preferences.load(configDir)).profile.displayName, 'Ada Lovelace');
+});
+
+test('data:reveal only ever opens the config directory', async () => {
+  const { call, configDir, revealed } = await harness();
+  // Arguments from the renderer are ignored.
+  await handlersCall(call, CHANNELS.dataReveal, '/etc');
+  assert.deepEqual(revealed, [configDir]);
+});
+
+async function handlersCall(call, channel, ...args) {
+  const response = await call(channel, ...args);
+  assert.equal(response.ok, true);
+  return response.data;
 }
 
 test('preload references every channel the main process registers', async () => {

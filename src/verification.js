@@ -93,7 +93,7 @@ function spawn(command, args, options) {
  * Executes one verification command.
  * @returns {Promise<{kind, command, exitCode, timedOut, durationMs, output, results, summary}>}
  */
-async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath } = {}) {
   const entry = config.commands?.[kind];
   if (!entry) {
     throw new VerificationError(`No ${kind} command is configured`, 'not_configured');
@@ -109,7 +109,9 @@ async function run(config, kind, { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
     timeout: timeoutMs,
     signal,
     // A test runner that inherits a TTY may emit colour codes; ask it not to.
-    env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+    // envPath (from ./shell-env.js) overrides the inherited PATH, which is
+    // minimal when the app is launched from Finder rather than a terminal.
+    env: { ...process.env, ...(envPath ? { PATH: envPath } : {}), NO_COLOR: '1', FORCE_COLOR: '0' },
   });
 
   if (error?.code === 'ENOENT') {

@@ -10,6 +10,8 @@ TaskPilot is an Electron app using plain HTML, CSS, and JavaScript (no bundler).
 - `src/tasks.js` — sample work-package data, the single source of truth until real integrations exist.
 - `src/renderer/` — UI. Build DOM with `textContent`/DOM APIs, never `innerHTML` with data. The page has a strict CSP (`script-src 'self'`, `style-src 'self'`), so no inline scripts or styles.
 - `src/renderer/icons.js` — the SVG icon set. Use `<i data-icon="name">` in markup or `icon('name')` in `renderer.js`; `tests/renderer/icons.test.js` fails on any unknown name.
+- `src/renderer/settings.js` — settings page controller; `settings-model.js` holds its pure logic (dirty tracking, search) and is tested directly. New settings pages need a nav entry, a `.settings-page` section, and an entry in `PAGE_STORES`.
+- `src/preferences.js` / `src/shell-env.js` — per-machine preferences and the login-shell PATH lookup used by verification commands.
 - `src/renderer/styles.css` — frosted-glass theme. Surfaces use the `.glass` / `.glass-strong` classes and the CSS variables at the top; light and dark follow the system.
 
 Keep automated tests under `tests/`, static files under `assets/`, and scripts under `scripts/`. Mirror the `src/` layout in `tests/`.

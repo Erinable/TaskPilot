@@ -7,6 +7,9 @@ const tasks = require('./tasks');
 const git = require('./git');
 const workspace = require('./workspace');
 const verification = require('./verification');
+const preferences = require('./preferences');
+const { createPathResolver } = require('./shell-env');
+const { STATE_FILENAME } = require('./work-package-store');
 const { label, available } = require('./work-package-status');
 
 const CHANNELS = {
@@ -22,6 +25,12 @@ const CHANNELS = {
   diffStat: 'diff:stat',
   diffFile: 'diff:file',
   verifyRun: 'verify:run',
+  preferencesGet: 'preferences:get',
+  preferencesSet: 'preferences:set',
+  environmentInfo: 'environment:info',
+  dataInfo: 'data:info',
+  dataResetProgress: 'data:reset-progress',
+  dataReveal: 'data:reveal',
 };
 
 /** Shaped like an Error but safe to send over IPC. */
@@ -80,9 +89,24 @@ function buildTaskView(task, state) {
  * @param deps.configDir where workspace.json lives
  * @param deps.getConfig/setConfig in-memory accessors for the loaded config
  * @param deps.pickDirectory optional (defaultPath) => Promise<string|null>
+ * @param deps.getPreferences/setPreferences in-memory accessors for preferences
+ * @param deps.pathResolver from shell-env.createPathResolver()
+ * @param deps.onPreferencesChanged optional (next, previous) => void, e.g. to
+ *   apply the theme to native windows
+ * @param deps.revealPath optional (dir) => Promise, opens a folder in the OS
+ * @param deps.appVersion optional, shown on the environment page
  */
 function registerIpcHandlers(ipcMain, deps) {
-  const { store, configDir, getConfig, setConfig, pickDirectory } = deps;
+  const {
+    store, configDir, getConfig, setConfig, pickDirectory,
+    getPreferences = () => preferences.defaults(),
+    setPreferences = () => {},
+    pathResolver = createPathResolver(),
+    onPreferencesChanged, revealPath, appVersion,
+  } = deps;
+
+  /** The PATH verification commands run with, per the user's preference. */
+  const commandPath = () => pathResolver.resolve(getPreferences().environment.pathSource);
 
   const failWith = (message, code, field) => {
     const error = new Error(message);
@@ -196,14 +220,66 @@ function registerIpcHandlers(ipcMain, deps) {
   // writing anything. Lets the settings page warn before the user commits.
   ipcMain.handle(CHANNELS.workspaceCheck, wrap(async (_event, form) => {
     const { config, info } = await validateForm(form);
+    const { path: envPath } = await commandPath();
     const commands = {};
     for (const kind of workspace.COMMAND_KINDS) {
       const entry = config.commands[kind];
       commands[kind] = entry
-        ? { configured: true, resolved: await workspace.resolveExecutable(entry.command, { cwd: config.root }) }
+        // Resolve against the PATH commands will actually run with.
+        ? { configured: true, resolved: await workspace.resolveExecutable(entry.command, { cwd: config.root, envPath }) }
         : { configured: false, resolved: null };
     }
     return { root: config.root, normalizedFrom: info.normalizedFrom, repo: info.repo, commands };
+  }));
+
+  ipcMain.handle(CHANNELS.preferencesGet, wrap(() => preferences.toView(getPreferences())));
+
+  ipcMain.handle(CHANNELS.preferencesSet, wrap(async (_event, raw) => {
+    const previous = getPreferences();
+    const saved = await preferences.save(configDir, raw);
+    setPreferences(saved);
+    // Switching the PATH source should take effect without a restart.
+    if (saved.environment.pathSource !== previous.environment.pathSource) pathResolver.refresh();
+    onPreferencesChanged?.(saved, previous);
+    return preferences.toView(saved);
+  }));
+
+  // Reports which PATH verification commands will use and what it contains.
+  // `source` lets the page preview a choice before saving it.
+  ipcMain.handle(CHANNELS.environmentInfo, wrap(async (_event, options) => {
+    const requested = options?.source ?? getPreferences().environment.pathSource;
+    if (!preferences.PATH_SOURCES.includes(requested)) failWith(`Unknown PATH source: ${requested}`, 'invalid_argument');
+    if (options?.refresh === true) pathResolver.refresh();
+    const resolved = await pathResolver.resolve(requested);
+    const entries = resolved.path.split(path.delimiter).filter(Boolean);
+    return {
+      requested,
+      source: resolved.source,
+      error: resolved.error,
+      shell: process.env.SHELL ?? null,
+      entries,
+      inheritedCount: pathResolver.inherited.split(path.delimiter).filter(Boolean).length,
+      platform: process.platform,
+      versions: { app: appVersion ?? null, electron: process.versions.electron ?? null, node: process.versions.node },
+    };
+  }));
+
+  ipcMain.handle(CHANNELS.dataInfo, wrap(() => ({
+    configDir,
+    files: [workspace.CONFIG_FILENAME, preferences.PREFERENCES_FILENAME, STATE_FILENAME],
+    packages: store.summary(),
+  })));
+
+  // Only resets execution progress; workspace config and preferences stay.
+  ipcMain.handle(CHANNELS.dataResetProgress, wrap(async () => {
+    await store.reset();
+    return store.summary();
+  }));
+
+  ipcMain.handle(CHANNELS.dataReveal, wrap(async () => {
+    if (!revealPath) failWith('Opening the folder is unavailable', 'unsupported');
+    await revealPath(configDir);
+    return true;
   }));
 
   ipcMain.handle(CHANNELS.workspacePickRoot, wrap(async () => {
@@ -239,7 +315,7 @@ function registerIpcHandlers(ipcMain, deps) {
       error.code = 'invalid_argument';
       throw error;
     }
-    const result = await verification.run(getConfig(), kind);
+    const result = await verification.run(getConfig(), kind, { envPath: (await commandPath()).path });
     if (!taskId) return result;
     const task = tasks.getTask(requireString(taskId, 'taskId'));
     return { ...result, acceptance: verification.matchAcceptance(task.acceptance, result.results) };

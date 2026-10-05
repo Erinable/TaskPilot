@@ -1,21 +1,42 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require('electron');
 const path = require('node:path');
 const { registerIpcHandlers } = require('./ipc');
 const { WorkPackageStore } = require('./work-package-store');
 const { listTasks } = require('./tasks');
 const workspace = require('./workspace');
+const preferences = require('./preferences');
+const { createPathResolver } = require('./shell-env');
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
 const CANVAS = { light: '#eef1f8', dark: '#0d0f16' };
+const canvasColor = () => (nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light);
 
-function createWindow() {
+/**
+ * Native vibrancy (macOS only) lets the desktop show through the window. The
+ * page's own backdrop is made transparent at the same time (see the
+ * `vibrancy` class in styles.css), otherwise it would cover the effect.
+ */
+function applyAppearance(window, appearance) {
+  if (process.platform !== 'darwin') return;
+  if (appearance.vibrancy) {
+    window.setVibrancy('under-window');
+    window.setBackgroundColor('#00000000');
+  } else {
+    window.setVibrancy(null);
+    window.setBackgroundColor(canvasColor());
+  }
+}
+
+function createWindow(appearance) {
+  const vibrant = process.platform === 'darwin' && appearance.vibrancy;
   const window = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1100,
     minHeight: 720,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light,
+    backgroundColor: vibrant ? '#00000000' : canvasColor(),
+    ...(vibrant ? { vibrancy: 'under-window', visualEffectState: 'followWindow' } : {}),
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 20, y: 22 },
     webPreferences: {
@@ -27,12 +48,14 @@ function createWindow() {
 
   // Keep the window background in step with a live light/dark switch.
   const syncBackground = () => {
-    window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light);
+    if (!window.isDestroyed() && !window.__taskpilotVibrant) window.setBackgroundColor(canvasColor());
   };
+  window.__taskpilotVibrant = vibrant;
   nativeTheme.on('updated', syncBackground);
   window.on('closed', () => nativeTheme.off('updated', syncBackground));
 
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  return window;
 }
 
 app.whenReady().then(async () => {
@@ -42,13 +65,35 @@ app.whenReady().then(async () => {
 
   const configDir = app.getPath('userData');
   let config = await workspace.load(configDir);
+  let prefs = await preferences.load(configDir);
   const store = await new WorkPackageStore(configDir).load(listTasks());
+
+  // themeSource drives prefers-color-scheme in every window, so the CSS
+  // follows the setting without the page needing to know about it.
+  nativeTheme.themeSource = prefs.appearance.theme;
 
   registerIpcHandlers(ipcMain, {
     store,
     configDir,
     getConfig: () => config,
     setConfig: (next) => { config = next; },
+    getPreferences: () => prefs,
+    setPreferences: (next) => { prefs = next; },
+    pathResolver: createPathResolver(),
+    appVersion: app.getVersion(),
+    onPreferencesChanged: (next) => {
+      nativeTheme.themeSource = next.appearance.theme;
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.__taskpilotVibrant = process.platform === 'darwin' && next.appearance.vibrancy;
+        applyAppearance(window, next.appearance);
+      }
+    },
+    // openPath only receives configDir (app.getPath('userData')), never a
+    // path from the renderer.
+    revealPath: async (dir) => {
+      const failure = await shell.openPath(dir);
+      if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
+    },
     pickDirectory: async (defaultPath) => {
       const options = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
       const parent = BrowserWindow.getFocusedWindow();
@@ -57,10 +102,10 @@ app.whenReady().then(async () => {
     },
   });
 
-  createWindow();
+  createWindow(prefs.appearance);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(prefs.appearance);
   });
 });
 

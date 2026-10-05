@@ -50,6 +50,36 @@
       ],
     },
 
+    user: { shapes: [['circle', { cx: 12, cy: 8, r: 3.75 }], ['path', { d: 'M4.5 20a7.5 7.5 0 0 1 15 0' }]] },
+    sliders: {
+      shapes: [
+        ['path', { d: 'M5 4v6M5 14v6M12 4v3M12 11v9M19 4v9M19 17v3' }],
+        ['path', { d: 'M3 12h4M10 9h4M17 15h4' }],
+      ],
+    },
+    laptop: { shapes: [['rect', { x: 4.5, y: 5, width: 15, height: 10.5, rx: 1.5 }], ['path', { d: 'M2.5 19h19' }]] },
+    monitor: { shapes: [['rect', { x: 3, y: 4, width: 18, height: 12.5, rx: 2 }], ['path', { d: 'M8.5 20.5h7M12 16.5v4' }]] },
+    cpu: {
+      shapes: [
+        ['rect', { x: 6, y: 6, width: 12, height: 12, rx: 2 }], ['rect', { x: 9.5, y: 9.5, width: 5, height: 5, rx: 0.5 }],
+        ['path', { d: 'M9.5 3v3M14.5 3v3M9.5 18v3M14.5 18v3M3 9.5h3M3 14.5h3M18 9.5h3M18 14.5h3' }],
+      ],
+    },
+    database: {
+      shapes: [
+        ['path', { d: 'M4.5 6c0-1.7 3.4-3 7.5-3s7.5 1.3 7.5 3-3.4 3-7.5 3-7.5-1.3-7.5-3z' }],
+        ['path', { d: 'M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3' }],
+      ],
+    },
+    sun: { shapes: [['circle', { cx: 12, cy: 12, r: 4 }], ['path', { d: 'M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4' }]] },
+    moon: { shapes: [['path', { d: 'M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z' }]] },
+    trash: {
+      shapes: [
+        ['path', { d: 'M4 7h16M9.5 7V4.5h5V7' }],
+        ['path', { d: 'M6 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5L18 7M10 11v6M14 11v6' }],
+      ],
+    },
+
     // Status and feedback
     check: { shapes: [['path', { d: 'm5 12.5 4.5 4.5L19 7.5' }]] },
     x: { shapes: [['path', { d: 'M6 6l12 12M18 6 6 18' }]] },

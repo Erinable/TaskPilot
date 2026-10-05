@@ -31,4 +31,19 @@ contextBridge.exposeInMainWorld('taskpilot', {
   verify: {
     run: (kind, taskId) => invoke('verify:run', kind, taskId),
   },
+
+  preferences: {
+    get: () => invoke('preferences:get'),
+    set: (prefs) => invoke('preferences:set', prefs),
+  },
+
+  environment: {
+    info: (options) => invoke('environment:info', options),
+  },
+
+  data: {
+    info: () => invoke('data:info'),
+    resetProgress: () => invoke('data:reset-progress'),
+    reveal: () => invoke('data:reveal'),
+  },
 });

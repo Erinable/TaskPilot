@@ -23,6 +23,10 @@ const ERROR_HINTS = {
   shell_syntax: '不支持 shell 语法，请改用 package.json 脚本。',
   unterminated_quote: '引号没有闭合。',
   invalid_command: '命令格式不正确。',
+  name_too_long: '最多 40 个字符。',
+  invalid_name: '名字不能包含控制字符。',
+  invalid_choice: '选项无效。',
+  open_failed: '系统无法打开这个目录。',
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -157,9 +161,132 @@ function showView(name) {
   $('#settingsLink').classList.toggle('active', name === 'settings');
 }
 
-function showQueue() {
+/**
+ * Leaving settings with unsaved edits asks first. Resolves true when it is
+ * fine to navigate away.
+ */
+async function confirmLeaveSettings() {
+  if (settingsView.hidden || !window.TaskPilotSettings?.hasUnsavedChanges()) return true;
+  const choice = await confirmAction({
+    title: '保存修改？',
+    body: '设置里有未保存的修改。离开后这些修改会丢失。',
+    accept: '保存',
+    alternate: '不保存',
+  });
+  if (choice === 'accept') return window.TaskPilotSettings.saveAll();
+  if (choice === 'alternate') {
+    window.TaskPilotSettings.discardAll();
+    return true;
+  }
+  return false;
+}
+
+async function showQueue() {
+  if (!(await confirmLeaveSettings())) return;
   current = null;
   showView('queue');
+}
+
+function showSettings(page) {
+  current = null;
+  window.TaskPilotSettings.open(page);
+}
+
+/* Profile and appearance */
+
+let profile = { displayName: '', avatarColor: 'sunset', initials: '' };
+const AVATAR_COLOR_NAMES = ['sunset', 'ocean', 'violet', 'forest', 'graphite'];
+
+/** Avatar text is derived on the client too, so previews follow typing. */
+function initialsOf(name) {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return '';
+  const words = trimmed.split(/[\s._-]+/).filter(Boolean);
+  const first = [...words[0]][0];
+  if (/[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(first)) return first;
+  const last = words.length > 1 ? [...words[words.length - 1]][0] : '';
+  return (first + last).toUpperCase();
+}
+
+/** Paints an avatar element: initials when there is a name, a user icon otherwise. */
+function paintAvatar(node, { displayName, avatarColor }) {
+  const text = initialsOf(displayName);
+  node.classList.remove(...AVATAR_COLOR_NAMES, 'empty');
+  node.classList.add(AVATAR_COLOR_NAMES.includes(avatarColor) ? avatarColor : 'sunset');
+  if (text) node.textContent = text;
+  else {
+    node.classList.add('empty');
+    node.replaceChildren(icon('user'));
+  }
+}
+
+function renderGreetingName() {
+  $('#greetingName').textContent = profile.displayName ? `，${profile.displayName}` : '';
+}
+
+/** Applies saved preferences to everything outside the settings page. */
+function applyPreferences(prefs) {
+  profile = prefs.profile;
+  paintAvatar($('#topAvatar'), profile);
+  paintAvatar($('#navAvatar'), profile);
+  renderGreetingName();
+  // The main process sets nativeTheme.themeSource, which drives the CSS
+  // colour scheme; the page only needs to know about vibrancy.
+  document.body.classList.toggle('vibrancy', prefs.appearance.vibrancy && /mac/i.test(navigator.platform));
+}
+
+/* Confirm dialog */
+
+const confirmModal = $('#confirmModal');
+let resolveConfirm = null;
+
+/**
+ * Promise-based confirm. Resolves true/false, or 'accept' / 'alternate' /
+ * false when an `alternate` button is offered.
+ */
+function confirmAction({ title, body, accept, alternate, danger = false }) {
+  $('#confirmTitle').textContent = title;
+  $('#confirmBody').textContent = body;
+  const acceptButton = $('#confirmAccept');
+  acceptButton.textContent = accept;
+  acceptButton.classList.toggle('danger', danger);
+  $('#confirmBadge').classList.toggle('neutral', !danger);
+
+  // The alternate button is created on demand so the default dialog stays two-button.
+  confirmModal.querySelector('.confirm-alternate')?.remove();
+  if (alternate) {
+    const alt = el('button', 'secondary-button confirm-alternate', alternate);
+    alt.type = 'button';
+    alt.addEventListener('click', () => settleConfirm('alternate'));
+    acceptButton.before(alt);
+  }
+
+  lastFocused = document.activeElement;
+  confirmModal.hidden = false;
+  $('#confirmCancel').focus();
+  return new Promise((resolve) => {
+    resolveConfirm = (value) => resolve(alternate ? value : value === 'accept');
+  });
+}
+
+function settleConfirm(value) {
+  if (confirmModal.hidden) return;
+  confirmModal.hidden = true;
+  lastFocused?.focus();
+  const resolve = resolveConfirm;
+  resolveConfirm = null;
+  resolve?.(value);
+}
+
+$('#confirmAccept').addEventListener('click', () => settleConfirm('accept'));
+$('#confirmCancel').addEventListener('click', () => settleConfirm(false));
+confirmModal.addEventListener('click', (event) => {
+  if (event.target === confirmModal) settleConfirm(false);
+});
+
+async function reloadQueue() {
+  tasks = await call(window.taskpilot.listTasks());
+  renderTasks();
 }
 
 /** Reflects workspace status in the top bar and sidebar card. */
@@ -190,138 +317,6 @@ async function refreshWorkspaceStatus() {
     renderWorkspaceStatus(null);
     $('#syncDetail').textContent = describeError(error);
     return null;
-  }
-}
-
-const settingsRoot = $('#settingsRoot');
-const commandInputs = [...document.querySelectorAll('#settingsForm [data-kind]')];
-const STATUS_IDS = { test: '#statusTest', lint: '#statusLint', build: '#statusBuild' };
-
-function readSettingsForm() {
-  const commands = {};
-  for (const input of commandInputs) commands[input.dataset.kind] = input.value;
-  return { root: settingsRoot.value, commands };
-}
-
-const FIELD_STATUS_ICONS = { ok: 'check-circle', warn: 'alert', error: 'x-circle' };
-
-function setFieldStatus(input, status, tone, message) {
-  status.className = `field-status${tone ? ` ${tone}` : ''}`;
-  status.replaceChildren();
-  if (message) {
-    if (FIELD_STATUS_ICONS[tone]) status.append(icon(FIELD_STATUS_ICONS[tone]));
-    status.append(el('span', null, message));
-  }
-  input.setAttribute('aria-invalid', String(tone === 'error'));
-}
-
-function clearSettingsStatus() {
-  setFieldStatus(settingsRoot, $('#rootStatus'), null, '');
-  for (const input of commandInputs) setFieldStatus(input, $(STATUS_IDS[input.dataset.kind]), null, '');
-}
-
-/** Shows a validation failure next to the field it belongs to. */
-function showSettingsError(error) {
-  const kind = error.field;
-  if (kind === 'root') {
-    setFieldStatus(settingsRoot, $('#rootStatus'), 'error', describeError(error));
-    settingsRoot.focus();
-  } else if (STATUS_IDS[kind]) {
-    const input = commandInputs.find((candidate) => candidate.dataset.kind === kind);
-    setFieldStatus(input, $(STATUS_IDS[kind]), 'error', describeError(error));
-    input.focus();
-  } else {
-    showToast(`设置无效：${describeError(error)}`);
-  }
-}
-
-function renderSettingsCheck(result) {
-  clearSettingsStatus();
-  if (!result.root) {
-    setFieldStatus(settingsRoot, $('#rootStatus'), 'warn', '未配置仓库，diff 和验证不可用。');
-  } else {
-    const { branch, commit, dirty, changedFiles } = result.repo;
-    let message = `${branch ?? 'detached'} · ${commit.slice(0, 8)} · ${dirty ? `${changedFiles} 个文件有改动` : '工作区干净'}`;
-    if (result.normalizedFrom) message += `。所选目录在仓库内，已改用仓库根目录 ${result.root}`;
-    setFieldStatus(settingsRoot, $('#rootStatus'), 'ok', message);
-    settingsRoot.value = result.root;
-  }
-  for (const input of commandInputs) {
-    const kind = input.dataset.kind;
-    const entry = result.commands[kind];
-    const status = $(STATUS_IDS[kind]);
-    if (!entry.configured) setFieldStatus(input, status, null, '未配置');
-    else if (entry.resolved) setFieldStatus(input, status, 'ok', entry.resolved);
-    // A PATH miss is a warning, not an error: the app's PATH can differ from
-    // the user's shell (see the note on the page).
-    else setFieldStatus(input, status, 'warn', '在 PATH 中找不到这个可执行文件，运行时可能失败。可以改用绝对路径。');
-  }
-}
-
-async function loadSettings() {
-  clearSettingsStatus();
-  try {
-    const form = await call(window.taskpilot.workspace.get());
-    settingsRoot.value = form.root ?? '';
-    for (const input of commandInputs) input.value = form.lines[input.dataset.kind] ?? '';
-  } catch (error) {
-    showToast(`读取设置失败：${describeError(error)}`);
-  }
-}
-
-async function showSettings() {
-  current = null;
-  showView('settings');
-  await loadSettings();
-  settingsRoot.focus();
-}
-
-/** Runs `action` with the settings buttons disabled to block double submits. */
-async function withSettingsBusy(action) {
-  const buttons = [$('#checkSettings'), $('#saveSettings'), $('#pickRoot')];
-  buttons.forEach((button) => { button.disabled = true; });
-  try {
-    await action();
-  } finally {
-    buttons.forEach((button) => { button.disabled = false; });
-  }
-}
-
-async function checkSettings() {
-  await withSettingsBusy(async () => {
-    clearSettingsStatus();
-    try {
-      renderSettingsCheck(await call(window.taskpilot.workspace.check(readSettingsForm())));
-    } catch (error) {
-      showSettingsError(error);
-    }
-  });
-}
-
-async function saveSettings() {
-  await withSettingsBusy(async () => {
-    clearSettingsStatus();
-    try {
-      const form = readSettingsForm();
-      const check = await call(window.taskpilot.workspace.check(form));
-      await call(window.taskpilot.workspace.set(form));
-      renderSettingsCheck(check);
-      await refreshWorkspaceStatus();
-      showToast('设置已保存。');
-    } catch (error) {
-      showSettingsError(error);
-    }
-  });
-}
-
-async function pickRoot() {
-  try {
-    const picked = await call(window.taskpilot.workspace.pickRoot());
-    if (!picked) return;
-    settingsRoot.value = picked;
-    await checkSettings();
-  } catch (error) {
-    showToast(`无法打开目录选择器：${describeError(error)}`);
   }
 }
 
@@ -567,8 +562,7 @@ async function reloadCurrent() {
   current = await call(window.taskpilot.getTask(current.id));
   renderExecution(current);
   await refreshDiff();
-  tasks = await call(window.taskpilot.listTasks());
-  renderTasks();
+  await reloadQueue();
 }
 
 const VERIFY_LABELS = { test: '测试', lint: 'Lint', build: 'Build' };
@@ -708,9 +702,9 @@ async function runTransition(name) {
   }
 }
 
-taskList.addEventListener('click', (event) => {
+taskList.addEventListener('click', async (event) => {
   const item = event.target.closest('.task-item');
-  if (item) openExecution(item.dataset.taskId);
+  if (item && (await confirmLeaveSettings())) openExecution(item.dataset.taskId);
 });
 
 $('#backToQueue').addEventListener('click', showQueue);
@@ -746,47 +740,61 @@ deviationModal.addEventListener('click', (event) => {
   if (event.target === deviationModal) closeDeviationForm();
 });
 
+/** Keeps Tab inside an open dialog. */
+function trapFocus(event, container) {
+  const focusable = [...container.querySelectorAll('button:not([hidden]), select, textarea, input')]
+    .filter((node) => !node.disabled);
+  if (focusable.length === 0) return;
+  const [first] = focusable;
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 document.addEventListener('keydown', (event) => {
-  if (!deviationModal.hidden) {
+  if (!confirmModal.hidden) {
+    if (event.key === 'Escape') settleConfirm(false);
+    else if (event.key === 'Tab') trapFocus(event, confirmModal);
+  } else if (!deviationModal.hidden) {
     if (event.key === 'Escape') closeDeviationForm();
-    else if (event.key === 'Tab') {
-      const focusable = [...deviationModal.querySelectorAll('button, select, textarea')];
-      const [first] = focusable;
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
+    else if (event.key === 'Tab') trapFocus(event, deviationModal);
   } else if (event.key === 'Escape' && !executionView.hidden) {
     showQueue();
-  }
-});
-
-$('#queueNav').addEventListener('click', showQueue);
-$('#settingsLink').addEventListener('click', showSettings);
-$('#workspacePicker').addEventListener('click', showSettings);
-$('#workspacePicker').addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' || event.key === ' ') {
+  } else if ((event.metaKey || event.ctrlKey) && event.key === 's' && !settingsView.hidden) {
+    event.preventDefault();
+    window.TaskPilotSettings.saveAll();
+  } else if ((event.metaKey || event.ctrlKey) && event.key === ',') {
     event.preventDefault();
     showSettings();
   }
 });
-$('#settingsForm').addEventListener('submit', (event) => {
-  event.preventDefault();
-  saveSettings();
+
+$('#queueNav').addEventListener('click', showQueue);
+$('#settingsLink').addEventListener('click', () => showSettings());
+$('#topAvatar').addEventListener('click', () => showSettings('profile'));
+$('#workspacePicker').addEventListener('click', () => showSettings('repository'));
+$('#workspacePicker').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    showSettings('repository');
+  }
 });
-$('#checkSettings').addEventListener('click', checkSettings);
-$('#pickRoot').addEventListener('click', pickRoot);
 
 async function init() {
   renderHeading();
   try {
-    tasks = await call(window.taskpilot.listTasks());
-    renderTasks();
+    applyPreferences(await call(window.taskpilot.preferences.get()));
+  } catch (error) {
+    console.error('Failed to load preferences', error);
+    paintAvatar($('#topAvatar'), profile);
+  }
+  try {
+    await reloadQueue();
   } catch (error) {
     console.error('Failed to load tasks', error);
     showToast(`工作包加载失败：${describeError(error)}`);
