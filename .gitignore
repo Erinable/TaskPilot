@@ -6,3 +6,8 @@ node_modules/
 dist/
 out/
 evals/product-lead/reports/
+
+# TaskPilot check reports written into the workspace
+.taskpilot/
+# Local preview server config
+.claude/launch.json
