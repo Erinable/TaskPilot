@@ -1,5 +1,6 @@
 // Runs Architect's two steps (select files, summarize) for a requirement,
-// and QA's review of a submitted work package.
+// QA's review of a submitted work package, and Architect's ruling on a
+// reported deviation.
 //
 // Shared by the app (ipc.js) and the eval harness, so both exercise the same
 // code path. Failure here is never fatal to the requirement: Product Lead
@@ -176,4 +177,36 @@ async function planEnvironment({ root, runAgent, envPath, signal, failure = null
   return { facts, blockers: found, plan: envSteward.validatePlan(output, facts), costUsd: costUsd ?? 0 };
 }
 
-module.exports = { summarizeForRequirement, reviewWorkPackage, planEnvironment, throwIfCancelled };
+/**
+ * Architect's ruling on the package's latest deviation. Reads the files the
+ * package and its deviations name (tracked files at HEAD only, through
+ * repo-reader), then asks for dismiss or replan.
+ *
+ * @param task effective work package definition
+ * @param deps.deviations every deviation on the package; the last is judged
+ * @param deps.mustReplan the developer contested an earlier dismissal
+ * @returns {{decision, reason, changes, revision, read, skipped, costUsd}}
+ */
+async function adjudicateDeviation(task, {
+  root, deviations, mustReplan = false, runAgent, interfaces = null, envPath, signal, readFiles = readTracked,
+}) {
+  throwIfCancelled(signal);
+  const wanted = [...task.fileScope, ...deviations.map((d) => d.filePath).filter(Boolean)];
+  const { files: sources, skipped } = root ? await readFiles(root, wanted) : { files: [], skipped: [] };
+  throwIfCancelled(signal);
+  const { output, costUsd } = await runAgent({
+    prompt: architect.adjudicatePrompt({ task, deviations, mustReplan, interfaces, sources, skipped }),
+    systemPrompt: architect.ADJUDICATE_SYSTEM_PROMPT,
+    schema: architect.ADJUDICATE_SCHEMA,
+    envPath,
+    signal,
+  });
+  return {
+    ...architect.validateAdjudication(output, { mustReplan }),
+    read: sources.map((s) => s.path),
+    skipped,
+    costUsd: costUsd ?? 0,
+  };
+}
+
+module.exports = { summarizeForRequirement, reviewWorkPackage, adjudicateDeviation, planEnvironment, throwIfCancelled };

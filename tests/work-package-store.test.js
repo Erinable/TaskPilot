@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { WorkPackageStore, STATE_FILENAME } = require('../src/work-package-store');
+const { WorkPackageStore, STATE_FILENAME, humanTransitions } = require('../src/work-package-store');
 
 const SAMPLE = [
   { id: 'a', status: 'pending', steps: ['one', 'two'] },
@@ -166,7 +166,7 @@ const reviewResult = (passed) => ({
   costUsd: 0.01,
 });
 
-test('a passing review moves the package to acceptance as the agent', async () => {
+test('a clean pass goes straight to done; a pass with attention waits for the human', async () => {
   const { store } = await newStore();
   await assert.rejects(() => store.beginReview('a'), { code: 'invalid_state' });
   await inReview(store);
@@ -175,10 +175,111 @@ test('a passing review moves the package to acceptance as the agent', async () =
   await assert.rejects(() => store.beginReview('a'), { code: 'review_running' });
 
   const done = await store.completeReview('a', reviewResult(true));
-  assert.equal(done.status, 'accepting');
+  assert.equal(done.status, 'done');
   assert.equal(done.review.status, 'passed');
   assert.equal(done.review.costUsd, 0.01);
   await assert.rejects(() => store.completeReview('a', reviewResult(true)), { code: 'review_not_running' });
+
+  const { store: other } = await newStore();
+  await inReview(other);
+  await other.beginReview('a');
+  const waiting = await other.completeReview('a', { ...reviewResult(true), attention: [{ kind: 'test', reason: 'no_baseline' }] });
+  assert.equal(waiting.status, 'accepting');
+  assert.deepEqual(humanTransitions(waiting).sort(), ['acceptance_rejected', 'accepted']);
+  const accepted = await other.transition('a', 'accepted', 'human');
+  assert.equal(accepted.status, 'done');
+  assert.equal(accepted.review.humanVerdict, 'accepted');
+});
+
+/* Deviation adjudication */
+
+const dismissal = { decision: 'dismiss', reason: '用 `findByEmail()` 即可', changes: [], revision: null, read: ['src/x.ts'], skipped: [], costUsd: 0.02 };
+const replan = {
+  decision: 'replan',
+  reason: '接口已改名',
+  changes: ['步骤 2 改用 `findUser()`'],
+  revision: { steps: ['新步骤'], fileScope: ['src/y.ts'], acceptance: [{ text: '新条件' }] },
+  read: [], skipped: [], costUsd: 0.03,
+};
+
+async function inDeviation(store) {
+  await store.transition('a', 'claim', 'human', { baseline: 'c1' });
+  await store.setStepDone('a', 0, true);
+  await store.transition('a', 'report_deviation', 'human', { deviation: { note: '接口不存在' } });
+  await store.beginAdjudication('a');
+}
+
+test('a dismissal returns the package with progress intact and can be contested once', async () => {
+  const { store } = await newStore();
+  await assert.rejects(() => store.beginAdjudication('a'), { code: 'invalid_state' });
+  await inDeviation(store);
+  await assert.rejects(() => store.beginAdjudication('a'), { code: 'adjudication_running' });
+
+  const dismissed = await store.completeAdjudication('a', dismissal);
+  assert.equal(dismissed.status, 'in_progress');
+  assert.equal(dismissed.baseline, 'c1');
+  assert.deepEqual(dismissed.completedSteps, [0]);
+  assert.equal(dismissed.deviations[0].resolution.decision, 'dismiss');
+  assert.ok(humanTransitions(dismissed).includes('override_dismissal'));
+
+  const contested = await store.transition('a', 'override_dismissal', 'human');
+  assert.equal(contested.status, 'deviation');
+  assert.equal(contested.deviations[0].resolution.contested, true);
+  const rerun = await store.beginAdjudication('a');
+  assert.equal(rerun.adjudication.mustReplan, true);
+  // Architect cannot dismiss the same deviation twice.
+  await assert.rejects(() => store.completeAdjudication('a', dismissal), { code: 'invalid_state' });
+  const replanned = await store.completeAdjudication('a', replan);
+  assert.equal(replanned.deviations[0].resolution.afterContest, true);
+  assert.ok(!humanTransitions({ ...replanned, status: 'in_progress' }).includes('override_dismissal'));
+});
+
+test('a replan swaps the definition, resets execution, and can be reverted until claimed', async () => {
+  const { store, configDir } = await newStore();
+  await inDeviation(store);
+  const replanned = await store.completeAdjudication('a', replan);
+  assert.equal(replanned.status, 'pending');
+  assert.equal(replanned.baseline, null);
+  assert.deepEqual(replanned.completedSteps, []);
+  assert.equal(replanned.revision.version, 1);
+  assert.deepEqual(store.effective(SAMPLE[0]).steps, ['新步骤']);
+  assert.deepEqual(store.effective(SAMPLE[0]).fileScope, ['src/y.ts']);
+  assert.ok(humanTransitions(replanned).includes('revert_replan'));
+
+  // The revision survives a restart.
+  const { store: reloaded } = await newStore(configDir);
+  assert.deepEqual(reloaded.effective(SAMPLE[0]).steps, ['新步骤']);
+
+  const reverted = await store.transition('a', 'revert_replan', 'human');
+  assert.equal(reverted.status, 'in_progress');
+  assert.equal(reverted.baseline, 'c1');
+  assert.deepEqual(reverted.completedSteps, [0]);
+  assert.equal(reverted.revision, null);
+  assert.equal(reverted.deviations[0].resolution.reverted, true);
+  assert.deepEqual(store.effective(SAMPLE[0]).steps, ['one', 'two']);
+  await assert.rejects(() => store.transition('a', 'revert_replan', 'human'), { code: 'not_allowed' });
+});
+
+test('claiming a replanned package drops the undo', async () => {
+  const { store } = await newStore();
+  await inDeviation(store);
+  await store.completeAdjudication('a', replan);
+  const claimed = await store.transition('a', 'claim', 'human', { baseline: 'c2' });
+  assert.equal(claimed.replanUndo, null);
+  await store.transition('a', 'release', 'human');
+  await assert.rejects(() => store.transition('a', 'revert_replan', 'human'), { code: 'invalid_state' });
+});
+
+test('a failed adjudication keeps the deviation, and an interrupted one fails on reload', async () => {
+  const { store, configDir } = await newStore();
+  await inDeviation(store);
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get('a').adjudication.status, 'failed');
+  assert.equal(reloaded.get('a').adjudication.error.code, 'agent_interrupted');
+
+  const failed = await store.failAdjudication('a', Object.assign(new Error('boom'), { code: 'agent_timeout' }));
+  assert.equal(failed.status, 'deviation');
+  assert.equal(failed.adjudication.error.code, 'agent_timeout');
 });
 
 test('a rejected review sends the package back and keeps the report', async () => {

@@ -203,8 +203,12 @@
                   <div class="acceptance-list" id="execAcceptance"></div>
                 </section>
 
-                <section class="panel glass" id="deviationPanel" hidden>
-                  <div class="panel-heading"><div class="panel-title"><span class="panel-icon danger"><i data-icon="flag"></i></span><div><h2>已报告的偏差</h2><p>AI 团队正在重新评估</p></div></div></div>
+                <section class="panel glass" id="deviationPanel" hidden aria-live="polite">
+                  <div class="panel-heading">
+                    <div class="panel-title"><span class="panel-icon danger" id="deviationIcon"><i data-icon="flag"></i></span><div><h2>偏差与裁决</h2><p id="deviationHint"></p></div></div>
+                    <div class="review-actions" id="deviationActions"></div>
+                  </div>
+                  <div class="deviation-revision" id="deviationRevision" hidden></div>
                   <div class="deviation-list" id="execDeviations"></div>
                 </section>
               </div>

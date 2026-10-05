@@ -111,8 +111,15 @@ const SUMMARY_OUTPUT = {
   conventions: ['测试放在 tests/ 下'],
   gaps: [],
 };
+const ADJUDICATE_REPLAN = {
+  decision: 'replan',
+  reason: '用例文件路径不对',
+  changes: ['文件范围改为 `tests/auth/login.test.ts`'],
+  revision: { steps: ['在 `tests/auth/login.test.ts` 添加用例。'], fileScope: ['tests/auth/login.test.ts'], acceptance: [{ text: '用例通过' }] },
+};
 /** Which agent step a schema belongs to. */
 const stepOf = (schema) => schema.properties.verdict ? 'review'
+  : schema.properties.decision ? 'adjudicate'
   : schema.properties.install ? 'env'
   : schema.properties.packages ? 'plan'
   : schema.properties.questions ? 'clarify'
@@ -127,6 +134,7 @@ const fakeAgent = (overrides = {}) => async ({ schema }) => {
     plan: () => overrides.plan ?? PLAN_OUTPUT,
     review: () => overrides.review ?? QA_PASS,
     env: () => overrides.env ?? ENV_PLAN,
+    adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
   }[stepOf(schema)]();
   if (output instanceof Error) throw output;
   return { output, costUsd: 0.02 };
@@ -839,4 +847,103 @@ test('review: without a baseline the same failure rejects', async () => {
   const task = await settleReview(h.call, 'auth-edge-tests');
   assert.equal(task.status, 'in_progress');
   assert.equal(task.review.checks[0].reason, 'no_baseline');
+});
+
+/* Deviations: Architect rules, the human can override */
+
+/** Polls until the package's adjudication leaves 'running'. */
+async function settleAdjudication(call, id) {
+  for (let i = 0; i < 400; i += 1) {
+    const { data } = await call(CHANNELS.getTask, id);
+    if (data.adjudication?.status !== 'running') return data;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('adjudication never settled');
+}
+
+const reportDeviation = async ({ call }) => {
+  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  return call(CHANNELS.transition, 'auth-edge-tests', 'report_deviation', {
+    deviation: { note: '测试文件应该叫 login.test.ts', filePath: 'src/auth/application/login-user.ts' },
+  });
+};
+
+test('deviation: Architect reads the code and its replan becomes the package, which the human can revert', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  const reported = await reportDeviation(h);
+  assert.equal(reported.data.adjudication.status, 'running');
+
+  let task = await settleAdjudication(h.call, 'auth-edge-tests');
+  assert.equal(task.status, 'pending');
+  assert.deepEqual(task.fileScope, ['tests/auth/login.test.ts']);
+  assert.equal(task.revision.version, 1);
+  assert.ok(task.humanTransitions.includes('revert_replan'));
+  // The file named in the deviation was read from git and sent to Architect.
+  const prompt = callFor(h.agentCalls, 'adjudicate').prompt;
+  assert.match(prompt, /<file path="src\/auth\/application\/login-user\.ts">\nexport \{\};/);
+  assert.match(prompt, /D1 \[file src\/auth\/application\/login-user\.ts\]: 测试文件应该叫 login\.test\.ts/);
+
+  const reverted = await h.call(CHANNELS.transition, 'auth-edge-tests', 'revert_replan');
+  assert.equal(reverted.data.status, 'in_progress');
+  task = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data;
+  assert.deepEqual(task.fileScope, ['tests/auth/login-user.test.ts']);
+  assert.equal(task.revision, null);
+});
+
+test('deviation: a contested dismissal goes back to Architect, which must replan', async () => {
+  let decision = 'dismiss';
+  const h = await harness({
+    agent: fakeAgent({ get adjudicate() { return decision === 'dismiss' ? { decision, reason: '按原计划即可', changes: [] } : ADJUDICATE_REPLAN; } }),
+  });
+  await reportDeviation(h);
+  let task = await settleAdjudication(h.call, 'auth-edge-tests');
+  assert.equal(task.status, 'in_progress');
+  assert.equal(task.deviations[0].resolution.decision, 'dismiss');
+  assert.ok(task.humanTransitions.includes('override_dismissal'));
+
+  decision = 'replan';
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'override_dismissal');
+  task = await settleAdjudication(h.call, 'auth-edge-tests');
+  assert.equal(task.status, 'pending');
+  const prompts = h.agentCalls.filter((c) => stepOf(c.schema) === 'adjudicate').map((c) => c.prompt);
+  assert.match(prompts[1], /contested your earlier dismissal/);
+});
+
+test('deviation: a failed ruling stays in deviation and can be retried', async () => {
+  let fail = true;
+  const h = await harness({
+    agent: async (options) => {
+      if (fail) throw Object.assign(new Error('timed out'), { code: 'agent_timeout' });
+      return fakeAgent()(options);
+    },
+  });
+  await reportDeviation(h);
+  let task = await settleAdjudication(h.call, 'auth-edge-tests');
+  assert.equal(task.status, 'deviation');
+  assert.equal(task.adjudication.error.code, 'agent_timeout');
+
+  fail = false;
+  await h.call(CHANNELS.deviationRetry, 'auth-edge-tests');
+  task = await settleAdjudication(h.call, 'auth-edge-tests');
+  assert.equal(task.status, 'pending');
+});
+
+test('review: a clean pass with a measured baseline finishes the package without the human', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  // The linked tests only exist once the developer writes the file, so the
+  // baseline cannot already pass them.
+  h.setCommands({
+    test: {
+      command: process.execPath,
+      args: ['-e', "if (require('fs').existsSync('tests/auth/login-user.test.ts')) console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts'); else console.log('ok 1 - placeholder');"],
+    },
+  });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await settleBaseline(h.call, 'auth-edge-tests');
+  await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
+  await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const task = await settleReview(h.call, 'auth-edge-tests');
+  assert.deepEqual(task.review.attention, []);
+  assert.equal(task.status, 'done');
 });

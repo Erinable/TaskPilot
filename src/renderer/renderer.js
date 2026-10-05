@@ -6,8 +6,12 @@ const PRIORITY_LABELS = { high: '高优先级', medium: '中优先级', low: '�
 const ACTIONS = [
   { name: 'claim', label: '开始执行', icon: 'play', primary: true },
   { name: 'submit_for_review', label: '提交审查', icon: 'send', primary: true },
+  { name: 'accepted', label: '验收通过', icon: 'check-circle', primary: true },
   { name: 'unblock', label: '解除阻塞', icon: 'unlock', primary: true },
-  { name: 'report_deviation', label: '报告偏差', icon: 'flag' },
+  { name: 'report_deviation', label: '报告偏差', icon: 'flag', danger: true },
+  { name: 'override_dismissal', label: '不同意驳回，要求重新规划', icon: 'flag', danger: true },
+  { name: 'acceptance_rejected', label: '打回修改', icon: 'undo', danger: true },
+  { name: 'revert_replan', label: '撤销重新规划', icon: 'undo' },
   { name: 'block', label: '标记阻塞', icon: 'ban' },
   { name: 'release', label: '放回队列', icon: 'undo' },
 ];
@@ -452,9 +456,60 @@ $('#remeasureBaseline').addEventListener('click', async () => {
   }
 });
 
+const DECISION_LABELS = { dismiss: 'Architect 驳回：按原计划继续', replan: 'Architect 已重新规划' };
+
+function resolutionNode(resolution) {
+  const box = el('div', `deviation-resolution ${resolution.decision}`);
+  let title = DECISION_LABELS[resolution.decision];
+  if (resolution.afterContest) title += '（应你的异议）';
+  if (resolution.contested) title += ' · 你已提出异议';
+  if (resolution.reverted) title += ' · 你已撤销';
+  box.append(withIcon('strong', null, 'bot', title));
+  const reason = el('p');
+  appendInlineCode(reason, resolution.reason);
+  box.append(reason);
+  if (resolution.changes?.length) {
+    const list = el('ul');
+    resolution.changes.forEach((change) => {
+      const item = el('li');
+      appendInlineCode(item, change);
+      list.append(item);
+    });
+    box.append(list);
+  }
+  return box;
+}
+
 function renderDeviations(task) {
   const panel = $('#deviationPanel');
-  panel.hidden = task.deviations.length === 0;
+  panel.hidden = task.deviations.length === 0 && !task.revision;
+  const adjudication = task.adjudication;
+  const actions = [];
+  let hint = '';
+  let iconName = 'flag';
+  if (adjudication?.status === 'running') {
+    hint = adjudication.mustReplan ? 'Architect 正在按你的异议重新规划…' : 'Architect 正在读代码并裁决…';
+    iconName = 'spinner';
+    actions.push(deviationButton('cancel', 'x', '取消'));
+  } else if (adjudication?.status === 'failed' && task.status === 'deviation') {
+    hint = `裁决没有完成：${describeError(adjudication.error)}`;
+    iconName = 'alert';
+    actions.push(deviationButton('retry', 'refresh', '重新裁决'));
+  } else if (task.deviations.length) {
+    hint = `共 ${task.deviations.length} 条，裁决结果已自动生效，可在上方撤销。`;
+  }
+  const iconBox = $('#deviationIcon');
+  iconBox.replaceChildren(icon(iconName, iconName === 'spinner' ? 'spin' : undefined));
+  $('#deviationHint').textContent = hint;
+  $('#deviationActions').replaceChildren(...actions);
+
+  const revisionBox = $('#deviationRevision');
+  revisionBox.hidden = !task.revision;
+  if (task.revision) {
+    revisionBox.replaceChildren(withIcon('div', 'deviation-revision-title', 'wand',
+      `当前是第 ${task.revision.version} 版计划，${new Date(task.revision.revisedAt).toLocaleString('zh-CN')} 由 Architect 修订`));
+  }
+
   $('#execDeviations').replaceChildren(...task.deviations.map((deviation) => {
     const item = el('div', 'deviation-item');
     const note = el('p');
@@ -465,8 +520,26 @@ function renderDeviations(task) {
     if (deviation.stepIndex !== null) meta.append(withIcon('span', null, 'list-checks', `指令 ${deviation.stepIndex + 1}`));
     if (deviation.filePath) meta.append(withIcon('span', null, 'file', deviation.filePath));
     item.append(meta);
+    if (deviation.resolution) item.append(resolutionNode(deviation.resolution));
     return item;
   }));
+}
+
+function deviationButton(action, iconName, label) {
+  const button = withIcon('button', 'secondary-button small', iconName, label);
+  button.type = 'button';
+  button.dataset.deviation = action;
+  return button;
+}
+
+async function runDeviationAction(action) {
+  try {
+    if (action === 'cancel') await call(window.taskpilot.deviation.cancel(current.id));
+    else await call(window.taskpilot.deviation.retry(current.id));
+    await reloadCurrent();
+  } catch (error) {
+    showToast(`操作失败：${describeError(error)}`);
+  }
 }
 
 /* QA review */
@@ -597,7 +670,9 @@ function renderReview(task) {
     tone = 'danger';
     iconName = 'alert';
   } else if (review.status === 'passed') {
-    hint = '已通过，进入验收。';
+    hint = review.humanVerdict === 'acceptance_rejected' ? '已通过，但你在验收时打回了。'
+      : task.status === 'accepting' ? '已通过，请确认「需要人工确认」各项后验收。'
+        : '已通过，工作包已完成。';
     tone = 'success';
     iconName = 'check-circle';
     body = renderReviewResult(task, review);
@@ -622,11 +697,14 @@ function stopReviewPolling() {
   reviewTimer = null;
 }
 
-/** Re-reads the open package while QA runs, until the review settles. */
+const agentRunning = (task) => task?.review?.status === 'running' || task?.adjudication?.status === 'running';
+
+/** Re-reads the open package while QA or Architect runs, until it settles. */
 function watchReview() {
   stopReviewPolling();
-  if (current?.review?.status !== 'running') return;
+  if (!agentRunning(current)) return;
   const id = current.id;
+  const before = current;
   reviewTimer = window.setTimeout(async () => {
     reviewTimer = null;
     let task;
@@ -637,21 +715,34 @@ function watchReview() {
       return;
     }
     if (current?.id !== id) return; // the user moved on
-    if (task.review?.status === 'running') {
+    if (agentRunning(task)) {
       current = task;
       watchReview();
       return;
     }
     await reloadCurrent();
-    announceReview(task.review);
+    if (before.review?.status === 'running') announceReview(task);
+    if (before.adjudication?.status === 'running') announceAdjudication(task);
   }, REVIEW_POLL_MS);
 }
 
-function announceReview(review) {
+function announceReview(task) {
+  const review = task.review;
   if (!review) return;
-  if (review.status === 'passed') showToast('QA 审查通过，进入验收。');
+  if (review.status === 'passed') showToast(task.status === 'done' ? 'QA 审查通过，工作包已完成。' : 'QA 审查通过，有几项需要你确认后验收。');
   else if (review.status === 'rejected') showToast('QA 审查未通过，请查看问题。', 'error');
   else if (review.status === 'failed' && review.error?.code !== 'agent_cancelled') showToast(`QA 审查失败：${describeError(review.error)}`);
+}
+
+function announceAdjudication(task) {
+  const adjudication = task.adjudication;
+  if (adjudication?.status === 'failed') {
+    if (adjudication.error?.code !== 'agent_cancelled') showToast(`Architect 裁决失败：${describeError(adjudication.error)}`);
+    return;
+  }
+  const decision = task.deviations[task.deviations.length - 1]?.resolution?.decision;
+  if (decision === 'dismiss') showToast('Architect 驳回了偏差，请查看理由后继续。');
+  else if (decision === 'replan') showToast('Architect 已重新规划，工作包回到队列。');
 }
 
 async function runReviewAction(action) {
@@ -763,7 +854,7 @@ function renderDiff(task, diff) {
 function renderActions(task) {
   const allowed = new Set(task.humanTransitions);
   const buttons = ACTIONS.filter((action) => allowed.has(action.name)).map((action) => {
-    const className = action.primary ? 'primary-button' : `secondary-button${action.name === 'report_deviation' ? ' danger' : ''}`;
+    const className = action.primary ? 'primary-button' : `secondary-button${action.danger ? ' danger' : ''}`;
     const button = withIcon('button', className, action.icon, action.label);
     button.type = 'button';
     button.dataset.transition = action.name;
@@ -958,7 +1049,7 @@ async function submitDeviation() {
     }));
     closeDeviationForm();
     await reloadCurrent();
-    showToast('偏差已记录，AI 团队会重新评估。');
+    showToast('偏差已记录，Architect 正在裁决。');
   } catch (error) {
     showToast(`提交失败：${describeError(error)}`);
   }
@@ -970,6 +1061,16 @@ const TRANSITION_TOASTS = {
   block: '已标记为阻塞。',
   unblock: '已解除阻塞。',
   release: '已放回队列。',
+  accepted: '已验收，工作包完成。',
+  acceptance_rejected: '已打回，工作包回到执行中。',
+  override_dismissal: '已提出异议，Architect 正在重新规划。',
+  revert_replan: '已撤销重新规划，恢复原计划和进度。',
+};
+
+// Transitions that need a confirmation first.
+const TRANSITION_CONFIRMS = {
+  acceptance_rejected: { title: '打回这个工作包？', body: '工作包会回到执行中，你需要修改后重新提交审查。', accept: '打回', danger: true },
+  revert_replan: { title: '撤销重新规划？', body: '恢复 Architect 修订前的计划和执行进度，偏差记录会保留。', accept: '撤销' },
 };
 
 async function runTransition(name) {
@@ -977,6 +1078,7 @@ async function runTransition(name) {
     openDeviationForm();
     return;
   }
+  if (TRANSITION_CONFIRMS[name] && !(await confirmAction(TRANSITION_CONFIRMS[name]))) return;
   try {
     await call(window.taskpilot.transition(current.id, name));
     await reloadCurrent();
@@ -995,6 +1097,10 @@ $('#backToQueue').addEventListener('click', showQueue);
 $('#reviewActions').addEventListener('click', (event) => {
   const button = event.target.closest('[data-review]');
   if (button) runReviewAction(button.dataset.review);
+});
+$('#deviationActions').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-deviation]');
+  if (button) runDeviationAction(button.dataset.deviation);
 });
 $('#refreshDiff').addEventListener('click', refreshDiff);
 

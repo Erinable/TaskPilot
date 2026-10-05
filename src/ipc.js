@@ -13,9 +13,9 @@ const claudeCli = require('./agents/claude-cli');
 const productLead = require('./agents/product-lead');
 const envSetup = require('./env-setup');
 const evidence = require('./evidence');
-const { summarizeForRequirement, reviewWorkPackage, planEnvironment, throwIfCancelled } = require('./agents/pipeline');
-const { STATE_FILENAME } = require('./work-package-store');
-const { label, available } = require('./work-package-status');
+const { summarizeForRequirement, reviewWorkPackage, adjudicateDeviation, planEnvironment, throwIfCancelled } = require('./agents/pipeline');
+const { STATE_FILENAME, humanTransitions } = require('./work-package-store');
+const { label } = require('./work-package-status');
 
 const CHANNELS = {
   listTasks: 'tasks:list',
@@ -24,6 +24,8 @@ const CHANNELS = {
   setStepDone: 'package:set-step-done',
   reviewRetry: 'review:retry',
   reviewCancel: 'review:cancel',
+  deviationRetry: 'deviation:retry',
+  deviationCancel: 'deviation:cancel',
   workspaceGet: 'workspace:get',
   workspaceSet: 'workspace:set',
   workspaceCheck: 'workspace:check',
@@ -121,6 +123,7 @@ function wrap(handler) {
   };
 }
 
+/** `task` is the effective definition (WorkPackageStore.effective()). */
 function buildTaskView(task, state) {
   return {
     ...task,
@@ -132,7 +135,9 @@ function buildTaskView(task, state) {
     deviations: state.deviations,
     review: state.review ?? null,
     baselineChecks: state.baselineChecks ?? null,
-    humanTransitions: available(state.status, 'human').map((t) => t.name),
+    adjudication: state.adjudication ?? null,
+    revision: state.revision && { version: state.revision.version, reason: state.revision.reason, changes: state.revision.changes, revisedAt: state.revision.revisedAt },
+    humanTransitions: humanTransitions(state),
   };
 }
 
@@ -234,13 +239,19 @@ function registerIpcHandlers(ipcMain, deps) {
     return state.baseline;
   };
 
+  /** The definition as currently planned, including Architect's replans. */
+  const effectiveTask = (id) => {
+    const task = tasks.getTask(id);
+    return task ? store.effective(task) : null;
+  };
+
   ipcMain.handle(CHANNELS.listTasks, wrap(() => {
     const state = store.all();
-    return tasks.listTasks().map((task) => buildTaskView(task, state[task.id]));
+    return tasks.listTasks().map((task) => buildTaskView(store.effective(task), state[task.id]));
   }));
 
   ipcMain.handle(CHANNELS.getTask, wrap((_event, id) => {
-    const task = tasks.getTask(requireString(id, 'id'));
+    const task = effectiveTask(requireString(id, 'id'));
     if (!task) {
       const error = new Error(`Unknown work package: ${id}`);
       error.code = 'unknown_package';
@@ -276,7 +287,7 @@ function registerIpcHandlers(ipcMain, deps) {
    * outcome; QA moves the package on itself when it finishes.
    */
   const startReview = async (id) => {
-    const task = tasks.getTask(id);
+    const task = effectiveTask(id);
     const root = requireRoot();
     const baseline = requireBaseline(id);
     const entry = await store.beginReview(id);
@@ -309,6 +320,46 @@ function registerIpcHandlers(ipcMain, deps) {
       reviews.delete(id);
       if (outcome.error) await store.failReview(id, outcome.error).catch(() => {});
       else await store.completeReview(id, outcome.result).catch((error) => store.failReview(id, error).catch(() => {}));
+    })();
+    track(settled);
+    return entry;
+  };
+
+  /* Architect: rules on a reported deviation. */
+
+  const adjudications = new Map(); // package id -> AbortController
+
+  /**
+   * Starts Architect's ruling in the background. Like QA, it moves the
+   * package on itself: back to the developer, or to the queue with a new plan.
+   * Without a workspace it still runs, on the package text alone.
+   */
+  const startAdjudication = async (id) => {
+    const task = effectiveTask(id);
+    const entry = await store.beginAdjudication(id);
+    const controller = new AbortController();
+    adjudications.set(id, controller);
+    const settled = (async () => {
+      let outcome;
+      try {
+        const { path: envPath } = await commandPath();
+        const result = await adjudicateDeviation(task, {
+          root: getConfig().root,
+          deviations: entry.deviations,
+          mustReplan: entry.adjudication.mustReplan,
+          runAgent,
+          interfaces: interfacesFor(task),
+          envPath,
+          signal: controller.signal,
+        });
+        throwIfCancelled(controller.signal);
+        outcome = { result };
+      } catch (error) {
+        outcome = { error: controller.signal.aborted ? Object.assign(new Error('The adjudication was cancelled'), { code: 'agent_cancelled' }) : error };
+      }
+      adjudications.delete(id);
+      if (outcome.error) await store.failAdjudication(id, outcome.error).catch(() => {});
+      else await store.completeAdjudication(id, outcome.result).catch((error) => store.failAdjudication(id, error).catch(() => {}));
     })();
     track(settled);
     return entry;
@@ -389,7 +440,7 @@ function registerIpcHandlers(ipcMain, deps) {
     if (state.status !== 'in_progress') failWith('Baselines can only be measured while the package is in progress', 'invalid_state');
     if (baselineRuns.has(id)) failWith('The baseline is already being measured', 'baseline_running');
     measureBaseline(id);
-    return buildTaskView(tasks.getTask(id), store.get(id));
+    return buildTaskView(effectiveTask(id), store.get(id));
   }));
 
   // `actor` is fixed to 'human': anything arriving from the renderer is a
@@ -406,6 +457,15 @@ function registerIpcHandlers(ipcMain, deps) {
       measureBaseline(id);
       return entry;
     }
+    if (name === 'report_deviation' || name === 'override_dismissal') {
+      // The report stands even if Architect cannot start; it can be retried.
+      try {
+        return await startAdjudication(id);
+      } catch (error) {
+        await store.beginAdjudication(id).then(() => store.failAdjudication(id, error)).catch(() => {});
+        return store.get(id);
+      }
+    }
     if (name !== 'submit_for_review') return entry;
     // The submission stands even if QA cannot start (no workspace, say);
     // the failure is recorded on the review and the user can retry.
@@ -421,6 +481,15 @@ function registerIpcHandlers(ipcMain, deps) {
 
   ipcMain.handle(CHANNELS.reviewCancel, wrap((_event, id) => {
     const controller = reviews.get(requireString(id, 'id'));
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }));
+
+  ipcMain.handle(CHANNELS.deviationRetry, wrap((_event, id) => startAdjudication(requireString(id, 'id'))));
+
+  ipcMain.handle(CHANNELS.deviationCancel, wrap((_event, id) => {
+    const controller = adjudications.get(requireString(id, 'id'));
     if (!controller) return false;
     controller.abort();
     return true;
@@ -500,6 +569,7 @@ function registerIpcHandlers(ipcMain, deps) {
   ipcMain.handle(CHANNELS.dataResetProgress, wrap(async () => {
     // Running reviews would otherwise write their result over the reset.
     for (const controller of reviews.values()) controller.abort();
+    for (const controller of adjudications.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
     await store.reset();
     return store.summary();
@@ -667,7 +737,7 @@ function registerIpcHandlers(ipcMain, deps) {
 
   ipcMain.handle(CHANNELS.diffStat, wrap(async (_event, id) => {
     const root = requireRoot();
-    const task = tasks.getTask(requireString(id, 'id'));
+    const task = effectiveTask(requireString(id, 'id'));
     const changes = await git.changesSince(root, requireBaseline(id));
     return { changes, scope: tasks.checkFileScope(task, changes.map((c) => c.path)) };
   }));
@@ -686,7 +756,7 @@ function registerIpcHandlers(ipcMain, deps) {
     const config = getConfig();
     const result = await verification.runCheck(config, kind, { envPath: (await commandPath()).path });
     if (!taskId) return result;
-    const task = tasks.getTask(requireString(taskId, 'taskId'));
+    const task = effectiveTask(requireString(taskId, 'taskId'));
     // The same comparison a review makes, so a manual run reads the same way.
     const check = { kind, stage: config.checks[kind].stage, blocking: config.checks[kind].blocking, line: checkLine(config.checks[kind]) };
     const baselines = store.get(task.id).baselineChecks?.checks ?? {};
@@ -868,6 +938,7 @@ function registerIpcHandlers(ipcMain, deps) {
       for (const controller of baselineRuns.values()) controller.abort();
       for (const controller of runs.values()) controller.abort();
       for (const controller of reviews.values()) controller.abort();
+      for (const controller of adjudications.values()) controller.abort();
       await Promise.allSettled([...pendingRuns]);
     },
   };

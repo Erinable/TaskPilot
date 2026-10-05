@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('taskpilot', {
     cancel: (id) => invoke('review:cancel', id),
   },
 
+  deviation: {
+    retry: (id) => invoke('deviation:retry', id),
+    cancel: (id) => invoke('deviation:cancel', id),
+  },
+
   workspace: {
     get: () => invoke('workspace:get'),
     set: (form) => invoke('workspace:set', form),

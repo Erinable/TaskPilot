@@ -29,13 +29,38 @@ function initialState(task) {
     // Submit-stage checks run on the claimed commit; see setBaselineChecks().
     // {status: measuring|measured|unavailable|contaminated, reason, commit, checks: {kind: record}, startedAt, finishedAt}
     baselineChecks: null,
+    // Architect's replan of the definition: {version, definition: {steps, fileScope, acceptance}, reason, changes, revisedAt}.
+    // Overlaid on the authored definition by effective().
+    revision: null,
+    adjudication: null, // Architect's latest run on a deviation; see beginAdjudication()
+    // Execution state from before the last replan, so the human can revert it
+    // until they claim the new plan.
+    replanUndo: null,
   };
 }
 
 const BASELINE_STATUSES = ['measuring', 'measured', 'unavailable', 'contaminated'];
 
-// The transition QA's outcome applies.
-const REVIEW_TRANSITIONS = { passed: 'review_passed', rejected: 'review_rejected' };
+// The transition Architect's ruling applies.
+const ADJUDICATION_TRANSITIONS = { dismiss: 'deviation_dismissed', replan: 'replanned' };
+
+const lastDeviation = (entry) => entry.deviations[entry.deviations.length - 1] ?? null;
+
+// Human transitions that also depend on state beyond the status.
+const GUARDS = {
+  // Only an uncontested dismissal can be contested.
+  override_dismissal: (entry) => {
+    const resolution = lastDeviation(entry)?.resolution;
+    return resolution?.decision === 'dismiss' && !resolution.contested;
+  },
+  revert_replan: (entry) => entry.replanUndo !== null,
+};
+const allowed = (entry, name) => GUARDS[name]?.(entry) ?? true;
+
+/** Human transitions available for an entry, after the state guards. */
+function humanTransitions(entry) {
+  return status.available(entry.status, 'human').map((t) => t.name).filter((name) => allowed(entry, name));
+}
 
 class WorkPackageStore {
   #file;
@@ -69,6 +94,15 @@ class WorkPackageStore {
         // Nor will a baseline measurement.
         if (merged.baselineChecks?.status === 'measuring') {
           merged.baselineChecks = { ...merged.baselineChecks, status: 'unavailable', reason: 'interrupted', finishedAt: null };
+        }
+        // Nor an adjudication; the package stays in deviation for a retry.
+        if (merged.adjudication?.status === 'running') {
+          merged.adjudication = {
+            ...merged.adjudication,
+            status: 'failed',
+            finishedAt: null,
+            error: { code: 'agent_interrupted', message: 'The adjudication was interrupted when the app closed' },
+          };
         }
         this.#state.set(id, merged);
       }
@@ -108,16 +142,27 @@ class WorkPackageStore {
     return Object.fromEntries([...this.#state].map(([id, entry]) => [id, structuredClone(entry)]));
   }
 
+  /** The definition with Architect's latest replan, if any, laid over it. */
+  effective(task) {
+    const revision = this.#state.get(task.id)?.revision;
+    return revision ? { ...task, ...structuredClone(revision.definition) } : task;
+  }
+
   /** Transitions a package, recording the baseline when it is claimed. */
   async transition(id, name, actor, { baseline, deviation } = {}) {
     const entry = this.get(id);
     const next = status.apply(entry.status, name, actor);
+    if (!allowed(entry, name)) {
+      throw new StoreError(`Transition "${name}" is not available now`, 'invalid_state');
+    }
 
     if (name === 'claim') {
       if (!baseline) throw new StoreError('Claiming requires a baseline commit', 'baseline_required');
       entry.baseline = baseline;
       entry.claimedAt = new Date().toISOString();
       entry.baselineChecks = null;
+      // Claiming accepts the replanned package; the old plan is gone.
+      entry.replanUndo = null;
     }
     if (name === 'release') {
       entry.baseline = null;
@@ -135,7 +180,29 @@ class WorkPackageStore {
         stepIndex: Number.isInteger(deviation.stepIndex) ? deviation.stepIndex : null,
         filePath: typeof deviation.filePath === 'string' ? deviation.filePath : null,
         reportedAt: new Date().toISOString(),
+        resolution: null, // set by completeAdjudication()
       });
+      entry.adjudication = null;
+    }
+    if (name === 'override_dismissal') {
+      // The same deviation goes back to Architect, which must now replan.
+      lastDeviation(entry).resolution.contested = true;
+      entry.adjudication = null;
+    }
+    if (name === 'revert_replan') {
+      const undo = entry.replanUndo;
+      lastDeviation(entry).resolution.reverted = true;
+      entry.revision = undo.revision;
+      entry.baseline = undo.baseline;
+      entry.claimedAt = undo.claimedAt;
+      entry.completedSteps = undo.completedSteps;
+      entry.baselineChecks = undo.baselineChecks;
+      entry.review = undo.review;
+      entry.replanUndo = null;
+    }
+    if (name === 'accepted' || name === 'acceptance_rejected') {
+      // The human's call on QA's pass; the review itself stays as QA wrote it.
+      entry.review = { ...entry.review, humanVerdict: name, humanAt: new Date().toISOString() };
     }
 
     entry.status = next;
@@ -200,9 +267,11 @@ class WorkPackageStore {
   }
 
   /**
-   * Records QA's result and moves the package on: to acceptance when it
-   * passed, back to the developer when it did not. The transition is applied
-   * as the agent actor, so it goes through the same rules as everything else.
+   * Records QA's result and moves the package on: straight to done when it
+   * passed with nothing for the human to confirm, to acceptance when it
+   * passed with attention items, back to the developer when it did not. The
+   * transition is applied as the agent actor, so it goes through the same
+   * rules as everything else.
    * @param result pipeline.reviewWorkPackage() result
    */
   async completeReview(id, result) {
@@ -211,8 +280,11 @@ class WorkPackageStore {
       throw new StoreError('No review is running', 'review_not_running');
     }
     const outcome = result.passed ? 'passed' : 'rejected';
+    // [人工决策-2026-10-05 21:57:41] 有「需要人工确认」项才停在待验收，否则 QA 通过即 done。
+    const transition = !result.passed ? 'review_rejected'
+      : (result.attention ?? []).length ? 'review_passed' : 'review_accepted';
     // Validate the transition before writing anything.
-    const next = status.apply(entry.status, REVIEW_TRANSITIONS[outcome], 'agent');
+    const next = status.apply(entry.status, transition, 'agent');
     entry.review = {
       status: outcome,
       startedAt: entry.review.startedAt,
@@ -248,6 +320,110 @@ class WorkPackageStore {
     return structuredClone(entry);
   }
 
+  /**
+   * Starts Architect's ruling on the latest deviation. `mustReplan` is set
+   * when the developer contested an earlier dismissal of it.
+   */
+  async beginAdjudication(id) {
+    const entry = this.get(id);
+    if (entry.status !== 'deviation') {
+      throw new StoreError('Only a package with a deviation can be adjudicated', 'invalid_state');
+    }
+    if (entry.adjudication?.status === 'running') {
+      throw new StoreError('An adjudication is already running', 'adjudication_running');
+    }
+    entry.adjudication = {
+      status: 'running',
+      mustReplan: lastDeviation(entry).resolution?.contested === true,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+    };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  /**
+   * Applies Architect's ruling. A dismissal returns the package to the
+   * developer with execution state intact. A replan swaps in the revised
+   * definition and returns the package to the queue, keeping the previous
+   * execution state so the human can revert.
+   * @param result pipeline.adjudicateDeviation() result
+   */
+  async completeAdjudication(id, result) {
+    const entry = this.get(id);
+    if (entry.adjudication?.status !== 'running') {
+      throw new StoreError('No adjudication is running', 'adjudication_not_running');
+    }
+    if (entry.adjudication.mustReplan && result.decision !== 'replan') {
+      throw new StoreError('A contested dismissal must be replanned', 'invalid_state');
+    }
+    const next = status.apply(entry.status, ADJUDICATION_TRANSITIONS[result.decision], 'agent');
+    const now = new Date().toISOString();
+    const deviation = lastDeviation(entry);
+    deviation.resolution = {
+      decision: result.decision,
+      reason: result.reason,
+      changes: result.changes,
+      decidedAt: now,
+      // A replan that answers a contested dismissal is recorded as such.
+      afterContest: deviation.resolution?.contested === true,
+      contested: false,
+      reverted: false,
+    };
+    if (result.decision === 'replan') {
+      entry.replanUndo = {
+        revision: entry.revision,
+        baseline: entry.baseline,
+        claimedAt: entry.claimedAt,
+        completedSteps: entry.completedSteps,
+        baselineChecks: entry.baselineChecks,
+        review: entry.review,
+      };
+      entry.revision = {
+        version: (entry.revision?.version ?? 0) + 1,
+        definition: structuredClone(result.revision),
+        reason: result.reason,
+        changes: result.changes,
+        revisedAt: now,
+      };
+      // Same as a release: the new plan is claimed from a fresh baseline.
+      entry.baseline = null;
+      entry.claimedAt = null;
+      entry.completedSteps = [];
+      entry.baselineChecks = null;
+      entry.review = null;
+    }
+    entry.adjudication = {
+      ...entry.adjudication,
+      status: 'done',
+      finishedAt: now,
+      read: result.read ?? [],
+      skipped: result.skipped ?? [],
+      costUsd: result.costUsd,
+    };
+    entry.status = next;
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  /** Records an adjudication that could not finish; the package stays in deviation. */
+  async failAdjudication(id, error) {
+    const entry = this.get(id);
+    if (entry.adjudication?.status !== 'running') return structuredClone(entry);
+    entry.adjudication = {
+      ...entry.adjudication,
+      status: 'failed',
+      finishedAt: new Date().toISOString(),
+      error: { code: error.code ?? 'agent_failed', message: error.message },
+    };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
   /** Marks one instruction step done or not done. */
   async setStepDone(id, stepIndex, done) {
     const entry = this.get(id);
@@ -263,4 +439,4 @@ class WorkPackageStore {
   }
 }
 
-module.exports = { STATE_FILENAME, StoreError, WorkPackageStore };
+module.exports = { STATE_FILENAME, StoreError, WorkPackageStore, humanTransitions };

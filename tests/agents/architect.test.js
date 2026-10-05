@@ -131,3 +131,45 @@ test('pipeline: when every selected file is refused, nothing is summarized', asy
   assert.equal(calls.length, 1, 'no summarize call without sources');
   assert.deepEqual(result.skipped, [{ path: 'package.json', reason: 'secret' }]);
 });
+
+/* Deviation adjudication */
+
+const revision = { steps: ['改用 `findUser()`'], fileScope: ['./src/auth/user-repository.ts'], acceptance: [{ text: '登录成功', test: 'login succeeds' }] };
+
+test('validateAdjudication() accepts a dismissal and a normalized replan', () => {
+  const dismissed = architect.validateAdjudication({ decision: 'dismiss', reason: '用 `findById()`', changes: [] });
+  assert.equal(dismissed.revision, null);
+  const replanned = architect.validateAdjudication({ decision: 'replan', reason: '接口不同', changes: ['改步骤 1'], revision });
+  assert.deepEqual(replanned.revision.fileScope, ['src/auth/user-repository.ts']);
+  assert.equal(replanned.revision.acceptance[0].test, 'login succeeds');
+});
+
+test('validateAdjudication() refuses contradictory or unsafe rulings', () => {
+  const bad = (raw, options) => assert.throws(() => architect.validateAdjudication(raw, options), { code: 'agent_bad_output' });
+  bad({ decision: 'replan', reason: 'x', changes: [] });
+  bad({ decision: 'dismiss', reason: 'x', changes: [], revision });
+  bad({ decision: 'replan', reason: 'x', changes: [], revision: { ...revision, fileScope: ['../etc/passwd'] } });
+  bad({ decision: 'replan', reason: 'x', changes: [], revision: { ...revision, steps: [] } });
+  bad({ decision: 'maybe', reason: 'x', changes: [] });
+  // A contested dismissal can only be answered with a replan.
+  bad({ decision: 'dismiss', reason: 'x', changes: [] }, { mustReplan: true });
+});
+
+test('adjudicateDeviation() reads the scope and the deviation file, then validates', async () => {
+  const { adjudicateDeviation } = require('../../src/agents/pipeline');
+  const requested = [];
+  const task = { title: 't', description: 'd', steps: ['s'], fileScope: ['src/auth/user-repository.ts'], acceptance: [{ text: 'a' }] };
+  const result = await adjudicateDeviation(task, {
+    root: '/repo',
+    deviations: [{ note: '冲突', stepIndex: 0, filePath: 'src/db/client.ts', resolution: null }],
+    runAgent: async ({ prompt }) => {
+      assert.match(prompt, /D1 \[step 1, file src\/db\/client\.ts\]: 冲突/);
+      return { output: { decision: 'dismiss', reason: '按原计划', changes: [] }, costUsd: 0.01 };
+    },
+    readFiles: async (_root, paths) => { requested.push(...paths); return { files: [{ path: paths[0], sha: 'x', content: 'c' }], skipped: [] }; },
+  });
+  assert.deepEqual(requested, ['src/auth/user-repository.ts', 'src/db/client.ts']);
+  assert.equal(result.decision, 'dismiss');
+  assert.deepEqual(result.read, ['src/auth/user-repository.ts']);
+  assert.equal(result.costUsd, 0.01);
+});
