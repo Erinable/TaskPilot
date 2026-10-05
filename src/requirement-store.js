@@ -63,6 +63,7 @@ class RequirementStore {
         // A run that was in flight when the app quit can't be resumed.
         if (item.status === 'clarifying' || item.status === 'planning') {
           item.failedStep = item.status;
+          item.phase = null;
           item.status = 'failed';
           item.error = { code: 'agent_interrupted', message: 'TaskPilot 在 Product Lead 运行时退出了' };
         }
@@ -130,6 +131,8 @@ class RequirementStore {
       questions: [],
       plan: null,
       packages: [],
+      interfaces: null,
+      phase: null,
       error: null,
       failedStep: null,
       costUsd: 0,
@@ -154,11 +157,25 @@ class RequirementStore {
     return this.#update(id, { status: step, error: null, failedStep: null });
   }
 
+  /** Which agent is working during a run, for the progress display. */
+  async setPhase(id, phase) {
+    const item = this.#require(id);
+    this.#expect(item, ['clarifying', 'planning']);
+    return this.#update(id, { phase });
+  }
+
+  /** Architect's interface summary, or why there isn't one. */
+  async setInterfaces(id, interfaces) {
+    this.#require(id);
+    return this.#update(id, { interfaces });
+  }
+
   async finishClarify(id, { title, summary, questions }, costUsd = 0) {
     const item = this.#require(id);
     this.#expect(item, ['clarifying']);
     return this.#update(id, {
       status: 'answering',
+      phase: null,
       title: item.title || title,
       summary,
       questions: questions.map((text) => ({ text, answer: '' })),
@@ -170,13 +187,14 @@ class RequirementStore {
   async finishPlan(id, plan, costUsd = 0) {
     const item = this.#require(id);
     this.#expect(item, ['planning']);
-    return this.#update(id, { status: 'reviewing', plan, costUsd: item.costUsd + (costUsd ?? 0) });
+    return this.#update(id, { status: 'reviewing', phase: null, plan, costUsd: item.costUsd + (costUsd ?? 0) });
   }
 
   async failRun(id, step, error) {
     this.#require(id);
     return this.#update(id, {
       status: 'failed',
+      phase: null,
       failedStep: step,
       error: { code: error.code ?? 'agent_failed', message: error.message },
     });

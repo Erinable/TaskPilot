@@ -7,6 +7,7 @@ Runs Product Lead's clarify and plan steps against fixed cases using the real Cl
 
 ```sh
 npm run eval:product-lead                      # all cases, ~$1.5
+npm run eval:product-lead -- --architect       # with Architect, ~$2.7
 npm run eval:product-lead -- --case vague      # one case
 npm run eval:product-lead -- --label my-change # names the report
 npm run eval:product-lead -- --no-judge        # checks only, ~$1
@@ -24,3 +25,18 @@ The judge is the same model family as Product Lead, so it can share its blind sp
 | v2 prompt | 100% / 100% | 4.26 / 4.20 | 1 | 2 |
 
 v2 tells Product Lead to infer from the file list before asking, to plan only what was asked, and to keep each implementation and its tests in the same package. A v3 that added rules for unknown-cause problems and explicit targets scored 4.20 and introduced an overlap failure, so it was not kept.
+
+## Architect
+
+`--architect` runs Architect first. Each fixture is materialized as a temporary git repository (`sources.js` holds file contents), so Architect reads through the same `repo-reader.js` path the app uses. Product Lead then plans against Architect's interface summary.
+
+From this version on, the judge always sees the fixture source code, with or without Architect, so it can tell a plan that matches the code from one that only matches file names. Scores in this section are therefore not comparable with the table above.
+
+The `codeGrounding` check looks for identifiers that are visible only inside the code, such as the `fakeDb` test helper or the fact that `getById` throws `NotFoundError`. It passes when at least two thirds of the expected terms appear in the plan.
+
+| mode | checks | codeGrounding | judge mean | actionability | cost per run |
+|---|---|---|---|---|---|
+| file list only | 85.7% | 0/5 | 3.57 | 2.50 | ~$1.0 |
+| with Architect | 96.8% | 4/5 | 4.23 | 4.17 | ~$2.2 |
+
+Across two runs with Architect, the judge mean was 4.30 and 4.23.

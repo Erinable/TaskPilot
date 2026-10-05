@@ -8,6 +8,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { looksSecret } = require('./repo-reader');
 
 const run = promisify(execFile);
 const MAX_BUFFER = 20 * 1024 * 1024; // diffs of a work package can be large
@@ -64,7 +65,9 @@ async function topLevel(cwd) {
  */
 async function listFiles(cwd, { limit = 400 } = {}) {
   const raw = await git(cwd, ['ls-files', '-z']);
-  const files = raw.split('\0').filter(Boolean);
+  // Secret-looking paths are left out entirely, even though they are tracked:
+  // agents get neither their contents (see repo-reader.js) nor their names.
+  const files = raw.split('\0').filter((file) => file && !looksSecret(file));
   files.sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
   return files.slice(0, limit);
 }

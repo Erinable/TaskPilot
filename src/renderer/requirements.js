@@ -92,7 +92,7 @@
       const facts = el('ul', 'req-context-list');
       facts.append(withIcon('li', null, info.configured ? 'git-branch' : 'info',
         info.configured
-          ? `Product Lead 会看到仓库 ${info.root.split(/[\\/]/).filter(Boolean).pop()} 中已跟踪文件的路径列表，不会读取文件内容。`
+          ? `Architect 会读取仓库 ${info.root.split(/[\\/]/).filter(Boolean).pop()} 中与需求相关的少量已提交文件（最多 12 个），整理成接口摘要；可能含密钥的文件、未跟踪文件和二进制文件不会读取。Product Lead 只看摘要和路径列表。`
           : '还没有配置仓库，Product Lead 会按常见目录结构推测文件路径。'));
       facts.append(withIcon('li', null, 'terminal', '通过本机的 Claude Code CLI 运行，不启用任何工具，单次费用上限 1 美元。'));
       box.append(facts);
@@ -165,9 +165,68 @@
     return bubble;
   }
 
+  /**
+   * Architect's interface summary, collapsed by default: it is what Product
+   * Lead planned against, so the user can check it, but it isn't the main
+   * thing on the page.
+   */
+  function renderInterfaces(item) {
+    const info = item.interfaces;
+    if (!info) return [];
+    const box = el('details', 'interfaces glass');
+    const summary = el('summary');
+    const label = el('span', 'interfaces-label');
+    label.append(el('span', 'agent-avatar arch', 'AR'), el('strong', null, 'Architect'));
+    let headline;
+    if (info.summary) headline = `读取了 ${info.read.length} 个文件，整理出 ${info.summary.modules.length} 个模块的接口`;
+    else if (info.error) headline = `没能整理接口摘要（${describeError(info.error)}），Product Lead 只按文件列表规划`;
+    else headline = '没有需要读取的代码';
+    summary.append(label, el('span', 'interfaces-headline', headline));
+    box.append(summary);
+
+    const body = el('div', 'interfaces-body');
+    for (const mod of info.summary?.modules ?? []) {
+      const card = el('div', 'interface-module');
+      card.append(withIcon('div', 'interface-path', 'file', mod.path), el('p', 'interface-purpose', mod.purpose));
+      if (mod.members.length) {
+        const sigs = el('pre', 'interface-members');
+        sigs.textContent = mod.members.map((m) => m.signature).join('\n');
+        card.append(sigs);
+      }
+      if (mod.dependsOn.length) card.append(el('p', 'interface-deps', `依赖 ${mod.dependsOn.join('、')}`));
+      if (mod.notes.length) {
+        const notes = el('ul', 'interface-notes');
+        for (const note of mod.notes) notes.append(el('li', null, note));
+        card.append(notes);
+      }
+      body.append(card);
+    }
+    const section = (title, entries, className = '') => {
+      if (!entries?.length) return;
+      const wrap = el('div', `interface-section ${className}`.trim());
+      wrap.append(el('h4', null, title));
+      const ul = el('ul');
+      for (const entry of entries) ul.append(el('li', null, entry));
+      wrap.append(ul);
+      body.append(wrap);
+    };
+    section('仓库约定', info.summary?.conventions);
+    section('不确定或缺失', info.summary?.gaps, 'gaps');
+    const SKIP_LABELS = { secret: '可能含密钥', binary: '二进制', too_large: '过大', budget: '超出读取上限', file_limit: '超出文件数上限', not_tracked: '未被 git 跟踪', not_a_file: '链接或子模块' };
+    section('未读取', (info.skipped ?? []).map((s) => `${s.path}（${SKIP_LABELS[s.reason] ?? s.reason}）`), 'skipped');
+    if (body.childElementCount) box.append(body);
+    return [box];
+  }
+
   function renderRunning(item) {
-    const label = item.status === 'clarifying' ? '正在阅读需求，准备澄清问题…' : '正在拆解工作包…';
+    const label = item.status === 'planning' ? '正在拆解工作包…'
+      : item.phase === 'architect' ? 'Architect 正在阅读相关代码…'
+      : '正在阅读需求，准备澄清问题…';
     const bubble = agentBubble(null, { tone: 'running' });
+    if (item.phase === 'architect') {
+      const head = bubble.querySelector('.agent-message-head');
+      head.replaceChildren(el('span', 'agent-avatar arch', 'AR'), el('strong', null, 'Architect'));
+    }
     const row = el('div', 'agent-running');
     row.append(icon('spinner', 'spin'), el('span', null, label));
     const hint = el('small', null, '通常需要 20 秒到 1 分钟。可以先去做别的事，完成后这里会更新。');
@@ -372,7 +431,9 @@
     else if (item.status === 'reviewing') nodes = renderPlan(item);
     else if (item.status === 'published') nodes = [agentBubble(`已发布 ${item.packages.length} 个工作包到工作队列。`, { iconName: 'check-circle' }), ...renderPlan(item, { published: true })];
     else nodes = [];
-    $('#reqBody').replaceChildren(...nodes);
+    // The summary sits above the conversation once it exists.
+    const interfaces = RUNNING.has(item.status) && item.phase === 'architect' ? [] : renderInterfaces(item);
+    $('#reqBody').replaceChildren(...interfaces, ...nodes);
   }
 
   /* Actions */
@@ -484,10 +545,12 @@
   function startPolling() {
     stopPolling();
     const tick = async () => {
-      const before = new Map(items.map((item) => [item.id, item.status]));
+      // Status plus phase, so the Architect → Product Lead handoff re-renders too.
+      const key = (item) => `${item.status}:${item.phase ?? ''}`;
+      const before = new Map(items.map((item) => [item.id, key(item)]));
       await refreshList();
       const open = items.find((item) => item.id === selectedId);
-      if (open && !composing && !requirementsView.hidden && before.get(open.id) !== open.status) {
+      if (open && !composing && !requirementsView.hidden && before.get(open.id) !== key(open)) {
         renderDetail(open);
         if (!RUNNING.has(open.status)) announce(open);
       }

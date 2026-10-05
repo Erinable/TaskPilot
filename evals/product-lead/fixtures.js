@@ -11,7 +11,7 @@ const TS_API = [
   'src/auth/user-repository.ts', 'src/auth/user.ts', 'src/auth/token-service.ts',
   'src/http/router.ts', 'src/http/middleware/error-handler.ts',
   'src/db/client.ts', 'src/db/migrations/001_users.sql',
-  'tests/auth/user-repository.test.ts', 'tests/http/router.test.ts',
+  'tests/auth/user-repository.test.ts', 'tests/http/router.test.ts', 'tests/helpers/fake-db.ts',
 ];
 
 const REACT_APP = [
@@ -32,6 +32,10 @@ const PY_SERVICE = [
   'tests/test_invoices.py', 'tests/conftest.py',
 ];
 
+const sources = require('./sources');
+
+const SOURCES_BY_FILES = new Map([[TS_API, sources.TS_API], [REACT_APP, sources.REACT_APP], [PY_SERVICE, sources.PY_SERVICE]]);
+
 const cases = [
   {
     id: 'clear-small',
@@ -42,7 +46,14 @@ const cases = [
     },
     files: TS_API,
     answers: {},
-    expect: { questions: [0, 1], packages: [1, 1], hours: [0.5, 2], mustTouch: ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts'] },
+    expect: {
+      questions: [0, 1], packages: [1, 1], hours: [0.5, 2],
+      mustTouch: ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts'],
+      // Facts only visible in the code: the existing fake-db test helper, and
+      // that the sibling getById throws NotFoundError (the requirement asks
+      // findByEmail to return null instead, so a good plan notes the contrast).
+      grounding: ['fakeDb', 'NotFoundError'],
+    },
   },
   {
     id: 'login-typical',
@@ -59,7 +70,10 @@ const cases = [
       frontend: '只做后端接口。',
       hash: '密码已经用 bcrypt 存储。',
     },
-    expect: { questions: [1, 3], packages: [1, 3], hours: [2, 6], mustTouch: ['src/auth/user-repository.ts'], mustNotInvent: ['session'] },
+    expect: {
+      questions: [1, 3], packages: [1, 3], hours: [2, 6], mustTouch: ['src/auth/user-repository.ts'], mustNotInvent: ['session'],
+      grounding: ['issue(', 'NotFoundError', 'route('],
+    },
   },
   {
     id: 'vague',
@@ -69,7 +83,7 @@ const cases = [
     answers: {
       default: '主要是订单多的时候（几千条）滚动卡顿，首屏也要等 3 秒。',
     },
-    expect: { questions: [1, 4], packages: [1, 3], hours: [1, 8], mustTouch: ['src/pages/OrdersPage.tsx'] },
+    expect: { questions: [1, 4], packages: [1, 3], hours: [1, 8], mustTouch: ['src/pages/OrdersPage.tsx'], grounding: ['listOrders', 'useOrders'] },
   },
   {
     id: 'large',
@@ -84,7 +98,10 @@ const cases = [
       pdf: '用 weasyprint 生成 PDF。',
       setting: '设置存在客户表上，加一个布尔字段。',
     },
-    expect: { questions: [1, 4], packages: [3, 5], hours: [5, 14], mustTouch: ['app/billing/invoices.py', 'app/notifications/email.py'] },
+    expect: {
+      questions: [1, 4], packages: [3, 5], hours: [5, 14], mustTouch: ['app/billing/invoices.py', 'app/notifications/email.py'],
+      grounding: ['issue_invoice', 'send_email', 'session'],
+    },
   },
   {
     id: 'frontend-only',
@@ -95,7 +112,10 @@ const cases = [
     },
     files: REACT_APP,
     answers: { default: '接口已经有了。确认框用现有的 Modal 组件。' },
-    expect: { questions: [0, 2], packages: [1, 2], hours: [1, 4], mustTouch: ['src/pages/SettingsPage.tsx'], testPattern: /__tests__\// },
+    expect: {
+      questions: [0, 2], packages: [1, 2], hours: [1, 4], mustTouch: ['src/pages/SettingsPage.tsx'], testPattern: /__tests__\//,
+      grounding: ['request', 'Modal', 'variant="danger"'],
+    },
   },
   {
     id: 'no-repo',
@@ -127,5 +147,8 @@ function answerFor(testCase, question) {
   }
   return testCase.answers.default ?? '';
 }
+
+// Each case carries its repository's file contents for Architect to read.
+for (const testCase of cases) testCase.sources = SOURCES_BY_FILES.get(testCase.files) ?? {};
 
 module.exports = { cases, answerFor };

@@ -9,7 +9,11 @@
 // Costs real money (roughly $0.3–0.5 per case with the judge), so it is not
 // part of `npm test`. Reports are written to evals/product-lead/reports/.
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const { summarizeForRequirement } = require('../../src/agents/pipeline');
 const cli = require('../../src/agents/claude-cli');
 const productLead = require('../../src/agents/product-lead');
 const { cases, answerFor } = require('./fixtures');
@@ -17,19 +21,51 @@ const { check } = require('./checks');
 const { CRITERIA, judge } = require('./judge');
 
 function parseArgs(argv) {
-  const args = { case: null, label: 'run', judge: true, concurrency: 3 };
+  const args = { case: null, label: 'run', judge: true, concurrency: 3, architect: false };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--case') args.case = argv[++i];
     else if (argv[i] === '--label') args.label = argv[++i];
     else if (argv[i] === '--no-judge') args.judge = false;
+    else if (argv[i] === '--architect') args.architect = true;
     else if (argv[i] === '--concurrency') args.concurrency = Number(argv[++i]);
   }
   return args;
 }
 
-async function runCase(testCase, { withJudge }) {
+const git = promisify(execFile);
+
+/**
+ * Materializes a fixture as a committed git repository, so Architect reads
+ * through the same repo-reader path the app uses. Files without contents
+ * become empty stubs.
+ */
+async function fixtureRepo(testCase) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `tp-eval-${testCase.id}-`));
+  for (const file of testCase.files) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.writeFile(path.join(root, file), testCase.sources[file] ?? '');
+  }
+  const run = (args) => git('git', args, { cwd: root });
+  await run(['init', '-q', '-b', 'main']);
+  await run(['-c', 'user.email=e@x', '-c', 'user.name=eval', 'add', '-A']);
+  await run(['-c', 'user.email=e@x', '-c', 'user.name=eval', 'commit', '-qm', 'fixture']);
+  return root;
+}
+
+async function runCase(testCase, { withJudge, withArchitect }) {
   const started = Date.now();
   const base = { title: testCase.requirement.title, text: testCase.requirement.text, files: testCase.files };
+
+  let architect = null;
+  if (withArchitect && testCase.files.length) {
+    const root = await fixtureRepo(testCase);
+    try {
+      architect = await summarizeForRequirement(base, { runAgent: cli.runStructured, root, files: testCase.files });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+    base.interfaces = architect.text;
+  }
   const call = (prompt, schema) => cli.runStructured({ prompt, systemPrompt: productLead.SYSTEM_PROMPT, schema });
 
   const c = await call(productLead.clarifyPrompt(base), productLead.CLARIFY_SCHEMA);
@@ -40,7 +76,7 @@ async function runCase(testCase, { withJudge }) {
   const p = await call(productLead.planPrompt({ ...base, questions }), productLead.PLAN_SCHEMA);
   const plan = productLead.validatePlan(p.output);
 
-  const run = { clarify, answers, plan };
+  const run = { clarify, answers, plan, architect: architect && { text: architect.text, read: architect.read.map((r) => r.path), skipped: architect.skipped, error: architect.error } };
   const checks = check(testCase, run);
   let scores = null;
   let judgeCost = 0;
@@ -52,7 +88,7 @@ async function runCase(testCase, { withJudge }) {
   return {
     id: testCase.id,
     seconds: Math.round((Date.now() - started) / 1000),
-    agentCostUsd: (c.costUsd ?? 0) + (p.costUsd ?? 0),
+    agentCostUsd: (c.costUsd ?? 0) + (p.costUsd ?? 0) + (architect?.costUsd ?? 0),
     judgeCostUsd: judgeCost,
     run,
     checks,
@@ -127,7 +163,7 @@ async function main() {
   const results = await pool(selected, args.concurrency, async (testCase) => {
     process.stderr.write(`· ${testCase.id}\n`);
     try {
-      return await runCase(testCase, { withJudge: args.judge });
+      return await runCase(testCase, { withJudge: args.judge, withArchitect: args.architect });
     } catch (error) {
       return { id: testCase.id, error: `${error.code ?? ''} ${error.message}`.trim() };
     }

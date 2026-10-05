@@ -11,6 +11,13 @@ TaskPilot is an Electron app using plain HTML, CSS, and JavaScript (no bundler).
 - `src/renderer/` — UI. Build DOM with `textContent`/DOM APIs, never `innerHTML` with data. The page has a strict CSP (`script-src 'self'`, `style-src 'self'`), so no inline scripts or styles.
 - `src/renderer/icons.js` — the SVG icon set. Use `<i data-icon="name">` in markup or `icon('name')` in `renderer.js`; `tests/renderer/icons.test.js` fails on any unknown name.
 - `src/renderer/settings.js` — settings page controller; `settings-model.js` holds its pure logic (dirty tracking, search) and is tested directly. New settings pages need a nav entry, a `.settings-page` section, and an entry in `PAGE_STORES`.
+- `src/agents/` — the AI team. Each agent sees only its layer:
+  - `architect.js` reads code (through `src/repo-reader.js`) and publishes a module interface summary;
+  - `product-lead.js` plans from the summary and the file list, and never sees source code;
+  - `pipeline.js` runs Architect's steps; `claude-cli.js` runs the isolated, tool-less CLI.
+
+  All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect` (see `evals/product-lead/README.md`).
+- `src/repo-reader.js` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.
 - `src/preferences.js` / `src/shell-env.js` — per-machine preferences and the login-shell PATH lookup used by verification commands.
 - `src/renderer/styles.css` — frosted-glass theme. Surfaces use the `.glass` / `.glass-strong` classes and the CSS variables at the top; light and dark follow the system.
 

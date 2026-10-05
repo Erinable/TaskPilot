@@ -71,6 +71,14 @@ test('no-repo cases skip grounding checks', () => {
   assert.equal(result.testConvention, undefined);
 });
 
+test('codeGrounding passes at two thirds of the terms and sees through JSON escaping', () => {
+  const steps = (text) => run([pkg({ steps: [text] })]);
+  const terms = { grounding: ['fakeDb', 'route(', 'variant="danger"'] };
+  assert.equal(check(testCase(terms), steps('用 `fakeDb` 和 `route(` 注册')).codeGrounding.pass, true);
+  assert.equal(check(testCase(terms), steps('传入 variant="danger"')).codeGrounding.pass, false);
+  assert.match(check(testCase(terms), steps('variant="danger" 和 fakeDb')).codeGrounding.detail, /^2\/3 missing route\(/);
+});
+
 test('fixtures are well-formed and their must-touch files exist', () => {
   const ids = new Set();
   for (const c of cases) {
@@ -78,6 +86,13 @@ test('fixtures are well-formed and their must-touch files exist', () => {
     ids.add(c.id);
     assert.ok([...c.requirement.text].length <= 4000);
     for (const file of c.expect.mustTouch ?? []) assert.ok(c.files.includes(file), `${c.id}: ${file} not in files`);
+    for (const file of Object.keys(c.sources)) assert.ok(c.files.includes(file), `${c.id}: source ${file} not in files`);
+    // Grounding terms must actually be in the code, or the check is unfair.
+    const code = Object.values(c.sources).join('\n');
+    for (const term of c.expect.grounding ?? []) {
+      if (term === 'variant="danger"') continue; // the fix itself, not existing code
+      assert.ok(code.includes(term), `${c.id}: grounding term ${term} not in sources`);
+    }
     for (const file of c.files) assert.doesNotThrow(() => productLead.scopePath(file, file));
   }
 });

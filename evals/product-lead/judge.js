@@ -7,7 +7,7 @@ const CRITERIA = {
   questionValue: 'Each clarifying question would change the plan depending on the answer. No questions whose answer is obvious from the requirement or the repository, and no generic checklist questions. Asking nothing is right when nothing is unclear.',
   scopeFidelity: 'The plan does what the requirement and answers ask, no more. No features, layers, or infrastructure the user did not ask for or ruled out. Defaults chosen for unanswered questions are stated.',
   packageBoundaries: 'Packages are independently reviewable units in a sensible dependency order. Not split so finely that packages are trivial, not so coarse that one does everything.',
-  actionability: 'A developer could follow the steps without guessing: concrete files, functions, and behaviour, consistent with the existing repository layout and conventions.',
+  actionability: 'A developer could follow the steps without guessing: concrete files, functions, and behaviour, consistent with the existing code shown in source_code (real signatures, helpers, error conventions). Hedges like "if the method is async" when the code answers it count against this.',
   acceptance: 'Acceptance criteria are checkable outcomes tied to the requirement, with test names a developer would actually write.',
 };
 
@@ -39,6 +39,12 @@ function prompt(testCase, run) {
     '<requirement>', testCase.requirement.text, '</requirement>',
     '',
     '<repository_files>', testCase.files.join('\n') || '(none)', '</repository_files>',
+    '',
+    // The judge always sees the real code, with or without Architect, so it
+    // can tell whether a plan matches what exists rather than what file names suggest.
+    '<source_code>',
+    Object.entries(testCase.sources ?? {}).map(([file, content]) => `<file path="${file}">\n${content}\n</file>`).join('\n\n') || '(none)',
+    '</source_code>',
     '',
     '<clarifications>', qa || '(no questions asked)', '</clarifications>',
     '',

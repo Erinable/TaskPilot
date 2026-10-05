@@ -101,13 +101,31 @@ const PLAN_OUTPUT = {
     acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
   }],
 };
-/** A fake Product Lead answering by which schema it was given. */
+const SUMMARY_OUTPUT = {
+  modules: [{
+    path: 'src/auth/application/login-user.ts', purpose: '登录用例占位',
+    members: [{ name: 'placeholder', signature: 'export {}' }], dependsOn: [], notes: ['当前为空模块'],
+  }],
+  conventions: ['测试放在 tests/ 下'],
+  gaps: [],
+};
+/** Which agent step a schema belongs to. */
+const stepOf = (schema) => schema.properties.packages ? 'plan'
+  : schema.properties.questions ? 'clarify'
+  : schema.properties.modules ? 'summarize'
+  : 'select';
+/** A fake team answering by which schema it was given. */
 const fakeAgent = (overrides = {}) => async ({ schema }) => {
-  const isPlan = Boolean(schema.properties.packages);
-  const output = isPlan ? (overrides.plan ?? PLAN_OUTPUT) : (overrides.clarify ?? CLARIFY_OUTPUT);
+  const output = {
+    select: () => overrides.select ?? { files: ['src/auth/application/login-user.ts'] },
+    summarize: () => overrides.summarize ?? SUMMARY_OUTPUT,
+    clarify: () => overrides.clarify ?? CLARIFY_OUTPUT,
+    plan: () => overrides.plan ?? PLAN_OUTPUT,
+  }[stepOf(schema)]();
   if (output instanceof Error) throw output;
   return { output, costUsd: 0.02 };
 };
+const callFor = (calls, step) => calls.find((c) => stepOf(c.schema) === step);
 
 test('requirements: create clarifies, plan publishes into the work queue', async () => {
   const { call, agentCalls } = await harness({ agent: fakeAgent() });
@@ -117,14 +135,20 @@ test('requirements: create clarifies, plan publishes into the work queue', async
   let item = await settle(call, created.data.id);
   assert.equal(item.status, 'answering');
   assert.equal(item.questions[0].text, '连续失败几次锁定？');
-  // Product Lead sees tracked paths, never contents.
-  assert.match(agentCalls[0].prompt, /src\/auth\/application\/login-user\.ts/);
-  assert.doesNotMatch(agentCalls[0].prompt, /export \{\}/);
+  // Architect read the file; Product Lead saw the summary, never the source.
+  assert.match(callFor(agentCalls, 'summarize').prompt, /<file path="src\/auth\/application\/login-user\.ts">\nexport \{\};/);
+  const clarifyCall = callFor(agentCalls, 'clarify');
+  assert.match(clarifyCall.prompt, /<interface_summary author="Architect">\nsrc\/auth\/application\/login-user\.ts: 登录用例占位/);
+  assert.doesNotMatch(clarifyCall.prompt, /<file path=/);
+  assert.equal(item.interfaces.read[0].path, 'src/auth/application/login-user.ts');
 
   await call(CHANNELS.requirementsPlan, item.id, ['5 次']);
   item = await settle(call, item.id);
   assert.equal(item.status, 'reviewing');
-  assert.match(agentCalls[1].prompt, /A1: 5 次/);
+  const planCall = callFor(agentCalls, 'plan');
+  assert.match(planCall.prompt, /A1: 5 次/);
+  assert.match(planCall.prompt, /<interface_summary/, 'planning reuses the summary');
+  assert.equal(agentCalls.filter((c) => stepOf(c.schema) === 'summarize').length, 1, 'summarized once');
 
   const published = await call(CHANNELS.requirementsPublish, item.id);
   assert.equal(published.data.status, 'published');

@@ -11,6 +11,7 @@ const preferences = require('./preferences');
 const { createPathResolver } = require('./shell-env');
 const claudeCli = require('./agents/claude-cli');
 const productLead = require('./agents/product-lead');
+const { summarizeForRequirement, throwIfCancelled } = require('./agents/pipeline');
 const { STATE_FILENAME } = require('./work-package-store');
 const { label, available } = require('./work-package-status');
 
@@ -342,14 +343,31 @@ function registerIpcHandlers(ipcMain, deps) {
     const settled = (async () => {
       let outcome;
       try {
+        // Architect summarizes the touched code once, during clarification;
+        // planning reuses it. Re-clarifying refreshes it.
+        let interfaces = item.interfaces?.text ?? null;
+        let architectCost = 0;
+        if (step === 'clarifying') {
+          await store.setPhase(id, 'architect');
+          const result = await summarizeForRequirement(item, {
+            runAgent, root: getConfig().root, files, envPath, signal: controller.signal,
+          });
+          architectCost = result.costUsd;
+          await store.setInterfaces(id, result.summary
+            ? { summary: result.summary, text: result.text, read: result.read, skipped: result.skipped, error: null }
+            : { summary: null, text: null, read: [], skipped: result.skipped, error: result.error });
+          interfaces = result.text;
+          await store.setPhase(id, 'product-lead');
+        }
+        throwIfCancelled(controller.signal);
         const { output, costUsd } = await runAgent({
-          prompt: buildPrompt({ ...item, files }),
+          prompt: buildPrompt({ ...item, files, interfaces }),
           systemPrompt: productLead.SYSTEM_PROMPT,
           schema,
           envPath,
           signal: controller.signal,
         });
-        outcome = { output: validate(output), costUsd };
+        outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost };
       } catch (error) {
         outcome = { error };
       }

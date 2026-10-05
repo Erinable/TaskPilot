@@ -99,6 +99,19 @@ function check(testCase, run) {
     results.noInvention = { pass: found.length === 0, detail: found.length ? `mentions ${found.join(', ')}` : 'ok' };
   }
 
+  // Code-level grounding: identifiers only visible inside the source files
+  // (helpers, exact call shapes). A plan that mentions them used what was
+  // in the code, not just the file names. Reported as a fraction because
+  // any one term is legitimately optional; pass at two thirds or more.
+  if (expect.grounding) {
+    const text = JSON.stringify(plan).replace(/\\"/g, '"');
+    const found = expect.grounding.filter((term) => text.includes(term));
+    results.codeGrounding = {
+      pass: found.length / expect.grounding.length >= 2 / 3,
+      detail: `${found.length}/${expect.grounding.length}${found.length < expect.grounding.length ? ` missing ${expect.grounding.filter((t) => !found.includes(t)).join(', ')}` : ''}`,
+    };
+  }
+
   return results;
 }
 
