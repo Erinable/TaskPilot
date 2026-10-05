@@ -20,11 +20,16 @@ function fakeDocument() {
   return { createElementNS: (_ns, tag) => make(tag) };
 }
 
-test('every icon name settings.js passes literally is defined', () => {
-  const source = read('settings.js');
-  const names = new Set([...source.matchAll(/\bicon\('([^']+)'/g)].map((m) => m[1]));
-  for (const name of names) assert.ok(ICONS[name], `settings.js uses unknown icon "${name}"`);
-});
+for (const file of ['settings.js', 'requirements.js']) {
+  test(`every icon name ${file} passes literally is defined`, () => {
+    const source = read(file);
+    const patterns = [/\bicon\('([^']+)'/g, /withIcon\([^,]+,\s*[^,]+,\s*'([^']+)'/g, /emptyHint\('([^']+)'/g, /iconName: '([^']+)'/g];
+    const names = new Set();
+    for (const pattern of patterns) for (const match of source.matchAll(pattern)) names.add(match[1]);
+    assert.ok(names.size > 0, `expected icon references in ${file}`);
+    for (const name of names) assert.ok(ICONS[name], `${file} uses unknown icon "${name}"`);
+  });
+}
 
 test('every data-icon in the markup names a defined icon', () => {
   const names = [...read('index.html').matchAll(/data-icon="([^"]+)"/g)].map((m) => m[1]);

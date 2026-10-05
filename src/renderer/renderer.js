@@ -27,6 +27,17 @@ const ERROR_HINTS = {
   invalid_name: '名字不能包含控制字符。',
   invalid_choice: '选项无效。',
   open_failed: '系统无法打开这个目录。',
+  agent_unavailable: '找不到 Claude Code CLI。请确认已安装 `claude`，或在「设置 → 运行环境」里改为从登录 shell 读取 PATH。',
+  agent_timeout: 'Product Lead 超过 3 分钟没有完成，已停止。',
+  agent_cancelled: '已取消。',
+  agent_budget: '本次调用超出了 1 美元的费用上限，已停止。',
+  agent_bad_output: 'Product Lead 返回的内容不符合格式要求，已丢弃。可以重试。',
+  agent_interrupted: 'TaskPilot 在 Product Lead 运行时退出了。',
+  agent_failed: 'Product Lead 运行失败。',
+  invalid_state: '当前状态下不能执行这个操作。',
+  required: '请填写这一项。',
+  too_long: '内容太长了。',
+  invalid_text: '内容包含控制字符。',
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -34,6 +45,7 @@ const taskList = $('#taskList');
 const queueView = $('#queueView');
 const executionView = $('#executionView');
 const settingsView = $('#settingsView');
+const requirementsView = $('#requirementsView');
 const deviationModal = $('#deviationModal');
 const toast = $('#toast');
 const toastText = $('#toastText');
@@ -152,12 +164,13 @@ function renderHeading(now = new Date()) {
     .toUpperCase();
 }
 
-const VIEWS = { queue: queueView, execution: executionView, settings: settingsView };
+const VIEWS = { queue: queueView, execution: executionView, settings: settingsView, requirements: requirementsView };
 
 /** Shows exactly one top-level view and syncs the sidebar highlight. */
 function showView(name) {
   for (const [key, view] of Object.entries(VIEWS)) view.hidden = key !== name;
   $('#queueNav').classList.toggle('active', name === 'queue' || name === 'execution');
+  $('#requirementsNav').classList.toggle('active', name === 'requirements');
   $('#settingsLink').classList.toggle('active', name === 'settings');
 }
 
@@ -732,7 +745,14 @@ document.querySelectorAll('[data-verify]').forEach((button) => {
   button.addEventListener('click', () => runVerification(button.dataset.verify));
 });
 
-$('#newTaskButton').addEventListener('click', () => showToast('需求创建向导即将上线。'));
+async function showRequirements(options) {
+  if (!(await confirmLeaveSettings())) return;
+  current = null;
+  window.TaskPilotRequirements.open(options);
+}
+
+$('#newTaskButton').addEventListener('click', () => showRequirements({ compose: true }));
+$('#requirementsNav').addEventListener('click', () => showRequirements());
 $('#closeDeviation').addEventListener('click', closeDeviationForm);
 $('#cancelDeviation').addEventListener('click', closeDeviationForm);
 $('#submitDeviation').addEventListener('click', submitDeviation);

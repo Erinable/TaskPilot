@@ -38,6 +38,7 @@
           <div class="side-section-label">WORKSPACE</div>
           <nav class="main-nav">
             <button class="nav-item active" id="queueNav"><i data-icon="queue" class="nav-icon"></i><span>工作队列</span><span class="nav-count" id="queueCount">–</span></button>
+            <button class="nav-item" id="requirementsNav"><i data-icon="sparkle" class="nav-icon"></i><span>需求中心</span><span class="nav-count attention" id="requirementsCount" hidden></span></button>
             <button class="nav-item"><i data-icon="map" class="nav-icon"></i><span>工程地图</span></button>
             <button class="nav-item"><i data-icon="activity" class="nav-icon"></i><span>活动记录</span></button>
           </nav>
@@ -92,6 +93,73 @@
                 <button class="view-all-button">查看完整活动记录<i data-icon="arrow-right"></i></button>
               </section>
             </div>
+          </div>
+
+          <div class="view requirements-view" id="requirementsView" hidden>
+            <aside class="req-list-pane glass" aria-label="需求列表">
+              <div class="req-list-header">
+                <h1>需求中心</h1>
+                <button class="icon-button small" id="newRequirement" title="新建需求" aria-label="新建需求"><i data-icon="plus"></i></button>
+              </div>
+              <div class="req-list" id="requirementList" role="list"></div>
+            </aside>
+
+            <section class="req-detail" id="requirementDetail" aria-live="polite">
+              <!-- New requirement form -->
+              <form class="req-pane" data-pane="new" id="newRequirementForm" novalidate hidden>
+                <header class="req-header">
+                  <div class="agent-chip"><span class="agent-avatar pm">PM</span><span>Product Lead</span></div>
+                  <h2>描述你的需求</h2>
+                  <p>写下要做什么、为什么做。Product Lead 会先提出澄清问题，再把需求拆成可执行的工作包，你确认后才会进入工作队列。</p>
+                </header>
+                <div class="settings-card glass req-form-card">
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="reqTitle"><strong>标题（可选）</strong><small>留空时 Product Lead 会起一个</small></label>
+                    <input class="field-input" id="reqTitle" type="text" maxlength="60" autocomplete="off" placeholder="例如：邮箱登录" />
+                  </div>
+                  <div class="setting-row stacked">
+                    <label class="setting-label" for="reqText"><strong>需求描述</strong></label>
+                    <textarea class="field-input req-textarea" id="reqText" rows="8" placeholder="例如：用户可以用邮箱和密码登录。登录失败时不能暴露邮箱是否注册。需要为现有的 UserRepository 补测试。" aria-describedby="reqTextStatus"></textarea>
+                    <div class="field-meta"><p class="field-status" id="reqTextStatus" aria-live="polite"></p><span class="char-count" id="reqTextCount">0/4000</span></div>
+                  </div>
+                </div>
+                <div class="req-context" id="reqContext"></div>
+                <div class="req-actions">
+                  <button class="primary-button" id="submitRequirement" type="submit"><i data-icon="send"></i>交给 Product Lead</button>
+                </div>
+              </form>
+
+              <!-- An existing requirement -->
+              <div class="req-pane" data-pane="detail" id="requirementPane" hidden>
+                <header class="req-header">
+                  <div class="req-title-row">
+                    <span class="status-pill" id="reqStatus"></span>
+                    <h2 id="reqHeading"></h2>
+                  </div>
+                  <ol class="req-stepper" id="reqStepper" aria-label="进度">
+                    <li data-step="clarify"><span class="step-dot"></span>澄清</li>
+                    <li data-step="answer"><span class="step-dot"></span>回答</li>
+                    <li data-step="plan"><span class="step-dot"></span>拆解</li>
+                    <li data-step="publish"><span class="step-dot"></span>发布</li>
+                  </ol>
+                </header>
+
+                <details class="req-original glass">
+                  <summary><i data-icon="file"></i>原始需求</summary>
+                  <p id="reqOriginal"></p>
+                </details>
+
+                <div id="reqBody"></div>
+              </div>
+
+              <!-- Nothing selected -->
+              <div class="req-pane req-empty" data-pane="empty" hidden>
+                <span class="req-empty-icon"><i data-icon="sparkle"></i></span>
+                <h2>从一个需求开始</h2>
+                <p>Product Lead 会澄清需求、拆解工作包，你确认后发布到工作队列。</p>
+                <button class="primary-button" id="emptyNewRequirement" type="button"><i data-icon="plus"></i>新建需求</button>
+              </div>
+            </section>
           </div>
 
           <div class="view" id="executionView" hidden>
@@ -385,5 +453,6 @@
     <script src="./settings-model.js"></script>
     <script src="./renderer.js"></script>
     <script src="./settings.js"></script>
+    <script src="./requirements.js"></script>
   </body>
 </html>

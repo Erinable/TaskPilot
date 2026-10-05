@@ -2,7 +2,8 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = requir
 const path = require('node:path');
 const { registerIpcHandlers } = require('./ipc');
 const { WorkPackageStore } = require('./work-package-store');
-const { listTasks } = require('./tasks');
+const { listTasks, setGeneratedTasks } = require('./tasks');
+const { RequirementStore } = require('./requirement-store');
 const workspace = require('./workspace');
 const preferences = require('./preferences');
 const { createPathResolver } = require('./shell-env');
@@ -66,13 +67,17 @@ app.whenReady().then(async () => {
   const configDir = app.getPath('userData');
   let config = await workspace.load(configDir);
   let prefs = await preferences.load(configDir);
+  // Generated packages must be known before the work package store loads, or
+  // their saved progress would be dropped as unknown ids.
+  const requirements = await new RequirementStore(configDir).load();
+  setGeneratedTasks(requirements.publishedPackages());
   const store = await new WorkPackageStore(configDir).load(listTasks());
 
   // themeSource drives prefers-color-scheme in every window, so the CSS
   // follows the setting without the page needing to know about it.
   nativeTheme.themeSource = prefs.appearance.theme;
 
-  registerIpcHandlers(ipcMain, {
+  const ipc = registerIpcHandlers(ipcMain, {
     store,
     configDir,
     getConfig: () => config,
@@ -81,6 +86,7 @@ app.whenReady().then(async () => {
     setPreferences: (next) => { prefs = next; },
     pathResolver: createPathResolver(),
     appVersion: app.getVersion(),
+    requirements,
     onPreferencesChanged: (next) => {
       nativeTheme.themeSource = next.appearance.theme;
       for (const window of BrowserWindow.getAllWindows()) {
@@ -102,11 +108,23 @@ app.whenReady().then(async () => {
     },
   });
 
+  app.__taskpilotIpc = ipc;
   createWindow(prefs.appearance);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(prefs.appearance);
   });
+});
+
+// Stop running agents and flush their writes before quitting. An interrupted
+// run is reported as failed on the next launch (see requirement-store.js).
+let shuttingDown = false;
+app.on('before-quit', (event) => {
+  if (shuttingDown || !app.__taskpilotIpc) return;
+  shuttingDown = true;
+  event.preventDefault();
+  const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
+  Promise.race([app.__taskpilotIpc.shutdown(), timeout]).finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

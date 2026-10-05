@@ -106,13 +106,24 @@ const tasks = [
   },
 ];
 
+// Work packages Product Lead generated and the user published. Set by the
+// main process from the requirement store; kept here so every caller of
+// listTasks()/getTask() sees samples and generated packages alike.
+let generated = [];
+
+/** Replaces the generated package list (see ./requirement-store.js). */
+function setGeneratedTasks(definitions) {
+  generated = structuredClone(definitions ?? []);
+}
+
 function listTasks() {
-  // Return a copy so callers can't mutate the shared sample data.
-  return structuredClone(tasks);
+  // Return a copy so callers can't mutate the shared data. Newer generated
+  // packages come first, ahead of the samples.
+  return structuredClone([...generated, ...tasks]);
 }
 
 function getTask(id) {
-  const task = tasks.find((candidate) => candidate.id === id);
+  const task = generated.find((candidate) => candidate.id === id) ?? tasks.find((candidate) => candidate.id === id);
   return task ? structuredClone(task) : null;
 }
 
@@ -140,4 +151,4 @@ function scopeEscapesRoot(root, task) {
   return (task.fileScope ?? []).filter((candidate) => !isInside(root, candidate));
 }
 
-module.exports = { PRIORITIES, isStatus, listTasks, getTask, checkFileScope, scopeEscapesRoot };
+module.exports = { PRIORITIES, isStatus, listTasks, getTask, setGeneratedTasks, checkFileScope, scopeEscapesRoot };

@@ -39,7 +39,7 @@ class WorkPackageStore {
 
   /** Seeds from task definitions, then overlays anything already on disk. */
   async load(tasks) {
-    this.#tasks = tasks;
+    this.#tasks = [...tasks];
     for (const task of tasks) this.#state.set(task.id, initialState(task));
     try {
       const saved = JSON.parse(await fs.readFile(this.#file, 'utf8'));
@@ -55,6 +55,18 @@ class WorkPackageStore {
       // blocking startup.
     }
     return this;
+  }
+
+  /**
+   * Adds newly published packages. Existing ids keep their state, so
+   * re-publishing never discards progress.
+   */
+  add(tasks) {
+    for (const task of tasks) {
+      if (this.#state.has(task.id)) continue;
+      this.#tasks.push(task);
+      this.#state.set(task.id, initialState(task));
+    }
   }
 
   async #persist() {

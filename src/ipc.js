@@ -9,6 +9,8 @@ const workspace = require('./workspace');
 const verification = require('./verification');
 const preferences = require('./preferences');
 const { createPathResolver } = require('./shell-env');
+const claudeCli = require('./agents/claude-cli');
+const productLead = require('./agents/product-lead');
 const { STATE_FILENAME } = require('./work-package-store');
 const { label, available } = require('./work-package-status');
 
@@ -31,6 +33,16 @@ const CHANNELS = {
   dataInfo: 'data:info',
   dataResetProgress: 'data:reset-progress',
   dataReveal: 'data:reveal',
+  requirementsList: 'requirements:list',
+  requirementsGet: 'requirements:get',
+  requirementsCreate: 'requirements:create',
+  requirementsClarify: 'requirements:clarify',
+  requirementsAnswer: 'requirements:answer',
+  requirementsPlan: 'requirements:plan',
+  requirementsPublish: 'requirements:publish',
+  requirementsRemove: 'requirements:remove',
+  requirementsCancel: 'requirements:cancel',
+  agentStatus: 'agent:status',
 };
 
 /** Shaped like an Error but safe to send over IPC. */
@@ -95,6 +107,10 @@ function buildTaskView(task, state) {
  *   apply the theme to native windows
  * @param deps.revealPath optional (dir) => Promise, opens a folder in the OS
  * @param deps.appVersion optional, shown on the environment page
+ * @param deps.requirements optional RequirementStore; enables the requirement flow
+ * @param deps.runAgent optional, replaces claude-cli.runStructured (tests)
+ * @param deps.onPackagesPublished optional (definitions) => void, called after
+ *   generated packages are added to the queue
  */
 function registerIpcHandlers(ipcMain, deps) {
   const {
@@ -103,6 +119,9 @@ function registerIpcHandlers(ipcMain, deps) {
     setPreferences = () => {},
     pathResolver = createPathResolver(),
     onPreferencesChanged, revealPath, appVersion,
+    requirements = null,
+    runAgent = claudeCli.runStructured,
+    onPackagesPublished,
   } = deps;
 
   /** The PATH verification commands run with, per the user's preference. */
@@ -282,6 +301,131 @@ function registerIpcHandlers(ipcMain, deps) {
     return true;
   }));
 
+  /* Requirements: Product Lead clarifies, plans, and the human publishes. */
+
+  // The handlers below use a local `store` for requirements, so keep a
+  // separate name for the work package store.
+  const workPackages = store;
+  // One in-flight run per requirement, so it can be cancelled.
+  const runs = new Map();
+  // Background run promises, so shutdown (and tests) can wait for writes.
+  const pendingRuns = new Set();
+
+  const requireRequirements = () => {
+    if (!requirements) failWith('Requirements are unavailable', 'unsupported');
+    return requirements;
+  };
+
+  /**
+   * Repository paths Product Lead sees: tracked files only (gitignored and
+   * untracked files are left out), capped, and never their contents.
+   */
+  const repositoryFiles = async () => {
+    const root = getConfig().root;
+    if (!root) return [];
+    try {
+      return await git.listFiles(root, { limit: 400 });
+    } catch {
+      return [];
+    }
+  };
+
+  /** Runs one Product Lead step in the background and records the outcome. */
+  const startRun = async (id, step, buildPrompt, schema, validate, finish) => {
+    const store = requireRequirements();
+    const item = await store.begin(id, step);
+    const controller = new AbortController();
+    runs.set(id, controller);
+    const files = await repositoryFiles();
+    const { path: envPath } = await commandPath();
+    // Not awaited: the renderer polls requirements:get for the result.
+    const settled = (async () => {
+      let outcome;
+      try {
+        const { output, costUsd } = await runAgent({
+          prompt: buildPrompt({ ...item, files }),
+          systemPrompt: productLead.SYSTEM_PROMPT,
+          schema,
+          envPath,
+          signal: controller.signal,
+        });
+        outcome = { output: validate(output), costUsd };
+      } catch (error) {
+        outcome = { error };
+      }
+      // Drop the run before recording the result, so nobody sees a settled
+      // requirement that still looks cancellable.
+      runs.delete(id);
+      if (outcome.error) await store.failRun(id, step, outcome.error).catch(() => {});
+      else await finish(id, outcome.output, outcome.costUsd).catch((error) => store.failRun(id, step, error).catch(() => {}));
+    })();
+    pendingRuns.add(settled);
+    settled.finally(() => pendingRuns.delete(settled));
+    return item;
+  };
+
+  ipcMain.handle(CHANNELS.requirementsList, wrap(() => requireRequirements().list()));
+
+  ipcMain.handle(CHANNELS.requirementsGet, wrap((_event, id) => requireRequirements().get(requireString(id, 'id'))));
+
+  ipcMain.handle(CHANNELS.requirementsCreate, wrap(async (_event, input) => {
+    const item = await requireRequirements().create({ title: input?.title, text: input?.text });
+    // Clarification starts right away; the page shows it running.
+    return startRun(item.id, 'clarifying', productLead.clarifyPrompt, productLead.CLARIFY_SCHEMA, productLead.validateClarify,
+      (rid, output, cost) => requirements.finishClarify(rid, output, cost));
+  }));
+
+  ipcMain.handle(CHANNELS.requirementsClarify, wrap((_event, id) => startRun(requireString(id, 'id'), 'clarifying',
+    productLead.clarifyPrompt, productLead.CLARIFY_SCHEMA, productLead.validateClarify,
+    (rid, output, cost) => requirements.finishClarify(rid, output, cost))));
+
+  ipcMain.handle(CHANNELS.requirementsAnswer, wrap((_event, id, answers) => requireRequirements().setAnswers(requireString(id, 'id'), answers)));
+
+  ipcMain.handle(CHANNELS.requirementsPlan, wrap(async (_event, id, answers) => {
+    const rid = requireString(id, 'id');
+    // Answers submitted with the plan request are saved first, in one step.
+    if (answers !== undefined) await requireRequirements().setAnswers(rid, answers);
+    return startRun(rid, 'planning', productLead.planPrompt, productLead.PLAN_SCHEMA, productLead.validatePlan,
+      (r, output, cost) => requirements.finishPlan(r, output, cost));
+  }));
+
+  ipcMain.handle(CHANNELS.requirementsCancel, wrap((_event, id) => {
+    const controller = runs.get(requireString(id, 'id'));
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  }));
+
+  // Publishing turns the reviewed plan into queue entries.
+  ipcMain.handle(CHANNELS.requirementsPublish, wrap(async (_event, id) => {
+    const store = requireRequirements();
+    const item = store.get(requireString(id, 'id'));
+    if (item.status !== 'reviewing' || !item.plan) failWith('There is no plan to publish', 'invalid_state');
+    const definitions = productLead.toTaskDefinitions(item, item.plan.packages);
+    const published = await store.publish(item.id, definitions);
+    tasks.setGeneratedTasks(store.publishedPackages());
+    workPackages.add(definitions);
+    onPackagesPublished?.(definitions);
+    return published;
+  }));
+
+  ipcMain.handle(CHANNELS.requirementsRemove, wrap(async (_event, id) => {
+    const store = requireRequirements();
+    const item = store.get(requireString(id, 'id'));
+    // Published packages may already be claimed; removing them would orphan
+    // that progress, so only unpublished requirements can be deleted.
+    if (item.status === 'published') failWith('Published requirements cannot be deleted', 'invalid_state');
+    await store.remove(item.id);
+    return true;
+  }));
+
+  // Whether the Claude Code CLI can be found on the command PATH.
+  ipcMain.handle(CHANNELS.agentStatus, wrap(async () => {
+    const { path: envPath } = await commandPath();
+    const resolved = await workspace.resolveExecutable('claude', { envPath });
+    return { available: Boolean(resolved), command: resolved };
+  }));
+
   ipcMain.handle(CHANNELS.workspacePickRoot, wrap(async () => {
     if (!pickDirectory) {
       const error = new Error('Directory picker is unavailable');
@@ -320,6 +464,14 @@ function registerIpcHandlers(ipcMain, deps) {
     const task = tasks.getTask(requireString(taskId, 'taskId'));
     return { ...result, acceptance: verification.matchAcceptance(task.acceptance, result.results) };
   }));
+
+  return {
+    /** Cancels running agents and waits for their final writes. */
+    async shutdown() {
+      for (const controller of runs.values()) controller.abort();
+      await Promise.allSettled([...pendingRuns]);
+    },
+  };
 }
 
 module.exports = { CHANNELS, buildTaskView, toFormView, registerIpcHandlers };

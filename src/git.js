@@ -56,6 +56,19 @@ async function topLevel(cwd) {
   return (await git(cwd, ['rev-parse', '--show-toplevel'])).trim();
 }
 
+/**
+ * Tracked file paths, for giving an agent a sense of the repository layout.
+ * Only paths, never contents; untracked and ignored files are excluded, which
+ * keeps local secrets like .env out of the list. Returns at most `limit`
+ * paths, shallowest first so the overall structure survives truncation.
+ */
+async function listFiles(cwd, { limit = 400 } = {}) {
+  const raw = await git(cwd, ['ls-files', '-z']);
+  const files = raw.split('\0').filter(Boolean);
+  files.sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+  return files.slice(0, limit);
+}
+
 async function head(cwd) {
   return (await git(cwd, ['rev-parse', 'HEAD'])).trim();
 }
@@ -168,6 +181,6 @@ async function describe(cwd) {
 }
 
 module.exports = {
-  GitError, isRepo, topLevel, head, currentBranch, status, parseStatus,
+  GitError, isRepo, topLevel, listFiles, head, currentBranch, status, parseStatus,
   diffStat, changesSince, diffFile, describe,
 };

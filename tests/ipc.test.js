@@ -7,16 +7,25 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { CHANNELS, registerIpcHandlers } = require('../src/ipc');
 const { WorkPackageStore } = require('../src/work-package-store');
-const { listTasks } = require('../src/tasks');
+const { listTasks, setGeneratedTasks } = require('../src/tasks');
+const { RequirementStore } = require('../src/requirement-store');
 const workspace = require('../src/workspace');
 const preferences = require('../src/preferences');
 const { createPathResolver } = require('../src/shell-env');
 
 const run = promisify(execFile);
 
-async function harness({ withRepo = true } = {}) {
+async function harness({ withRepo = true, agent = null } = {}) {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
-  test.after(() => fs.rm(configDir, { recursive: true, force: true }));
+  // Background agent runs must finish writing before the directory goes.
+  let ipc = null;
+  test.after(async () => {
+    await ipc?.shutdown();
+    await fs.rm(configDir, { recursive: true, force: true });
+  });
+  // Generated packages are module state in tasks.js; start each test clean.
+  setGeneratedTasks([]);
+  test.after(() => setGeneratedTasks([]));
 
   let root = null;
   if (withRepo) {
@@ -39,12 +48,14 @@ async function harness({ withRepo = true } = {}) {
   const changes = [];
   const revealed = [];
   let shellReads = 0;
+  const requirements = await new RequirementStore(configDir).load();
+  const agentCalls = [];
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
     inherited: '/usr/bin:/bin',
     read: async () => { shellReads += 1; return `/tp/shell/bin:${process.env.PATH}`; },
   });
-  registerIpcHandlers(
+  ipc = registerIpcHandlers(
     { handle: (channel, handler) => handlers.set(channel, handler) },
     {
       store, configDir, getConfig: () => config, setConfig: (next) => { config = next; },
@@ -53,13 +64,137 @@ async function harness({ withRepo = true } = {}) {
       onPreferencesChanged: (next, previous) => changes.push({ next, previous }),
       revealPath: async (dir) => { revealed.push(dir); },
       appVersion: '9.9.9',
+      requirements,
+      runAgent: async (options) => {
+        agentCalls.push(options);
+        if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
+        return agent(options);
+      },
     },
   );
 
   const call = (channel, ...args) => handlers.get(channel)({}, ...args);
   const setCommands = (commands) => { config = { ...config, commands }; };
-  return { call, store, root, configDir, setCommands, changes, revealed, shellReads: () => shellReads };
+  return {
+    call, store, root, configDir, setCommands, changes, revealed, requirements, agentCalls,
+    shellReads: () => shellReads,
+  };
 }
+
+/** Polls until a requirement leaves a running state. */
+async function settle(call, id) {
+  for (let i = 0; i < 200; i += 1) {
+    const { data } = await call(CHANNELS.requirementsGet, id);
+    if (data.status !== 'clarifying' && data.status !== 'planning') return data;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('requirement never settled');
+}
+
+const CLARIFY_OUTPUT = { title: '邮箱登录', summary: '用户用邮箱和密码登录', questions: ['连续失败几次锁定？'] };
+const PLAN_OUTPUT = {
+  summary: '一个工作包完成登录。',
+  packages: [{
+    title: '实现登录接口', description: '邮箱密码登录', module: 'auth', tags: ['auth'], priority: 'high',
+    estimateHours: 2, icon: 'key', steps: ['创建 `LoginUserUseCase`。'],
+    fileScope: ['src/auth/application/login-user.ts'],
+    acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
+  }],
+};
+/** A fake Product Lead answering by which schema it was given. */
+const fakeAgent = (overrides = {}) => async ({ schema }) => {
+  const isPlan = Boolean(schema.properties.packages);
+  const output = isPlan ? (overrides.plan ?? PLAN_OUTPUT) : (overrides.clarify ?? CLARIFY_OUTPUT);
+  if (output instanceof Error) throw output;
+  return { output, costUsd: 0.02 };
+};
+
+test('requirements: create clarifies, plan publishes into the work queue', async () => {
+  const { call, agentCalls } = await harness({ agent: fakeAgent() });
+  const created = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  assert.equal(created.data.status, 'clarifying');
+
+  let item = await settle(call, created.data.id);
+  assert.equal(item.status, 'answering');
+  assert.equal(item.questions[0].text, '连续失败几次锁定？');
+  // Product Lead sees tracked paths, never contents.
+  assert.match(agentCalls[0].prompt, /src\/auth\/application\/login-user\.ts/);
+  assert.doesNotMatch(agentCalls[0].prompt, /export \{\}/);
+
+  await call(CHANNELS.requirementsPlan, item.id, ['5 次']);
+  item = await settle(call, item.id);
+  assert.equal(item.status, 'reviewing');
+  assert.match(agentCalls[1].prompt, /A1: 5 次/);
+
+  const published = await call(CHANNELS.requirementsPublish, item.id);
+  assert.equal(published.data.status, 'published');
+  const queue = (await call(CHANNELS.listTasks)).data;
+  assert.equal(queue[0].id, `${item.id}-wp1`, 'generated packages lead the queue');
+  assert.deepEqual(queue[0].humanTransitions, ['claim']);
+
+  // The new package is a real work package: it can be claimed.
+  const claimed = await call(CHANNELS.transition, `${item.id}-wp1`, 'claim');
+  assert.equal(claimed.data.status, 'in_progress');
+});
+
+test('requirements: an invalid agent plan fails the run instead of reaching the queue', async () => {
+  const evil = { ...PLAN_OUTPUT, packages: [{ ...PLAN_OUTPUT.packages[0], fileScope: ['../../.ssh/id_rsa'] }] };
+  const { call } = await harness({ agent: fakeAgent({ plan: evil }) });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
+  await settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['']);
+  const item = await settle(call, data.id);
+  assert.equal(item.status, 'failed');
+  assert.equal(item.failedStep, 'planning');
+  assert.equal(item.error.code, 'agent_bad_output');
+  assert.equal((await call(CHANNELS.requirementsPublish, data.id)).error.code, 'invalid_state');
+});
+
+test('requirements: agent errors are recorded and the step can be retried', async () => {
+  let fail = true;
+  const agent = async (options) => {
+    if (fail) throw Object.assign(new Error('Claude Code CLI not found: claude'), { code: 'agent_unavailable' });
+    return fakeAgent()(options);
+  };
+  const { call } = await harness({ agent });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
+  let item = await settle(call, data.id);
+  assert.equal(item.error.code, 'agent_unavailable');
+
+  fail = false;
+  await call(CHANNELS.requirementsClarify, data.id);
+  item = await settle(call, data.id);
+  assert.equal(item.status, 'answering');
+});
+
+test('requirements: a running step can be cancelled', async () => {
+  const agent = ({ signal }) => new Promise((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
+  });
+  const { call } = await harness({ agent });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
+  assert.equal((await call(CHANNELS.requirementsCancel, data.id)).data, true);
+  const item = await settle(call, data.id);
+  assert.equal(item.error.code, 'agent_cancelled');
+  assert.equal((await call(CHANNELS.requirementsCancel, data.id)).data, false, 'nothing left to cancel');
+});
+
+test('requirements: published requirements cannot be deleted', async () => {
+  const { call } = await harness({ agent: fakeAgent() });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
+  await settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['']);
+  await settle(call, data.id);
+  await call(CHANNELS.requirementsPublish, data.id);
+  assert.equal((await call(CHANNELS.requirementsRemove, data.id)).error.code, 'invalid_state');
+});
+
+test('requirements: create rejects empty text before any agent runs', async () => {
+  const { call, agentCalls } = await harness({ agent: fakeAgent() });
+  const response = await call(CHANNELS.requirementsCreate, { text: '  ' });
+  assert.equal(response.error.field, 'text');
+  assert.equal(agentCalls.length, 0);
+});
 
 const validPrefs = (overrides = {}) => ({
   profile: { displayName: 'Ada Lovelace', avatarColor: 'ocean', ...overrides.profile },

@@ -46,4 +46,20 @@ contextBridge.exposeInMainWorld('taskpilot', {
     resetProgress: () => invoke('data:reset-progress'),
     reveal: () => invoke('data:reveal'),
   },
+
+  requirements: {
+    list: () => invoke('requirements:list'),
+    get: (id) => invoke('requirements:get', id),
+    create: (input) => invoke('requirements:create', input),
+    clarify: (id) => invoke('requirements:clarify', id),
+    answer: (id, answers) => invoke('requirements:answer', id, answers),
+    plan: (id, answers) => invoke('requirements:plan', id, answers),
+    publish: (id) => invoke('requirements:publish', id),
+    remove: (id) => invoke('requirements:remove', id),
+    cancel: (id) => invoke('requirements:cancel', id),
+  },
+
+  agent: {
+    status: () => invoke('agent:status'),
+  },
 });
