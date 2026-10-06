@@ -43,9 +43,11 @@ Keep automated tests under `tests/`, static files under `assets/`, and scripts u
 - `npm start` — run the built app (`electron-vite preview`).
 - `npm test` — run `tests/**/*.test.ts` with Vitest. Component tests opt into a DOM with `// @vitest-environment happy-dom`.
 - `npm run typecheck` — vue-tsc over main, preload, renderer and tests.
+- `npm run lint` — ESLint (`eslint.config.ts`): checks the conventions below that a tool can (const arrow functions, // comments, inline exports, no `v-html`/`innerHTML`, `process.env` only in `src/main/env.ts`, no explicit `any`).
+- `npm run format` / `npm run format:check` — Prettier (`.prettierrc.json`). The one-time formatting commit is listed in `.git-blame-ignore-revs`.
 - `npm run eval:product-lead` — Product Lead eval harness; Node runs the `.ts` files directly.
 
-No linter or formatter is configured yet. Do not introduce duplicate commands that bypass these scripts.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, test and build on Ubuntu and macOS. Do not introduce duplicate commands that bypass these scripts.
 
 ## Coding Style & Naming Conventions
 

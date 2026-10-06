@@ -1,0 +1,3 @@
+# One-time Prettier pass; hide it from git blame with
+# git config blame.ignoreRevsFile .git-blame-ignore-revs
+e4620a9c1060d89dd1444e13cfcfb3009bbcd5fc

@@ -31,6 +31,8 @@ npm start
 ```bash
 npm test
 npm run typecheck
+npm run lint
+npm run format:check
 ```
 
 ## 技术栈
