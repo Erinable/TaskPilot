@@ -10,6 +10,9 @@ import type { IpcHandle } from '../../src/main/ipc.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
+// Runs real git and npm processes per test; slow machines and CI need the room.
+vi.setConfig({ testTimeout: 20_000 });
+
 // A stand-in agent; tests answer with plain objects or reject.
 type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';

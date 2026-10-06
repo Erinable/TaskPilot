@@ -6,5 +6,12 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } },
-  test: { include: ['tests/**/*.test.{js,ts}'], environment: 'node', setupFiles: ['tests/setup/renderer_globals.ts'] },
+  test: {
+    include: ['tests/**/*.test.{js,ts}'],
+    environment: 'node',
+    setupFiles: ['tests/setup/renderer_globals.ts'],
+    // Integration tests spawn git, npm and Electron-free app stacks; running a
+    // worker per CPU starves them past their timeouts.
+    maxWorkers: '50%',
+  },
 });
