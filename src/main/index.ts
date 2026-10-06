@@ -11,6 +11,7 @@ import * as workspace from './workspace.ts';
 import * as preferences from './preferences.ts';
 import { createPathResolver } from './shell_env.ts';
 import { env } from './env.ts';
+import { ActivityLog } from './activity_log.ts';
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -83,6 +84,9 @@ app.whenReady().then(async () => {
   const requirements = await new RequirementStore(configDir).load();
   setGeneratedTasks(requirements.publishedPackages());
   const store = await new WorkPackageStore(configDir).load(listTasks());
+  const activity = new ActivityLog(configDir, { timeZone: env.businessTimeZone });
+  // Expired day files go at startup; a failure only leaves old files behind.
+  activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
   // themeSource drives prefers-color-scheme in every window, so the CSS
   // follows the setting without the page needing to know about it.
@@ -98,6 +102,7 @@ app.whenReady().then(async () => {
     pathResolver: createPathResolver(),
     appVersion: app.getVersion(),
     requirements,
+    activity,
     onPreferencesChanged: (next) => {
       nativeTheme.themeSource = next.appearance.theme;
       for (const window of BrowserWindow.getAllWindows()) {

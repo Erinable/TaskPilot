@@ -1,4 +1,4 @@
-import { test, onTestFinished } from 'vitest';
+import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -15,7 +15,9 @@ type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
 import { listTasks, setGeneratedTasks } from '../../src/main/tasks.ts';
+import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
 import { RequirementStore } from '../../src/main/requirement_store.ts';
+import { ActivityLog } from '../../src/main/activity_log.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import * as preferences from '../../src/main/preferences.ts';
 import { createPathResolver } from '../../src/main/shell_env.ts';
@@ -30,8 +32,9 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
     await ipc?.shutdown();
     await fs.rm(configDir, { recursive: true, force: true });
   });
-  // Generated packages are module state in tasks.js; start each test clean.
-  setGeneratedTasks([]);
+  // Generated packages are module state in tasks.ts; start each test with
+  // the sample packages and clear them afterwards.
+  setGeneratedTasks(SAMPLE_TASKS);
   onTestFinished(() => setGeneratedTasks([]));
 
   let root: string | null = null;
@@ -57,6 +60,7 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
   const revealed: string[] = [];
   let shellReads = 0;
   const requirements = await new RequirementStore(configDir).load();
+  const activity = new ActivityLog(configDir, { timeZone: 'Asia/Shanghai' });
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
@@ -73,6 +77,7 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
       revealPath: async (dir) => { revealed.push(dir); },
       appVersion: '9.9.9',
       requirements,
+      activity,
       runAgent: async (options) => {
         agentCalls.push(options);
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
@@ -87,7 +92,7 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
   const getConfig = () => config;
   return {
     // Null only with withRepo: false, and those tests never read it.
-    call, store, root: root!, configDir, setCommands, setRoot, getConfig, changes, revealed, requirements, agentCalls,
+    call, store, root: root!, configDir, activity, setCommands, setRoot, getConfig, changes, revealed, requirements, agentCalls,
     shellReads: () => shellReads,
   };
 }
@@ -956,4 +961,72 @@ test('review: a clean pass with a measured baseline finishes the package without
   const task = await settleReview(h.call, 'auth-edge-tests');
   assert.deepEqual(task.review.attention, []);
   assert.equal(task.status, 'done');
+});
+
+// Appends are not awaited by handlers; poll the overview until `count` events land.
+const overviewWith = async (call, count: number) => {
+  for (let i = 0; i < 200; i += 1) {
+    const { data } = await call(CHANNELS.activityOverview);
+    if (data.recent.length >= count) return data;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`expected ${count} activity events`);
+};
+
+test('activity: the requirement flow and a claim are recorded, newest first', async () => {
+  const { call } = await harness({ agent: fakeAgent() });
+  const created = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  let item = await settle(call, created.data.id);
+  await call(CHANNELS.requirementsPlan, item.id, ['5 次']);
+  item = await settle(call, item.id);
+  await call(CHANNELS.requirementsPublish, item.id);
+  await call(CHANNELS.transition, `${item.id}-wp1`, 'claim');
+
+  const overview = await overviewWith(call, 5);
+  assert.deepEqual(overview.recent.map((record) => record.kind), [
+    'package_transition', 'requirement_published', 'requirement_finished', 'requirement_finished', 'requirement_created',
+  ]);
+  const [claim, published, planned] = overview.recent;
+  assert.equal(claim.transition, 'claim');
+  assert.equal(claim.actor, 'human');
+  assert.equal(claim.title, '实现登录接口');
+  assert.equal(published.packageCount, 1);
+  assert.equal(planned.step, 'planning');
+  assert.equal(overview.timeZone, 'Asia/Shanghai');
+  assert.equal(overview.metrics.doneThisWeek, 0);
+});
+
+test('activity: QA finishing a review is recorded as an agent transition', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  await submitEdgeTests(h);
+  await settleReview(h.call, 'auth-edge-tests');
+  const overview = await overviewWith(h.call, 3);
+  const [review] = overview.recent;
+  assert.equal(review.transition, 'review_passed');
+  assert.equal(review.actor, 'agent');
+  assert.equal(review.to, 'accepting');
+});
+
+test('activity: a failed append never fails the action', async () => {
+  const h = await harness();
+  // A file where the events directory should be makes every append fail.
+  await fs.writeFile(path.join(h.configDir, 'events'), '');
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => errors.mockRestore());
+  const claimed = await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  assert.equal(claimed.ok, true);
+  await vi.waitFor(() => assert.ok(errors.mock.calls.some(([message]) => message === '[activity] append failed')));
+});
+
+test('activity: team status reports busy agents and CLI availability', async () => {
+  let release: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const { call } = await harness({ agent: async (options) => { await blocked; return fakeAgent()(options); } });
+  const created = await call(CHANNELS.requirementsCreate, { text: 't' });
+  const busy = (await call(CHANNELS.activityOverview)).data.team.busy;
+  assert.ok(busy.includes('architect') || busy.includes('product-lead'));
+  release();
+  await settle(call, created.data.id);
+  assert.deepEqual((await call(CHANNELS.activityOverview)).data.team.busy, []);
 });

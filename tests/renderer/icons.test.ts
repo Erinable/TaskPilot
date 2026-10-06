@@ -8,7 +8,8 @@ import { mount } from '@vue/test-utils';
 import AppIcon from '../../src/renderer/src/components/AppIcon.vue';
 import { ICONS } from '../../src/renderer/src/lib/icons.ts';
 import type { IconDefinition, IconName } from '../../src/renderer/src/lib/icons.ts';
-import { listTasks } from '../../src/main/tasks.ts';
+import { PACKAGE_ICONS } from '../../src/main/agents/product_lead.ts';
+import { SAMPLE_TASKS } from '../main/fixtures/sample_tasks.ts';
 
 const SOURCE = path.join(import.meta.dirname, '..', '..', 'src', 'renderer', 'src');
 const definitions = ICONS as Record<string, IconDefinition>;
@@ -31,7 +32,9 @@ test('every icon name written literally in the renderer is defined', () => {
 });
 
 test('every work package icon is defined', () => {
-  for (const task of listTasks()) assert.ok(definitions[task.icon], `${task.id} uses unknown icon "${task.icon}"`);
+  // Product Lead can only assign PACKAGE_ICONS; the samples cover test fixtures.
+  for (const name of PACKAGE_ICONS) assert.ok(definitions[name], `Product Lead may assign unknown icon "${name}"`);
+  for (const task of SAMPLE_TASKS) assert.ok(definitions[task.icon], `${task.id} uses unknown icon "${task.icon}"`);
 });
 
 test('AppIcon renders an accessible-hidden SVG with stroke defaults', () => {

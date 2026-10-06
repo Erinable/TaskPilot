@@ -15,10 +15,12 @@ import * as envSetup from './env_setup.ts';
 import * as evidence from './evidence.ts';
 import { summarizeForRequirement, reviewWorkPackage, adjudicateDeviation, planEnvironment, throwIfCancelled } from './agents/pipeline.ts';
 import { STATE_FILENAME, humanTransitions } from './work_package_store.ts';
-import { label } from './work_package_status.ts';
+import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
+import { computeMetrics, RETENTION_DAYS } from './activity_log.ts';
+import type { ActivityLog } from './activity_log.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
 import type { BaselineChecks, BaselineChecksStatus, DeviationInput, WorkPackageStore } from './work_package_store.ts';
@@ -136,6 +138,11 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState):
   };
 };
 
+// The agent transition that moved a package from `from` to `to`; the store
+// picks it, so it is looked up rather than passed back.
+const agentTransitionOf = (from: ipc.WorkPackageStatus, to: ipc.WorkPackageStatus) =>
+  TRANSITIONS.find((transition) => transition.actor === 'agent' && transition.from === from && transition.to === to)?.name as ipc.AgentTransition;
+
 // Electron's ipcMain, or a stand-in exposing `handle`.
 export type IpcMainLike = { handle(channel: Channel, listener: (event: unknown, ...args: unknown[]) => unknown): void };
 
@@ -166,6 +173,8 @@ export type IpcDeps = {
   runAgent?: RunAgent;
   // Called after generated packages are added to the queue.
   onPackagesPublished?: (definitions: TaskDefinition[]) => void;
+  // Records state changes for metrics and the activity feed.
+  activity?: ActivityLog | null;
 };
 
 export type IpcHandle = { shutdown: () => Promise<void> };
@@ -180,6 +189,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     requirements = null,
     runAgent = claudeCli.runStructured,
     onPackagesPublished,
+    activity = null,
   } = deps;
 
   // The PATH verification commands run with, per the user's preference.
@@ -238,6 +248,18 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const effectiveTask = (id: string) => {
     const task = tasks.getTask(id);
     return task ? store.effective(task) : null;
+  };
+
+  // Activity is a side record: a failed append is logged and never fails the
+  // action that caused it.
+  const record = (event: ipc.ActivityEvent) => {
+    activity?.append(event).catch((error) => console.error('[activity] append failed', error));
+  };
+
+  // Records a package moving between statuses.
+  const recordTransition = (id: string, before: ipc.WorkPackageStatus, after: { status: ipc.WorkPackageStatus }, transition: ipc.HumanTransition | ipc.AgentTransition, actor: 'human' | 'agent') => {
+    if (before === after.status) return;
+    record({ kind: 'package_transition', packageId: id, title: tasks.getTask(id)?.title ?? id, transition, actor, from: before, to: after.status });
   };
 
   const requireTask = (id: string) => {
@@ -313,7 +335,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       // looks cancellable.
       reviews.delete(id);
       if ('error' in outcome) await store.failReview(id, asAgentError(outcome.error)).catch(() => {});
-      else await store.completeReview(id, outcome.result).catch((error) => store.failReview(id, error).catch(() => {}));
+      else {
+        const before = store.get(id).status;
+        await store.completeReview(id, outcome.result)
+          .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
+          .catch((error) => store.failReview(id, error).catch(() => {}));
+      }
     })();
     track(settled);
     return toWireState(entry);
@@ -352,7 +379,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       }
       adjudications.delete(id);
       if ('error' in outcome) await store.failAdjudication(id, asAgentError(outcome.error)).catch(() => {});
-      else await store.completeAdjudication(id, outcome.result).catch((error) => store.failAdjudication(id, error).catch(() => {}));
+      else {
+        const before = store.get(id).status;
+        await store.completeAdjudication(id, outcome.result)
+          .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
+          .catch((error) => store.failAdjudication(id, error).catch(() => {}));
+      }
     })();
     track(settled);
     return toWireState(entry);
@@ -446,7 +478,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     if (name === 'report_deviation') extra.deviation = (options as { deviation?: DeviationInput } | null | undefined)?.deviation;
     if (name === 'release') baselineRuns.get(id)?.abort();
     // store.transition() rejects names that are not transitions.
+    const before = store.get(id).status;
     const entry = await store.transition(id, name as TransitionName, 'human', extra);
+    recordTransition(id, before, entry, name as ipc.HumanTransition, 'human');
     if (name === 'claim') {
       measureBaseline(id);
       return toWireState(entry);
@@ -654,8 +688,19 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       // Drop the run before recording the result, so nobody sees a settled
       // requirement that still looks cancellable.
       runs.delete(id);
-      if ('error' in outcome) await store.failRun(id, step, asAgentError(outcome.error)).catch(() => {});
-      else await finish(id, outcome.output, outcome.costUsd).catch((error) => store.failRun(id, step, error).catch(() => {}));
+      const title = store.get(id).title || item.text.slice(0, 40);
+      const fail = (error: unknown) => {
+        const agentError = asAgentError(error);
+        record({ kind: 'requirement_failed', requirementId: id, title, step, code: agentError.code ?? 'unknown' });
+        return store.failRun(id, step, agentError).catch(() => {});
+      };
+      if ('error' in outcome) await fail(outcome.error);
+      else {
+        const { costUsd } = outcome;
+        await finish(id, outcome.output, costUsd)
+          .then(() => record({ kind: 'requirement_finished', requirementId: id, title: store.get(id).title || title, step, costUsd }))
+          .catch(fail);
+      }
     })();
     track(settled);
     return toWireRequirement(item);
@@ -669,6 +714,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(CHANNELS.requirementsCreate, wrap(async (_event, rawInput): Promise<ipc.Requirement> => {
     const input = rawInput as { title?: unknown; text?: unknown } | null | undefined;
     const item = await requireRequirements().create({ title: input?.title, text: input?.text });
+    record({ kind: 'requirement_created', requirementId: item.id, title: item.title || item.text.slice(0, 40) });
     // Clarification starts right away; the page shows it running.
     return startRun(item.id, 'clarifying', productLead.clarifyPrompt, productLead.CLARIFY_SCHEMA, productLead.validateClarify,
       (rid, output, cost) => requireRequirements().finishClarify(rid, output, cost));
@@ -707,6 +753,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     tasks.setGeneratedTasks(store.publishedPackages());
     workPackages.add(definitions);
     onPackagesPublished?.(definitions);
+    record({ kind: 'requirement_published', requirementId: item.id, title: published.title || item.text.slice(0, 40), packageCount: definitions.length });
     return toWireRequirement(published);
   }));
 
@@ -718,6 +765,30 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     if (item.status === 'published') failWith('Published requirements cannot be deleted', 'invalid_state');
     await store.remove(item.id);
     return true;
+  }));
+
+  // The feed, the week's metrics and who on the team is busy. The metrics
+  // read the retention window once; the feed reads only the newest days.
+  ipcMain.handle(CHANNELS.activityOverview, wrap(async (): Promise<ipc.ActivityOverview> => {
+    if (!activity) return failWith('Activity is unavailable', 'unsupported');
+    const { path: envPath } = await commandPath();
+    const [recent, window, executable] = await Promise.all([
+      activity.recent({ days: RETENTION_DAYS, limit: 20 }),
+      activity.window(RETENTION_DAYS),
+      workspace.resolveExecutable('claude', { envPath }),
+    ]);
+    const busy = new Set<ipc.ActivityAgent>();
+    if (reviews.size) busy.add('qa');
+    if (adjudications.size) busy.add('architect');
+    for (const id of runs.keys()) {
+      busy.add(requirements?.get(id).phase === 'architect' ? 'architect' : 'product-lead');
+    }
+    return {
+      recent,
+      metrics: computeMetrics(window, new Date(), activity.timeZone),
+      team: { available: Boolean(executable), busy: [...busy] },
+      timeZone: activity.timeZone,
+    };
   }));
 
   // Whether the Claude Code CLI can be found on the command PATH.

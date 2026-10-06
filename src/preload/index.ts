@@ -75,6 +75,10 @@ const api = {
     status: () => invoke<ipc.AgentStatus>(CHANNELS.agentStatus),
   },
 
+  activity: {
+    overview: () => invoke<ipc.ActivityOverview>(CHANNELS.activityOverview),
+  },
+
   env: {
     get: () => invoke<ipc.EnvState>(CHANNELS.envGet),
     plan: (options?: ipc.EnvPlanOptions) => invoke<ipc.EnvState>(CHANNELS.envPlan, options),

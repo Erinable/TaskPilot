@@ -6,6 +6,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import * as activity from '@/lib/activity.ts';
 import type { IconName } from '@/lib/icons.ts';
 
 const PRIORITY_LABELS: Record<string, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
@@ -21,12 +22,20 @@ const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好'
 const todayLabel = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase();
 const greetingName = computed(() => (app.preferences?.profile.displayName ? `，${app.preferences.profile.displayName}` : ''));
 
-const ACTIVITY = [
-  { avatar: 'arch', initials: 'AR', who: 'Architect', what: '更新了架构决策', detail: '将 TokenService 移入 auth/infrastructure', time: '8 分钟前' },
-  { avatar: 'qa', initials: 'QA', who: 'QA Partner', what: '完成测试分析', detail: '发现 2 个未覆盖的边界条件', time: '34 分钟前' },
-  { avatar: 'pm', initials: 'PM', who: 'Product Lead', what: '澄清了需求', detail: '邮箱登录 · 验收标准已更新', time: '1 小时前' },
-  { avatar: 'rel', initials: 'RM', who: 'Release Manager', what: '发布了 v0.8.0', detail: '登录模块 · 生产环境', time: '昨天' },
-];
+const overview = computed(() => app.activity);
+const feed = computed(() => {
+  const current = overview.value;
+  if (!current) return [];
+  const at = new Date();
+  return current.recent.slice(0, 6).map((record, index) => {
+    const item = activity.toFeedItem(record, index);
+    return { ...item, time: activity.relativeTime(item.at, at, current.timeZone) };
+  });
+});
+const doneTrend = computed(() => (overview.value ? activity.doneTrend(overview.value.metrics) : null));
+const durationTrend = computed(() => (overview.value ? activity.durationTrend(overview.value.metrics) : null));
+const presenceSummary = computed(() => activity.presenceSummary(overview.value?.team ?? null));
+const teamOnline = computed(() => overview.value?.team.available === true);
 </script>
 
 <template>
@@ -38,21 +47,36 @@ const ACTIVITY = [
         <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
       </div>
       <div class="heading-actions">
-        <div class="team-presence"><span></span> 4 个 AI 成员在线</div>
+        <div v-if="presenceSummary" class="team-presence" :class="{ offline: !teamOnline }"><span></span> {{ presenceSummary }}</div>
         <button class="primary-button" @click="requirements.open({ compose: true })"><AppIcon name="plus" />新建需求</button>
       </div>
     </div>
 
     <section class="metrics-row">
-      <div class="metric-card glass"><div class="metric-icon accent"><AppIcon name="inbox" /></div><div><span>待处理工作包</span><strong>{{ tasks.pendingCount }}</strong></div><small class="metric-trend up"><AppIcon name="trend-up" />2 本周</small></div>
-      <div class="metric-card glass"><div class="metric-icon success"><AppIcon name="check-circle" /></div><div><span>本周已完成</span><strong>12</strong></div><small class="metric-trend up"><AppIcon name="trend-up" />28%</small></div>
-      <div class="metric-card glass"><div class="metric-icon warning"><AppIcon name="clock" /></div><div><span>平均执行时长</span><strong>2.4h</strong></div><small class="metric-trend neutral">较上周稳定</small></div>
+      <div class="metric-card glass"><div class="metric-icon accent"><AppIcon name="inbox" /></div><div><span>待处理工作包</span><strong>{{ tasks.pendingCount }}</strong></div></div>
+      <div class="metric-card glass">
+        <div class="metric-icon success"><AppIcon name="check-circle" /></div>
+        <div><span>本周已完成</span><strong>{{ overview ? overview.metrics.doneThisWeek : '–' }}</strong></div>
+        <small v-if="doneTrend" class="metric-trend" :class="doneTrend.tone"><AppIcon v-if="doneTrend.tone === 'up'" name="trend-up" />{{ doneTrend.text }}</small>
+      </div>
+      <div class="metric-card glass" title="从领取到完成的平均时长，近 7 天">
+        <div class="metric-icon warning"><AppIcon name="clock" /></div>
+        <div><span>平均执行时长</span><strong>{{ overview ? activity.formatHours(overview.metrics.averageHours) : '–' }}</strong></div>
+        <small v-if="durationTrend" class="metric-trend" :class="durationTrend.tone"><AppIcon v-if="durationTrend.tone === 'up'" name="trend-up" />{{ durationTrend.text }}</small>
+      </div>
     </section>
 
     <div class="content-columns">
       <section class="queue-panel panel glass">
         <div class="panel-heading"><div><h2>你的工作队列</h2><p>按优先级排序的编码工作包</p></div><button class="filter-button"><AppIcon name="filter" />全部状态</button></div>
         <div class="task-list">
+          <!-- The queue only holds published packages, so point an empty one at the requirement center. -->
+          <div v-if="tasks.tasks.length === 0" class="req-empty" data-empty="queue">
+            <span class="req-empty-icon"><AppIcon name="inbox" /></span>
+            <h2>还没有工作包</h2>
+            <p>在需求中心描述需求，Product Lead 拆解并经你确认后，工作包会出现在这里。</p>
+            <button class="primary-button" type="button" @click="requirements.open({ compose: true })"><AppIcon name="plus" />去写需求</button>
+          </div>
           <button v-for="task in tasks.tasks" :key="task.id" class="task-item" type="button" @click="execution.open(task.id)">
             <!-- task.icon comes from tasks.ts; an unknown name renders blank. -->
             <div class="task-state" :class="`priority-${task.priority}`"><AppIcon :name="task.icon as IconName" /></div>
@@ -79,13 +103,24 @@ const ACTIVITY = [
       <section class="activity-panel panel glass">
         <div class="panel-heading"><div><h2>AI 团队动态</h2><p>项目上下文正在持续更新</p></div><button class="icon-button small" aria-label="更多"><AppIcon name="more" /></button></div>
         <div class="activity-list">
-          <div v-for="item in ACTIVITY" :key="item.initials" class="activity-item">
-            <span class="activity-avatar" :class="item.avatar">{{ item.initials }}</span>
-            <div><p><strong>{{ item.who }}</strong> {{ item.what }}</p><small>{{ item.detail }}</small><time>{{ item.time }}</time></div>
+          <div v-for="item in feed" :key="item.key" class="activity-item">
+            <span class="activity-avatar" :class="item.actor.avatar">{{ item.actor.initials }}</span>
+            <div><p><strong>{{ item.actor.name }}</strong> {{ item.what }}</p><small>{{ item.detail }}</small><time :datetime="item.at">{{ item.time }}</time></div>
           </div>
+          <p v-if="overview && feed.length === 0" class="empty-hint"><AppIcon name="activity" />还没有动态。提交需求或推进工作包后会出现在这里。</p>
         </div>
         <button class="view-all-button">查看完整活动记录<AppIcon name="arrow-right" /></button>
       </section>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* A falling trend, and the presence chip when the team is unreachable. */
+.metric-trend.down { color: var(--danger); background: var(--danger-soft); }
+.team-presence.offline span { background: var(--text-tertiary); box-shadow: none; animation: none; }
+/* "You" in the feed, beside the agents' gradients. */
+.activity-avatar.you { background: linear-gradient(135deg, #7d8597, #5a6172); font-size: 11px; }
+/* The requirement center's empty state sits lower; inside a panel it starts near the top. */
+.task-list .req-empty { padding-top: 32px; padding-bottom: 24px; }
+</style>

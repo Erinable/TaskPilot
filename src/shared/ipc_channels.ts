@@ -39,6 +39,7 @@ export const CHANNELS = {
   envApply: 'env:apply',
   envCancel: 'env:cancel',
   baselineMeasure: 'baseline:measure',
+  activityOverview: 'activity:overview',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

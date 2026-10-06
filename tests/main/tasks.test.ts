@@ -1,7 +1,20 @@
-import { test } from 'vitest';
+import { test, beforeEach, afterEach } from 'vitest';
 import assert from 'node:assert/strict';
+
 import { isStatus } from '../../src/main/work_package_status.ts';
-import { PRIORITIES, listTasks, getTask, checkFileScope, scopeEscapesRoot } from '../../src/main/tasks.ts';
+import { PRIORITIES, listTasks, getTask, checkFileScope, scopeEscapesRoot, setGeneratedTasks } from '../../src/main/tasks.ts';
+import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
+
+// The app ships no packages; install the samples so the definitions below
+// have something to check.
+beforeEach(() => setGeneratedTasks(SAMPLE_TASKS));
+afterEach(() => setGeneratedTasks([]));
+
+test('listTasks() and getTask() are empty when nothing is published', () => {
+  setGeneratedTasks([]);
+  assert.deepEqual(listTasks(), []);
+  assert.equal(getTask('auth-email-login'), null);
+});
 
 test('every task has the fields the renderer depends on', () => {
   const tasks = listTasks();

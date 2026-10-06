@@ -5,6 +5,9 @@ export const env = {
   shell: process.env.SHELL ?? null,
   path: process.env.PATH ?? '',
   pathExt: process.env.PATHEXT,
+  // Business time zone (IANA name): day boundaries for activity and weekly
+  // metrics follow it. Storage stays UTC.
+  businessTimeZone: process.env.TASKPILOT_TIME_ZONE ?? 'Asia/Shanghai',
 };
 
 // Child processes inherit the whole environment, so they get a copy of it.

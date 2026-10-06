@@ -460,6 +460,26 @@ export type Requirement = {
 // Whether the Claude Code CLI is on the command PATH.
 export type AgentStatus = { available: boolean; command: string | null };
 
+// ========== activity ==========
+
+export type ActivityAgent = 'product-lead' | 'architect' | 'qa';
+
+export type ActivityEvent =
+  | { kind: 'package_transition'; packageId: string; title: string; transition: HumanTransition | AgentTransition; actor: 'human' | 'agent'; from: WorkPackageStatus; to: WorkPackageStatus }
+  | { kind: 'requirement_created'; requirementId: string; title: string }
+  | { kind: 'requirement_finished'; requirementId: string; title: string; step: RequirementStep; costUsd: number | null }
+  | { kind: 'requirement_failed'; requirementId: string; title: string; step: RequirementStep; code: string }
+  | { kind: 'requirement_published'; requirementId: string; title: string; packageCount: number };
+
+export type ActivityRecord = ActivityEvent & { at: string };
+
+export type QueueMetrics = { doneThisWeek: number; donePreviousWeek: number; averageHours: number | null; averageHoursPrevious: number | null };
+
+// Which agents are busy right now; availability comes from AgentStatus.
+export type TeamStatus = { available: boolean; busy: ActivityAgent[] };
+
+export type ActivityOverview = { recent: ActivityRecord[]; metrics: QueueMetrics; team: TeamStatus; timeZone: string };
+
 // ========== Environment Steward ==========
 
 export type InstallMode = 'ci' | 'install' | 'skip';

@@ -51,6 +51,31 @@ export const useAppStore = defineStore('app', () => {
     return workspaceInfo.value;
   };
 
+  // ========== Activity ==========
+  const activity = ref<ipc.ActivityOverview | null>(null);
+  let activityTimer: number | null = null;
+
+  // A failed read keeps the last overview; the feed is not worth a toast.
+  const refreshActivity = async () => {
+    try {
+      activity.value = await call(window.taskpilot.activity.overview());
+    } catch (error) {
+      console.error('[activity] overview failed', error);
+    }
+  };
+
+  // Agents run in the background, so presence and the feed are polled.
+  const startActivityPolling = (intervalMs: number) => {
+    if (activityTimer !== null) return;
+    refreshActivity().catch((error) => console.error(error));
+    activityTimer = window.setInterval(() => refreshActivity().catch((error) => console.error(error)), intervalMs);
+  };
+
+  const stopActivityPolling = () => {
+    if (activityTimer !== null) window.clearInterval(activityTimer);
+    activityTimer = null;
+  };
+
   return {
     // Navigation
     view, setLeaveGuard, navigate,
@@ -58,5 +83,7 @@ export const useAppStore = defineStore('app', () => {
     preferences, applyPreferences, loadPreferences,
     // Workspace
     workspaceInfo, workspaceError, refreshWorkspaceStatus,
+    // Activity
+    activity, refreshActivity, startActivityPolling, stopActivityPolling,
   };
 });

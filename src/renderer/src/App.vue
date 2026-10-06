@@ -35,8 +35,12 @@ const onKeydown = (event: KeyboardEvent) => {
   }
 };
 
+// Agents run in the background; presence and the feed follow them.
+const ACTIVITY_POLL_MS = 15_000;
+
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown);
+  app.startActivityPolling(ACTIVITY_POLL_MS);
   requirements.init().catch((error) => console.error(error));
   try {
     await app.loadPreferences();
@@ -53,7 +57,10 @@ onMounted(async () => {
   if (info && !info.configured) showToast('尚未配置工作区，diff 和验证暂不可用。', 'info');
 });
 
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onKeydown);
+  app.stopActivityPolling();
+});
 </script>
 
 <template>

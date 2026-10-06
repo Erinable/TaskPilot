@@ -7,6 +7,7 @@ import { useTasksStore } from '@/stores/tasks.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import * as activity from '@/lib/activity.ts';
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -31,12 +32,10 @@ const showQueue = async () => {
   if (await app.navigate('queue')) execution.close();
 };
 
-const TEAM = [
-  { avatar: 'pm', initials: 'PM', name: 'Product Lead', presence: 'online' },
-  { avatar: 'arch', initials: 'AR', name: 'Architect', presence: 'online' },
-  { avatar: 'qa', initials: 'QA', name: 'QA Partner', presence: 'idle' },
-  { avatar: 'rel', initials: 'RM', name: 'Release Manager', presence: 'online' },
-];
+const team = computed(() => activity.TEAM.map(({ agent, actor }) => {
+  const presence = activity.presenceOf(app.activity?.team ?? null, agent);
+  return { ...actor, presence, label: activity.PRESENCE_LABELS[presence] };
+}));
 </script>
 
 <template>
@@ -55,8 +54,9 @@ const TEAM = [
     </nav>
     <div class="side-section-label team-label">AI TEAM</div>
     <div class="team-list">
-      <div v-for="member in TEAM" :key="member.initials" class="team-member">
-        <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span><span>{{ member.name }}</span><span class="presence" :class="member.presence"></span>
+      <div v-for="member in team" :key="member.initials" class="team-member" :title="member.label">
+        <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span><span>{{ member.name }}</span>
+        <span class="presence" :class="member.presence" role="img" :aria-label="member.label"></span>
       </div>
     </div>
     <div class="sidebar-bottom">
@@ -70,3 +70,9 @@ const TEAM = [
     </div>
   </aside>
 </template>
+
+<style scoped>
+/* Busy reads as working, offline as unreachable; online keeps the theme's dot. */
+.presence.busy { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: pulse 1.6s ease-in-out infinite; }
+.presence.offline { background: var(--text-tertiary); opacity: .6; }
+</style>
