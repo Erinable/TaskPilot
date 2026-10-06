@@ -16,7 +16,14 @@ const tempDir = async () => {
 };
 
 const transition = (packageId: string, name: string, to: string, at: string): ActivityRecord => ({
-  kind: 'package_transition', packageId, title: packageId, transition: name as never, actor: 'human', from: 'pending', to: to as never, at,
+  kind: 'package_transition',
+  packageId,
+  title: packageId,
+  transition: name as never,
+  actor: 'human',
+  from: 'pending',
+  to: to as never,
+  at,
 });
 
 test('businessDay() buckets by the business time zone, not UTC', () => {
@@ -38,8 +45,14 @@ test('append() writes one line per event into the business day file', async () =
     log.append({ kind: 'requirement_created', requirementId: 'r2', title: 'B' }),
   ]);
   const text = await fs.readFile(path.join(dir, EVENTS_DIRNAME, '2026-10-06.jsonl'), 'utf8');
-  const lines = text.trim().split('\n').map((line) => JSON.parse(line));
-  assert.deepEqual(lines.map((line) => line.requirementId), ['r1', 'r2']);
+  const lines = text
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    lines.map((line) => line.requirementId),
+    ['r1', 'r2'],
+  );
   assert.equal(lines[0].at, '2026-10-05T17:30:00.000Z');
 });
 
@@ -53,7 +66,10 @@ test('recent() returns newest first, capped, and skips a torn last line', async 
   await log.append({ kind: 'requirement_created', requirementId: 'b', title: 'b' });
   await fs.appendFile(path.join(dir, EVENTS_DIRNAME, '2026-10-06.jsonl'), '{"kind":"requirement_cr');
   const recent = await log.recent({ days: 7, limit: 2 });
-  assert.deepEqual(recent.map((record) => record.kind === 'requirement_created' && record.requirementId), ['b', 'a']);
+  assert.deepEqual(
+    recent.map((record) => record.kind === 'requirement_created' && record.requirementId),
+    ['b', 'a'],
+  );
   const all = await log.recent({ days: 7, limit: 10 });
   assert.equal(all.length, 3);
 });
@@ -104,16 +120,26 @@ test('page() walks whole days newest first and continues from nextBefore', async
   const dir = await tempDir();
   let now = new Date('2026-10-01T02:00:00Z');
   const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
-  for (const [day, count] of [['2026-10-01', 2], ['2026-10-03', 1], ['2026-10-05', 3]] as const) {
+  for (const [day, count] of [
+    ['2026-10-01', 2],
+    ['2026-10-03', 1],
+    ['2026-10-05', 3],
+  ] as const) {
     now = new Date(`${day}T02:00:00Z`);
     for (let i = 0; i < count; i += 1) await log.append({ kind: 'requirement_created', requirementId: `${day}-${i}`, title: 't' });
   }
   now = new Date('2026-10-06T02:00:00Z');
   const first = await log.page({ before: null, minEvents: 3 });
-  assert.deepEqual(first.days.map((entry) => [entry.day, entry.records.length]), [['2026-10-05', 3]]);
+  assert.deepEqual(
+    first.days.map((entry) => [entry.day, entry.records.length]),
+    [['2026-10-05', 3]],
+  );
   assert.equal(first.days[0].records[0].kind === 'requirement_created' && first.days[0].records[0].requirementId, '2026-10-05-2');
   const second = await log.page({ before: first.nextBefore, minEvents: 3 });
-  assert.deepEqual(second.days.map((entry) => entry.day), ['2026-10-03', '2026-10-01']);
+  assert.deepEqual(
+    second.days.map((entry) => entry.day),
+    ['2026-10-03', '2026-10-01'],
+  );
   const last = await log.page({ before: second.nextBefore, minEvents: 3 });
   assert.deepEqual(last.days, []);
   assert.equal(last.nextBefore, null);

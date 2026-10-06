@@ -219,10 +219,15 @@ export interface CommitInfo {
 // printable text parse safely.
 const COMMIT_FORMAT = '--format=%H%x1f%cI%x1f%s%x00';
 
-const parseCommits = (raw: string): CommitInfo[] => raw.split('\0').map((record) => record.replace(/^\n/, '')).filter(Boolean).map((record) => {
-  const [sha, date, subject = ''] = record.split('\x1f');
-  return { sha, subject, date };
-});
+const parseCommits = (raw: string): CommitInfo[] =>
+  raw
+    .split('\0')
+    .map((record) => record.replace(/^\n/, ''))
+    .filter(Boolean)
+    .map((record) => {
+      const [sha, date, subject = ''] = record.split('\x1f');
+      return { sha, subject, date };
+    });
 
 // The full sha `ref` resolves to as a commit, or null when it does not.
 export const resolveCommit = async (cwd: string, ref: string): Promise<string | null> => {
@@ -266,7 +271,12 @@ export const recentCommits = async (cwd: string, { limit }: { limit: number }): 
 };
 
 // Commits in start..end, newest first, at most `limit`; `truncated` when more exist.
-export const commitRange = async (cwd: string, start: string, end: string, { limit }: { limit: number }): Promise<{ commits: CommitInfo[]; truncated: boolean }> => {
+export const commitRange = async (
+  cwd: string,
+  start: string,
+  end: string,
+  { limit }: { limit: number },
+): Promise<{ commits: CommitInfo[]; truncated: boolean }> => {
   const commits = parseCommits(await git(cwd, ['log', `--max-count=${limit + 1}`, COMMIT_FORMAT, `${start}..${end}`, '--']));
   return { commits: commits.slice(0, limit), truncated: commits.length > limit };
 };

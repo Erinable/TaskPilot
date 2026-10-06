@@ -19,9 +19,22 @@ export type WorkPackageStatus = keyof typeof STATUSES;
 export type Actor = 'human' | 'agent';
 
 export type TransitionName =
-  | 'breakdown_done' | 'claim' | 'revert_replan' | 'release' | 'submit_for_review' | 'report_deviation'
-  | 'override_dismissal' | 'block' | 'review_accepted' | 'review_passed' | 'review_rejected' | 'replanned'
-  | 'deviation_dismissed' | 'accepted' | 'acceptance_rejected' | 'unblock';
+  | 'breakdown_done'
+  | 'claim'
+  | 'revert_replan'
+  | 'release'
+  | 'submit_for_review'
+  | 'report_deviation'
+  | 'override_dismissal'
+  | 'block'
+  | 'review_accepted'
+  | 'review_passed'
+  | 'review_rejected'
+  | 'replanned'
+  | 'deviation_dismissed'
+  | 'accepted'
+  | 'acceptance_rejected'
+  | 'unblock';
 
 export interface Transition {
   from: WorkPackageStatus;
@@ -67,16 +80,14 @@ export class TransitionError extends Error {
   }
 }
 
-export const isStatus = (status: unknown): status is WorkPackageStatus =>
-  typeof status === 'string' && Object.hasOwn(STATUSES, status);
+export const isStatus = (status: unknown): status is WorkPackageStatus => typeof status === 'string' && Object.hasOwn(STATUSES, status);
 
 export const label = (status: string): string => (isStatus(status) ? STATUSES[status].label : status);
 
 const findTransition = (from: WorkPackageStatus, name: string) => TRANSITIONS.find((t) => t.from === from && t.name === name);
 
 // Transitions available from `status`, optionally narrowed to one actor.
-export const available = (status: string, actor?: Actor | null): Transition[] =>
-  TRANSITIONS.filter((t) => t.from === status && (!actor || t.actor === actor));
+export const available = (status: string, actor?: Actor | null): Transition[] => TRANSITIONS.filter((t) => t.from === status && (!actor || t.actor === actor));
 
 // Validates a transition and returns the resulting status.
 // Throws TransitionError with a machine-readable `code` on rejection.
@@ -89,10 +100,7 @@ export const apply = (status: string, name: string, actor?: Actor | null): WorkP
     throw new TransitionError(`Transition "${name}" is not allowed from "${status}"`, 'not_allowed');
   }
   if (actor && transition.actor !== actor) {
-    throw new TransitionError(
-      `Transition "${name}" belongs to ${transition.actor}, not ${actor}`,
-      'wrong_actor',
-    );
+    throw new TransitionError(`Transition "${name}" belongs to ${transition.actor}, not ${actor}`, 'wrong_actor');
   }
   return transition.to;
 };

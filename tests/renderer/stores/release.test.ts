@@ -22,7 +22,9 @@ describe('release store', () => {
     vi.mocked(feedback.confirmAction).mockClear();
   });
 
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   test('polls only while generating and stops on leave', async () => {
     vi.useFakeTimers();

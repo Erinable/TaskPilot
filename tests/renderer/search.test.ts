@@ -18,7 +18,10 @@ describe('search', () => {
       search.requirementEntry(requirement({ id: 'r1', title: '邮箱登录' }), '待回答'),
       search.taskEntry(taskView({ id: 't1', title: '登录接口' })),
     ];
-    expect(keys(search.search(entries, '登录'))).toEqual([['工作包', ['task:t1']], ['需求', ['requirement:r1']]]);
+    expect(keys(search.search(entries, '登录'))).toEqual([
+      ['工作包', ['task:t1']],
+      ['需求', ['requirement:r1']],
+    ]);
   });
 
   test('is case-insensitive and requires every term to match somewhere', () => {
@@ -39,7 +42,10 @@ describe('search', () => {
       search.taskEntry(taskView({ id: 'prefix', title: 'cache warmup', module: 'x', tags: [], description: '' })),
     ];
     expect(search.search(entries, 'cache')[0].entries.map((entry) => entry.target)).toEqual([
-      { kind: 'task', id: 'prefix' }, { kind: 'task', id: 'inner' }, { kind: 'task', id: 'meta' }, { kind: 'task', id: 'body' },
+      { kind: 'task', id: 'prefix' },
+      { kind: 'task', id: 'inner' },
+      { kind: 'task', id: 'meta' },
+      { kind: 'task', id: 'body' },
     ]);
   });
 
@@ -63,7 +69,10 @@ describe('search', () => {
       search.requirementEntry(requirement({ id: 'waiting', status: 'answering' }), '待回答'),
       ...settings,
     ];
-    expect(keys(search.search(entries, '   '))).toEqual([['工作包', ['task:open']], ['需求', ['requirement:waiting']]]);
+    expect(keys(search.search(entries, '   '))).toEqual([
+      ['工作包', ['task:open']],
+      ['需求', ['requirement:waiting']],
+    ]);
   });
 
   test('an untitled requirement is named by its first line', () => {

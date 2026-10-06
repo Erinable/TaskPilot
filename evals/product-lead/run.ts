@@ -34,7 +34,7 @@ interface Args {
 }
 
 interface CaseRun extends EvalRun {
-  architect: Pick<SummaryResult, 'text' | 'skipped' | 'error'> & { read: string[] } | null;
+  architect: (Pick<SummaryResult, 'text' | 'skipped' | 'error'> & { read: string[] }) | null;
 }
 
 interface CaseResult {
@@ -89,7 +89,9 @@ const fixtureRepo = async (testCase: EvalCase): Promise<string> => {
 const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJudge: boolean; withArchitect: boolean }): Promise<CaseResult> => {
   const started = Date.now();
   const base: { title: string; text: string; files: string[]; interfaces?: string | null } = {
-    title: testCase.requirement.title, text: testCase.requirement.text, files: testCase.files,
+    title: testCase.requirement.title,
+    text: testCase.requirement.text,
+    files: testCase.files,
   };
 
   let architect: SummaryResult | null = null;
@@ -112,7 +114,12 @@ const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJ
   const p = await call(productLead.planPrompt({ ...base, questions }), productLead.PLAN_SCHEMA);
   const plan = productLead.validatePlan(p.output);
 
-  const run: CaseRun = { clarify, answers, plan, architect: architect && { text: architect.text, read: architect.read.map((r) => r.path), skipped: architect.skipped, error: architect.error } };
+  const run: CaseRun = {
+    clarify,
+    answers,
+    plan,
+    architect: architect && { text: architect.text, read: architect.read.map((r) => r.path), skipped: architect.skipped, error: architect.error },
+  };
   const checks = check(testCase, run);
   let scores: Scores | null = null;
   let judgeCost = 0;
@@ -136,27 +143,33 @@ const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJ
 const pool = async <T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> => {
   const results = new Array<R>(items.length);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await worker(items[index]);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await worker(items[index]);
+      }
+    }),
+  );
   return results;
 };
 
 const summarize = (results: (CaseResult | CaseError)[]) => {
   const ok = results.filter((r): r is CaseResult => !isCaseError(r));
   const checkNames = [...new Set(ok.flatMap((r) => Object.keys(r.checks)))];
-  const checkRates = Object.fromEntries(checkNames.map((name) => {
-    const applicable = ok.filter((r) => r.checks[name]);
-    return [name, `${applicable.filter((r) => r.checks[name].pass).length}/${applicable.length}`];
-  }));
+  const checkRates = Object.fromEntries(
+    checkNames.map((name) => {
+      const applicable = ok.filter((r) => r.checks[name]);
+      return [name, `${applicable.filter((r) => r.checks[name].pass).length}/${applicable.length}`];
+    }),
+  );
   const judged = ok.filter((r): r is CaseResult & { scores: Scores } => r.scores !== null);
-  const scoreMeans = Object.fromEntries((Object.keys(CRITERIA) as Criterion[]).map((key) => [
-    key,
-    judged.length ? Math.round((judged.reduce((sum, r) => sum + r.scores[key].score, 0) / judged.length) * 100) / 100 : null,
-  ]));
+  const scoreMeans = Object.fromEntries(
+    (Object.keys(CRITERIA) as Criterion[]).map((key) => [
+      key,
+      judged.length ? Math.round((judged.reduce((sum, r) => sum + r.scores[key].score, 0) / judged.length) * 100) / 100 : null,
+    ]),
+  );
   const passed = ok.reduce((sum, r) => sum + Object.values(r.checks).filter((c) => c.pass).length, 0);
   const total = ok.reduce((sum, r) => sum + Object.values(r.checks).length, 0);
   return {
@@ -166,7 +179,9 @@ const summarize = (results: (CaseResult | CaseError)[]) => {
     checkRates,
     scoreMeans,
     // Every mean is a number once anything was judged.
-    meanScore: judged.length ? Math.round(((Object.values(scoreMeans) as number[]).reduce((a, b) => a + b, 0) / Object.keys(CRITERIA).length) * 100) / 100 : null,
+    meanScore: judged.length
+      ? Math.round(((Object.values(scoreMeans) as number[]).reduce((a, b) => a + b, 0) / Object.keys(CRITERIA).length) * 100) / 100
+      : null,
     agentCostUsd: Math.round(ok.reduce((sum, r) => sum + r.agentCostUsd, 0) * 1000) / 1000,
     judgeCostUsd: Math.round(ok.reduce((sum, r) => sum + r.judgeCostUsd, 0) * 1000) / 1000,
   };
@@ -183,7 +198,9 @@ const printTable = (results: (CaseResult | CaseError)[], summary: ReturnType<typ
     const checks = Object.values(r.checks);
     const hours = r.run.plan.packages.reduce((sum, pkg) => sum + pkg.estimateHours, 0);
     const mean = r.scores ? (Object.values(r.scores).reduce((sum, s) => sum + s.score, 0) / Object.keys(CRITERIA).length).toFixed(1) : '–';
-    console.log(`${pad(r.id, 15)}${pad(r.run.clarify.questions.length, 4)}${pad(r.run.plan.packages.length, 6)}${pad(hours, 7)}${pad(`${checks.filter((c) => c.pass).length}/${checks.length}`, 9)}${mean}`);
+    console.log(
+      `${pad(r.id, 15)}${pad(r.run.clarify.questions.length, 4)}${pad(r.run.plan.packages.length, 6)}${pad(hours, 7)}${pad(`${checks.filter((c) => c.pass).length}/${checks.length}`, 9)}${mean}`,
+    );
     for (const [name, result] of Object.entries(r.checks)) if (!result.pass) console.log(`    ✗ ${name}: ${result.detail}`);
     if (r.scores) for (const [key, s] of Object.entries(r.scores)) if (s.score <= 3) console.log(`    ${s.score} ${key}: ${s.reason}`);
   }

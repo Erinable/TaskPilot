@@ -13,7 +13,10 @@ const PLAN: ReleasePlan = {
   currentVersion: '1.0.0',
   nextVersion: '1.1.0',
   notes: { added: ['支持导出'], fixed: [], changed: [], notes: [] },
-  checklist: [{ text: '检查导出', evidence: ['src/export.ts'] }, { text: '检查文档', evidence: [] }],
+  checklist: [
+    { text: '检查导出', evidence: ['src/export.ts'] },
+    { text: '检查文档', evidence: [] },
+  ],
 };
 const INPUT = { commitCount: 2, commitsTruncated: false, fileCount: 1, filesTruncated: false, packageIds: ['wp1'] };
 

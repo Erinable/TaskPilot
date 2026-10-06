@@ -20,7 +20,9 @@ const workspaceFact = computed(() => {
     : '还没有配置仓库，Product Lead 会按常见目录结构推测文件路径。';
 });
 
-const focusText = () => { nextTick(() => textInput.value?.focus()).catch((error) => console.error(error)); };
+const focusText = () => {
+  nextTick(() => textInput.value?.focus()).catch((error) => console.error(error));
+};
 
 onMounted(focusText);
 watch(() => store.composeFocus, focusText);
@@ -31,19 +33,27 @@ const onKeydown = (event: Event | KeyboardEvent) => {
   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) store.submitNew().catch((error) => console.error(error));
 };
 
-const onSubmit = () => { store.submitNew().catch((error) => console.error(error)); };
+const onSubmit = () => {
+  store.submitNew().catch((error) => console.error(error));
+};
 </script>
 
 <template>
   <form class="req-pane" data-pane="new" novalidate @submit.prevent="onSubmit">
     <header class="req-header">
-      <div class="agent-chip"><span class="agent-avatar pm">PM</span><span>Product Lead</span></div>
+      <div class="agent-chip">
+        <span class="agent-avatar pm">PM</span>
+        <span>Product Lead</span>
+      </div>
       <h2>描述你的需求</h2>
       <p>写下要做什么、为什么做。Product Lead 会先提出澄清问题，再把需求拆成可执行的工作包，你确认后才会进入工作队列。</p>
     </header>
     <div class="settings-card glass req-form-card">
       <div class="setting-row stacked">
-        <label class="setting-label" for="reqTitle"><strong>标题（可选）</strong><small>留空时 Product Lead 会起一个</small></label>
+        <label class="setting-label" for="reqTitle">
+          <strong>标题（可选）</strong>
+          <small>留空时 Product Lead 会起一个</small>
+        </label>
         <el-input id="reqTitle" v-model="store.composeTitle" maxlength="60" autocomplete="off" placeholder="例如：邮箱登录" />
       </div>
       <div class="setting-row stacked">
@@ -70,19 +80,38 @@ const onSubmit = () => { store.submitNew().catch((error) => console.error(error)
     <div class="req-context">
       <template v-if="store.composeContext">
         <ul class="req-context-list">
-          <li><AppIcon :name="store.composeContext.workspace.configured ? 'git-branch' : 'info'" />{{ workspaceFact }}</li>
-          <li><AppIcon name="terminal" />通过本机的 Claude Code CLI 运行，不启用任何工具，单次费用上限 1 美元。</li>
+          <li>
+            <AppIcon :name="store.composeContext.workspace.configured ? 'git-branch' : 'info'" />
+            {{ workspaceFact }}
+          </li>
+          <li>
+            <AppIcon name="terminal" />
+            通过本机的 Claude Code CLI 运行，不启用任何工具，单次费用上限 1 美元。
+          </li>
         </ul>
-        <p v-if="!store.composeContext.agentAvailable" class="req-warning"><AppIcon name="alert" />{{ ERROR_HINTS.agent_unavailable }}</p>
+        <p v-if="!store.composeContext.agentAvailable" class="req-warning">
+          <AppIcon name="alert" />
+          {{ ERROR_HINTS.agent_unavailable }}
+        </p>
       </template>
     </div>
     <div class="req-actions">
-      <button class="primary-button" type="submit" :disabled="store.submitting"><AppIcon name="send" />交给 Product Lead</button>
+      <button class="primary-button" type="submit" :disabled="store.submitting">
+        <AppIcon name="send" />
+        交给 Product Lead
+      </button>
     </div>
   </form>
 </template>
 
 <style scoped>
-.req-textarea :deep(textarea) { min-height: 160px; line-height: 1.6; }
-.req-textarea :deep(textarea[aria-invalid="true"]) { box-shadow: 0 0 0 1px var(--danger) inset, 0 0 0 3px var(--danger-soft); }
+.req-textarea :deep(textarea) {
+  min-height: 160px;
+  line-height: 1.6;
+}
+.req-textarea :deep(textarea[aria-invalid='true']) {
+  box-shadow:
+    0 0 0 1px var(--danger) inset,
+    0 0 0 3px var(--danger-soft);
+}
 </style>

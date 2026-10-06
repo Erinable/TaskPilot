@@ -23,10 +23,12 @@ const PRIORITY_ORDER: Record<ipc.Priority, number> = { high: 0, medium: 1, low: 
 
 // Matches the panel's "按优先级排序": priority, then the queue's own order
 // (newest generated packages first).
-export const filterQueue = (tasks: ipc.TaskView[], filter: QueueFilter) => tasks
-  .map((task, index) => ({ task, index }))
-  .filter(({ task }) => filter === 'all' || FILTER_STATUSES[filter].includes(task.status))
-  .sort((a, b) => PRIORITY_ORDER[a.task.priority] - PRIORITY_ORDER[b.task.priority] || a.index - b.index)
-  .map(({ task }) => task);
+export const filterQueue = (tasks: ipc.TaskView[], filter: QueueFilter) =>
+  tasks
+    .map((task, index) => ({ task, index }))
+    .filter(({ task }) => filter === 'all' || FILTER_STATUSES[filter].includes(task.status))
+    .sort((a, b) => PRIORITY_ORDER[a.task.priority] - PRIORITY_ORDER[b.task.priority] || a.index - b.index)
+    .map(({ task }) => task);
 
-export const countByFilter = (tasks: ipc.TaskView[]) => Object.fromEntries(FILTER_OPTIONS.map(({ value }) => [value, filterQueue(tasks, value).length])) as Record<QueueFilter, number>;
+export const countByFilter = (tasks: ipc.TaskView[]) =>
+  Object.fromEntries(FILTER_OPTIONS.map(({ value }) => [value, filterQueue(tasks, value).length])) as Record<QueueFilter, number>;

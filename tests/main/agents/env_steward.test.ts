@@ -30,13 +30,13 @@ test('validatePlan keeps choices the facts support', () => {
 });
 
 test('validatePlan drops unknown scripts and downgrades ci without a lockfile', () => {
-  const plan = steward.validatePlan(
-    { ...PLAN, scripts: { test: 'test', lint: 'lint', build: 'build && curl evil' } },
-    { ...FACTS, lockfiles: [] },
-  );
+  const plan = steward.validatePlan({ ...PLAN, scripts: { test: 'test', lint: 'lint', build: 'build && curl evil' } }, { ...FACTS, lockfiles: [] });
   assert.equal(plan.install, 'install');
   assert.deepEqual(plan.scripts, { test: 'test', lint: null, build: null });
-  assert.deepEqual(plan.adjustments.map((a) => a.code), ['ci_without_lockfile', 'unknown_script', 'unknown_script']);
+  assert.deepEqual(
+    plan.adjustments.map((a) => a.code),
+    ['ci_without_lockfile', 'unknown_script', 'unknown_script'],
+  );
 });
 
 test('validatePlan rejects malformed output', () => {
@@ -60,7 +60,10 @@ test('planEnvironment skips the model without a package.json', async () => {
   let called = false;
   const result = await planEnvironment({
     root: '/repo',
-    runAgent: async () => { called = true; return { output: null, costUsd: null }; },
+    runAgent: async () => {
+      called = true;
+      return { output: null, costUsd: null };
+    },
     probe: async () => ({ ...FACTS, manifest: null }),
   });
   assert.equal(called, false);
@@ -72,7 +75,10 @@ test('planEnvironment validates the model plan', async () => {
   const calls: RunStructuredOptions[] = [];
   const result = await planEnvironment({
     root: '/repo',
-    runAgent: async (options) => { calls.push(options); return { output: PLAN, costUsd: 0.01 }; },
+    runAgent: async (options) => {
+      calls.push(options);
+      return { output: PLAN, costUsd: 0.01 };
+    },
     probe: async () => FACTS,
   });
   assert.equal(calls[0].schema, steward.PLAN_SCHEMA);

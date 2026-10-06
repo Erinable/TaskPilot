@@ -27,8 +27,15 @@ const actions = computed(() => {
 });
 const actionClass = (action: (typeof ACTIONS)[number]) => (action.primary ? 'primary-button' : `secondary-button${action.danger ? ' danger' : ''}`);
 
-const back = () => { app.navigate('queue').then((left) => left && execution.close()).catch((error) => console.error(error)); };
-const transition = (name: ipc.HumanTransition) => { execution.runTransition(name).catch((error) => console.error(error)); };
+const back = () => {
+  app
+    .navigate('queue')
+    .then((left) => left && execution.close())
+    .catch((error) => console.error(error));
+};
+const transition = (name: ipc.HumanTransition) => {
+  execution.runTransition(name).catch((error) => console.error(error));
+};
 
 onMounted(() => backButton.value?.focus());
 // Leaving the view any way (back, sidebar, settings) stops the polls.
@@ -37,7 +44,10 @@ onBeforeUnmount(() => execution.close());
 
 <template>
   <div class="view">
-    <button ref="backButton" class="back-button" type="button" @click="back"><AppIcon name="arrow-left" />返回工作队列</button>
+    <button ref="backButton" class="back-button" type="button" @click="back">
+      <AppIcon name="arrow-left" />
+      返回工作队列
+    </button>
 
     <template v-if="task">
       <div class="exec-heading">
@@ -47,19 +57,42 @@ onBeforeUnmount(() => execution.close());
         </div>
         <p>{{ task.intro }}</p>
         <div class="exec-meta">
-          <span class="meta-chip"><span class="priority-dot" :class="task.priority"></span><span>{{ PRIORITY_LABELS[task.priority] }}</span></span>
-          <span class="meta-chip"><AppIcon name="folder" /><span>{{ task.module }} 模块</span></span>
-          <span class="meta-chip"><AppIcon name="clock" /><span>{{ task.estimate }}</span></span>
-          <span class="meta-chip"><AppIcon name="commit" /><span>{{ task.baseline ? `基线 ${task.baseline.slice(0, 8)}` : '未领取' }}</span></span>
+          <span class="meta-chip">
+            <span class="priority-dot" :class="task.priority"></span>
+            <span>{{ PRIORITY_LABELS[task.priority] }}</span>
+          </span>
+          <span class="meta-chip">
+            <AppIcon name="folder" />
+            <span>{{ task.module }} 模块</span>
+          </span>
+          <span class="meta-chip">
+            <AppIcon name="clock" />
+            <span>{{ task.estimate }}</span>
+          </span>
+          <span class="meta-chip">
+            <AppIcon name="commit" />
+            <span>{{ task.baseline ? `基线 ${task.baseline.slice(0, 8)}` : '未领取' }}</span>
+          </span>
         </div>
       </div>
 
       <div class="exec-actions">
-        <button v-for="action in actions" :key="action.name" :class="actionClass(action)" type="button" :data-transition="action.name" @click="transition(action.name)">
-          <AppIcon :name="action.icon" />{{ action.label }}
+        <button
+          v-for="action in actions"
+          :key="action.name"
+          :class="actionClass(action)"
+          type="button"
+          :data-transition="action.name"
+          @click="transition(action.name)"
+        >
+          <AppIcon :name="action.icon" />
+          {{ action.label }}
         </button>
       </div>
-      <div v-if="actions.length === 0" class="exec-notice"><AppIcon name="info" /><span>当前状态「{{ task.statusLabel }}」由 AI 团队推进，你无需操作。</span></div>
+      <div v-if="actions.length === 0" class="exec-notice">
+        <AppIcon name="info" />
+        <span>当前状态「{{ task.statusLabel }}」由 AI 团队推进，你无需操作。</span>
+      </div>
 
       <div class="exec-columns">
         <div class="exec-column">

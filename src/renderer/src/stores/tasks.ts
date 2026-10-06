@@ -9,10 +9,14 @@ export const useTasksStore = defineStore('tasks', () => {
   const tasks = ref<ipc.TaskView[]>([]);
   const pendingCount = computed(() => tasks.value.filter((task) => task.status !== 'done').length);
 
-  const reloadQueue = async () => { tasks.value = await call(window.taskpilot.listTasks()); };
+  const reloadQueue = async () => {
+    tasks.value = await call(window.taskpilot.listTasks());
+  };
 
   return {
     // Queue
-    tasks, pendingCount, reloadQueue,
+    tasks,
+    pendingCount,
+    reloadQueue,
   };
 });

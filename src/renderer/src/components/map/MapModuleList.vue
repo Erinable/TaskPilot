@@ -24,17 +24,50 @@ const shown = computed(() => props.modules.slice(0, limit.value));
       </span>
       <span class="map-module-purpose"><InlineCode :text="module.purpose" /></span>
     </button>
-    <button v-if="props.modules.length > limit" type="button" class="view-all-button" data-more @click="limit += PAGE_SIZE">显示更多（还有 {{ props.modules.length - limit }} 个）</button>
+    <button v-if="props.modules.length > limit" type="button" class="view-all-button" data-more @click="limit += PAGE_SIZE">
+      显示更多（还有 {{ props.modules.length - limit }} 个）
+    </button>
   </div>
 </template>
 
 <style scoped>
-.map-module-list { display: flex; flex-direction: column; }
-.map-module-item { display: flex; flex-direction: column; gap: 4px; padding: 10px 20px; text-align: left; border-top: 1px solid var(--line-soft); transition: background .15s var(--ease); }
-.map-module-item:hover { background: var(--fill); }
-.map-module-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.map-module-path { color: var(--text); font-size: 14px; font-weight: 600; word-break: break-all; }
-.map-module-top .status-pill { font-size: 14px; }
-.map-module-purpose { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
-.view-all-button { font-size: 14px; }
+.map-module-list {
+  display: flex;
+  flex-direction: column;
+}
+.map-module-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 20px;
+  text-align: left;
+  border-top: 1px solid var(--line-soft);
+  transition: background 0.15s var(--ease);
+}
+.map-module-item:hover {
+  background: var(--fill);
+}
+.map-module-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.map-module-path {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  word-break: break-all;
+}
+.map-module-top .status-pill {
+  font-size: 14px;
+}
+.map-module-purpose {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.view-all-button {
+  font-size: 14px;
+}
 </style>

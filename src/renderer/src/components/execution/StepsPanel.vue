@@ -18,15 +18,26 @@ const progress = computed(() => `${props.task.steps.length ? (done.value.size / 
 const onToggle = (event: Event, index: number) => {
   const box = event.target as HTMLInputElement;
   // Revert the optimistic toggle when saving fails.
-  execution.setStepDone(index, box.checked)
-    .then((saved) => { if (!saved) box.checked = !box.checked; })
+  execution
+    .setStepDone(index, box.checked)
+    .then((saved) => {
+      if (!saved) box.checked = !box.checked;
+    })
     .catch((error) => console.error(error));
 };
 </script>
 
 <template>
   <section class="panel glass">
-    <div class="panel-heading"><div class="panel-title"><span class="panel-icon"><AppIcon name="list-checks" /></span><div><h2>执行指令</h2><p>{{ done.size }} / {{ task.steps.length }} 已完成</p></div></div></div>
+    <div class="panel-heading">
+      <div class="panel-title">
+        <span class="panel-icon"><AppIcon name="list-checks" /></span>
+        <div>
+          <h2>执行指令</h2>
+          <p>{{ done.size }} / {{ task.steps.length }} 已完成</p>
+        </div>
+      </div>
+    </div>
     <div class="progress-track" aria-hidden="true"><span class="progress-fill" :style="{ width: progress }"></span></div>
     <ol class="step-list">
       <li v-for="(step, index) in task.steps" :key="index" class="step-item" :class="{ done: done.has(index) }">

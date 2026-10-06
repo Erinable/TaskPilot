@@ -34,19 +34,15 @@ const onNodeClick = (data: TreeNodeData) => {
       <span class="map-tree-total">{{ props.files.length }} 个文件 · 已摘要 {{ props.summarized.size }}</span>
       <el-switch v-model="onlySummarized" class="map-tree-filter" active-text="只看已摘要" aria-label="只看已摘要" />
     </div>
-    <p v-if="props.truncated" class="map-tree-note" data-note="truncated"><AppIcon name="info" />仓库文件超过 5000 个，只显示前 5000 个</p>
-    <p v-if="onlySummarized && roots.length === 0" class="empty-hint" data-empty="filtered"><AppIcon name="info" />没有已摘要的文件</p>
-    <el-tree
-      v-else
-      :key="treeKey"
-      class="map-tree-body"
-      lazy
-      :load="load"
-      :props="treeProps"
-      node-key="path"
-      highlight-current
-      @node-click="onNodeClick"
-    >
+    <p v-if="props.truncated" class="map-tree-note" data-note="truncated">
+      <AppIcon name="info" />
+      仓库文件超过 5000 个，只显示前 5000 个
+    </p>
+    <p v-if="onlySummarized && roots.length === 0" class="empty-hint" data-empty="filtered">
+      <AppIcon name="info" />
+      没有已摘要的文件
+    </p>
+    <el-tree v-else :key="treeKey" class="map-tree-body" lazy :load="load" :props="treeProps" node-key="path" highlight-current @node-click="onNodeClick">
       <template #default="{ data }">
         <span class="map-node" :class="{ summarized: data.summarized }" :data-path="data.path">
           <AppIcon :name="data.isDir ? 'folder' : 'file'" />
@@ -60,17 +56,85 @@ const onNodeClick = (data: TreeNodeData) => {
 </template>
 
 <style scoped>
-.map-tree { display: flex; flex-direction: column; min-height: 0; }
-.map-tree-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px 10px; }
-.map-tree-total { color: var(--text-muted); font-size: 14px; }
-.map-tree-note { display: flex; align-items: center; gap: 6px; margin: 0 20px 10px; padding: 8px 10px; color: var(--warning); background: var(--warning-soft); border-radius: 8px; font-size: 14px; }
-.map-tree-note .icon { width: 15px; height: 15px; }
-.map-tree-body { flex: 1; min-height: 0; max-height: 640px; overflow: auto; padding: 0 12px 16px; background: transparent; }
-.map-node { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; color: var(--text-secondary); }
-.map-node .icon { width: 15px; height: 15px; flex: 0 0 15px; color: var(--text-tertiary); }
-.map-node.summarized { color: var(--accent-strong); font-weight: 600; }
-.map-node.summarized .icon { color: var(--accent); }
-.map-node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-node-count { margin-left: auto; padding-left: 12px; color: var(--text-tertiary); font-size: 14px; white-space: nowrap; }
-.map-node-badge { margin-left: 6px; padding: 0 6px; color: var(--accent-strong); background: var(--accent-soft); border-radius: 5px; font-size: 14px; font-weight: 600; }
+.map-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.map-tree-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px 10px;
+}
+.map-tree-total {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.map-tree-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 20px 10px;
+  padding: 8px 10px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.map-tree-note .icon {
+  width: 15px;
+  height: 15px;
+}
+.map-tree-body {
+  flex: 1;
+  min-height: 0;
+  max-height: 640px;
+  overflow: auto;
+  padding: 0 12px 16px;
+  background: transparent;
+}
+.map-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.map-node .icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  color: var(--text-tertiary);
+}
+.map-node.summarized {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.map-node.summarized .icon {
+  color: var(--accent);
+}
+.map-node-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-node-count {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.map-node-badge {
+  margin-left: 6px;
+  padding: 0 6px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: 600;
+}
 </style>

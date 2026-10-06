@@ -14,8 +14,10 @@ const AGENTS: Record<ipc.ActivityAgent, FeedActor> = {
 };
 const YOU: FeedActor = { avatar: 'you', initials: '你', name: '你' };
 
-export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager'] as const)
-  .map((agent) => ({ agent, actor: AGENTS[agent] }));
+export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager'] as const).map((agent) => ({
+  agent,
+  actor: AGENTS[agent],
+}));
 
 // What a transition reads as, and who did it.
 const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition, { by: FeedActor; what: string }> = {
@@ -55,7 +57,13 @@ export const toFeedItem = (record: ipc.ActivityRecord, index: number): FeedItem 
     case 'requirement_published':
       return { key, actor: YOU, what: `发布了 ${record.packageCount} 个工作包`, detail: record.title, at: record.at };
     case 'release_finished':
-      return { key, actor: AGENTS['release-manager'], what: `完成了版本 ${record.version} 的发布准备`, detail: `包含 ${record.packageCount} 个工作包`, at: record.at };
+      return {
+        key,
+        actor: AGENTS['release-manager'],
+        what: `完成了版本 ${record.version} 的发布准备`,
+        detail: `包含 ${record.packageCount} 个工作包`,
+        at: record.at,
+      };
   }
 };
 

@@ -49,12 +49,25 @@ export const NAV_GROUPS: NavGroup[] = [
 
 // Inputs a validation error can point at, by the error's `field`.
 export const FIELD_INPUTS: Record<string, string> = {
-  root: 'settingsRoot', test: 'commandTest', lint: 'commandLint', build: 'commandBuild', smoke: 'commandSmoke', displayName: 'profileName',
+  root: 'settingsRoot',
+  test: 'commandTest',
+  lint: 'commandLint',
+  build: 'commandBuild',
+  smoke: 'commandSmoke',
+  displayName: 'profileName',
 };
 // Which page shows a validation error for a given field.
 const FIELD_PAGES: Record<string, SettingsPage> = {
-  root: 'repository', test: 'commands', lint: 'commands', build: 'commands', smoke: 'commands',
-  displayName: 'profile', avatarColor: 'profile', theme: 'preferences', vibrancy: 'preferences', pathSource: 'environment',
+  root: 'repository',
+  test: 'commands',
+  lint: 'commands',
+  build: 'commands',
+  smoke: 'commands',
+  displayName: 'profile',
+  avatarColor: 'profile',
+  theme: 'preferences',
+  vibrancy: 'preferences',
+  pathSource: 'environment',
 };
 
 const PATH_ERROR_HINTS: Record<string, string> = {
@@ -93,13 +106,21 @@ export const useSettingsStore = defineStore('settings', () => {
   const preferencesDraft = ref<ipc.PreferencesInput | null>(null);
   const workspaceDraft = ref<WorkspaceDraft | null>(null);
 
-  const fillPreferences = (prefs: ipc.PreferencesInput) => { preferencesDraft.value = clone(prefs); };
-  const fillWorkspace = (form: WorkspaceDraft) => { workspaceDraft.value = clone(form); };
+  const fillPreferences = (prefs: ipc.PreferencesInput) => {
+    preferencesDraft.value = clone(prefs);
+  };
+  const fillWorkspace = (form: WorkspaceDraft) => {
+    workspaceDraft.value = clone(form);
+  };
 
   // ========== Unsaved changes ==========
-  const pairs = () => (savedPreferences.value && savedWorkspace.value && preferencesDraft.value && workspaceDraft.value
-    ? { saved: { preferences: savedPreferences.value, workspace: savedWorkspace.value }, draft: { preferences: preferencesDraft.value, workspace: workspaceDraft.value } }
-    : null);
+  const pairs = () =>
+    savedPreferences.value && savedWorkspace.value && preferencesDraft.value && workspaceDraft.value
+      ? {
+          saved: { preferences: savedPreferences.value, workspace: savedWorkspace.value },
+          draft: { preferences: preferencesDraft.value, workspace: workspaceDraft.value },
+        }
+      : null;
 
   const dirty = computed(() => {
     const pair = pairs();
@@ -122,11 +143,18 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== Field status ==========
   const statuses = ref<Record<StatusKey, FieldStatus>>({
-    root: emptyStatus(), test: emptyStatus(), lint: emptyStatus(), build: emptyStatus(), smoke: emptyStatus(), displayName: emptyStatus(),
+    root: emptyStatus(),
+    test: emptyStatus(),
+    lint: emptyStatus(),
+    build: emptyStatus(),
+    smoke: emptyStatus(),
+    displayName: emptyStatus(),
   });
   const repoFacts = ref<Fact[] | null>(null);
 
-  const setStatus = (key: StatusKey, tone: FieldTone | null, message: string) => { statuses.value[key] = { tone, message }; };
+  const setStatus = (key: StatusKey, tone: FieldTone | null, message: string) => {
+    statuses.value[key] = { tone, message };
+  };
 
   const clearWorkspaceStatus = () => {
     setStatus('root', null, '');
@@ -152,7 +180,7 @@ export const useSettingsStore = defineStore('settings', () => {
       return;
     }
     openPage(page);
-    const key = field === 'root' || field === 'displayName' || (CHECK_KINDS as readonly string[]).includes(field) ? field as StatusKey : null;
+    const key = field === 'root' || field === 'displayName' || (CHECK_KINDS as readonly string[]).includes(field) ? (field as StatusKey) : null;
     if (key) setStatus(key, 'error', describeError(error));
     else showToast(`设置无效：${describeError(error)}`);
     if (FIELD_INPUTS[field]) focusById(FIELD_INPUTS[field]).catch((focusError) => console.error(focusError));
@@ -168,11 +196,13 @@ export const useSettingsStore = defineStore('settings', () => {
       setStatus('root', 'ok', result.normalizedFrom ? `所选目录在仓库内，已改用仓库根目录 ${result.root}` : '这是一个 git 仓库');
       if (workspaceDraft.value) workspaceDraft.value.root = result.root;
       const repo = result.repo;
-      repoFacts.value = repo ? [
-        { term: '分支', value: repo.branch ?? 'detached' },
-        { term: '当前提交', value: repo.commit.slice(0, 12) },
-        { term: '工作区状态', value: repo.dirty ? `${repo.changedFiles} 个文件有改动` : '干净' },
-      ] : null;
+      repoFacts.value = repo
+        ? [
+            { term: '分支', value: repo.branch ?? 'detached' },
+            { term: '当前提交', value: repo.commit.slice(0, 12) },
+            { term: '工作区状态', value: repo.dirty ? `${repo.changedFiles} 个文件有改动` : '干净' },
+          ]
+        : null;
     }
     for (const kind of CHECK_KINDS) {
       const entry = result.commands[kind];
@@ -238,7 +268,10 @@ export const useSettingsStore = defineStore('settings', () => {
     if (info.error) return { text: PATH_ERROR_HINTS[info.error.code] ?? `读取失败：${info.error.message}`, warn: true };
     const added = info.entries.filter((entry) => !inheritedEntries.value.has(entry)).length;
     const source = preferencesDraft.value?.environment.pathSource;
-    return { text: source === 'login-shell' ? `${info.entries.length} 个目录，其中 ${added} 个是登录 shell 新增的` : `${info.entries.length} 个目录`, warn: false };
+    return {
+      text: source === 'login-shell' ? `${info.entries.length} 个目录，其中 ${added} 个是登录 shell 新增的` : `${info.entries.length} 个目录`,
+      warn: false,
+    };
   });
 
   // ========== Data ==========
@@ -286,7 +319,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // Shown beside the workspace group label in the nav.
   const navWorkspaceName = computed(() => {
     const root = savedWorkspace.value?.root;
-    return root ? root.split(/[\\/]/).filter(Boolean).pop() ?? '工作区' : '工作区';
+    return root ? (root.split(/[\\/]/).filter(Boolean).pop() ?? '工作区') : '工作区';
   });
 
   // Resolves true when everything saved.
@@ -360,7 +393,10 @@ export const useSettingsStore = defineStore('settings', () => {
     activePage.value = page;
     if (page === 'environment') renderEnvironment().catch((error) => console.error(error));
     if (page === 'data') renderData().catch((error) => console.error(error));
-    if (page === 'setup') useSetupStore().render().catch((error) => console.error(error));
+    if (page === 'setup')
+      useSetupStore()
+        .render()
+        .catch((error) => console.error(error));
   };
 
   const search = (query: string) => {
@@ -394,20 +430,50 @@ export const useSettingsStore = defineStore('settings', () => {
 
   return {
     // Drafts
-    savedPreferences, savedWorkspace, preferencesDraft, workspaceDraft,
+    savedPreferences,
+    savedWorkspace,
+    preferencesDraft,
+    workspaceDraft,
     // Unsaved changes
-    dirty, dirtyPages, anyDirty, savebarText, hasUnsavedChanges,
+    dirty,
+    dirtyPages,
+    anyDirty,
+    savebarText,
+    hasUnsavedChanges,
     // Field status
-    statuses, repoFacts, nameLength, checkNameLength,
+    statuses,
+    repoFacts,
+    nameLength,
+    checkNameLength,
     // Repository
-    checkWorkspace, pickRoot,
+    checkWorkspace,
+    pickRoot,
     // Environment
-    environmentLoading, environmentError, environment, inheritedEntries, pathNote, renderEnvironment,
+    environmentLoading,
+    environmentError,
+    environment,
+    inheritedEntries,
+    pathNote,
+    renderEnvironment,
     // Data
-    dataInfo, renderData, revealData, resetProgress,
+    dataInfo,
+    renderData,
+    revealData,
+    resetProgress,
     // Saving
-    saving, navWorkspaceName, saveAll, discardAll, load,
+    saving,
+    navWorkspaceName,
+    saveAll,
+    discardAll,
+    load,
     // Navigation
-    activePage, searchQuery, visiblePages, visibleGroups, openPage, search, open, confirmLeave,
+    activePage,
+    searchQuery,
+    visiblePages,
+    visibleGroups,
+    openPage,
+    search,
+    open,
+    confirmLeave,
   };
 });

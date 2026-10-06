@@ -160,8 +160,16 @@ export interface StoreSummary {
 }
 
 export type StoreErrorCode =
-  | 'unknown_package' | 'invalid_state' | 'baseline_required' | 'deviation_note_required' | 'invalid_argument'
-  | 'review_running' | 'review_not_running' | 'adjudication_running' | 'adjudication_not_running' | 'invalid_step';
+  | 'unknown_package'
+  | 'invalid_state'
+  | 'baseline_required'
+  | 'deviation_note_required'
+  | 'invalid_argument'
+  | 'review_running'
+  | 'review_not_running'
+  | 'adjudication_running'
+  | 'adjudication_not_running'
+  | 'invalid_step';
 
 export class StoreError extends Error {
   code: StoreErrorCode;
@@ -174,22 +182,22 @@ export class StoreError extends Error {
 }
 
 const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState => ({
-    status: task.status,
-    baseline: null, // git commit recorded when the human claims the package
-    claimedAt: null,
-    completedSteps: [], // indices into task.steps
-    deviations: [],
-    review: null, // QA's latest review of the package; see beginReview()
-    // Submit-stage checks run on the claimed commit; see setBaselineChecks().
-    // {status: measuring|measured|unavailable|contaminated, reason, commit, checks: {kind: record}, startedAt, finishedAt}
-    baselineChecks: null,
-    // Architect's replan of the definition: {version, definition: {steps, fileScope, acceptance}, reason, changes, revisedAt}.
-    // Overlaid on the authored definition by effective().
-    revision: null,
-    adjudication: null, // Architect's latest run on a deviation; see beginAdjudication()
-    // Execution state from before the last replan, so the human can revert it
-    // until they claim the new plan.
-    replanUndo: null,
+  status: task.status,
+  baseline: null, // git commit recorded when the human claims the package
+  claimedAt: null,
+  completedSteps: [], // indices into task.steps
+  deviations: [],
+  review: null, // QA's latest review of the package; see beginReview()
+  // Submit-stage checks run on the claimed commit; see setBaselineChecks().
+  // {status: measuring|measured|unavailable|contaminated, reason, commit, checks: {kind: record}, startedAt, finishedAt}
+  baselineChecks: null,
+  // Architect's replan of the definition: {version, definition: {steps, fileScope, acceptance}, reason, changes, revisedAt}.
+  // Overlaid on the authored definition by effective().
+  revision: null,
+  adjudication: null, // Architect's latest run on a deviation; see beginAdjudication()
+  // Execution state from before the last replan, so the human can revert it
+  // until they claim the new plan.
+  replanUndo: null,
 });
 
 const BASELINE_STATUSES: string[] = ['measuring', 'measured', 'unavailable', 'contaminated'];
@@ -212,7 +220,10 @@ const allowed = (entry: WorkPackageState, name: string) => GUARDS[name]?.(entry)
 
 // Human transitions available for an entry, after the state guards.
 export const humanTransitions = (entry: WorkPackageState): TransitionName[] =>
-  status.available(entry.status, 'human').map((t) => t.name).filter((name) => allowed(entry, name));
+  status
+    .available(entry.status, 'human')
+    .map((t) => t.name)
+    .filter((name) => allowed(entry, name));
 
 // The task fields the store needs: its id and seed status.
 type StoreTask = Pick<TaskDefinition, 'id' | 'status'>;
@@ -335,7 +346,7 @@ export class WorkPackageStore {
       }
       entry.deviations.push({
         note: (deviation.note as string).trim(),
-        stepIndex: Number.isInteger(deviation.stepIndex) ? deviation.stepIndex as number : null,
+        stepIndex: Number.isInteger(deviation.stepIndex) ? (deviation.stepIndex as number) : null,
         filePath: typeof deviation.filePath === 'string' ? deviation.filePath : null,
         reportedAt: new Date().toISOString(),
         resolution: null, // set by completeAdjudication()
@@ -362,7 +373,7 @@ export class WorkPackageStore {
     }
     if (name === 'accepted' || name === 'acceptance_rejected') {
       // The human's call on QA's pass; the review itself stays as QA wrote it.
-      entry.review = { ...entry.review as Review, humanVerdict: name, humanAt: new Date().toISOString() };
+      entry.review = { ...(entry.review as Review), humanVerdict: name, humanAt: new Date().toISOString() };
     }
 
     entry.status = next;
@@ -433,8 +444,7 @@ export class WorkPackageStore {
     }
     const outcome = result.passed ? 'passed' : 'rejected';
     // [人工决策-2026-10-05 21:57:41] 有「需要人工确认」项才停在待验收，否则 QA 通过即 done。
-    const transition = !result.passed ? 'review_rejected'
-      : (result.attention ?? []).length ? 'review_passed' : 'review_accepted';
+    const transition = !result.passed ? 'review_rejected' : (result.attention ?? []).length ? 'review_passed' : 'review_accepted';
     // Validate the transition before writing anything.
     const next = status.apply(entry.status, transition, 'agent');
     entry.review = {

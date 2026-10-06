@@ -11,7 +11,7 @@ const SAMPLE: any[] = [
 ];
 
 const newStore = async (dir?: string) => {
-  const configDir = dir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
+  const configDir = dir ?? (await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-')));
   if (!dir) onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
   return { store: await new WorkPackageStore(configDir).load(SAMPLE), configDir };
 };
@@ -63,10 +63,7 @@ test('releasing clears the baseline and step progress', async () => {
 test('a deviation report needs a note and is recorded with a timestamp', async () => {
   const { store } = await newStore();
   await store.transition('a', 'claim', 'human', { baseline: 'abc123' });
-  await assert.rejects(
-    () => store.transition('a', 'report_deviation', 'human', { deviation: { note: '  ' } }),
-    { code: 'deviation_note_required' },
-  );
+  await assert.rejects(() => store.transition('a', 'report_deviation', 'human', { deviation: { note: '  ' } }), { code: 'deviation_note_required' });
   const entry = await store.transition('a', 'report_deviation', 'human', {
     deviation: { note: 'ADR-014 和现有代码冲突', stepIndex: 1, filePath: 'src/x.ts' },
   });
@@ -141,10 +138,13 @@ test('reset() returns every package to its seed state and removes the file', asy
 test('saved entries for unknown ids or unknown statuses are ignored', async () => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
   onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
-  await fs.writeFile(path.join(configDir, STATE_FILENAME), JSON.stringify({
-    removed: { status: 'done' },
-    a: { status: 'not_a_real_status' },
-  }));
+  await fs.writeFile(
+    path.join(configDir, STATE_FILENAME),
+    JSON.stringify({
+      removed: { status: 'done' },
+      a: { status: 'not_a_real_status' },
+    }),
+  );
   const { store } = await newStore(configDir);
   assert.throws(() => store.get('removed'), { code: 'unknown_package' });
   assert.equal(store.get('a').status, 'pending');
@@ -199,7 +199,9 @@ const replan: any = {
   reason: '接口已改名',
   changes: ['步骤 2 改用 `findUser()`'],
   revision: { steps: ['新步骤'], fileScope: ['src/y.ts'], acceptance: [{ text: '新条件' }] },
-  read: [], skipped: [], costUsd: 0.03,
+  read: [],
+  skipped: [],
+  costUsd: 0.03,
 };
 
 const inDeviation = async (store) => {

@@ -37,19 +37,25 @@ const flat = computed(() => groups.value.flatMap((group) => group.entries));
 const activeEntry = computed(() => flat.value[highlighted.value] ?? null);
 
 const optionId = (entry: search.SearchEntry) => `palette-option-${entry.key.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-const entryIcon = (entry: search.SearchEntry) => (entry.target.kind === 'setting' ? SETTING_ICONS.get(entry.target.page) ?? KIND_ICONS.setting : KIND_ICONS[entry.kind]);
+const entryIcon = (entry: search.SearchEntry) =>
+  entry.target.kind === 'setting' ? (SETTING_ICONS.get(entry.target.page) ?? KIND_ICONS.setting) : KIND_ICONS[entry.kind];
 
-watch(query, () => { highlighted.value = flat.value.length ? 0 : -1; });
-
-watch(() => palette.visible, (visible) => {
-  // While open, App's page shortcuts (Escape, ⌘S, ⌘,) stay out of the way.
-  openDialogs.value += visible ? 1 : -1;
-  if (!visible) return;
-  query.value = '';
+watch(query, () => {
   highlighted.value = flat.value.length ? 0 : -1;
-  // Startup loaded the list already; this picks up requirements created since.
-  requirements.refreshList().catch((error) => console.error(error));
 });
+
+watch(
+  () => palette.visible,
+  (visible) => {
+    // While open, App's page shortcuts (Escape, ⌘S, ⌘,) stay out of the way.
+    openDialogs.value += visible ? 1 : -1;
+    if (!visible) return;
+    query.value = '';
+    highlighted.value = flat.value.length ? 0 : -1;
+    // Startup loaded the list already; this picks up requirements created since.
+    requirements.refreshList().catch((error) => console.error(error));
+  },
+);
 
 const focusInput = () => input.value?.focus();
 
@@ -63,11 +69,8 @@ const scrollToActive = () => {
 const choose = (entry: search.SearchEntry) => {
   palette.closePalette();
   const target = entry.target;
-  const action = target.kind === 'task'
-    ? execution.open(target.id)
-    : target.kind === 'requirement'
-      ? requirements.open({ id: target.id })
-      : settings.open(target.page);
+  const action =
+    target.kind === 'task' ? execution.open(target.id) : target.kind === 'requirement' ? requirements.open({ id: target.id }) : settings.open(target.page);
   action.catch((error) => console.error(error));
 };
 
@@ -116,7 +119,11 @@ onBeforeUnmount(() => {
     :close-on-press-escape="false"
     append-to-body
     align-center
-    @update:model-value="(value: boolean) => { if (!value) palette.closePalette(); }"
+    @update:model-value="
+      (value: boolean) => {
+        if (!value) palette.closePalette();
+      }
+    "
     @opened="focusInput"
   >
     <template #header><span class="sr-only">搜索工作包、需求和设置</span></template>
@@ -168,19 +175,97 @@ onBeforeUnmount(() => {
 
 <style>
 /* Teleported, so not scoped; selected narrowly by the dialog's own class. */
-.el-dialog.command-palette { width: min(620px, calc(100% - 32px)); padding: 0; border-radius: 18px; overflow: hidden; }
-.el-dialog.command-palette .el-dialog__header { padding: 0; margin: 0; }
-.el-dialog.command-palette .el-dialog__body { padding: 0; }
-.el-dialog.command-palette .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.el-dialog.command-palette .palette-search { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line-soft); color: var(--text-muted); }
-.el-dialog.command-palette .palette-input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; }
-.el-dialog.command-palette .palette-kbd { padding: 2px 6px; border-radius: 6px; background: var(--fill); color: var(--text-tertiary); font-size: 14px; }
-.el-dialog.command-palette .palette-results { max-height: min(60vh, 460px); overflow-y: auto; padding: 6px 8px 10px; }
-.el-dialog.command-palette .palette-group-label { padding: 10px 10px 4px; color: var(--text-tertiary); font-size: 14px; }
-.el-dialog.command-palette .palette-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--text); font-size: 14px; cursor: pointer; }
-.el-dialog.command-palette .palette-option[aria-selected="true"] { background: var(--accent-soft); }
-.el-dialog.command-palette .palette-option-icon { flex: none; color: var(--text-muted); }
-.el-dialog.command-palette .palette-option-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.el-dialog.command-palette .palette-option-detail { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-tertiary); font-size: 14px; }
-.el-dialog.command-palette .palette-empty { margin: 0; padding: 18px; font-size: 14px; }
+.el-dialog.command-palette {
+  width: min(620px, calc(100% - 32px));
+  padding: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+.el-dialog.command-palette .el-dialog__header {
+  padding: 0;
+  margin: 0;
+}
+.el-dialog.command-palette .el-dialog__body {
+  padding: 0;
+}
+.el-dialog.command-palette .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.el-dialog.command-palette .palette-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-muted);
+}
+.el-dialog.command-palette .palette-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+}
+.el-dialog.command-palette .palette-kbd {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+.el-dialog.command-palette .palette-results {
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+}
+.el-dialog.command-palette .palette-group-label {
+  padding: 10px 10px 4px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+.el-dialog.command-palette .palette-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.el-dialog.command-palette .palette-option[aria-selected='true'] {
+  background: var(--accent-soft);
+}
+.el-dialog.command-palette .palette-option-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+.el-dialog.command-palette .palette-option-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.el-dialog.command-palette .palette-option-detail {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+.el-dialog.command-palette .palette-empty {
+  margin: 0;
+  padding: 18px;
+  font-size: 14px;
+}
 </style>

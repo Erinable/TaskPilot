@@ -12,23 +12,28 @@ const workspaceWith = async (commands) => {
 };
 
 test('parseTap() reads pass, fail, skip, and todo lines', () => {
-  const results = verification.parseTap([
-    'TAP version 13',
-    'ok 1 - first passes',
-    'not ok 2 - second fails',
-    'ok 3 - third # SKIP not ready',
-    'ok 4 - fourth # TODO later',
-  ].join('\n'));
+  const results = verification.parseTap(
+    ['TAP version 13', 'ok 1 - first passes', 'not ok 2 - second fails', 'ok 3 - third # SKIP not ready', 'ok 4 - fourth # TODO later'].join('\n'),
+  );
 
-  assert.deepEqual(results.map((r) => r.name), ['first passes', 'second fails', 'third', 'fourth']);
-  assert.deepEqual(results.map((r) => r.passed), [true, false, true, true]);
+  assert.deepEqual(
+    results.map((r) => r.name),
+    ['first passes', 'second fails', 'third', 'fourth'],
+  );
+  assert.deepEqual(
+    results.map((r) => r.passed),
+    [true, false, true, true],
+  );
   assert.equal(results[2].skipped, true);
   assert.equal(results[3].todo, true);
 });
 
 test('parseTap() ignores indented subtest lines so suites are not double-counted', () => {
   const results = verification.parseTap(['    ok 1 - inner', 'ok 1 - outer suite'].join('\n'));
-  assert.deepEqual(results.map((r) => r.name), ['outer suite']);
+  assert.deepEqual(
+    results.map((r) => r.name),
+    ['outer suite'],
+  );
 });
 
 test('parseTap() returns nothing for output that is not TAP', () => {
@@ -36,9 +41,7 @@ test('parseTap() returns nothing for output that is not TAP', () => {
 });
 
 test('summarize() excludes skipped and todo tests from the counts', () => {
-  const summary = verification.summarize([
-    { passed: true }, { passed: false }, { passed: true, skipped: true },
-  ] as any[], 1);
+  const summary = verification.summarize([{ passed: true }, { passed: false }, { passed: true, skipped: true }] as any[], 1);
   assert.deepEqual(summary, { total: 2, passed: 1, failed: 1, skipped: 1, ok: false });
 });
 
@@ -55,7 +58,10 @@ test('run() reports a passing command with parsed results', async () => {
   const result = await verification.run(config, 'test');
   assert.equal(result.exitCode, 0);
   assert.equal(result.summary.ok, true);
-  assert.deepEqual(result.results.map((r) => r.name), ['it works']);
+  assert.deepEqual(
+    result.results.map((r) => r.name),
+    ['it works'],
+  );
   assert.ok(result.durationMs >= 0);
 });
 
@@ -124,13 +130,15 @@ test('run() does not interpret arguments through a shell', async () => {
 });
 
 test('parseSpec() reads the reporter node --test uses by default', () => {
-  const results = verification.parseSpec([
-    '✔ first passes (1.2ms)',
-    '✖ second fails (0.5ms)',
-    '    ✔ nested subtest (0.1ms)',
-  ].join('\n'));
-  assert.deepEqual(results.map((r) => r.name), ['first passes', 'second fails']);
-  assert.deepEqual(results.map((r) => r.passed), [true, false]);
+  const results = verification.parseSpec(['✔ first passes (1.2ms)', '✖ second fails (0.5ms)', '    ✔ nested subtest (0.1ms)'].join('\n'));
+  assert.deepEqual(
+    results.map((r) => r.name),
+    ['first passes', 'second fails'],
+  );
+  assert.deepEqual(
+    results.map((r) => r.passed),
+    [true, false],
+  );
 });
 
 test('parseSpec() does not double-count a failure repeated in the summary', () => {
@@ -139,8 +147,14 @@ test('parseSpec() does not double-count a failure repeated in the summary', () =
 });
 
 test('parseResults() picks TAP when present and falls back to spec', () => {
-  assert.deepEqual(verification.parseResults('ok 1 - tap style').map((r) => r.name), ['tap style']);
-  assert.deepEqual(verification.parseResults('✔ spec style (1ms)').map((r) => r.name), ['spec style']);
+  assert.deepEqual(
+    verification.parseResults('ok 1 - tap style').map((r) => r.name),
+    ['tap style'],
+  );
+  assert.deepEqual(
+    verification.parseResults('✔ spec style (1ms)').map((r) => r.name),
+    ['spec style'],
+  );
   assert.deepEqual(verification.parseResults('Build finished.'), []);
 });
 
@@ -154,10 +168,7 @@ test('run() parses the default node --test output end to end', async () => {
 });
 
 test('matchAcceptance() verifies a criterion whose test passed', () => {
-  const matched = verification.matchAcceptance(
-    [{ text: 'login works', test: 'login succeeds' }],
-    [{ name: 'login succeeds', passed: true }],
-  );
+  const matched = verification.matchAcceptance([{ text: 'login works', test: 'login succeeds' }], [{ name: 'login succeeds', passed: true }]);
   assert.equal(matched[0].verified, true);
   assert.equal(matched[0].manual, false);
 });
@@ -187,11 +198,26 @@ test('runCheck() reads a fresh JUnit report and ignores a stale one', async () =
   const writer = `require('fs').mkdirSync('out',{recursive:true});require('fs').writeFileSync('out/r.xml',${JSON.stringify(xml)});process.exit(1)`;
   const config: any = {
     root,
-    checks: { test: { command: process.execPath, args: ['-e', writer], stage: 'submit', blocking: true, report: { format: 'junit', path: 'out/r.xml' }, env: { TP_MARK: '1' } } },
+    checks: {
+      test: {
+        command: process.execPath,
+        args: ['-e', writer],
+        stage: 'submit',
+        blocking: true,
+        report: { format: 'junit', path: 'out/r.xml' },
+        env: { TP_MARK: '1' },
+      },
+    },
   };
   const fresh = await verification.runCheck(config, 'test');
   assert.deepEqual(fresh.report, { format: 'junit', trusted: true, problem: null });
-  assert.deepEqual(fresh.results.map((r) => [r.fullName, r.passed]), [['s › a', true], ['s › b', false]]);
+  assert.deepEqual(
+    fresh.results.map((r) => [r.fullName, r.passed]),
+    [
+      ['s › a', true],
+      ['s › b', false],
+    ],
+  );
   assert.equal(fresh.summary.failed, 1);
 
   // A command that does not rewrite the report leaves the old one behind.
@@ -204,7 +230,14 @@ test('runCheck() reads a fresh JUnit report and ignores a stale one', async () =
 test('runCheck() passes the check env but never lets it replace PATH', async () => {
   const config: any = {
     root: process.cwd(),
-    checks: { test: { command: process.execPath, args: ['-e', 'console.log(process.env.TP_MARK + "|" + process.env.PATH)'], report: { format: 'stdout' }, env: { TP_MARK: 'yes', PATH: '/evil' } } },
+    checks: {
+      test: {
+        command: process.execPath,
+        args: ['-e', 'console.log(process.env.TP_MARK + "|" + process.env.PATH)'],
+        report: { format: 'stdout' },
+        env: { TP_MARK: 'yes', PATH: '/evil' },
+      },
+    },
   };
   const result = await verification.runCheck(config, 'test', { envPath: '/tp/bin' });
   assert.equal(result.output.trim(), 'yes|/tp/bin');

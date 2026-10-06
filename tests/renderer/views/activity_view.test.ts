@@ -14,15 +14,33 @@ const at = (iso: string) => iso;
 
 const pages: Record<string, ipc.ActivityPage> = {
   first: {
-    days: [{ day: '2026-10-06', records: [
-      { kind: 'package_transition', packageId: 'p1', title: '登录接口', transition: 'claim', actor: 'human', from: 'pending', to: 'in_progress', at: at('2026-10-06T02:05:00Z') },
-      { kind: 'requirement_finished', requirementId: 'gone', title: '<b>已删除的需求</b>', step: 'planning', costUsd: 0.1, at: at('2026-10-06T01:00:00Z') },
-    ] }],
-    nextBefore: '2026-10-06', timeZone: 'Asia/Shanghai', retentionDays: 30,
+    days: [
+      {
+        day: '2026-10-06',
+        records: [
+          {
+            kind: 'package_transition',
+            packageId: 'p1',
+            title: '登录接口',
+            transition: 'claim',
+            actor: 'human',
+            from: 'pending',
+            to: 'in_progress',
+            at: at('2026-10-06T02:05:00Z'),
+          },
+          { kind: 'requirement_finished', requirementId: 'gone', title: '<b>已删除的需求</b>', step: 'planning', costUsd: 0.1, at: at('2026-10-06T01:00:00Z') },
+        ],
+      },
+    ],
+    nextBefore: '2026-10-06',
+    timeZone: 'Asia/Shanghai',
+    retentionDays: 30,
   },
   second: {
     days: [{ day: '2026-10-02', records: [{ kind: 'requirement_created', requirementId: 'r0', title: '旧需求', at: at('2026-10-02T03:00:00Z') }] }],
-    nextBefore: null, timeZone: 'Asia/Shanghai', retentionDays: 30,
+    nextBefore: null,
+    timeZone: 'Asia/Shanghai',
+    retentionDays: 30,
   },
 };
 
@@ -58,7 +76,12 @@ describe('ActivityView', () => {
     await wrapper.find('.view-all-button').trigger('click');
     await flushPromises();
     expect(page).toHaveBeenLastCalledWith('2026-10-06');
-    expect(wrapper.findAll('.activity-day-label').map((node) => node.text()).at(-1)).toBe('10 月 2 日');
+    expect(
+      wrapper
+        .findAll('.activity-day-label')
+        .map((node) => node.text())
+        .at(-1),
+    ).toBe('10 月 2 日');
     expect(wrapper.find('.view-all-button').exists()).toBe(false);
   });
 

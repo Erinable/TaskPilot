@@ -27,6 +27,9 @@ export const usePaletteStore = defineStore('palette', () => {
 
   return {
     // Visibility
-    visible, openPalette, closePalette, togglePalette,
+    visible,
+    openPalette,
+    closePalette,
+    togglePalette,
   };
 });

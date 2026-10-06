@@ -21,9 +21,7 @@ export interface EnvFailure {
 }
 
 export type EnvAdjustment =
-  | { code: 'install_without_manifest' }
-  | { code: 'ci_without_lockfile' }
-  | { code: 'unknown_script'; kind: ScriptKind; script: string };
+  { code: 'install_without_manifest' } | { code: 'ci_without_lockfile' } | { code: 'unknown_script'; kind: ScriptKind; script: string };
 
 export interface EnvIssue {
   text: string;
@@ -100,44 +98,55 @@ const section = (tag: string, body: string): string => [`<${tag}>`, body, `</${t
 // Renders probe facts (and an optional failed step) as the user prompt.
 export const planPrompt = (facts: EnvFacts, { failure = null }: { failure?: EnvFailure | null } = {}): string => {
   const manifest = facts.manifest;
-  const scripts = manifest && Object.keys(manifest.scripts).length
-    ? Object.entries(manifest.scripts).map(([name, body]) => `${name}: ${body}`).join('\n')
-    : '(none)';
+  const scripts =
+    manifest && Object.keys(manifest.scripts).length
+      ? Object.entries(manifest.scripts)
+          .map(([name, body]) => `${name}: ${body}`)
+          .join('\n')
+      : '(none)';
   const parts = [
     'Plan the environment setup for this repository.',
     '',
-    section('package_json', manifest
-      ? [
-        `name: ${manifest.name ?? '(none)'}`,
-        `engines: ${JSON.stringify(manifest.engines)}`,
-        `packageManager: ${manifest.packageManager ?? '(none)'}`,
-        'scripts:',
-        scripts,
-      ].join('\n')
-      : '(no package.json)'),
+    section(
+      'package_json',
+      manifest
+        ? [
+            `name: ${manifest.name ?? '(none)'}`,
+            `engines: ${JSON.stringify(manifest.engines)}`,
+            `packageManager: ${manifest.packageManager ?? '(none)'}`,
+            'scripts:',
+            scripts,
+          ].join('\n')
+        : '(no package.json)',
+    ),
     '',
     section('lockfiles', facts.lockfiles.length ? facts.lockfiles.join('\n') : '(none)'),
     '',
     section('node_modules', facts.nodeModules ? 'present' : 'absent'),
     '',
-    section('version_pins', facts.versionFiles.length
-      ? facts.versionFiles.map((file) => `${file.path}: ${file.content}`).join('\n')
-      : '(none)'),
+    section('version_pins', facts.versionFiles.length ? facts.versionFiles.map((file) => `${file.path}: ${file.content}`).join('\n') : '(none)'),
     '',
     section('installed_tools', `node: ${facts.tools.node ?? 'not found'}\nnpm: ${facts.tools.npm ?? 'not found'}`),
     '',
-    section('ci_workflows', facts.workflows.length
-      ? facts.workflows.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n')
-      : '(none)'),
+    section(
+      'ci_workflows',
+      facts.workflows.length ? facts.workflows.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n') : '(none)',
+    ),
   ];
   if (failure) {
-    parts.push('', section('failed_step', [
-      `step: ${failure.step}`,
-      `command: ${failure.command}`,
-      `exit code: ${failure.exitCode}${failure.timedOut ? ' (timed out)' : ''}`,
-      'output (tail):',
-      String(failure.output ?? '').slice(-OUTPUT_TAIL_CHARS),
-    ].join('\n')));
+    parts.push(
+      '',
+      section(
+        'failed_step',
+        [
+          `step: ${failure.step}`,
+          `command: ${failure.command}`,
+          `exit code: ${failure.exitCode}${failure.timedOut ? ' (timed out)' : ''}`,
+          'output (tail):',
+          String(failure.output ?? '').slice(-OUTPUT_TAIL_CHARS),
+        ].join('\n'),
+      ),
+    );
     parts.push('', 'Explain the failure in issues and adjust the plan if a different choice would fix it.');
   }
   return parts.join('\n');
@@ -184,7 +193,10 @@ export const validatePlan = (raw: unknown, facts: EnvFacts): EnvPlan => {
     const value = rawScripts[kind];
     if (typeof value !== 'string') fail(`scripts.${kind}`, 'must be text');
     const name = value.trim();
-    if (!name) { scripts[kind] = null; continue; }
+    if (!name) {
+      scripts[kind] = null;
+      continue;
+    }
     if (!SCRIPT_NAME.test(name) || !Object.hasOwn(known, name)) {
       scripts[kind] = null;
       adjustments.push({ code: 'unknown_script', kind, script: name.slice(0, 64) });

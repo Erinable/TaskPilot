@@ -146,9 +146,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // ========== Actions ==========
   const runStep = async (item: ipc.Requirement, step: 'clarify' | 'plan', answers?: ipc.RequirementAnswers) => {
     try {
-      const next = step === 'plan'
-        ? await call(window.taskpilot.requirements.plan(item.id, answers))
-        : await call(window.taskpilot.requirements.clarify(item.id));
+      const next =
+        step === 'plan' ? await call(window.taskpilot.requirements.plan(item.id, answers)) : await call(window.taskpilot.requirements.clarify(item.id));
       upsert(next);
       renderDetail(next);
       startPolling();
@@ -161,7 +160,12 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // Back to the question form with the current answers, discarding the plan.
   const editAnswers = async (item: ipc.Requirement) => {
     try {
-      const next = await call(window.taskpilot.requirements.answer(item.id, item.questions.map((question) => question.answer ?? '')));
+      const next = await call(
+        window.taskpilot.requirements.answer(
+          item.id,
+          item.questions.map((question) => question.answer ?? ''),
+        ),
+      );
       upsert(next);
       renderDetail(next);
     } catch (error) {
@@ -241,13 +245,18 @@ export const useRequirementsStore = defineStore('requirements', () => {
       renderDetail(open);
       if (!model.isRunning(open)) announce(open);
     }
-    if (items.value.some(model.isRunning)) pollTimer = setTimeout(() => { tick().catch((error) => console.error(error)); }, model.POLL_MS);
+    if (items.value.some(model.isRunning))
+      pollTimer = setTimeout(() => {
+        tick().catch((error) => console.error(error));
+      }, model.POLL_MS);
     else pollTimer = null;
   };
 
   const startPolling = () => {
     stopPolling();
-    pollTimer = setTimeout(() => { tick().catch((error) => console.error(error)); }, model.POLL_MS);
+    pollTimer = setTimeout(() => {
+      tick().catch((error) => console.error(error));
+    }, model.POLL_MS);
   };
 
   const isPolling = () => pollTimer !== null;
@@ -273,16 +282,40 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   return {
     // List
-    items, attentionCount, refreshList,
+    items,
+    attentionCount,
+    refreshList,
     // Selection
-    pane, selectedId, composing, current, detailRevision, select,
+    pane,
+    selectedId,
+    composing,
+    current,
+    detailRevision,
+    select,
     // Compose
-    composeTitle, composeText, composeStatus, composeInvalid, submitting, composeFocus, composeContext, startCompose, onComposeInput, submitNew,
+    composeTitle,
+    composeText,
+    composeStatus,
+    composeInvalid,
+    submitting,
+    composeFocus,
+    composeContext,
+    startCompose,
+    onComposeInput,
+    submitNew,
     // Actions
-    runStep, editAnswers, publishPlan, cancelRun, removeRequirement, showQueue,
+    runStep,
+    editAnswers,
+    publishPlan,
+    cancelRun,
+    removeRequirement,
+    showQueue,
     // Polling
-    startPolling, stopPolling, isPolling,
+    startPolling,
+    stopPolling,
+    isPolling,
     // Navigation
-    open, init,
+    open,
+    init,
   };
 });

@@ -18,7 +18,8 @@ const DAY_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // YYYY-MM-DD of `date` in the business time zone.
-export const businessDay = (date: Date, timeZone: string) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+export const businessDay = (date: Date, timeZone: string) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 
 // The `count` business days ending with the one `now` falls in, newest first.
 // Stepping back 24h at a time from noon UTC stays on distinct calendar days
@@ -73,7 +74,13 @@ export class ActivityLog {
   // One page of the full feed: whole business days, newest first, starting
   // at `before` (exclusive) and stopping once `minEvents` are collected or
   // the retention window ends. `nextBefore` continues from the last day read.
-  async page({ before, minEvents }: { before: string | null; minEvents: number }): Promise<{ days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null }> {
+  async page({
+    before,
+    minEvents,
+  }: {
+    before: string | null;
+    minEvents: number;
+  }): Promise<{ days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null }> {
     const window = recentDays(this.#now(), this.#timeZone, RETENTION_DAYS);
     const start = before ? window.findIndex((day) => day < before) : 0;
     if (start < 0) return { days: [], nextBefore: null };

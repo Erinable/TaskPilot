@@ -48,12 +48,17 @@ export interface TrackedRead {
 
 // Matched against the file's basename and full path, case-insensitively.
 const SECRET_PATTERNS = [
-  /^\.env($|\.)/, /^\.npmrc$/, /^\.pypirc$/, /^\.netrc$/, /^\.git-credentials$/,
+  /^\.env($|\.)/,
+  /^\.npmrc$/,
+  /^\.pypirc$/,
+  /^\.netrc$/,
+  /^\.git-credentials$/,
   /\.(pem|key|p12|pfx|jks|keystore|crt|cer|der|asc|gpg|kdbx)$/,
   /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/,
   /(^|[-_.])(secret|secrets|credential|credentials|password|passwords)([-_.]|$)/,
   /(^|\/)\.aws\/|(^|\/)\.ssh\//,
-  /serviceaccount.*\.json$/, /^terraform\.tfstate/,
+  /serviceaccount.*\.json$/,
+  /^terraform\.tfstate/,
 ];
 
 export const looksSecret = (file: string): boolean => {
@@ -101,17 +106,38 @@ export const readTracked = async (root: string, requested: unknown[], limits: Pa
     seen.add(candidate);
     const skip = (reason: ReadSkipReason) => skipped.push({ path: candidate, reason });
     const entry = entries.get(candidate);
-    if (!entry) { skip('not_tracked'); continue; }
-    if (looksSecret(candidate)) { skip('secret'); continue; }
-    if (entry.mode === '120000' || entry.mode === '160000') { skip('not_a_file'); continue; }
-    if (files.length >= maxFiles) { skip('file_limit'); continue; }
+    if (!entry) {
+      skip('not_tracked');
+      continue;
+    }
+    if (looksSecret(candidate)) {
+      skip('secret');
+      continue;
+    }
+    if (entry.mode === '120000' || entry.mode === '160000') {
+      skip('not_a_file');
+      continue;
+    }
+    if (files.length >= maxFiles) {
+      skip('file_limit');
+      continue;
+    }
 
     const size = Number((await git(root, ['cat-file', '-s', entry.sha])).toString().trim());
-    if (size > maxFileBytes) { skip('too_large'); continue; }
-    if (total + size > maxTotalBytes) { skip('budget'); continue; }
+    if (size > maxFileBytes) {
+      skip('too_large');
+      continue;
+    }
+    if (total + size > maxTotalBytes) {
+      skip('budget');
+      continue;
+    }
 
     const blob = await git(root, ['cat-file', 'blob', entry.sha]);
-    if (looksBinary(blob)) { skip('binary'); continue; }
+    if (looksBinary(blob)) {
+      skip('binary');
+      continue;
+    }
     total += blob.length;
     files.push({ path: candidate, sha: entry.sha, content: blob.toString('utf8'), bytes: blob.length });
   }

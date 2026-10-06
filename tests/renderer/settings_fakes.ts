@@ -17,7 +17,8 @@ export const preferences = () => ({
 
 export const workspaceView = () => ({
   root: '/repo',
-  commands: {}, checks: {},
+  commands: {},
+  checks: {},
   lines: { test: 'npm test', lint: '', build: '', smoke: '' },
   options: {
     test: { stage: 'submit', blocking: true, reportPath: '' },
@@ -40,14 +41,31 @@ export const workspaceCheck = () => ({
 });
 
 export const envState = (overrides: Record<string, unknown> = {}) => ({
-  root: '/repo', status: 'ready', stale: false,
+  root: '/repo',
+  status: 'ready',
+  stale: false,
   facts: {
     manifest: { valid: true, name: 'app', scripts: { test: 'vitest' }, engines: {}, packageManager: null },
-    lockfiles: ['package-lock.json'], managers: ['npm'], nodeModules: false, versionFiles: [], workflows: [], tools: { node: 'v22.0.0', npm: '10.0.0' },
+    lockfiles: ['package-lock.json'],
+    managers: ['npm'],
+    nodeModules: false,
+    versionFiles: [],
+    workflows: [],
+    tools: { node: 'v22.0.0', npm: '10.0.0' },
   },
   blockers: [],
-  plan: { summary: '先安装依赖再跑测试。', install: 'ci', installReason: '有 lockfile', scripts: { test: 'test', lint: null, build: null }, issues: [], adjustments: [] },
-  error: null, costUsd: 0, allowScripts: false, running: null,
+  plan: {
+    summary: '先安装依赖再跑测试。',
+    install: 'ci',
+    installReason: '有 lockfile',
+    scripts: { test: 'test', lint: null, build: null },
+    issues: [],
+    adjustments: [],
+  },
+  error: null,
+  costUsd: 0,
+  allowScripts: false,
+  running: null,
   steps: [
     { id: 'install', kind: 'install', script: null, line: 'npm ci --ignore-scripts', result: null },
     { id: 'test', kind: 'test', script: 'test', line: 'npm run test', result: null },
@@ -61,7 +79,9 @@ export const installApi = () => {
     listTasks: vi.fn(() => ok([])),
     workspace: {
       get: vi.fn(() => ok(workspaceView())),
-      set: vi.fn((form: { root: string; commands: Record<string, string>; options: unknown }) => ok({ ...workspaceView(), root: form.root, lines: { ...workspaceView().lines, ...form.commands } })),
+      set: vi.fn((form: { root: string; commands: Record<string, string>; options: unknown }) =>
+        ok({ ...workspaceView(), root: form.root, lines: { ...workspaceView().lines, ...form.commands } }),
+      ),
       check: vi.fn(() => ok(workspaceCheck())),
       pickRoot: vi.fn(() => ok(null)),
       info: vi.fn(() => ok({ configured: false })),
@@ -70,7 +90,20 @@ export const installApi = () => {
       get: vi.fn(() => ok(preferences())),
       set: vi.fn((input: ReturnType<typeof preferences>) => ok({ ...input, profile: { ...input.profile, initials: 'X' } })),
     },
-    environment: { info: vi.fn(() => ok({ requested: 'inherit', source: 'inherit', error: null, shell: '/bin/zsh', entries: ['/usr/bin'], inheritedCount: 1, platform: 'darwin', versions: { app: '0.1.0', electron: '40', node: '22' } })) },
+    environment: {
+      info: vi.fn(() =>
+        ok({
+          requested: 'inherit',
+          source: 'inherit',
+          error: null,
+          shell: '/bin/zsh',
+          entries: ['/usr/bin'],
+          inheritedCount: 1,
+          platform: 'darwin',
+          versions: { app: '0.1.0', electron: '40', node: '22' },
+        }),
+      ),
+    },
     data: {
       info: vi.fn(() => ok({ configDir: '/config', files: ['workspace.json'], packages: { total: 3, claimed: 1, deviations: 0 } })),
       resetProgress: vi.fn(() => ok({ total: 3, claimed: 0, deviations: 0 })),

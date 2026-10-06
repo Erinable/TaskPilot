@@ -52,7 +52,7 @@ export const defaults = (): Preferences => ({
 });
 
 const codePoints = (text: string) => [...text].length;
-const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? value as T : fallback);
+const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback);
 
 const isValidName = (name: string) => codePoints(name) <= MAX_NAME_LENGTH && !DISALLOWED_NAME_CHARS.test(name);
 
@@ -118,8 +118,10 @@ export const initials = (name: string | null | undefined): string => {
 };
 
 // Preferences as the renderer sees them, with derived display values.
-export const toView = (preferences: Preferences): PreferencesView =>
-  ({ ...preferences, profile: { ...preferences.profile, initials: initials(preferences.profile.displayName) } });
+export const toView = (preferences: Preferences): PreferencesView => ({
+  ...preferences,
+  profile: { ...preferences.profile, initials: initials(preferences.profile.displayName) },
+});
 
 export const load = async (configDir: string): Promise<Preferences> => {
   try {

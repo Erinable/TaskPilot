@@ -33,7 +33,10 @@ const reasons = (result) => Object.fromEntries(result.skipped.map((s) => [s.path
 test('reads tracked text files in the requested order', async () => {
   const root = await repo({ 'src/a.ts': 'export const a = 1;\n', 'src/b.ts': 'export const b = 2;\n' });
   const { files, skipped } = await readTracked(root, ['src/b.ts', 'src/a.ts', 'src/b.ts']);
-  assert.deepEqual(files.map((f) => f.path), ['src/b.ts', 'src/a.ts']);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ['src/b.ts', 'src/a.ts'],
+  );
   assert.equal(files[1].content, 'export const a = 1;\n');
   assert.match(files[0].sha, /^[0-9a-f]{40}$/);
   assert.deepEqual(skipped, []);
@@ -67,11 +70,29 @@ test('reads the committed blob, not later edits on disk', async () => {
 
 test('refuses tracked files that commonly hold secrets', async () => {
   const root = await repo({
-    '.env': 'KEY=1', 'config/.env.production': 'KEY=2', 'deploy/server.pem': 'x', 'id_ed25519': 'x',
-    'config/secrets.json': '{}', 'src/credentials.ts': 'x', '.npmrc': 'x', 'src/app.ts': 'ok',
+    '.env': 'KEY=1',
+    'config/.env.production': 'KEY=2',
+    'deploy/server.pem': 'x',
+    id_ed25519: 'x',
+    'config/secrets.json': '{}',
+    'src/credentials.ts': 'x',
+    '.npmrc': 'x',
+    'src/app.ts': 'ok',
   });
-  const result = await readTracked(root, ['.env', 'config/.env.production', 'deploy/server.pem', 'id_ed25519', 'config/secrets.json', 'src/credentials.ts', '.npmrc', 'src/app.ts']);
-  assert.deepEqual(result.files.map((f) => f.path), ['src/app.ts']);
+  const result = await readTracked(root, [
+    '.env',
+    'config/.env.production',
+    'deploy/server.pem',
+    'id_ed25519',
+    'config/secrets.json',
+    'src/credentials.ts',
+    '.npmrc',
+    'src/app.ts',
+  ]);
+  assert.deepEqual(
+    result.files.map((f) => f.path),
+    ['src/app.ts'],
+  );
   assert.ok(Object.values(reasons(result)).every((reason) => reason === 'secret'));
 });
 
@@ -95,9 +116,15 @@ test('enforces binary, per-file, count, and total limits', async () => {
   const root = await repo({
     'img.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 1]),
     'big.ts': 'x'.repeat(300),
-    'a.ts': 'a'.repeat(100), 'b.ts': 'b'.repeat(100), 'c.ts': 'c'.repeat(100), 'd.ts': 'd',
+    'a.ts': 'a'.repeat(100),
+    'b.ts': 'b'.repeat(100),
+    'c.ts': 'c'.repeat(100),
+    'd.ts': 'd',
   });
   const result = await readTracked(root, ['img.png', 'big.ts', 'a.ts', 'b.ts', 'c.ts', 'd.ts'], { maxFileBytes: 200, maxTotalBytes: 250, maxFiles: 3 });
-  assert.deepEqual(result.files.map((f) => f.path), ['a.ts', 'b.ts', 'd.ts']);
+  assert.deepEqual(
+    result.files.map((f) => f.path),
+    ['a.ts', 'b.ts', 'd.ts'],
+  );
   assert.deepEqual(reasons(result), { 'img.png': 'binary', 'big.ts': 'too_large', 'c.ts': 'budget' });
 });

@@ -48,7 +48,9 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
       clarify: vi.fn((id: string) => ok(requirement({ id, status: 'clarifying' }))),
       answer: vi.fn((id: string) => ok(requirement({ id, status: 'answering' }))),
       plan: vi.fn((id: string) => ok(requirement({ id, status: 'planning' }))),
-      publish: vi.fn((id: string) => ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as ipc.TaskDefinition] }))),
+      publish: vi.fn((id: string) =>
+        ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as ipc.TaskDefinition] })),
+      ),
       remove: vi.fn(() => ok(true as const)),
       cancel: vi.fn(() => ok(true)),
     },

@@ -28,13 +28,15 @@ export type ConfirmOptions = { title: string; body: string; accept: string; dang
 // Resolves true when the user accepts.
 export const confirmAction = async ({ title, body, accept, danger = false }: ConfirmOptions) => {
   try {
-    await tracked(ElMessageBox.confirm(body, title, {
-      confirmButtonText: accept,
-      cancelButtonText: '取消',
-      type: 'warning',
-      customClass: danger ? 'glass-strong confirm-danger' : 'glass-strong',
-      confirmButtonClass: danger ? 'el-button--danger' : undefined,
-    }));
+    await tracked(
+      ElMessageBox.confirm(body, title, {
+        confirmButtonText: accept,
+        cancelButtonText: '取消',
+        type: 'warning',
+        customClass: danger ? 'glass-strong confirm-danger' : 'glass-strong',
+        confirmButtonClass: danger ? 'el-button--danger' : undefined,
+      }),
+    );
     return true;
   } catch {
     return false;
@@ -44,15 +46,17 @@ export const confirmAction = async ({ title, body, accept, danger = false }: Con
 // A three-way choice: 'accept', 'alternate', or false when dismissed.
 export const confirmChoice = async ({ title, body, accept, alternate }: ConfirmOptions & { alternate: string }) => {
   try {
-    await tracked(ElMessageBox.confirm(body, title, {
-      confirmButtonText: accept,
-      cancelButtonText: alternate,
-      distinguishCancelAndClose: true,
-      type: 'warning',
-      customClass: 'glass-strong',
-    }));
+    await tracked(
+      ElMessageBox.confirm(body, title, {
+        confirmButtonText: accept,
+        cancelButtonText: alternate,
+        distinguishCancelAndClose: true,
+        type: 'warning',
+        customClass: 'glass-strong',
+      }),
+    );
     return 'accept' as const;
   } catch (action) {
-    return action === 'cancel' ? 'alternate' as const : false;
+    return action === 'cancel' ? ('alternate' as const) : false;
   }
 };

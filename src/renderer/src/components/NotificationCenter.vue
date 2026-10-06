@@ -18,7 +18,9 @@ const bellLabel = computed(() => (store.unreadCount ? `通知（${store.unreadCo
 const timeOf = (item: NotificationItem) => (item.at ? relativeTime(item.at, new Date(), businessTimeZone()) : '');
 
 // Fresh data each time the popover opens.
-watch(visible, (shown) => { if (shown) store.refresh().catch((error) => console.error(error)); });
+watch(visible, (shown) => {
+  if (shown) store.refresh().catch((error) => console.error(error));
+});
 
 const close = () => {
   visible.value = false;
@@ -35,13 +37,11 @@ onUnmounted(() => store.stopAutoRefresh());
 </script>
 
 <template>
-  <el-popover
-    v-model:visible="visible" trigger="click" placement="bottom-end" :width="380"
-    role="dialog" popper-class="notification-popper glass-strong"
-  >
+  <el-popover v-model:visible="visible" trigger="click" placement="bottom-end" :width="380" role="dialog" popper-class="notification-popper glass-strong">
     <template #reference>
       <button ref="bell" class="icon-button" type="button" title="通知" :aria-label="bellLabel">
-        <AppIcon name="bell" /><span v-if="store.unreadCount" class="notification-dot" data-unread-dot></span>
+        <AppIcon name="bell" />
+        <span v-if="store.unreadCount" class="notification-dot" data-unread-dot></span>
       </button>
     </template>
     <div class="notification-center" @keydown.escape.stop="close">
@@ -53,8 +53,11 @@ onUnmounted(() => store.stopAutoRefresh());
       <ul v-else class="notification-list">
         <li v-for="item in store.items" :key="item.id">
           <button
-            class="notification-item" :class="[item.tone, { unread: !store.isRead(item.id) }]" type="button"
-            :data-notification="item.id" @click="open(item)"
+            class="notification-item"
+            :class="[item.tone, { unread: !store.isRead(item.id) }]"
+            type="button"
+            :data-notification="item.id"
+            @click="open(item)"
           >
             <span class="notification-mark" aria-hidden="true"></span>
             <span class="notification-body">
@@ -71,25 +74,111 @@ onUnmounted(() => store.stopAutoRefresh());
 </template>
 
 <style scoped>
-.notification-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 10px; border-bottom: 1px solid var(--line-soft); }
-.notification-header h2 { margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
-.notification-empty { padding: 24px 6px; text-align: center; font-size: 14px; }
-.notification-list { max-height: 420px; overflow-y: auto; margin: 6px 0 0; padding: 0; list-style: none; }
-.notification-item { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px; text-align: left; color: var(--text-secondary); background: none; border: 0; border-radius: 9px; cursor: pointer; font: inherit; }
-.notification-item:hover, .notification-item:focus-visible { background: var(--fill-hover); outline: none; }
-.notification-item:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.notification-mark { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: transparent; }
-.notification-item.unread .notification-mark { background: var(--accent); }
-.notification-item.unread.danger .notification-mark { background: var(--danger); }
-.notification-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.notification-title { overflow: hidden; color: var(--text); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.notification-item:not(.unread) .notification-title { font-weight: 500; color: var(--text-secondary); }
-.notification-text { font-size: 14px; overflow-wrap: anywhere; }
-.notification-time { flex: none; color: var(--text-tertiary); font-size: 14px; white-space: nowrap; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.notification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.notification-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.notification-empty {
+  padding: 24px 6px;
+  text-align: center;
+  font-size: 14px;
+}
+.notification-list {
+  max-height: 420px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.notification-item {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 8px;
+  text-align: left;
+  color: var(--text-secondary);
+  background: none;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  font: inherit;
+}
+.notification-item:hover,
+.notification-item:focus-visible {
+  background: var(--fill-hover);
+  outline: none;
+}
+.notification-item:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.notification-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+.notification-item.unread .notification-mark {
+  background: var(--accent);
+}
+.notification-item.unread.danger .notification-mark {
+  background: var(--danger);
+}
+.notification-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.notification-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notification-item:not(.unread) .notification-title {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.notification-text {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.notification-time {
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 </style>
 
 <style>
 /* The popover is teleported to body; only its own surface is styled here. */
-.el-popover.notification-popper { padding: 10px; border: 1px solid var(--glass-border); border-radius: 14px; }
+.el-popover.notification-popper {
+  padding: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+}
 </style>

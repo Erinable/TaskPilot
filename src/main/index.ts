@@ -100,9 +100,13 @@ app.whenReady().then(async () => {
     store,
     configDir,
     getConfig: () => config,
-    setConfig: (next) => { config = next; },
+    setConfig: (next) => {
+      config = next;
+    },
     getPreferences: () => prefs,
-    setPreferences: (next) => { prefs = next; },
+    setPreferences: (next) => {
+      prefs = next;
+    },
     pathResolver: createPathResolver(),
     appVersion: app.getVersion(),
     requirements,
@@ -126,7 +130,7 @@ app.whenReady().then(async () => {
       const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
       const parent = BrowserWindow.getFocusedWindow();
       const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
-      return result.canceled ? null : result.filePaths[0] ?? null;
+      return result.canceled ? null : (result.filePaths[0] ?? null);
     },
   });
 

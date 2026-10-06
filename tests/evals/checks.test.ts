@@ -6,7 +6,8 @@ import * as productLead from '../../src/main/agents/product_lead.ts';
 
 const files = ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts', 'package.json'];
 const pkg = (overrides = {}) => ({
-  title: 'p', estimateHours: 1,
+  title: 'p',
+  estimateHours: 1,
   fileScope: ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts'],
   acceptance: [{ text: 'a', test: 'finds by email' }],
   ...overrides,
@@ -16,7 +17,10 @@ const testCase = (expect = {}): any => ({
   expect: { questions: [0, 1], packages: [1, 2], hours: [0.5, 3], ...expect },
 });
 const run = (packages, questions: string[] = []): any => ({ clarify: { questions }, answers: [], plan: { summary: 's', packages } });
-const failing = (results: Record<string, { pass: boolean }>) => Object.entries(results).filter(([, r]) => !r.pass).map(([name]) => name);
+const failing = (results: Record<string, { pass: boolean }>) =>
+  Object.entries(results)
+    .filter(([, r]) => !r.pass)
+    .map(([name]) => name);
 
 test('a grounded, well-sized plan passes every check', () => {
   assert.deepEqual(failing(check(testCase({ mustTouch: ['src/auth/user-repository.ts'] }), run([pkg()]))), []);
@@ -55,11 +59,14 @@ test('overlap tolerates one shared file but not more', () => {
 });
 
 test('testable, unique tests, and invention checks', () => {
-  const result = check(testCase({ mustNotInvent: ['session'] }), run([
-    pkg({ acceptance: [{ text: 'no test' }] }),
-    pkg({ title: 'q', acceptance: [{ text: 'Session cookie set', test: 'dup' }] }),
-    pkg({ title: 'r', acceptance: [{ text: 'b', test: 'dup' }] }),
-  ]));
+  const result = check(
+    testCase({ mustNotInvent: ['session'] }),
+    run([
+      pkg({ acceptance: [{ text: 'no test' }] }),
+      pkg({ title: 'q', acceptance: [{ text: 'Session cookie set', test: 'dup' }] }),
+      pkg({ title: 'r', acceptance: [{ text: 'b', test: 'dup' }] }),
+    ]),
+  );
   assert.equal(result.testable.pass, false);
   assert.equal(result.uniqueTests.pass, false);
   assert.equal(result.noInvention.pass, false);

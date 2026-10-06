@@ -47,6 +47,7 @@ export const buildMapTree = (paths: string[], summarized: Set<string>): MapTreeN
 
 // Keeps only summarized files and the directories that lead to them; counts
 // still describe the whole directory.
-export const summarizedOnly = (nodes: MapTreeNode[]): MapTreeNode[] => nodes
-  .filter((node) => (node.isDir ? node.summarizedCount > 0 : node.summarized))
-  .map((node) => (node.isDir ? { ...node, children: summarizedOnly(node.children) } : node));
+export const summarizedOnly = (nodes: MapTreeNode[]): MapTreeNode[] =>
+  nodes
+    .filter((node) => (node.isDir ? node.summarizedCount > 0 : node.summarized))
+    .map((node) => (node.isDir ? { ...node, children: summarizedOnly(node.children) } : node));

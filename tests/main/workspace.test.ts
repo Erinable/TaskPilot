@@ -86,10 +86,13 @@ test('parseCommandLine() treats a blank line as not configured', () => {
 });
 
 test('parseCommandLine() groups quoted words and honours escapes', () => {
-  assert.deepEqual(
-    workspace.parseCommandLine(`node --test "tests/a b.test.js" 'it''s' x\\ y ""`, 'test')!.args,
-    ['--test', 'tests/a b.test.js', 'its', 'x y', ''],
-  );
+  assert.deepEqual(workspace.parseCommandLine(`node --test "tests/a b.test.js" 'it''s' x\\ y ""`, 'test')!.args, [
+    '--test',
+    'tests/a b.test.js',
+    'its',
+    'x y',
+    '',
+  ]);
   assert.deepEqual(workspace.parseCommandLine('echo "say \\"hi\\""', 'test')!.args, ['say "hi"']);
 });
 
@@ -169,7 +172,18 @@ test('normalize() upgrades v1 commands into checks with per-kind defaults', () =
 });
 
 test('normalizeCheck() validates stage, blocking, report and env', () => {
-  const ok = workspace.normalizeCheck({ command: 'npx', args: ['vitest', 'run'], stage: 'submit', blocking: false, report: { format: 'junit', path: '.taskpilot/reports/test.xml' }, env: { CI: '1' }, timeoutMs: 60000 }, 'test');
+  const ok = workspace.normalizeCheck(
+    {
+      command: 'npx',
+      args: ['vitest', 'run'],
+      stage: 'submit',
+      blocking: false,
+      report: { format: 'junit', path: '.taskpilot/reports/test.xml' },
+      env: { CI: '1' },
+      timeoutMs: 60000,
+    },
+    'test',
+  );
   assert.deepEqual(ok!.report, { format: 'junit', path: '.taskpilot/reports/test.xml' });
   assert.deepEqual(ok!.env, { CI: '1' });
   const bad = (value, code) => assert.throws(() => workspace.normalizeCheck({ command: 'npm', args: [], ...value }, 'test'), { code, field: 'test' });
@@ -186,11 +200,14 @@ test('normalizeCheck() validates stage, blocking, report and env', () => {
 
 test('fromForm() applies stage, blocking and report options and keeps hidden settings', () => {
   const previous = workspace.normalize({ checks: { test: { command: 'npm', args: ['test'], env: { CI: '1' }, timeoutMs: 120000 } } });
-  const config = workspace.fromForm({
-    root: '/r',
-    commands: { test: 'npm test', smoke: 'npm run smoke' },
-    options: { test: { stage: 'submit', blocking: true, reportPath: 'reports/unit.xml' }, smoke: { stage: 'step', blocking: false } },
-  }, previous);
+  const config = workspace.fromForm(
+    {
+      root: '/r',
+      commands: { test: 'npm test', smoke: 'npm run smoke' },
+      options: { test: { stage: 'submit', blocking: true, reportPath: 'reports/unit.xml' }, smoke: { stage: 'step', blocking: false } },
+    },
+    previous,
+  );
   assert.deepEqual(config.checks.test!.report, { format: 'junit', path: 'reports/unit.xml' });
   assert.deepEqual(config.checks.test!.env, { CI: '1' });
   assert.equal(config.checks.test!.timeoutMs, 120000);

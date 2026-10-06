@@ -14,8 +14,24 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn()
 
 describe('requirement model', () => {
   test('every status has a pill label and tone', () => {
-    expect(model.STATUS_LABELS).toEqual({ draft: '草稿', clarifying: '澄清中', answering: '待回答', planning: '拆解中', reviewing: '待确认', published: '已发布', failed: '失败' });
-    expect(model.STATUS_TONES).toEqual({ draft: 'pending', clarifying: 'in_progress', answering: 'in_review', planning: 'in_progress', reviewing: 'in_review', published: 'done', failed: 'blocked' });
+    expect(model.STATUS_LABELS).toEqual({
+      draft: '草稿',
+      clarifying: '澄清中',
+      answering: '待回答',
+      planning: '拆解中',
+      reviewing: '待确认',
+      published: '已发布',
+      failed: '失败',
+    });
+    expect(model.STATUS_TONES).toEqual({
+      draft: 'pending',
+      clarifying: 'in_progress',
+      answering: 'in_review',
+      planning: 'in_progress',
+      reviewing: 'in_review',
+      published: 'done',
+      failed: 'blocked',
+    });
   });
 
   test('stepper marks done and current steps per status', () => {
@@ -49,7 +65,11 @@ describe('requirement model', () => {
   });
 
   test('inline code splits into text and code parts', () => {
-    expect(inlineCodeParts('call `run()` now')).toEqual([{ text: 'call ', code: false }, { text: 'run()', code: true }, { text: ' now', code: false }]);
+    expect(inlineCodeParts('call `run()` now')).toEqual([
+      { text: 'call ', code: false },
+      { text: 'run()', code: true },
+      { text: ' now', code: false },
+    ]);
   });
 });
 
@@ -70,7 +90,9 @@ describe('requirements store', () => {
   });
 
   test('attentionCount counts answering, reviewing and failed', async () => {
-    state.list = ['draft', 'clarifying', 'answering', 'planning', 'reviewing', 'published', 'failed'].map((status, index) => requirement({ id: `r${index}`, status: status as never }));
+    state.list = ['draft', 'clarifying', 'answering', 'planning', 'reviewing', 'published', 'failed'].map((status, index) =>
+      requirement({ id: `r${index}`, status: status as never }),
+    );
     const store = useRequirementsStore();
     await store.refreshList();
     expect(store.attentionCount).toBe(3);

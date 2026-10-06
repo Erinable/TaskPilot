@@ -33,26 +33,36 @@ test('dirtyStores() ignores whitespace that saving would trim', () => {
 
 test('dirtyStores() flags each store independently', () => {
   const saved = { preferences: prefs(), workspace: ws() };
-  assert.deepEqual(
-    model.dirtyStores(saved, { preferences: prefs({ appearance: { theme: 'dark' } }), workspace: ws() }),
-    { preferences: true, workspace: false },
-  );
-  assert.deepEqual(
-    model.dirtyStores(saved, { preferences: prefs(), workspace: ws({ commands: { test: 'npm test', lint: 'eslint .', build: '' } }) }),
-    { preferences: false, workspace: true },
-  );
+  assert.deepEqual(model.dirtyStores(saved, { preferences: prefs({ appearance: { theme: 'dark' } }), workspace: ws() }), {
+    preferences: true,
+    workspace: false,
+  });
+  assert.deepEqual(model.dirtyStores(saved, { preferences: prefs(), workspace: ws({ commands: { test: 'npm test', lint: 'eslint .', build: '' } }) }), {
+    preferences: false,
+    workspace: true,
+  });
 });
 
 test('dirtyPages() marks only the page whose slice changed', () => {
   const saved = { preferences: prefs(), workspace: ws() };
   const onlyName = model.dirtyPages(saved, { preferences: prefs({ profile: { displayName: 'Grace' } }), workspace: ws() });
-  assert.deepEqual(Object.entries(onlyName).filter(([, dirty]) => dirty).map(([page]) => page), ['profile']);
+  assert.deepEqual(
+    Object.entries(onlyName)
+      .filter(([, dirty]) => dirty)
+      .map(([page]) => page),
+    ['profile'],
+  );
 
   const onlyLint = model.dirtyPages(saved, {
     preferences: prefs(),
     workspace: ws({ commands: { test: 'npm test', lint: 'eslint .', build: '' } }),
   });
-  assert.deepEqual(Object.entries(onlyLint).filter(([, dirty]) => dirty).map(([page]) => page), ['commands']);
+  assert.deepEqual(
+    Object.entries(onlyLint)
+      .filter(([, dirty]) => dirty)
+      .map(([page]) => page),
+    ['commands'],
+  );
 });
 
 test('sameValue() does not depend on key order', () => {
@@ -82,9 +92,15 @@ test('charCount() counts code points after trimming', () => {
 test('changing a check option marks the commands page dirty, but not for an empty command', () => {
   const opts = (blocking: boolean) => ({ test: { stage: 'submit', blocking, reportPath: '' }, lint: { stage: 'step', blocking, reportPath: '' } });
   const saved = { preferences: prefs(), workspace: ws({ options: opts(true) }) };
-  const changed = model.dirtyPages(saved, { preferences: prefs(), workspace: ws({ options: { ...opts(true), test: { stage: 'submit', blocking: false, reportPath: '' } } }) });
+  const changed = model.dirtyPages(saved, {
+    preferences: prefs(),
+    workspace: ws({ options: { ...opts(true), test: { stage: 'submit', blocking: false, reportPath: '' } } }),
+  });
   assert.equal(changed.commands, true);
   // lint has no command, so toggling its options is not an edit.
-  const ignored = model.dirtyPages(saved, { preferences: prefs(), workspace: ws({ options: { ...opts(true), lint: { stage: 'step', blocking: false, reportPath: '' } } }) });
+  const ignored = model.dirtyPages(saved, {
+    preferences: prefs(),
+    workspace: ws({ options: { ...opts(true), lint: { stage: 'step', blocking: false, reportPath: '' } } }),
+  });
   assert.equal(ignored.commands, false);
 });

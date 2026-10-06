@@ -33,7 +33,7 @@ test('rejects a human performing an agent-only transition', () => {
   assert.throws(() => status.apply('deviation', 'replanned', 'human'), { code: 'wrong_actor' });
 });
 
-test('acceptance with attention items is the human\'s call', () => {
+test("acceptance with attention items is the human's call", () => {
   assert.equal(status.apply('accepting', 'accepted', 'human'), 'done');
   assert.equal(status.apply('accepting', 'acceptance_rejected', 'human'), 'in_progress');
   assert.throws(() => status.apply('accepting', 'accepted', 'agent'), { code: 'wrong_actor' });

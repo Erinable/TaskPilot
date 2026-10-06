@@ -41,7 +41,9 @@ export const useNotificationsStore = defineStore('notifications', () => {
     localStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...readIds.value]));
   };
 
-  const markRead = (id: string) => { if (!readIds.value.has(id)) saveRead([...readIds.value, id]); };
+  const markRead = (id: string) => {
+    if (!readIds.value.has(id)) saveRead([...readIds.value, id]);
+  };
   const markAllRead = () => saveRead([...readIds.value, ...items.value.map((item) => item.id)]);
 
   // Only after a successful reload: a failed or partial one would drop ids
@@ -89,10 +91,16 @@ export const useNotificationsStore = defineStore('notifications', () => {
     // Items
     items,
     // Read state
-    readIds, isRead, unreadCount, markRead, markAllRead,
+    readIds,
+    isRead,
+    unreadCount,
+    markRead,
+    markAllRead,
     // Actions
     openItem,
     // Refresh
-    refresh, startAutoRefresh, stopAutoRefresh,
+    refresh,
+    startAutoRefresh,
+    stopAutoRefresh,
   };
 });

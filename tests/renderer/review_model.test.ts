@@ -9,12 +9,28 @@ import * as evidence from '../../src/main/evidence.ts';
 import type * as ipc from '../../src/shared/ipc_types.ts';
 
 const baseline = (overrides: Partial<ipc.BaselineChecks>): ipc.BaselineChecks => ({
-  status: 'measured', reason: null, commit: 'abc', checks: {}, startedAt: '', finishedAt: null, ...overrides,
+  status: 'measured',
+  reason: null,
+  commit: 'abc',
+  checks: {},
+  startedAt: '',
+  finishedAt: null,
+  ...overrides,
 });
 
 test('baselineText() explains each state and when re-measuring helps', () => {
   assert.deepEqual(model.baselineText(null), { text: '', canRemeasure: false });
-  const record: ipc.BaselineCheckRecord = { status: 'measured', line: '', exitCode: 1, timedOut: false, crashed: false, reportProblem: null, failing: ['a', 'b'], passing: [], at: '' };
+  const record: ipc.BaselineCheckRecord = {
+    status: 'measured',
+    line: '',
+    exitCode: 1,
+    timedOut: false,
+    crashed: false,
+    reportProblem: null,
+    failing: ['a', 'b'],
+    passing: [],
+    at: '',
+  };
   const measured = model.baselineText(baseline({ checks: { test: record } }));
   assert.match(measured.text, /2 个测试在基线上就失败/);
   assert.equal(measured.canRemeasure, false);
@@ -64,19 +80,24 @@ test('criterionRows() prefers evidence status, then legacy flags, then manual/pe
     { text: 'b', test: 'tb', verified: false, manual: false, missing: true },
   ] as ipc.CriterionEvidence[];
   const rows = model.criterionRows(acceptance, matched);
-  assert.deepEqual(rows.map((row) => [row.status, row.tone, row.icon]), [
-    ['verified', 'verified', 'check-circle'],
-    ['missing', 'failed', 'x-circle'],
-    ['manual', '', 'circle'],
-    [null, '', 'circle'],
-  ]);
+  assert.deepEqual(
+    rows.map((row) => [row.status, row.tone, row.icon]),
+    [
+      ['verified', 'verified', 'check-circle'],
+      ['missing', 'failed', 'x-circle'],
+      ['manual', '', 'circle'],
+      [null, '', 'circle'],
+    ],
+  );
   assert.equal(rows[0].alreadyPassing, true);
   assert.equal(rows[3].note, '待验证');
 });
 
 test('inlineCodeParts() splits backticks and drops empty parts', () => {
   assert.deepEqual(inlineCodeParts('call `login()` now'), [
-    { text: 'call ', code: false }, { text: 'login()', code: true }, { text: ' now', code: false },
+    { text: 'call ', code: false },
+    { text: 'login()', code: true },
+    { text: ' now', code: false },
   ]);
   assert.deepEqual(inlineCodeParts('`x`'), [{ text: 'x', code: true }]);
 });
@@ -92,7 +113,15 @@ test('diffLineKind() treats git headers as meta, not additions or deletions', ()
 });
 
 test('resolutionTitle() and describeErrorInfo() word plain IPC objects', () => {
-  const resolution: ipc.DeviationResolution = { decision: 'replan', reason: '', changes: [], decidedAt: '', afterContest: true, contested: false, reverted: true };
+  const resolution: ipc.DeviationResolution = {
+    decision: 'replan',
+    reason: '',
+    changes: [],
+    decidedAt: '',
+    afterContest: true,
+    contested: false,
+    reverted: true,
+  };
   assert.equal(model.resolutionTitle(resolution), 'Architect 已重新规划（应你的异议） · 你已撤销');
   assert.equal(describeErrorInfo({ code: 'agent_timeout', message: 'x' }), '智能体超过 3 分钟没有完成，已停止。');
   assert.equal(describeErrorInfo({ code: 'weird', message: 'raw' }), 'raw');

@@ -28,15 +28,27 @@ export const startPointLine = (startPoint: ipc.ReleaseStartPoint & { kind: 'rele
   return `${from}（${input.commitCount}${input.commitsTruncated ? '+' : ''} 个提交，${input.packageIds.length} 个完成的工作包）`;
 };
 
-export const draftInputLine = (input: ipc.ReleaseInputSummary) => `${input.commitCount}${input.commitsTruncated ? '+' : ''} 个提交，${input.packageIds.length} 个完成的工作包`;
+export const draftInputLine = (input: ipc.ReleaseInputSummary) =>
+  `${input.commitCount}${input.commitsTruncated ? '+' : ''} 个提交，${input.packageIds.length} 个完成的工作包`;
 
 export const versionFrom = (plan: ipc.ReleasePlan) => plan.currentVersion ?? '未发布';
 
 // YYYY-MM-DD HH:mm:ss in the business time zone.
 export const formatTime = (iso: string, timeZone = businessTimeZone()) => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(iso)).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date(iso))
+      .map((part) => [part.type, part.value]),
+  );
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 };
 

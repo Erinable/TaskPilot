@@ -29,16 +29,22 @@ const repo = async (files: Record<string, string>, { untracked = {} as Record<st
   return root;
 };
 
-const fakeVersions = (node: string | null = 'v22.1.0', npm: string | null = '10.7.0') => async (command) => (command === 'node' ? node : npm);
+const fakeVersions =
+  (node: string | null = 'v22.1.0', npm: string | null = '10.7.0') =>
+  async (command) =>
+    command === 'node' ? node : npm;
 
 test('probe reads tracked manifests, pins, lockfiles and workflows', async () => {
-  const root = await repo({
-    'package.json': JSON.stringify({ name: 'demo', scripts: { test: 'node --test', 'lint:js': 'eslint .' }, engines: { node: '>=20' } }),
-    'package-lock.json': '{}',
-    '.nvmrc': '20\n',
-    '.github/workflows/ci.yml': 'jobs:\n  test:\n    steps:\n      - run: npm ci\n',
-    '.env': 'SECRET=1\n',
-  }, { untracked: { 'node_modules/x/index.js': '' } });
+  const root = await repo(
+    {
+      'package.json': JSON.stringify({ name: 'demo', scripts: { test: 'node --test', 'lint:js': 'eslint .' }, engines: { node: '>=20' } }),
+      'package-lock.json': '{}',
+      '.nvmrc': '20\n',
+      '.github/workflows/ci.yml': 'jobs:\n  test:\n    steps:\n      - run: npm ci\n',
+      '.env': 'SECRET=1\n',
+    },
+    { untracked: { 'node_modules/x/index.js': '' } },
+  );
   const facts = await envSetup.probe(root, { version: fakeVersions() });
   assert.ok(facts.manifest);
   assert.equal(facts.manifest.name, 'demo');
@@ -48,7 +54,10 @@ test('probe reads tracked manifests, pins, lockfiles and workflows', async () =>
   assert.deepEqual(facts.managers, ['npm']);
   assert.equal(facts.nodeModules, true);
   assert.deepEqual(facts.versionFiles, [{ path: '.nvmrc', content: '20' }]);
-  assert.deepEqual(facts.workflows.map((w) => w.path), ['.github/workflows/ci.yml']);
+  assert.deepEqual(
+    facts.workflows.map((w) => w.path),
+    ['.github/workflows/ci.yml'],
+  );
   assert.deepEqual(facts.tools, { node: 'v22.1.0', npm: '10.7.0' });
   assert.deepEqual(envSetup.blockers(facts), []);
 });
@@ -76,10 +85,13 @@ test('install commands disable lifecycle scripts unless allowed', () => {
 test('buildSteps only runs scripts the manifest defines', () => {
   const facts: any = { manifest: { scripts: { test: 'node --test', 'lint:js': 'eslint .' } } };
   const steps = envSetup.buildSteps({ install: 'ci', scripts: { test: 'test', lint: 'lint:js', build: null } }, facts);
-  assert.deepEqual(steps.map((s) => [s.id, s.command, ...s.args]), [
-    ['install', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-    ['test', 'npm', 'test'],
-    ['lint', 'npm', 'run', 'lint:js'],
-  ]);
+  assert.deepEqual(
+    steps.map((s) => [s.id, s.command, ...s.args]),
+    [
+      ['install', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+      ['test', 'npm', 'test'],
+      ['lint', 'npm', 'run', 'lint:js'],
+    ],
+  );
   assert.throws(() => envSetup.buildSteps({ install: 'skip', scripts: { test: 'nope' } }, facts), { code: 'invalid_script' });
 });

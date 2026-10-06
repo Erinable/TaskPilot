@@ -8,9 +8,17 @@ const props = defineProps<{ item: ipc.Evidence }>();
 
 const line = computed(() => reviewModel.evidenceLine(props.item));
 const label = computed(() => reviewModel.EVIDENCE_STATUS[props.item.status]?.label ?? props.item.status);
-const lists = computed(() => ([['新增失败', props.item.newFailures], ['基线上已失败', props.item.preexisting], ['本次修复', props.item.fixed]] as const)
-  .filter(([, names]) => names?.length)
-  .map(([title, names]) => ({ title, names })));
+const lists = computed(() =>
+  (
+    [
+      ['新增失败', props.item.newFailures],
+      ['基线上已失败', props.item.preexisting],
+      ['本次修复', props.item.fixed],
+    ] as const
+  )
+    .filter(([, names]) => names?.length)
+    .map(([title, names]) => ({ title, names })),
+);
 </script>
 
 <template>

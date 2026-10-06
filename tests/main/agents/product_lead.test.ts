@@ -43,11 +43,7 @@ test('validatePlan() accepts a valid plan and keeps optional test names', () => 
 
 test('validatePlan() rejects file scopes that leave the repository', () => {
   for (const bad of ['/etc/passwd', '../secrets.txt', 'src/../../x', 'C:/Windows/x', 'src\\auth\\x.ts', '.', './']) {
-    assert.throws(
-      () => productLead.validatePlan(validPlan([validPackage({ fileScope: [bad] })])),
-      { code: 'agent_bad_output' },
-      bad,
-    );
+    assert.throws(() => productLead.validatePlan(validPlan([validPackage({ fileScope: [bad] })])), { code: 'agent_bad_output' }, bad);
   }
 });
 

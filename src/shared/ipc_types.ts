@@ -20,8 +20,16 @@ export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_r
 
 // Transitions the renderer may request; the actor is always 'human'.
 export type HumanTransition =
-  | 'claim' | 'revert_replan' | 'release' | 'submit_for_review' | 'report_deviation'
-  | 'override_dismissal' | 'block' | 'accepted' | 'acceptance_rejected' | 'unblock';
+  | 'claim'
+  | 'revert_replan'
+  | 'release'
+  | 'submit_for_review'
+  | 'report_deviation'
+  | 'override_dismissal'
+  | 'block'
+  | 'accepted'
+  | 'acceptance_rejected'
+  | 'unblock';
 
 export type AgentTransition = 'breakdown_done' | 'review_accepted' | 'review_passed' | 'review_rejected' | 'replanned' | 'deviation_dismissed';
 
@@ -111,16 +119,16 @@ export type CheckRun = {
 export type CompactRun =
   | { error: ErrorInfo }
   | {
-    kind: CheckKind;
-    command: string;
-    exitCode: number;
-    timedOut: boolean;
-    durationMs: number;
-    summary: RunSummary;
-    report: ReportInfo | null;
-    failing: string[];
-    outputTail: string | null;
-  };
+      kind: CheckKind;
+      command: string;
+      exitCode: number;
+      timedOut: boolean;
+      durationMs: number;
+      summary: RunSummary;
+      report: ReportInfo | null;
+      failing: string[];
+      outputTail: string | null;
+    };
 
 export type EvidenceStatus = 'pass' | 'fail' | 'unverifiable' | 'skipped';
 
@@ -157,16 +165,16 @@ export type AttentionItem =
 // evidence.baselineRecord(), or why a check has none.
 export type BaselineCheckRecord =
   | {
-    status: 'measured';
-    line: string;
-    exitCode: number;
-    timedOut: boolean;
-    crashed: boolean;
-    reportProblem: ReportProblem | null;
-    failing: string[];
-    passing: string[];
-    at: string;
-  }
+      status: 'measured';
+      line: string;
+      exitCode: number;
+      timedOut: boolean;
+      crashed: boolean;
+      reportProblem: ReportProblem | null;
+      failing: string[];
+      passing: string[];
+      at: string;
+    }
   | { status: 'unavailable'; reason: string; line: string };
 
 export type BaselineStatus = 'measuring' | 'measured' | 'unavailable' | 'contaminated';
@@ -213,22 +221,22 @@ export type Review =
   // The running entry plus why it could not finish.
   | (ReviewTiming & { status: 'failed'; error: ErrorInfo })
   | (ReviewTiming & {
-    status: 'passed' | 'rejected';
-    error: null;
-    reasons: ReviewReason[];
-    attention: AttentionItem[];
-    checks: ReviewCheck[];
-    // The unit-test run, as the execution page shows it.
-    verification: CompactRun | null;
-    acceptance: CriterionEvidence[];
-    // Null when the outcome was certain without the model.
-    report: QaReport | null;
-    diff: ReviewDiff;
-    costUsd: number;
-    // Set when the human accepts or rejects QA's pass.
-    humanVerdict?: 'accepted' | 'acceptance_rejected';
-    humanAt?: string;
-  });
+      status: 'passed' | 'rejected';
+      error: null;
+      reasons: ReviewReason[];
+      attention: AttentionItem[];
+      checks: ReviewCheck[];
+      // The unit-test run, as the execution page shows it.
+      verification: CompactRun | null;
+      acceptance: CriterionEvidence[];
+      // Null when the outcome was certain without the model.
+      report: QaReport | null;
+      diff: ReviewDiff;
+      costUsd: number;
+      // Set when the human accepts or rejects QA's pass.
+      humanVerdict?: 'accepted' | 'acceptance_rejected';
+      humanAt?: string;
+    });
 
 // ========== Architect on a deviation ==========
 
@@ -465,7 +473,15 @@ export type AgentStatus = { available: boolean; command: string | null };
 export type ActivityAgent = 'product-lead' | 'architect' | 'qa' | 'release-manager';
 
 export type ActivityEvent =
-  | { kind: 'package_transition'; packageId: string; title: string; transition: HumanTransition | AgentTransition; actor: 'human' | 'agent'; from: WorkPackageStatus; to: WorkPackageStatus }
+  | {
+      kind: 'package_transition';
+      packageId: string;
+      title: string;
+      transition: HumanTransition | AgentTransition;
+      actor: 'human' | 'agent';
+      from: WorkPackageStatus;
+      to: WorkPackageStatus;
+    }
   | { kind: 'requirement_created'; requirementId: string; title: string }
   | { kind: 'requirement_finished'; requirementId: string; title: string; step: RequirementStep; costUsd: number | null }
   | { kind: 'requirement_failed'; requirementId: string; title: string; step: RequirementStep; code: string }
@@ -524,9 +540,7 @@ export type EnvFacts = {
 };
 
 // Corrections TaskPilot made to the steward's plan.
-export type EnvAdjustment =
-  | { code: 'install_without_manifest' | 'ci_without_lockfile' }
-  | { code: 'unknown_script'; kind: ScriptKind; script: string };
+export type EnvAdjustment = { code: 'install_without_manifest' | 'ci_without_lockfile' } | { code: 'unknown_script'; kind: ScriptKind; script: string };
 
 export type EnvPlan = {
   summary: string;
@@ -616,8 +630,7 @@ export type ReleasePlan = {
 type ReleasePreview = { commitCount?: number; commitsTruncated?: boolean; packageCount?: number };
 
 export type ReleaseStartPoint =
-  | ({ kind: 'release' | 'tag'; commit: string; label: string } & ReleasePreview)
-  | ({ kind: 'none'; commit: null; label: null } & ReleasePreview);
+  ({ kind: 'release' | 'tag'; commit: string; label: string } & ReleasePreview) | ({ kind: 'none'; commit: null; label: null } & ReleasePreview);
 
 // What TaskPilot collected for the run, as counts for the page.
 export type ReleaseInputSummary = {

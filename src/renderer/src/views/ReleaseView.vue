@@ -17,10 +17,12 @@ const settings = useSettingsStore();
 
 const startPoint = computed(() => store.state?.startPoint ?? null);
 const draft = computed(() => store.draft);
-const readyDraft = computed(() => (draft.value?.status === 'ready' && draft.value.plan ? draft.value as ipc.ReleaseDraft & { plan: ipc.ReleasePlan } : null));
+const readyDraft = computed(() => (draft.value?.status === 'ready' && draft.value.plan ? (draft.value as ipc.ReleaseDraft & { plan: ipc.ReleasePlan }) : null));
 const commitOptions = computed(() => (store.commits ?? []).map((commit) => ({ value: commit.sha, label: model.commitOptionLabel(commit) })));
 
-const run = (action: () => Promise<unknown>) => { action().catch((error) => console.error(error)); };
+const run = (action: () => Promise<unknown>) => {
+  action().catch((error) => console.error(error));
+};
 const openRepositorySettings = () => run(() => settings.open('repository'));
 
 onMounted(() => run(store.enter));
@@ -32,17 +34,25 @@ onBeforeUnmount(() => store.leave());
     <div class="page-heading">
       <div>
         <h1>发布</h1>
-        <p class="release-intro">Release Manager 根据上次发布以来的提交和完成的工作包，起草版本号、更新说明和发布前检查清单。TaskPilot 不会打 tag、提交或推送。</p>
+        <p class="release-intro">
+          Release Manager 根据上次发布以来的提交和完成的工作包，起草版本号、更新说明和发布前检查清单。TaskPilot 不会打 tag、提交或推送。
+        </p>
       </div>
     </div>
 
-    <p v-if="store.loadError" class="empty-hint load-error"><AppIcon name="alert" />读取发布信息失败：{{ store.loadError }}</p>
+    <p v-if="store.loadError" class="empty-hint load-error">
+      <AppIcon name="alert" />
+      读取发布信息失败：{{ store.loadError }}
+    </p>
 
     <div v-if="store.state && !store.state.configured" class="panel glass req-empty no-workspace">
       <span class="req-empty-icon"><AppIcon name="folder" /></span>
       <h2>尚未配置工作区</h2>
       <p>发布需要读取仓库的提交记录，请先在设置里指定仓库路径。</p>
-      <button class="primary-button" type="button" @click="openRepositorySettings"><AppIcon name="settings" />前往仓库设置</button>
+      <button class="primary-button" type="button" @click="openRepositorySettings">
+        <AppIcon name="settings" />
+        前往仓库设置
+      </button>
     </div>
 
     <template v-else-if="store.state && startPoint">
@@ -53,24 +63,38 @@ onBeforeUnmount(() => store.leave());
           <div v-else class="start-pick">
             <label for="release-start-commit" class="start-label">还没有发布记录或标签，从哪个提交开始？</label>
             <el-select
-              id="release-start-commit" :model-value="store.selectedStart ?? undefined" class="start-select" filterable placeholder="选择起始提交"
-              :loading="store.commits === null" aria-label="起始提交" :disabled="store.generating" @update:model-value="store.selectStart"
+              id="release-start-commit"
+              :model-value="store.selectedStart ?? undefined"
+              class="start-select"
+              filterable
+              placeholder="选择起始提交"
+              :loading="store.commits === null"
+              aria-label="起始提交"
+              :disabled="store.generating"
+              @update:model-value="store.selectStart"
             >
               <el-option v-for="option in commitOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
           </div>
           <div class="start-actions">
             <template v-if="store.generating">
-              <span class="generating" role="status"><AppIcon name="spinner" class="spin" />Release Manager 正在起草…</span>
+              <span class="generating" role="status">
+                <AppIcon name="spinner" class="spin" />
+                Release Manager 正在起草…
+              </span>
               <button class="secondary-button cancel-release" type="button" @click="run(store.cancel)">取消</button>
             </template>
             <button v-else class="primary-button generate-release" type="button" @click="run(store.generate)">
-              <AppIcon :name="draft?.status === 'failed' ? 'refresh' : 'sparkle'" />{{ draft?.status === 'failed' ? '重试' : draft ? '重新生成' : '生成' }}
+              <AppIcon :name="draft?.status === 'failed' ? 'refresh' : 'sparkle'" />
+              {{ draft?.status === 'failed' ? '重试' : draft ? '重新生成' : '生成' }}
             </button>
           </div>
         </div>
         <p v-if="store.startError" class="start-error" role="alert">{{ store.startError }}</p>
-        <p v-if="draft?.status === 'failed'" class="draft-error" role="alert"><AppIcon name="alert" />{{ describeErrorInfo(draft.error) || '生成失败。' }}</p>
+        <p v-if="draft?.status === 'failed'" class="draft-error" role="alert">
+          <AppIcon name="alert" />
+          {{ describeErrorInfo(draft.error) || '生成失败。' }}
+        </p>
       </section>
 
       <ReleaseDraftPanel v-if="readyDraft" :draft="readyDraft" />
@@ -81,21 +105,81 @@ onBeforeUnmount(() => store.leave());
 </template>
 
 <style scoped>
-.release-intro { font-size: 14px; }
-.release-view > .panel + .panel, .release-view :deep(.panel + .panel) { margin-top: 16px; }
-.release-start { padding: 16px 20px; }
-.start-row { display: flex; align-items: center; gap: 12px; }
-.start-line { flex: 1; margin: 0; color: var(--text); font-size: 14px; }
-.start-pick { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.start-label { color: var(--text-secondary); font-size: 14px; }
-.start-select { max-width: 520px; }
-.start-actions { display: flex; align-items: center; gap: 10px; }
-.generating { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 14px; }
-.generating .icon { width: 15px; height: 15px; }
-.start-error, .draft-error { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; color: var(--danger); font-size: 14px; }
-.draft-error .icon { width: 15px; height: 15px; }
-.primary-button, .secondary-button { font-size: 14px; }
-.load-error { font-size: 14px; }
-.no-workspace h2 { font-size: 16px; }
-.no-workspace p { font-size: 14px; }
+.release-intro {
+  font-size: 14px;
+}
+.release-view > .panel + .panel,
+.release-view :deep(.panel + .panel) {
+  margin-top: 16px;
+}
+.release-start {
+  padding: 16px 20px;
+}
+.start-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.start-line {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+.start-pick {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.start-label {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.start-select {
+  max-width: 520px;
+}
+.start-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.generating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.generating .icon {
+  width: 15px;
+  height: 15px;
+}
+.start-error,
+.draft-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 14px;
+}
+.draft-error .icon {
+  width: 15px;
+  height: 15px;
+}
+.primary-button,
+.secondary-button {
+  font-size: 14px;
+}
+.load-error {
+  font-size: 14px;
+}
+.no-workspace h2 {
+  font-size: 16px;
+}
+.no-workspace p {
+  font-size: 14px;
+}
 </style>

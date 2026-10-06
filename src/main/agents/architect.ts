@@ -129,7 +129,9 @@ export const selectPrompt = ({ title, text, files }: ArchitectRequirement): stri
     '<repository_files>',
     files.join('\n'),
     '</repository_files>',
-  ].filter((line) => line !== null).join('\n');
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
 };
 
 export const SELECT_SCHEMA = {
@@ -160,13 +162,10 @@ export const validateSelection = (raw: unknown, files: string[]): string[] => {
 
 // Step 2: summarize
 
-const formatSources = (sources: SourceFile[]): string =>
-  sources.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n\n');
+const formatSources = (sources: SourceFile[]): string => sources.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n\n');
 
 export const summarizePrompt = ({ title, text, files, sources, skipped }: ArchitectRequirement & { sources: SourceFile[]; skipped: SkippedFile[] }): string => {
-  const unread = skipped.length
-    ? skipped.map((s) => `${s.path} (${s.reason})`).join('\n')
-    : '(none)';
+  const unread = skipped.length ? skipped.map((s) => `${s.path} (${s.reason})`).join('\n') : '(none)';
   return [
     'Describe the code below at the interface level, for a planner who will not see it.',
     '',
@@ -194,7 +193,9 @@ export const summarizePrompt = ({ title, text, files, sources, skipped }: Archit
     '<sources>',
     formatSources(sources),
     '</sources>',
-  ].filter((line) => line !== null).join('\n');
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
 };
 
 const str = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength });
@@ -272,9 +273,19 @@ export const validateSummary = (raw: unknown, { readPaths, files }: { readPaths:
         name: text((m as RawObject | null | undefined)?.name, `${at}.members[${j}].name`, 120),
         signature: text((m as RawObject | null | undefined)?.signature, `${at}.members[${j}].signature`, 300),
       })),
-      dependsOn: [...new Set(list(mod.dependsOn, `${at}.dependsOn`, 15)
-        .map((dep) => { try { return scopePath(dep, 'dep'); } catch { return null; } })
-        .filter((dep): dep is string => dep !== null && known.has(dep) && dep !== modPath))],
+      dependsOn: [
+        ...new Set(
+          list(mod.dependsOn, `${at}.dependsOn`, 15)
+            .map((dep) => {
+              try {
+                return scopePath(dep, 'dep');
+              } catch {
+                return null;
+              }
+            })
+            .filter((dep): dep is string => dep !== null && known.has(dep) && dep !== modPath),
+        ),
+      ],
       notes: list(mod.notes, `${at}.notes`, 6).map((n, j) => text(n, `${at}.notes[${j}]`, 240)),
     };
   });
@@ -332,7 +343,7 @@ export const ADJUDICATE_SYSTEM_PROMPT = [
   'Principles:',
   '- Judge against the code you were given. If the report is correct, replan; do not defend a plan the code contradicts.',
   '- Dismiss only when the plan is still right and you can say concretely how to proceed (which existing function to use, which step was misread). A dismissal without an actionable reason leaves the developer stuck.',
-  '- When replanning, change only what the deviation requires. Keep the package\'s goal; do not add scope. Steps must be concrete enough to follow without asking.',
+  "- When replanning, change only what the deviation requires. Keep the package's goal; do not add scope. Steps must be concrete enough to follow without asking.",
   '- When the developer has contested an earlier dismissal, you must replan.',
   '',
   'Write every human-readable field in the same language as the work package; keep code identifiers as they appear in the source.',
@@ -341,21 +352,29 @@ export const ADJUDICATE_SYSTEM_PROMPT = [
 ].join('\n');
 
 const formatHistory = (deviations: DeviationRecord[]): string =>
-  deviations.map((deviation, index) => {
-    const where = [
-      deviation.stepIndex !== null ? `step ${deviation.stepIndex + 1}` : null,
-      deviation.filePath ? `file ${deviation.filePath}` : null,
-    ].filter(Boolean).join(', ');
-    const resolution = deviation.resolution
-      ? `${deviation.resolution.decision}${deviation.resolution.reverted ? ' (reverted by developer)' : ''}${deviation.resolution.contested ? ' (contested by developer)' : ''}: ${deviation.resolution.reason}`
-      : 'pending';
-    return `D${index + 1}${where ? ` [${where}]` : ''}: ${deviation.note}\n  resolution: ${resolution}`;
-  }).join('\n');
+  deviations
+    .map((deviation, index) => {
+      const where = [deviation.stepIndex !== null ? `step ${deviation.stepIndex + 1}` : null, deviation.filePath ? `file ${deviation.filePath}` : null]
+        .filter(Boolean)
+        .join(', ');
+      const resolution = deviation.resolution
+        ? `${deviation.resolution.decision}${deviation.resolution.reverted ? ' (reverted by developer)' : ''}${deviation.resolution.contested ? ' (contested by developer)' : ''}: ${deviation.resolution.reason}`
+        : 'pending';
+      return `D${index + 1}${where ? ` [${where}]` : ''}: ${deviation.note}\n  resolution: ${resolution}`;
+    })
+    .join('\n');
 
 // task: effective work package definition
 // deviations: every deviation on the package; the last is being judged
 // mustReplan: the developer contested a dismissal
-export const adjudicatePrompt = ({ task, deviations, mustReplan, interfaces, sources, skipped }: {
+export const adjudicatePrompt = ({
+  task,
+  deviations,
+  mustReplan,
+  interfaces,
+  sources,
+  skipped,
+}: {
   task: AdjudicationTask;
   deviations: DeviationRecord[];
   mustReplan: boolean;
@@ -366,13 +385,11 @@ export const adjudicatePrompt = ({ task, deviations, mustReplan, interfaces, sou
   const unread = skipped.length ? skipped.map((s) => `${s.path} (${s.reason})`).join('\n') : '(none)';
   return [
     `Decide on deviation D${deviations.length}, the last one below.`,
-    mustReplan
-      ? 'The developer contested your earlier dismissal of this deviation. Replan the package.'
-      : 'Choose "dismiss" or "replan".',
+    mustReplan ? 'The developer contested your earlier dismissal of this deviation. Replan the package.' : 'Choose "dismiss" or "replan".',
     'For "dismiss": omit revision; reason says how the developer should proceed under the current plan.',
     `For "replan": revision is the complete new steps (at most ${MAX_STEPS}), fileScope (at most ${MAX_SCOPE} relative paths) and acceptance criteria (at most ${MAX_CRITERIA}); reason says what was wrong; changes lists what you changed, one item each.`,
     'An acceptance criterion may name the exact test that proves it.',
-    'The files below are as of the last commit; the developer\'s uncommitted work is not included.',
+    "The files below are as of the last commit; the developer's uncommitted work is not included.",
     '',
     '<work_package>',
     `Title: ${task.title}`,
@@ -397,7 +414,9 @@ export const adjudicatePrompt = ({ task, deviations, mustReplan, interfaces, sou
     '<sources>',
     sources.length ? formatSources(sources) : '(none)',
     '</sources>',
-  ].filter((line) => line !== null).join('\n');
+  ]
+    .filter((line) => line !== null)
+    .join('\n');
 };
 
 export const ADJUDICATE_SCHEMA = {

@@ -60,10 +60,12 @@ export const fail = (code: string, message: string, field?: string) => Promise.r
 export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
   const release = {
     get: vi.fn(() => ok(state.current)),
-    recentCommits: vi.fn(() => ok<ipc.ReleaseCommit[]>([
-      { sha: 'c0ffee1234', subject: '<b>初始提交</b>', date: '2026-09-30T16:30:00.000Z' },
-      { sha: 'deadbeef99', subject: '第二个提交', date: '2026-10-02T03:00:00.000Z' },
-    ])),
+    recentCommits: vi.fn(() =>
+      ok<ipc.ReleaseCommit[]>([
+        { sha: 'c0ffee1234', subject: '<b>初始提交</b>', date: '2026-09-30T16:30:00.000Z' },
+        { sha: 'deadbeef99', subject: '第二个提交', date: '2026-10-02T03:00:00.000Z' },
+      ]),
+    ),
     generate: vi.fn((_startCommit?: string) => {
       state.current = { ...state.current, running: true, draft: draft({ status: 'generating', plan: null, input: null, notesText: '' }) };
       return ok(state.current);

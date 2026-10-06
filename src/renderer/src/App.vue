@@ -29,7 +29,10 @@ const execution = useExecutionStore();
 const onKeydown = (event: KeyboardEvent) => {
   if (openDialogs.value > 0) return;
   if (event.key === 'Escape' && app.view === 'execution' && !execution.deviationOpen) {
-    app.navigate('queue').then((left) => left && execution.close()).catch((error) => console.error(error));
+    app
+      .navigate('queue')
+      .then((left) => left && execution.close())
+      .catch((error) => console.error(error));
   } else if ((event.metaKey || event.ctrlKey) && event.key === 's' && app.view === 'settings') {
     event.preventDefault();
     settings.saveAll().catch((error) => console.error(error));
@@ -69,7 +72,11 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- Soft colour fields behind every frosted surface; the glass blurs these. -->
-  <div class="backdrop" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span><span class="orb orb-c"></span></div>
+  <div class="backdrop" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+  </div>
 
   <div class="window-shell">
     <TopBar />

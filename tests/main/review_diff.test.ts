@@ -39,10 +39,13 @@ test('collects tracked and untracked changes, skipping secrets and binaries', as
   assert.match(byPath['a.js'].patch, /\+two/);
   assert.equal(byPath['src/new/b.js'].untracked, true);
   assert.match(byPath['src/new/b.js'].patch, /\+new file/);
-  assert.deepEqual(skipped.sort((x, y) => x.path.localeCompare(y.path)), [
-    { path: '.env', reason: 'secret' },
-    { path: 'img.png', reason: 'binary' },
-  ]);
+  assert.deepEqual(
+    skipped.sort((x, y) => x.path.localeCompare(y.path)),
+    [
+      { path: '.env', reason: 'secret' },
+      { path: 'img.png', reason: 'binary' },
+    ],
+  );
   // The secret's contents never appear anywhere in the result.
   assert.doesNotMatch(JSON.stringify(files), /hunter2/);
 });
@@ -57,13 +60,22 @@ test('reads prioritized files first and enforces size limits', async () => {
     limits: { maxPatchBytes: 1000 },
     prioritize: (p) => p === 'z-scope.js',
   });
-  assert.deepEqual(files.map((f) => f.path), ['z-scope.js', 'a.js']);
+  assert.deepEqual(
+    files.map((f) => f.path),
+    ['z-scope.js', 'a.js'],
+  );
   assert.deepEqual(skipped, [{ path: 'big.js', reason: 'too_large' }]);
 
   // The file limit keeps the prioritized file.
   const capped = await collectChanges(root, baseline, { limits: { maxFiles: 1 }, prioritize: (p) => p === 'z-scope.js' });
-  assert.deepEqual(capped.files.map((f) => f.path), ['z-scope.js']);
-  assert.deepEqual(capped.skipped.map((s) => s.reason), ['file_limit', 'file_limit']);
+  assert.deepEqual(
+    capped.files.map((f) => f.path),
+    ['z-scope.js'],
+  );
+  assert.deepEqual(
+    capped.skipped.map((s) => s.reason),
+    ['file_limit', 'file_limit'],
+  );
 
   const budget = await collectChanges(root, baseline, { limits: { maxTotalBytes: 400 } });
   assert.deepEqual(budget.skipped, [{ path: 'big.js', reason: 'budget' }]);

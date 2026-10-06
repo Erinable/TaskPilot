@@ -29,7 +29,10 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
 
 <template>
   <ul v-if="review.reasons.length > 0" class="review-reasons">
-    <li v-for="reason in review.reasons" :key="reason"><AppIcon name="x" />{{ reviewModel.REVIEW_REASONS[reason] ?? reason }}</li>
+    <li v-for="reason in review.reasons" :key="reason">
+      <AppIcon name="x" />
+      {{ reviewModel.REVIEW_REASONS[reason] ?? reason }}
+    </li>
   </ul>
   <template v-if="report">
     <p class="review-summary"><InlineCode :text="report.summary" /></p>
@@ -39,7 +42,10 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
         <AppIcon :name="reviewModel.CRITERION_ICONS[criterion.status]" />
         <div>
           <span class="criterion-text">{{ criterionText(criterion.index) }}</span>
-          <small>{{ reviewModel.CRITERION_LABELS[criterion.status] }}{{ criterion.note ? '：' : '' }}<InlineCode v-if="criterion.note" :text="criterion.note" /></small>
+          <small>
+            {{ reviewModel.CRITERION_LABELS[criterion.status] }}{{ criterion.note ? '：' : '' }}
+            <InlineCode v-if="criterion.note" :text="criterion.note" />
+          </small>
         </div>
       </div>
     </div>
@@ -49,10 +55,16 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
         <span class="severity-tag" :class="issue.severity">{{ reviewModel.SEVERITY_LABELS[issue.severity] }}</span>
         <div>
           <p><InlineCode :text="issue.text" /></p>
-          <small v-if="issue.file"><AppIcon name="file" />{{ issueLocation(issue) }}</small>
+          <small v-if="issue.file">
+            <AppIcon name="file" />
+            {{ issueLocation(issue) }}
+          </small>
         </div>
       </div>
-      <p v-if="report.issues.length === 0" class="empty-hint"><AppIcon name="check" />QA 没有发现问题。</p>
+      <p v-if="report.issues.length === 0" class="empty-hint">
+        <AppIcon name="check" />
+        QA 没有发现问题。
+      </p>
     </div>
   </template>
   <div v-if="review.checks?.length" class="review-section">
@@ -61,19 +73,40 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
   </div>
   <div v-if="review.attention?.length" class="review-section">
     <h3>需要人工确认</h3>
-    <div v-for="(item, index) in review.attention" :key="index" class="review-attention"><AppIcon name="alert" />{{ reviewModel.attentionText(item, task.acceptance) }}</div>
+    <div v-for="(item, index) in review.attention" :key="index" class="review-attention">
+      <AppIcon name="alert" />
+      {{ reviewModel.attentionText(item, task.acceptance) }}
+    </div>
   </div>
   <div v-if="review.diff.skipped.length > 0" class="review-section">
     <h3>未审查的文件</h3>
-    <div v-for="skip in review.diff.skipped" :key="skip.path" class="review-skipped"><AppIcon name="file" />{{ skip.path }} · {{ reviewModel.SKIP_LABELS[skip.reason] ?? skip.reason }}</div>
+    <div v-for="skip in review.diff.skipped" :key="skip.path" class="review-skipped">
+      <AppIcon name="file" />
+      {{ skip.path }} · {{ reviewModel.SKIP_LABELS[skip.reason] ?? skip.reason }}
+    </div>
   </div>
   <div class="review-meta">
-    <span><AppIcon name="flask" />{{ testLine }}</span>
-    <span><AppIcon name="diff" />审查了 {{ review.diff.files.length }} 个文件</span>
-    <span v-if="review.costUsd > 0"><AppIcon name="activity" />费用 ${{ review.costUsd.toFixed(4) }}</span>
-    <span v-if="finishedAt"><AppIcon name="clock" />{{ finishedAt }}</span>
+    <span>
+      <AppIcon name="flask" />
+      {{ testLine }}
+    </span>
+    <span>
+      <AppIcon name="diff" />
+      审查了 {{ review.diff.files.length }} 个文件
+    </span>
+    <span v-if="review.costUsd > 0">
+      <AppIcon name="activity" />
+      费用 ${{ review.costUsd.toFixed(4) }}
+    </span>
+    <span v-if="finishedAt">
+      <AppIcon name="clock" />
+      {{ finishedAt }}
+    </span>
   </div>
   <div v-if="failing.length" class="verify-failures">
-    <div v-for="(name, index) in failing" :key="index"><AppIcon name="x" />{{ name }}</div>
+    <div v-for="(name, index) in failing" :key="index">
+      <AppIcon name="x" />
+      {{ name }}
+    </div>
   </div>
 </template>

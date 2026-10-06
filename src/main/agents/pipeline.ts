@@ -91,14 +91,24 @@ export const throwIfCancelled = (signal: AbortSignal | null | undefined): void =
 // deps.root:      repository root, or null when none is configured
 // deps.files:     tracked file list (already capped)
 // deps.readFiles: optional (root, paths) => {files, skipped}, for tests
-export const summarizeForRequirement = async ({ title, text }: { title?: string | null; text: string }, { runAgent, root, files, envPath, signal, readFiles = readTracked }: {
-  runAgent: RunAgent;
-  root: string | null;
-  files: string[];
-  envPath?: string | null;
-  signal?: AbortSignal;
-  readFiles?: ReadFiles;
-}): Promise<SummaryResult> => {
+export const summarizeForRequirement = async (
+  { title, text }: { title?: string | null; text: string },
+  {
+    runAgent,
+    root,
+    files,
+    envPath,
+    signal,
+    readFiles = readTracked,
+  }: {
+    runAgent: RunAgent;
+    root: string | null;
+    files: string[];
+    envPath?: string | null;
+    signal?: AbortSignal;
+    readFiles?: ReadFiles;
+  },
+): Promise<SummaryResult> => {
   const empty: SummaryResult = { summary: null, text: null, read: [], skipped: [], costUsd: 0, error: null };
   if (!root || files.length === 0) return empty;
   let costUsd = 0;
@@ -161,22 +171,34 @@ export const summarizeForRequirement = async ({ title, text }: { title?: string 
 // deps.runAgent:  claude_cli.runStructured or a stand-in
 // deps.collect:   optional review_diff.collectChanges, for tests
 // deps.interfaces: Architect's formatted summary, or null
-export const reviewWorkPackage = async (task: ReviewTask & { acceptance?: AcceptanceCriterion[] }, {
-  root, baseline, runAgent, checks = [], runCheck, baselines = {}, ignore,
-  collect = collectChanges, interfaces = null, envPath, signal,
-}: {
-  root: string;
-  baseline: string;
-  runAgent: RunAgent;
-  checks?: SubmitCheck[];
-  runCheck: (kind: string, signal?: AbortSignal) => Promise<CheckOutcome>;
-  baselines?: Partial<Record<string, BaselineCheck | null>>;
-  ignore?: (path: string) => boolean;
-  collect?: CollectChanges;
-  interfaces?: string | null;
-  envPath?: string | null;
-  signal?: AbortSignal;
-}): Promise<ReviewResult> => {
+export const reviewWorkPackage = async (
+  task: ReviewTask & { acceptance?: AcceptanceCriterion[] },
+  {
+    root,
+    baseline,
+    runAgent,
+    checks = [],
+    runCheck,
+    baselines = {},
+    ignore,
+    collect = collectChanges,
+    interfaces = null,
+    envPath,
+    signal,
+  }: {
+    root: string;
+    baseline: string;
+    runAgent: RunAgent;
+    checks?: SubmitCheck[];
+    runCheck: (kind: string, signal?: AbortSignal) => Promise<CheckOutcome>;
+    baselines?: Partial<Record<string, BaselineCheck | null>>;
+    ignore?: (path: string) => boolean;
+    collect?: CollectChanges;
+    interfaces?: string | null;
+    envPath?: string | null;
+    signal?: AbortSignal;
+  },
+): Promise<ReviewResult> => {
   throwIfCancelled(signal);
   const runs: Record<string, CheckOutcome> = {};
   for (const check of checks) {
@@ -239,7 +261,14 @@ export const reviewWorkPackage = async (task: ReviewTask & { acceptance?: Accept
 // there is nothing to choose, so the model is not called.
 //
 // deps.failure: optional failed step
-export const planEnvironment = async ({ root, runAgent, envPath, signal, failure = null, probe = envSetup.probe }: {
+export const planEnvironment = async ({
+  root,
+  runAgent,
+  envPath,
+  signal,
+  failure = null,
+  probe = envSetup.probe,
+}: {
   root: string;
   runAgent: RunAgent;
   envPath?: string | null;
@@ -270,18 +299,28 @@ export const planEnvironment = async ({ root, runAgent, envPath, signal, failure
 // task: effective work package definition
 // deps.deviations: every deviation on the package; the last is judged
 // deps.mustReplan: the developer contested an earlier dismissal
-export const adjudicateDeviation = async (task: AdjudicationTask, {
-  root, deviations, mustReplan = false, runAgent, interfaces = null, envPath, signal, readFiles = readTracked,
-}: {
-  root: string | null;
-  deviations: DeviationRecord[];
-  mustReplan?: boolean;
-  runAgent: RunAgent;
-  interfaces?: string | null;
-  envPath?: string | null;
-  signal?: AbortSignal;
-  readFiles?: ReadFiles;
-}): Promise<AdjudicationOutcome> => {
+export const adjudicateDeviation = async (
+  task: AdjudicationTask,
+  {
+    root,
+    deviations,
+    mustReplan = false,
+    runAgent,
+    interfaces = null,
+    envPath,
+    signal,
+    readFiles = readTracked,
+  }: {
+    root: string | null;
+    deviations: DeviationRecord[];
+    mustReplan?: boolean;
+    runAgent: RunAgent;
+    interfaces?: string | null;
+    envPath?: string | null;
+    signal?: AbortSignal;
+    readFiles?: ReadFiles;
+  },
+): Promise<AdjudicationOutcome> => {
   throwIfCancelled(signal);
   const wanted = [...task.fileScope, ...deviations.map((d) => d.filePath).filter((p): p is string => Boolean(p))];
   const { files: sources, skipped } = root ? await readFiles(root, wanted) : { files: [], skipped: [] };
@@ -328,12 +367,20 @@ export const committedVersion = async (root: string, commit: string): Promise<st
 // Everything Release Manager sees, from committed history only: subjects,
 // changed paths with line counts (secret-looking paths dropped), and the
 // version at the release commit. No file contents.
-export const collectReleaseInput = async (root: string, { startCommit, startLabel, endCommit, packages }: {
-  startCommit: string;
-  startLabel: string;
-  endCommit: string;
-  packages: ReleasePackage[];
-}): Promise<ReleaseInput> => {
+export const collectReleaseInput = async (
+  root: string,
+  {
+    startCommit,
+    startLabel,
+    endCommit,
+    packages,
+  }: {
+    startCommit: string;
+    startLabel: string;
+    endCommit: string;
+    packages: ReleasePackage[];
+  },
+): Promise<ReleaseInput> => {
   const [range, changes, currentVersion] = await Promise.all([
     git.commitRange(root, startCommit, endCommit, { limit: RELEASE_MAX_COMMITS }),
     git.rangeStat(root, startCommit, endCommit),
@@ -355,7 +402,16 @@ export const collectReleaseInput = async (root: string, { startCommit, startLabe
 
 // Release Manager's turn: collect the input, then ask for a bump, notes and
 // a checklist. Nothing to release (no commits) fails before the model runs.
-export const planRelease = async ({ root, startCommit, startLabel, endCommit, packages, runAgent, envPath, signal }: {
+export const planRelease = async ({
+  root,
+  startCommit,
+  startLabel,
+  endCommit,
+  packages,
+  runAgent,
+  envPath,
+  signal,
+}: {
   root: string;
   startCommit: string;
   startLabel: string;

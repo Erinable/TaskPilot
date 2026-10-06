@@ -52,9 +52,15 @@ test('the save bar appears with an edit and names the dirty store', async () => 
 test('search hides unmatched pages, their group labels, and shows the empty hint', async () => {
   const wrapper = await mountView();
   await wrapper.get('#settingsSearch').setValue('头像');
-  const shownPages = wrapper.findAll('.settings-nav-item').filter(isShown).map((item) => item.attributes('data-page'));
+  const shownPages = wrapper
+    .findAll('.settings-nav-item')
+    .filter(isShown)
+    .map((item) => item.attributes('data-page'));
   expect(shownPages).toEqual(['profile']);
-  const shownGroups = wrapper.findAll('.settings-group-label').filter(isShown).map((label) => label.attributes('data-group'));
+  const shownGroups = wrapper
+    .findAll('.settings-group-label')
+    .filter(isShown)
+    .map((label) => label.attributes('data-group'));
   expect(shownGroups).toEqual(['personal']);
   expect(isShown(wrapper.get('#settingsSearchEmpty'))).toBe(false);
   await wrapper.get('#settingsSearch').setValue('zzzz');

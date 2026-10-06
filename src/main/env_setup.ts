@@ -69,10 +69,7 @@ export interface SetupPlan {
 }
 
 // One runnable setup step.
-export type SetupStep = CommandEntry & (
-  | { id: 'install'; kind: 'install' }
-  | { id: ScriptKind; kind: ScriptKind; script: string }
-);
+export type SetupStep = CommandEntry & ({ id: 'install'; kind: 'install' } | { id: ScriptKind; kind: ScriptKind; script: string });
 
 // Reads a tool's version; injectable for tests.
 export type ToolVersion = (command: string, args: string[], envPath?: string | null) => Promise<string | null>;
@@ -93,10 +90,15 @@ export class EnvSetupError extends Error {
 
 const toolVersion: ToolVersion = (command, args, envPath) =>
   new Promise((resolve) => {
-    execFile(command, args, {
-      timeout: 5000,
-      env: { ...processEnv(), ...(envPath ? { PATH: envPath } : {}), NO_UPDATE_NOTIFIER: '1' },
-    }, (error, stdout) => resolve(error ? null : stdout.trim().split('\n')[0] || null));
+    execFile(
+      command,
+      args,
+      {
+        timeout: 5000,
+        env: { ...processEnv(), ...(envPath ? { PATH: envPath } : {}), NO_UPDATE_NOTIFIER: '1' },
+      },
+      (error, stdout) => resolve(error ? null : stdout.trim().split('\n')[0] || null),
+    );
   });
 
 export const parseManifest = (content: string): Manifest => {
@@ -128,7 +130,10 @@ export const parseManifest = (content: string): Manifest => {
 // exists, and the node/npm versions on the command PATH.
 export const probe = async (root: string, { envPath, version = toolVersion }: { envPath?: string | null; version?: ToolVersion } = {}): Promise<EnvFacts> => {
   const tracked = [...(await indexEntries(root)).keys()];
-  const workflows = tracked.filter((file) => WORKFLOW.test(file)).sort().slice(0, MAX_WORKFLOWS);
+  const workflows = tracked
+    .filter((file) => WORKFLOW.test(file))
+    .sort()
+    .slice(0, MAX_WORKFLOWS);
   const wanted = ['package.json', ...VERSION_FILES, ...workflows];
   const { files } = await readTracked(root, wanted, { maxFiles: wanted.length, maxFileBytes: 64 * 1024, maxTotalBytes: 256 * 1024 });
   const content = new Map(files.map((file) => [file.path, file.content]));
@@ -149,10 +154,8 @@ export const probe = async (root: string, { envPath, version = toolVersion }: { 
     lockfiles,
     managers,
     nodeModules,
-    versionFiles: VERSION_FILES.filter((file) => content.has(file))
-      .map((file) => ({ path: file, content: read(file).trim().slice(0, 200) })),
-    workflows: workflows.filter((file) => content.has(file))
-      .map((file) => ({ path: file, content: read(file).slice(0, MAX_WORKFLOW_CHARS) })),
+    versionFiles: VERSION_FILES.filter((file) => content.has(file)).map((file) => ({ path: file, content: read(file).trim().slice(0, 200) })),
+    workflows: workflows.filter((file) => content.has(file)).map((file) => ({ path: file, content: read(file).slice(0, MAX_WORKFLOW_CHARS) })),
     tools: {
       node: await version('node', ['--version'], envPath),
       npm: await version('npm', ['--version'], envPath),

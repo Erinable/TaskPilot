@@ -35,7 +35,8 @@ test('readLoginShellPath() reads PATH from a real shell', { skip: process.platfo
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-shell-'));
   onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
   // HOME points at an empty dir so the user's real rc files don't run.
-  const run = (file, args, options, callback) => execFile(file, args, { ...options, env: { ...options.env, HOME: dir, PATH: '/usr/bin:/bin:/tp-marker' } }, callback);
+  const run = (file, args, options, callback) =>
+    execFile(file, args, { ...options, env: { ...options.env, HOME: dir, PATH: '/usr/bin:/bin:/tp-marker' } }, callback);
   const value = await shellEnv.readLoginShellPath({ shell: '/bin/sh', run });
   assert.ok(value.includes('/tp-marker'), value);
 });
@@ -76,7 +77,9 @@ test('the resolver caches the login-shell PATH until refreshed', async () => {
 test('the resolver falls back to the inherited PATH when the shell fails', async () => {
   const resolver = shellEnv.createPathResolver({
     inherited: '/usr/bin',
-    read: async () => { throw new shellEnv.ShellEnvError('nope', 'shell_timeout'); },
+    read: async () => {
+      throw new shellEnv.ShellEnvError('nope', 'shell_timeout');
+    },
   });
   const result = await resolver.resolve('login-shell');
   assert.equal(result.source, 'inherit');

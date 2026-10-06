@@ -83,8 +83,7 @@ export interface WorkspaceFormInput {
   options?: Partial<Record<CheckKind, { stage?: unknown; blocking?: unknown; reportPath?: unknown }>>;
 }
 
-export type WorkspaceErrorCode =
-  | 'invalid_report' | 'invalid_check' | 'invalid_command' | 'unterminated_quote' | 'shell_syntax' | 'invalid_json';
+export type WorkspaceErrorCode = 'invalid_report' | 'invalid_check' | 'invalid_command' | 'unterminated_quote' | 'shell_syntax' | 'invalid_json';
 
 // Defaults keep a v1 config behaving exactly as before: only tests ran
 // before review, and they decided it.
@@ -129,8 +128,7 @@ export const normalizeReportPath = (value: unknown, kind: string): string => {
   }
   const clean = value.trim();
   const parts = clean.split(/[\\/]/);
-  if (clean.length > 200 || path.isAbsolute(clean) || /^[A-Za-z]:/.test(clean)
-    || parts.some((part) => part === '..' || part === '') || hasControlChar(clean)) {
+  if (clean.length > 200 || path.isAbsolute(clean) || /^[A-Za-z]:/.test(clean) || parts.some((part) => part === '..' || part === '') || hasControlChar(clean)) {
     throw new WorkspaceError(`${kind} report path must stay inside the workspace`, 'invalid_report', kind);
   }
   return parts.join('/');
@@ -263,9 +261,7 @@ export const parseCommandLine = (text: unknown, kind: string): CommandEntry | nu
 export const formatCommandLine = (entry: CommandEntry | null | undefined): string => {
   if (!entry) return '';
   return [entry.command, ...entry.args]
-    .map((token) => (token === '' || /[\s'"\\]/.test(token) || SHELL_OPERATORS.has(token)
-      ? `'${token.replace(/'/g, "'\\''")}'`
-      : token))
+    .map((token) => (token === '' || /[\s'"\\]/.test(token) || SHELL_OPERATORS.has(token) ? `'${token.replace(/'/g, "'\\''")}'` : token))
     .join(' ');
 };
 
@@ -276,7 +272,10 @@ export const fromForm = (form: WorkspaceFormInput | null | undefined, previous: 
   const checks: Record<string, unknown> = {};
   for (const kind of COMMAND_KINDS) {
     const entry = parseCommandLine(form?.commands?.[kind], kind);
-    if (!entry) { checks[kind] = null; continue; }
+    if (!entry) {
+      checks[kind] = null;
+      continue;
+    }
     const options = form?.options?.[kind] ?? {};
     const kept = previous?.checks?.[kind];
     const reportPath = typeof options.reportPath === 'string' ? options.reportPath.trim() : null;
@@ -309,12 +308,15 @@ export const toForm = (config: WorkspaceConfig): WorkspaceForm => {
 // Finds the file `command` would launch, the way execFile does: through PATH
 // for a bare name, relative to `cwd` for a path. Returns null when nothing
 // executable is found, so settings can warn before a run fails.
-export const resolveExecutable = async (command: string, {
-  cwd = null,
-  envPath = env.path,
-  platform = process.platform,
-  pathExt = env.pathExt,
-}: { cwd?: string | null; envPath?: string; platform?: NodeJS.Platform; pathExt?: string } = {}): Promise<string | null> => {
+export const resolveExecutable = async (
+  command: string,
+  {
+    cwd = null,
+    envPath = env.path,
+    platform = process.platform,
+    pathExt = env.pathExt,
+  }: { cwd?: string | null; envPath?: string; platform?: NodeJS.Platform; pathExt?: string } = {},
+): Promise<string | null> => {
   const extensions = platform === 'win32' ? ['', ...(pathExt ?? '.EXE;.CMD;.BAT').split(';')] : [''];
   const isPath = command.includes('/') || (platform === 'win32' && command.includes('\\'));
   const bases: string[] = [];

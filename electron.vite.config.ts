@@ -9,9 +9,8 @@ import type { Plugin } from 'vite';
 const devCsp = (): Plugin => ({
   name: 'taskpilot-dev-csp',
   apply: 'serve',
-  transformIndexHtml: (html) => html
-    .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'")
-    .replace("font-src 'self'", "font-src 'self'; connect-src 'self' ws:"),
+  transformIndexHtml: (html) =>
+    html.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'").replace("font-src 'self'", "font-src 'self'; connect-src 'self' ws:"),
 });
 
 export default defineConfig({

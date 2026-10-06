@@ -7,12 +7,17 @@
 // detectably wrong.
 
 export const TS_API = {
-  'package.json': JSON.stringify({
-    name: 'api', type: 'module',
-    scripts: { test: 'vitest run' },
-    dependencies: { bcrypt: '5.1.1', jsonwebtoken: '9.0.2', pg: '8.11.3' },
-    devDependencies: { vitest: '1.6.0', typescript: '5.4.5' },
-  }, null, 2),
+  'package.json': JSON.stringify(
+    {
+      name: 'api',
+      type: 'module',
+      scripts: { test: 'vitest run' },
+      dependencies: { bcrypt: '5.1.1', jsonwebtoken: '9.0.2', pg: '8.11.3' },
+      devDependencies: { vitest: '1.6.0', typescript: '5.4.5' },
+    },
+    null,
+    2,
+  ),
   'src/auth/user.ts': `export interface User {
   id: string;
   email: string;
@@ -126,11 +131,16 @@ describe('UserRepository.getById', () => {
 };
 
 export const REACT_APP = {
-  'package.json': JSON.stringify({
-    name: 'web', type: 'module',
-    dependencies: { react: '18.3.1', 'react-dom': '18.3.1', 'react-router-dom': '6.23.1', '@tanstack/react-query': '5.40.0' },
-    devDependencies: { vitest: '1.6.0', '@testing-library/react': '15.0.7', vite: '5.2.12' },
-  }, null, 2),
+  'package.json': JSON.stringify(
+    {
+      name: 'web',
+      type: 'module',
+      dependencies: { react: '18.3.1', 'react-dom': '18.3.1', 'react-router-dom': '6.23.1', '@tanstack/react-query': '5.40.0' },
+      devDependencies: { vitest: '1.6.0', '@testing-library/react': '15.0.7', vite: '5.2.12' },
+    },
+    null,
+    2,
+  ),
   'src/App.tsx': `import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { OrdersPage } from './pages/OrdersPage';
 import { SettingsPage } from './pages/SettingsPage';

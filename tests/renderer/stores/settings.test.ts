@@ -125,7 +125,9 @@ test('the workspace check shows resolved commands and repo facts', async () => {
   expect(settings.statuses.test).toEqual({ tone: 'ok', message: '/usr/local/bin/npm' });
   expect(settings.statuses.lint).toEqual({ tone: null, message: '未配置' });
   expect(settings.repoFacts).toEqual([
-    { term: '分支', value: 'main' }, { term: '当前提交', value: 'abcdef123456' }, { term: '工作区状态', value: '干净' },
+    { term: '分支', value: 'main' },
+    { term: '当前提交', value: 'abcdef123456' },
+    { term: '工作区状态', value: '干净' },
   ]);
 });
 
@@ -147,7 +149,12 @@ test('leave guard: 保存 saves before leaving', async () => {
   settings.preferencesDraft!.profile.displayName = 'Grace';
   vi.mocked(feedback.confirmChoice).mockResolvedValueOnce('accept');
   expect(await useAppStore().navigate('queue')).toBe(true);
-  expect(feedback.confirmChoice).toHaveBeenCalledWith({ title: '保存修改？', body: '设置里有未保存的修改。离开后这些修改会丢失。', accept: '保存', alternate: '不保存' });
+  expect(feedback.confirmChoice).toHaveBeenCalledWith({
+    title: '保存修改？',
+    body: '设置里有未保存的修改。离开后这些修改会丢失。',
+    accept: '保存',
+    alternate: '不保存',
+  });
   expect(api.preferences.set).toHaveBeenCalled();
   expect(useAppStore().view).toBe('queue');
 });

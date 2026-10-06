@@ -109,22 +109,27 @@ export const planPrompt = (input: ReleaseInput): string => {
   if (input.commitsTruncated) commits.push(`(only the newest ${input.commits.length} commits are listed)`);
   const files = input.files.map((file) => `${escape(file.path)} ${file.binary ? '(binary)' : `+${file.added} -${file.removed}`}`);
   if (input.filesTruncated) files.push(`(only the first ${input.files.length} changed files are listed)`);
-  const packages = input.packages.map((item) => [
-    `<package id="${escape(item.id)}">`,
-    `title: ${escape(item.title)}`,
-    `description: ${escape(item.description)}`,
-    'acceptance:',
-    ...item.acceptance.map((text) => `- ${escape(text)}`),
-    '</package>',
-  ].join('\n'));
+  const packages = input.packages.map((item) =>
+    [
+      `<package id="${escape(item.id)}">`,
+      `title: ${escape(item.title)}`,
+      `description: ${escape(item.description)}`,
+      'acceptance:',
+      ...item.acceptance.map((text) => `- ${escape(text)}`),
+      '</package>',
+    ].join('\n'),
+  );
   return [
     'Prepare the release for the changes below.',
     '',
-    section('version', [
-      `current package.json version: ${input.currentVersion ?? '(none)'}`,
-      `previous release point: ${escape(input.startLabel)} (${shortSha(input.startCommit)})`,
-      `release commit: ${shortSha(input.endCommit)}`,
-    ].join('\n')),
+    section(
+      'version',
+      [
+        `current package.json version: ${input.currentVersion ?? '(none)'}`,
+        `previous release point: ${escape(input.startLabel)} (${shortSha(input.startCommit)})`,
+        `release commit: ${shortSha(input.endCommit)}`,
+      ].join('\n'),
+    ),
     '',
     section('commits', commits.length ? commits.join('\n') : '(none)'),
     '',
@@ -206,7 +211,9 @@ export const validatePlan = (raw: unknown, input: ReleaseInput): ReleasePlan => 
 
   if (!isObject(raw.notes)) fail('notes', 'must be an object');
   const rawNotes = raw.notes;
-  const notes = Object.fromEntries(NOTE_GROUPS.map((group) => [group, textList(rawNotes[group], `notes.${group}`, MAX_NOTE_ITEMS, MAX_NOTE_CHARS)])) as ReleaseNotes;
+  const notes = Object.fromEntries(
+    NOTE_GROUPS.map((group) => [group, textList(rawNotes[group], `notes.${group}`, MAX_NOTE_ITEMS, MAX_NOTE_CHARS)]),
+  ) as ReleaseNotes;
 
   if (!Array.isArray(raw.checklist)) fail('checklist', 'must be a list');
   const matchEvidence = evidenceMatcher(input);
@@ -214,9 +221,9 @@ export const validatePlan = (raw: unknown, input: ReleaseInput): ReleasePlan => 
     if (!isObject(item)) fail(`checklist[${index}]`, 'must be an object');
     const evidence = Array.isArray(item.evidence)
       ? item.evidence.slice(0, MAX_EVIDENCE).flatMap((entry) => {
-        const matched = typeof entry === 'string' ? matchEvidence(entry.trim()) : null;
-        return matched ? [matched] : [];
-      })
+          const matched = typeof entry === 'string' ? matchEvidence(entry.trim()) : null;
+          return matched ? [matched] : [];
+        })
       : fail(`checklist[${index}].evidence`, 'must be a list');
     return { text: text(item.text, `checklist[${index}].text`, MAX_CHECK_TEXT), evidence: [...new Set(evidence)] };
   });
@@ -227,7 +234,7 @@ export const validatePlan = (raw: unknown, input: ReleaseInput): ReleasePlan => 
 const GROUP_HEADINGS: Record<NoteGroup, string> = { added: '新增', fixed: '修复', changed: '变更', notes: '说明' };
 
 // The notes as editable Markdown, one ### heading per non-empty group.
-export const formatNotes = (notes: ReleaseNotes): string => NOTE_GROUPS
-  .filter((group) => notes[group].length)
-  .map((group) => [`### ${GROUP_HEADINGS[group]}`, '', ...notes[group].map((item) => `- ${item}`)].join('\n'))
-  .join('\n\n');
+export const formatNotes = (notes: ReleaseNotes): string =>
+  NOTE_GROUPS.filter((group) => notes[group].length)
+    .map((group) => [`### ${GROUP_HEADINGS[group]}`, '', ...notes[group].map((item) => `- ${item}`)].join('\n'))
+    .join('\n\n');

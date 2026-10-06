@@ -53,8 +53,7 @@ export interface StructuredResult {
 export type RunAgent = (options: RunStructuredOptions) => Promise<StructuredResult>;
 
 export type AgentErrorCode =
-  | 'agent_bad_output' | 'agent_budget' | 'agent_schema_retry' | 'agent_failed'
-  | 'agent_cancelled' | 'agent_unavailable' | 'agent_timeout';
+  'agent_bad_output' | 'agent_budget' | 'agent_schema_retry' | 'agent_failed' | 'agent_cancelled' | 'agent_unavailable' | 'agent_timeout';
 
 interface Envelope {
   is_error?: boolean;
@@ -92,7 +91,12 @@ export const childEnv = (base: NodeJS.ProcessEnv, envPath?: string | null): Node
   return env;
 };
 
-export const cliArgs = ({ systemPrompt, schema, model, budgetUsd }: {
+export const cliArgs = ({
+  systemPrompt,
+  schema,
+  model,
+  budgetUsd,
+}: {
   systemPrompt: string;
   schema: JsonSchema;
   model?: string | null;
@@ -100,14 +104,19 @@ export const cliArgs = ({ systemPrompt, schema, model, budgetUsd }: {
 }): string[] => {
   const args = [
     '-p',
-    '--output-format', 'json',
-    '--tools', '',
+    '--output-format',
+    'json',
+    '--tools',
+    '',
     '--restricted',
     '--strict-mcp-config',
     '--no-session-persistence',
-    '--max-budget-usd', String(budgetUsd),
-    '--system-prompt', systemPrompt,
-    '--json-schema', JSON.stringify(schema),
+    '--max-budget-usd',
+    String(budgetUsd),
+    '--system-prompt',
+    systemPrompt,
+    '--json-schema',
+    JSON.stringify(schema),
   ];
   if (model) args.push('--model', model);
   return args;
@@ -122,10 +131,13 @@ export const parseEnvelope = (stdout: string): StructuredResult => {
     throw new AgentRunError('Agent returned output that is not JSON', 'agent_bad_output', stdout.slice(0, 500));
   }
   if (envelope.is_error || envelope.subtype !== 'success') {
-    const reason = envelope.subtype === 'error_max_budget_usd' ? 'agent_budget'
-      // The CLI gave up after its own schema-repair attempts; worth one fresh try.
-      : envelope.subtype === 'error_max_structured_output_retries' ? 'agent_schema_retry'
-      : 'agent_failed';
+    const reason =
+      envelope.subtype === 'error_max_budget_usd'
+        ? 'agent_budget'
+        : // The CLI gave up after its own schema-repair attempts; worth one fresh try.
+          envelope.subtype === 'error_max_structured_output_retries'
+          ? 'agent_schema_retry'
+          : 'agent_failed';
     throw new AgentRunError(String(envelope.result || `Agent run ended with ${envelope.subtype}`), reason);
   }
   let output = envelope.structured_output;
@@ -144,8 +156,16 @@ const codeOf = (error: unknown): unknown => (error as { code?: unknown } | null)
 
 // One CLI run; see RunStructuredOptions.
 const runOnce = async ({
-  prompt, systemPrompt, schema, command = 'claude', model = null, envPath = null,
-  budgetUsd = DEFAULT_BUDGET_USD, timeoutMs = DEFAULT_TIMEOUT_MS, signal, spawnFn = spawn,
+  prompt,
+  systemPrompt,
+  schema,
+  command = 'claude',
+  model = null,
+  envPath = null,
+  budgetUsd = DEFAULT_BUDGET_USD,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal,
+  spawnFn = spawn,
 }: RunStructuredOptions): Promise<StructuredResult> => {
   if (signal?.aborted) throw new AgentRunError('Agent run was cancelled', 'agent_cancelled');
   // An empty working directory: with no tools there is nothing to read, and
@@ -156,7 +176,9 @@ const runOnce = async ({
       let child: ChildProcessWithoutNullStreams;
       try {
         child = spawnFn(command, cliArgs({ systemPrompt, schema, model, budgetUsd }), {
-          cwd, env: childEnv(processEnv(), envPath), stdio: ['pipe', 'pipe', 'pipe'],
+          cwd,
+          env: childEnv(processEnv(), envPath),
+          stdio: ['pipe', 'pipe', 'pipe'],
         });
       } catch (error) {
         reject(new AgentRunError(`Could not start ${command}: ${(error as Error).message}`, 'agent_unavailable'));
@@ -190,9 +212,12 @@ const runOnce = async ({
         if (stderr.length < 64 * 1024) stderr += chunk;
       });
       child.on('error', (error: NodeJS.ErrnoException) => {
-        finish(reject, error.code === 'ENOENT'
-          ? new AgentRunError(`Claude Code CLI not found: ${command}`, 'agent_unavailable')
-          : new AgentRunError(error.message, 'agent_failed'));
+        finish(
+          reject,
+          error.code === 'ENOENT'
+            ? new AgentRunError(`Claude Code CLI not found: ${command}`, 'agent_unavailable')
+            : new AgentRunError(error.message, 'agent_failed'),
+        );
       });
       child.on('close', (code: number | null) => {
         if (reason === 'timeout') return finish(reject, new AgentRunError('Agent did not finish in time', 'agent_timeout'));

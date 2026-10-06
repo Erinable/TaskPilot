@@ -10,7 +10,9 @@ beforeEach(() => {
   Object.defineProperty(window, 'taskpilot', {
     configurable: true,
     get: () => api,
-    set: (next: Record<string, unknown>) => { api = { businessTimeZone: BUSINESS_TIME_ZONE, ...next }; },
+    set: (next: Record<string, unknown>) => {
+      api = { businessTimeZone: BUSINESS_TIME_ZONE, ...next };
+    },
   });
   (window as unknown as { taskpilot: Record<string, unknown> }).taskpilot = {};
 });

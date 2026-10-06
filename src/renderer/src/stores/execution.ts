@@ -157,7 +157,14 @@ export const useExecutionStore = defineStore('execution', () => {
     try {
       const task = await call(window.taskpilot.measureBaseline(current.value.id));
       // The new measurement replaces the old record once it starts.
-      const measuring: ipc.BaselineChecks = { status: 'measuring', reason: null, commit: task.baseline ?? '', checks: {}, startedAt: new Date().toISOString(), finishedAt: null };
+      const measuring: ipc.BaselineChecks = {
+        status: 'measuring',
+        reason: null,
+        commit: task.baseline ?? '',
+        checks: {},
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      };
       current.value = { ...task, baselineChecks: measuring };
       watchBaseline();
     } catch (error) {
@@ -340,7 +347,9 @@ export const useExecutionStore = defineStore('execution', () => {
     deviationOpen.value = true;
   };
 
-  const closeDeviationForm = () => { deviationOpen.value = false; };
+  const closeDeviationForm = () => {
+    deviationOpen.value = false;
+  };
 
   // Resolves false when the note is blank, so the view can refocus it.
   const submitDeviation = async () => {
@@ -364,20 +373,36 @@ export const useExecutionStore = defineStore('execution', () => {
 
   return {
     // Current package
-    current, acceptanceOverride, open, close, reloadCurrent,
+    current,
+    acceptanceOverride,
+    open,
+    close,
+    reloadCurrent,
     // Steps
     setStepDone,
     // Baseline
     remeasureBaseline,
     // Review and adjudication
-    runReviewAction, runDeviationAction,
+    runReviewAction,
+    runDeviationAction,
     // Diff
-    diff, diffHint, diffVersion, refreshDiff,
+    diff,
+    diffHint,
+    diffVersion,
+    refreshDiff,
     // Verification
-    verifyKind, verifyRunning, verifyResult, verifyError, runVerification,
+    verifyKind,
+    verifyRunning,
+    verifyResult,
+    verifyError,
+    runVerification,
     // Transitions
     runTransition,
     // Modals
-    deviationOpen, deviationForm, openDeviationForm, closeDeviationForm, submitDeviation,
+    deviationOpen,
+    deviationForm,
+    openDeviationForm,
+    closeDeviationForm,
+    submitDeviation,
   };
 });

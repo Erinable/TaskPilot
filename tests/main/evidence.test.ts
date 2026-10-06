@@ -5,8 +5,20 @@ import type { ReportInfo, TestResult } from '../../src/main/verification.ts';
 
 const CHECK: any = { kind: 'test', stage: 'submit', blocking: true };
 const r = (name, passed): TestResult => ({ name, fullName: `suite › ${name}`, passed, skipped: false, todo: false });
-const run = ({ exitCode = 0, timedOut = false, results = [] as TestResult[], report = { format: 'stdout', trusted: true, problem: null } as ReportInfo } = {}): any => ({
-  kind: 'test', command: 'npm test', exitCode, timedOut, durationMs: 5, output: '', results, report,
+const run = ({
+  exitCode = 0,
+  timedOut = false,
+  results = [] as TestResult[],
+  report = { format: 'stdout', trusted: true, problem: null } as ReportInfo,
+} = {}): any => ({
+  kind: 'test',
+  command: 'npm test',
+  exitCode,
+  timedOut,
+  durationMs: 5,
+  output: '',
+  results,
+  report,
 });
 const baseline = (source) => evidence.baselineRecord(source, 'npm test', 'T');
 
@@ -31,7 +43,13 @@ test('usableBaseline() requires a measurement for the same command line', () => 
 const TABLE = [
   ['clean run', run({ results: [r('a', true)] }), null, 'pass', null],
   ['new failure', run({ exitCode: 1, results: [r('a', false)] }), baseline(run({ results: [r('a', true)] })), 'fail', 'new_failures'],
-  ['only preexisting failures', run({ exitCode: 1, results: [r('a', false), r('b', true)] }), baseline(run({ exitCode: 1, results: [r('a', false)] })), 'pass', 'preexisting_only'],
+  [
+    'only preexisting failures',
+    run({ exitCode: 1, results: [r('a', false), r('b', true)] }),
+    baseline(run({ exitCode: 1, results: [r('a', false)] })),
+    'pass',
+    'preexisting_only',
+  ],
   ['failure with no baseline', run({ exitCode: 1, results: [r('a', false)] }), null, 'fail', 'no_baseline'],
   ['crash, crashed the same at baseline', run({ exitCode: 2 }), baseline(run({ exitCode: 2 })), 'unverifiable', 'broken_at_baseline'],
   ['crash, healthy at baseline', run({ exitCode: 2 }), baseline(run({ results: [r('a', true)] })), 'fail', 'crashed'],
@@ -62,12 +80,7 @@ test('evaluate() lists new, preexisting and fixed tests separately', () => {
 });
 
 test('criteriaStatus() matches by name or full name and degrades to unverifiable', () => {
-  const criteria = [
-    { text: 'one', test: 'a' },
-    { text: 'two', test: 'suite › b' },
-    { text: 'three', test: 'missing' },
-    { text: 'four' },
-  ];
+  const criteria = [{ text: 'one', test: 'a' }, { text: 'two', test: 'suite › b' }, { text: 'three', test: 'missing' }, { text: 'four' }];
   const runs = { test: run({ exitCode: 1, results: [r('a', true), r('b', false)] }) };
   const items = [evidence.evaluate(CHECK, runs.test, null)];
   const statuses = evidence.criteriaStatus(criteria, runs, items).map((c) => c.status);
@@ -76,7 +89,10 @@ test('criteriaStatus() matches by name or full name and degrades to unverifiable
   // When a check's results could not be read, a missing test is unverifiable, not missing.
   const unreadable = { test: run({ report: { format: 'junit', trusted: false, problem: 'invalid' } }) };
   const fromUnreadable = evidence.criteriaStatus(criteria, unreadable, [evidence.evaluate(CHECK, unreadable.test, null)]);
-  assert.deepEqual(fromUnreadable.map((c) => c.status), ['unverifiable', 'unverifiable', 'unverifiable', 'manual']);
+  assert.deepEqual(
+    fromUnreadable.map((c) => c.status),
+    ['unverifiable', 'unverifiable', 'unverifiable', 'manual'],
+  );
 });
 
 test('criteriaStatus() flags a linked test that already passed at the baseline', () => {

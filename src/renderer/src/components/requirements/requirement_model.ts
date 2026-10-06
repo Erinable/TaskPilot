@@ -14,8 +14,13 @@ export const STATUS_LABELS: Record<ipc.RequirementStatus, string> = {
 
 // Pill colours reuse the work package status classes.
 export const STATUS_TONES: Record<ipc.RequirementStatus, string> = {
-  draft: 'pending', clarifying: 'in_progress', answering: 'in_review', planning: 'in_progress',
-  reviewing: 'in_review', published: 'done', failed: 'blocked',
+  draft: 'pending',
+  clarifying: 'in_progress',
+  answering: 'in_review',
+  planning: 'in_progress',
+  reviewing: 'in_review',
+  published: 'done',
+  failed: 'blocked',
 };
 
 export type StepName = 'clarify' | 'answer' | 'plan' | 'publish';
@@ -60,7 +65,13 @@ export const MAX_ANSWER = 1000;
 export const PRIORITY_LABELS: Record<ipc.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
 
 export const SKIP_LABELS: Record<ipc.ReadSkipReason, string> = {
-  secret: '可能含密钥', binary: '二进制', too_large: '过大', budget: '超出读取上限', file_limit: '超出文件数上限', not_tracked: '未被 git 跟踪', not_a_file: '链接或子模块',
+  secret: '可能含密钥',
+  binary: '二进制',
+  too_large: '过大',
+  budget: '超出读取上限',
+  file_limit: '超出文件数上限',
+  not_tracked: '未被 git 跟踪',
+  not_a_file: '链接或子模块',
 };
 
 // Characters by code point, so an emoji or CJK extension counts once.

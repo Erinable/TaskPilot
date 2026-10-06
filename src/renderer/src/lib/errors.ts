@@ -45,7 +45,7 @@ export const ERROR_HINTS: Record<string, string> = {
   path_secret: '这个路径看起来是敏感文件，已拒绝。',
 };
 
-export const describeError = (error: unknown) => (error instanceof Error ? ERROR_HINTS[(error as IpcError).code] ?? error.message : String(error));
+export const describeError = (error: unknown) => (error instanceof Error ? (ERROR_HINTS[(error as IpcError).code] ?? error.message) : String(error));
 
 // Agent errors are stored as plain {code, message} objects, not Error instances.
 export const describeErrorInfo = (error: Partial<ErrorInfo> | null | undefined) => (error?.code ? ERROR_HINTS[error.code] : undefined) ?? error?.message ?? '';

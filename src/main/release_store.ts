@@ -83,7 +83,10 @@ export class ReleaseStore {
   #newId: () => string;
   #now: () => Date;
 
-  constructor(configDir: string, { newId = () => `rel-${crypto.randomBytes(4).toString('hex')}`, now = () => new Date() }: { newId?: () => string; now?: () => Date } = {}) {
+  constructor(
+    configDir: string,
+    { newId = () => `rel-${crypto.randomBytes(4).toString('hex')}`, now = () => new Date() }: { newId?: () => string; now?: () => Date } = {},
+  ) {
     this.#file = path.join(configDir, RELEASES_FILENAME);
     this.#newId = newId;
     this.#now = now;
@@ -157,22 +160,41 @@ export class ReleaseStore {
     if (this.#state.draft?.status === 'generating') fail('Release Manager is already running', 'invalid_state');
     const now = this.#now().toISOString();
     return (await this.#setDraft({
-      status: 'generating', error: null, startCommit, endCommit, input: null, plan: null,
-      notesText: '', checked: [], costUsd: 0, startedAt: now, updatedAt: now,
+      status: 'generating',
+      error: null,
+      startCommit,
+      endCommit,
+      input: null,
+      plan: null,
+      notesText: '',
+      checked: [],
+      costUsd: 0,
+      startedAt: now,
+      updatedAt: now,
     }))!;
   }
 
   async complete(plan: ReleasePlan, input: ReleaseInputSummary, costUsd: number): Promise<ReleaseDraft> {
     const draft = this.#mustDraft(['generating']);
     return (await this.#setDraft({
-      ...draft, status: 'ready', plan, input, notesText: formatNotes(plan.notes), checked: [], costUsd, updatedAt: this.#now().toISOString(),
+      ...draft,
+      status: 'ready',
+      plan,
+      input,
+      notesText: formatNotes(plan.notes),
+      checked: [],
+      costUsd,
+      updatedAt: this.#now().toISOString(),
     }))!;
   }
 
   async failRun(error: { code?: string; message: string }): Promise<ReleaseDraft> {
     const draft = this.#mustDraft(['generating']);
     return (await this.#setDraft({
-      ...draft, status: 'failed', error: { code: error.code ?? 'agent_failed', message: error.message }, updatedAt: this.#now().toISOString(),
+      ...draft,
+      status: 'failed',
+      error: { code: error.code ?? 'agent_failed', message: error.message },
+      updatedAt: this.#now().toISOString(),
     }))!;
   }
 

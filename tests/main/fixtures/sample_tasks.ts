@@ -69,15 +69,8 @@ export const SAMPLE_TASKS: TaskDefinition[] = [
       '在 `src/auth/application` 中只保留 `TokenIssuer` 接口。',
       '更新依赖注入配置，确保 application 层不再引用 infrastructure。',
     ],
-    fileScope: [
-      'src/auth/application/token-issuer.ts',
-      'src/auth/infrastructure/token-service.ts',
-      'src/container.ts',
-    ],
-    acceptance: [
-      { text: 'application 层没有指向 infrastructure 的 import' },
-      { text: '现有 auth 测试全部通过', test: 'auth module test suite' },
-    ],
+    fileScope: ['src/auth/application/token-issuer.ts', 'src/auth/infrastructure/token-service.ts', 'src/container.ts'],
+    acceptance: [{ text: 'application 层没有指向 infrastructure 的 import' }, { text: '现有 auth 测试全部通过', test: 'auth module test suite' }],
   },
   {
     id: 'release-v0-9-0',
@@ -90,15 +83,8 @@ export const SAMPLE_TASKS: TaskDefinition[] = [
     priority: 'low',
     estimate: '预计 30 分钟',
     icon: 'rocket',
-    steps: [
-      '核对 `migrations/` 中的新迁移都有对应的回滚脚本。',
-      '确认登录接口的监控告警已配置。',
-      '在发布清单中补充回滚步骤。',
-    ],
+    steps: ['核对 `migrations/` 中的新迁移都有对应的回滚脚本。', '确认登录接口的监控告警已配置。', '在发布清单中补充回滚步骤。'],
     fileScope: ['docs/release/v0.9.0.md'],
-    acceptance: [
-      { text: '迁移、监控、回滚三项均已勾选' },
-      { text: 'Release Manager 确认清单完整' },
-    ],
+    acceptance: [{ text: '迁移、监控、回滚三项均已勾选' }, { text: 'Release Manager 确认清单完整' }],
   },
 ];

@@ -28,12 +28,15 @@ const tempRoot = async () => {
 
 test('parseJunit() reads cases, failures, errors and skips with suite paths', () => {
   const results = testReport.parseJunit(JUNIT);
-  assert.deepEqual(results.map((x) => [x.fullName, x.passed, x.skipped]), [
-    ['auth › login › succeeds & returns a token', true, false],
-    ['auth › login › rejects bad password', false, false],
-    ['auth › login › locks out', true, true],
-    ['auth › nested › errors', false, false],
-  ]);
+  assert.deepEqual(
+    results.map((x) => [x.fullName, x.passed, x.skipped]),
+    [
+      ['auth › login › succeeds & returns a token', true, false],
+      ['auth › login › rejects bad password', false, false],
+      ['auth › login › locks out', true, true],
+      ['auth › nested › errors', false, false],
+    ],
+  );
   assert.equal(results[0].name, 'succeeds & returns a token');
 });
 

@@ -63,7 +63,10 @@ export const useReleaseStore = defineStore('release', () => {
 
   const schedulePoll = () => {
     stopPolling();
-    if (active && generating.value) pollTimer = setTimeout(() => { load().catch((error) => console.error(error)); }, model.POLL_MS);
+    if (active && generating.value)
+      pollTimer = setTimeout(() => {
+        load().catch((error) => console.error(error));
+      }, model.POLL_MS);
   };
 
   const enter = async () => {
@@ -154,7 +157,9 @@ export const useReleaseStore = defineStore('release', () => {
     notesText.value = text;
     notesStatus.value = 'dirty';
     if (notesTimer !== null) clearTimeout(notesTimer);
-    notesTimer = setTimeout(() => { saveNotes().catch((error) => console.error(error)); }, NOTES_DEBOUNCE_MS);
+    notesTimer = setTimeout(() => {
+      saveNotes().catch((error) => console.error(error));
+    }, NOTES_DEBOUNCE_MS);
   };
 
   // Saves pending edits now (blur, leaving the page, before finishing).
@@ -214,7 +219,9 @@ export const useReleaseStore = defineStore('release', () => {
   const writeError = ref<string | null>(null);
   const writing = ref(false);
 
-  const clearWriteError = () => { writeError.value = null; };
+  const clearWriteError = () => {
+    writeError.value = null;
+  };
 
   // Resolves true once the notes are in the file. Errors stay under the path input.
   const writeNotes = async (path: string) => {
@@ -245,18 +252,37 @@ export const useReleaseStore = defineStore('release', () => {
 
   return {
     // State
-    state, loadError, draft, generating, notesText, load,
+    state,
+    loadError,
+    draft,
+    generating,
+    notesText,
+    load,
     // Polling
-    enter, leave,
+    enter,
+    leave,
     // Start point
-    commits, selectedStart, startError, selectStart,
+    commits,
+    selectedStart,
+    startError,
+    selectStart,
     // Generate
-    generate, cancel,
+    generate,
+    cancel,
     // Draft edits
-    notesStatus, editNotes, flushNotes, setChecked,
+    notesStatus,
+    editNotes,
+    flushNotes,
+    setChecked,
     // Finish
-    finishing, canFinish, finish,
+    finishing,
+    canFinish,
+    finish,
     // Notes output
-    copyNotes, writeError, writing, clearWriteError, writeNotes,
+    copyNotes,
+    writeError,
+    writing,
+    clearWriteError,
+    writeNotes,
   };
 });

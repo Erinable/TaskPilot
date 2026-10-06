@@ -86,16 +86,16 @@ export type RejectReason = 'no_changes' | 'tests_failed' | 'acceptance_tests' | 
 export type CompactRun =
   | { error: Extract<CheckOutcome, { error: unknown }>['error'] }
   | {
-    kind: string;
-    command: string;
-    exitCode: number;
-    timedOut: boolean;
-    durationMs: number;
-    summary: CheckRun['summary'];
-    report: CheckRun['report'] | null;
-    failing: string[];
-    outputTail: string | null;
-  };
+      kind: string;
+      command: string;
+      exitCode: number;
+      timedOut: boolean;
+      durationMs: number;
+      summary: CheckRun['summary'];
+      report: CheckRun['report'] | null;
+      failing: string[];
+      outputTail: string | null;
+    };
 
 export const SYSTEM_PROMPT = [
   'You are QA Partner on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
@@ -121,36 +121,48 @@ const KIND_NAMES: Record<string, string> = { test: 'Unit tests', lint: 'Lint', b
 // not blame the package for failures that were already there.
 export const formatChecks = (checks: { evidence: EvidenceItem; run: CheckOutcome }[]): string => {
   if (!checks.length) return '(no verification command runs before review in this workspace; judge the tests from the diff)';
-  return checks.map(({ evidence: e, run }) => {
-    const lines = [`## ${KIND_NAMES[e.kind] ?? e.kind}${e.blocking ? ' (blocking)' : ' (advisory)'}`];
-    if ('error' in run) {
-      lines.push(`Could not run: ${run.error.code}`);
+  return checks
+    .map(({ evidence: e, run }) => {
+      const lines = [`## ${KIND_NAMES[e.kind] ?? e.kind}${e.blocking ? ' (blocking)' : ' (advisory)'}`];
+      if ('error' in run) {
+        lines.push(`Could not run: ${run.error.code}`);
+        return lines.join('\n');
+      }
+      lines.push(`Command: ${run.command}`);
+      lines.push(
+        `Exit code ${run.exitCode}${run.timedOut ? ', timed out' : ''}; tests ${run.summary.passed}/${run.summary.total} passed, ${run.summary.skipped} skipped`,
+      );
+      lines.push(
+        `TaskPilot verdict: ${e.status}${e.reason ? ` (${e.reason})` : ''}; baseline ${e.baseline === 'measured' ? 'measured on the claimed commit' : 'not available'}`,
+      );
+      const list = (title: string, names: string[]) => {
+        if (names.length) lines.push(`${title}:`, ...names.map((name) => `- ${name}`));
+      };
+      list('Failing now but passing at the baseline (caused by this change)', e.baseline === 'measured' ? e.newFailures : []);
+      list('Failing tests', e.baseline === 'measured' ? [] : e.newFailures);
+      list('Already failing at the baseline (not caused by this change)', e.preexisting);
+      list('Fixed by this change', e.fixed);
       return lines.join('\n');
-    }
-    lines.push(`Command: ${run.command}`);
-    lines.push(`Exit code ${run.exitCode}${run.timedOut ? ', timed out' : ''}; tests ${run.summary.passed}/${run.summary.total} passed, ${run.summary.skipped} skipped`);
-    lines.push(`TaskPilot verdict: ${e.status}${e.reason ? ` (${e.reason})` : ''}; baseline ${e.baseline === 'measured' ? 'measured on the claimed commit' : 'not available'}`);
-    const list = (title: string, names: string[]) => { if (names.length) lines.push(`${title}:`, ...names.map((name) => `- ${name}`)); };
-    list('Failing now but passing at the baseline (caused by this change)', e.baseline === 'measured' ? e.newFailures : []);
-    list('Failing tests', e.baseline === 'measured' ? [] : e.newFailures);
-    list('Already failing at the baseline (not caused by this change)', e.preexisting);
-    list('Fixed by this change', e.fixed);
-    return lines.join('\n');
-  }).join('\n\n');
+    })
+    .join('\n\n');
 };
 
 const formatCriteria = (acceptance: CriterionEvidence[]): string =>
-  acceptance.map((criterion, index) => {
-    const status = criterion.status ?? (criterion.manual ? 'manual' : criterion.verified ? 'verified' : criterion.missing ? 'missing' : 'failed');
-    const check = ({
-      manual: 'no linked test; judge from the diff',
-      verified: `linked test "${criterion.test}" passed${criterion.alreadyPassing ? ', but it also passed before this change, so it does not show the change works' : ''}`,
-      missing: `linked test "${criterion.test}" was not found in the test results`,
-      unverifiable: `linked test "${criterion.test}" could not be checked (its test run was unreadable); judge from the diff`,
-      failed: `linked test "${criterion.test}" failed`,
-    } as Record<string, string>)[status];
-    return `${index}. ${criterion.text} [${check}]`;
-  }).join('\n');
+  acceptance
+    .map((criterion, index) => {
+      const status = criterion.status ?? (criterion.manual ? 'manual' : criterion.verified ? 'verified' : criterion.missing ? 'missing' : 'failed');
+      const check = (
+        {
+          manual: 'no linked test; judge from the diff',
+          verified: `linked test "${criterion.test}" passed${criterion.alreadyPassing ? ', but it also passed before this change, so it does not show the change works' : ''}`,
+          missing: `linked test "${criterion.test}" was not found in the test results`,
+          unverifiable: `linked test "${criterion.test}" could not be checked (its test run was unreadable); judge from the diff`,
+          failed: `linked test "${criterion.test}" failed`,
+        } as Record<string, string>
+      )[status];
+      return `${index}. ${criterion.text} [${check}]`;
+    })
+    .join('\n');
 
 const formatDiff = (files: ReviewDiffFile[]): string => {
   if (files.length === 0) return '(no readable changes)';
@@ -161,7 +173,13 @@ const formatDiff = (files: ReviewDiffFile[]): string => {
 // acceptance: evidence.criteriaStatus() result
 // checks: [{evidence, run}] for the submit-stage checks
 // interfaces: Architect's formatted summary, or null
-export const reviewPrompt = ({ task, acceptance, checks = [], diff, interfaces }: {
+export const reviewPrompt = ({
+  task,
+  acceptance,
+  checks = [],
+  diff,
+  interfaces,
+}: {
   task: ReviewTask;
   acceptance: CriterionEvidence[];
   checks?: { evidence: EvidenceItem; run: CheckOutcome }[];
@@ -295,8 +313,7 @@ export const validateReview = (raw: unknown, { criteriaCount, changedPaths }: { 
       note: text(c.note, `${at}.note`, 240),
     });
   });
-  const criteria = Array.from({ length: criteriaCount }, (_, index): CriterionReview => byIndex.get(index)
-    ?? { index, status: 'unclear', note: null });
+  const criteria = Array.from({ length: criteriaCount }, (_, index): CriterionReview => byIndex.get(index) ?? { index, status: 'unclear', note: null });
 
   const issues = list(raw.issues, 'issues', MAX_ISSUES).map((issue, i): ReviewIssue => {
     const at = `issues[${i}]`;
@@ -336,7 +353,12 @@ export const validateReview = (raw: unknown, { criteriaCount, changedPaths }: { 
 //   criteria_unmet    QA judged a criterion unmet
 // An unverifiable check or criterion never rejects: the package goes on to
 // acceptance, where the human sees why (evidence.attention()).
-export const decide = ({ evidence = [], acceptance, changeCount, report }: {
+export const decide = ({
+  evidence = [],
+  acceptance,
+  changeCount,
+  report,
+}: {
   evidence?: Pick<EvidenceItem, 'blocking' | 'status'>[];
   acceptance: Pick<CriterionEvidence, 'status'>[];
   changeCount: number;
@@ -368,7 +390,10 @@ export const compactRun = (run: CheckOutcome | null | undefined): CompactRun | n
     durationMs: run.durationMs,
     summary: run.summary,
     report: run.report ?? null,
-    failing: run.results.filter((r) => !r.passed && !r.skipped && !r.todo).map((r) => r.fullName ?? r.name).slice(0, 50),
+    failing: run.results
+      .filter((r) => !r.passed && !r.skipped && !r.todo)
+      .map((r) => r.fullName ?? r.name)
+      .slice(0, 50),
     outputTail: failed ? run.output.slice(-MAX_OUTPUT_TAIL) : null,
   };
 };

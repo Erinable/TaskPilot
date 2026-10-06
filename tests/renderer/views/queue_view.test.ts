@@ -39,7 +39,19 @@ describe('QueueView', () => {
   });
 
   test('the empty state goes away once packages are published', async () => {
-    useTasksStore().tasks = [{ id: 'r1-wp1', title: '登录接口', description: '实现邮箱登录', status: 'pending', statusLabel: '待领取', priority: 'high', tags: ['auth'], estimate: '预计 1 小时', icon: 'key' } as ipc.TaskView];
+    useTasksStore().tasks = [
+      {
+        id: 'r1-wp1',
+        title: '登录接口',
+        description: '实现邮箱登录',
+        status: 'pending',
+        statusLabel: '待领取',
+        priority: 'high',
+        tags: ['auth'],
+        estimate: '预计 1 小时',
+        icon: 'key',
+      } as ipc.TaskView,
+    ];
     const wrapper = render();
     await flushPromises();
     expect(wrapper.find('[data-empty="queue"]').exists()).toBe(false);
@@ -49,7 +61,16 @@ describe('QueueView', () => {
   test('metrics, presence and the feed come from the activity overview', async () => {
     useAppStore().activity = {
       recent: [
-        { kind: 'package_transition', packageId: 'p1', title: '登录接口', transition: 'review_passed', actor: 'agent', from: 'in_review', to: 'accepting', at: new Date().toISOString() },
+        {
+          kind: 'package_transition',
+          packageId: 'p1',
+          title: '登录接口',
+          transition: 'review_passed',
+          actor: 'agent',
+          from: 'in_review',
+          to: 'accepting',
+          at: new Date().toISOString(),
+        },
         { kind: 'requirement_created', requirementId: 'r1', title: '<img src=x onerror=alert(1)>', at: new Date(Date.now() - 5 * 60_000).toISOString() },
       ],
       metrics: { doneThisWeek: 5, donePreviousWeek: 4, averageHours: 2.44, averageHoursPrevious: 2.4 },
@@ -72,7 +93,12 @@ describe('QueueView', () => {
 
   test('before the first overview the metrics show placeholders and the feed stays empty', () => {
     const wrapper = render();
-    expect(wrapper.findAll('.metric-card strong').map((node) => node.text()).slice(1)).toEqual(['–', '–']);
+    expect(
+      wrapper
+        .findAll('.metric-card strong')
+        .map((node) => node.text())
+        .slice(1),
+    ).toEqual(['–', '–']);
     expect(wrapper.find('.team-presence').exists()).toBe(false);
     expect(wrapper.find('.activity-list .empty-hint').exists()).toBe(false);
   });

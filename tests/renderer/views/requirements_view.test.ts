@@ -58,17 +58,26 @@ describe('RequirementsView', () => {
     const { wrapper } = await render();
     expect(wrapper.find('.req-title-row .status-pill').classes()).toContain('in_review');
     const steps = wrapper.findAll('.req-stepper li');
-    expect(steps.map((step) => step.classes().filter((name) => name !== '').join(' '))).toEqual(['done', 'done', 'done', 'current']);
+    expect(
+      steps.map((step) =>
+        step
+          .classes()
+          .filter((name) => name !== '')
+          .join(' '),
+      ),
+    ).toEqual(['done', 'done', 'done', 'current']);
     wrapper.unmount();
   });
 
   test('agent-written text renders as text, with backtick spans as code', async () => {
-    state.list = [requirement({
-      title: MARKUP,
-      text: MARKUP,
-      summary: `用 \`${MARKUP}\` 做`,
-      questions: [{ text: `问题 ${MARKUP} \`code\``, answer: '' }],
-    })];
+    state.list = [
+      requirement({
+        title: MARKUP,
+        text: MARKUP,
+        summary: `用 \`${MARKUP}\` 做`,
+        questions: [{ text: `问题 ${MARKUP} \`code\``, answer: '' }],
+      }),
+    ];
     const { wrapper } = await render();
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.find('.req-title-row h2').text()).toBe(MARKUP);
@@ -79,7 +88,14 @@ describe('RequirementsView', () => {
   });
 
   test('answers are limited to 1000 characters and submitted in order', async () => {
-    state.list = [requirement({ questions: [{ text: 'q1', answer: '已有' }, { text: 'q2', answer: '' }] })];
+    state.list = [
+      requirement({
+        questions: [
+          { text: 'q1', answer: '已有' },
+          { text: 'q2', answer: '' },
+        ],
+      }),
+    ];
     const { wrapper } = await render();
     const inputs = wrapper.findAll('.question-card textarea');
     expect(inputs.map((input) => input.attributes('maxlength'))).toEqual(['1000', '1000']);
@@ -168,12 +184,21 @@ describe('RequirementsView', () => {
   });
 
   test('the interface summary lists modules, sections and skipped files', async () => {
-    state.list = [requirement({
-      interfaces: {
-        summary: { modules: [{ path: 'src/a.ts', purpose: 'A', members: [{ name: 'a', signature: 'a(): void' }], dependsOn: ['b'], notes: ['n'] }], conventions: ['c'], gaps: [] },
-        text: 't', read: [{ path: 'src/a.ts', sha: '1' }], skipped: [{ path: '.env', reason: 'secret' }], error: null,
-      },
-    })];
+    state.list = [
+      requirement({
+        interfaces: {
+          summary: {
+            modules: [{ path: 'src/a.ts', purpose: 'A', members: [{ name: 'a', signature: 'a(): void' }], dependsOn: ['b'], notes: ['n'] }],
+            conventions: ['c'],
+            gaps: [],
+          },
+          text: 't',
+          read: [{ path: 'src/a.ts', sha: '1' }],
+          skipped: [{ path: '.env', reason: 'secret' }],
+          error: null,
+        },
+      }),
+    ];
     const { wrapper } = await render();
     expect(wrapper.find('.interfaces-headline').text()).toBe('读取了 1 个文件，整理出 1 个模块的接口');
     expect(wrapper.find('.interface-members').text()).toBe('a(): void');

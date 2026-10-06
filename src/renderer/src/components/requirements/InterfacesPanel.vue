@@ -20,11 +20,17 @@ const headline = computed(() => {
 
 const modules = computed(() => props.info.summary?.modules ?? []);
 
-const sections = computed(() => [
-  { title: '仓库约定', entries: props.info.summary?.conventions ?? [], className: '' },
-  { title: '不确定或缺失', entries: props.info.summary?.gaps ?? [], className: 'gaps' },
-  { title: '未读取', entries: (props.info.skipped ?? []).map((skipped) => `${skipped.path}（${SKIP_LABELS[skipped.reason] ?? skipped.reason}）`), className: 'skipped' },
-].filter((section) => section.entries.length));
+const sections = computed(() =>
+  [
+    { title: '仓库约定', entries: props.info.summary?.conventions ?? [], className: '' },
+    { title: '不确定或缺失', entries: props.info.summary?.gaps ?? [], className: 'gaps' },
+    {
+      title: '未读取',
+      entries: (props.info.skipped ?? []).map((skipped) => `${skipped.path}（${SKIP_LABELS[skipped.reason] ?? skipped.reason}）`),
+      className: 'skipped',
+    },
+  ].filter((section) => section.entries.length),
+);
 
 const hasBody = computed(() => modules.value.length > 0 || sections.value.length > 0);
 </script>
@@ -32,12 +38,18 @@ const hasBody = computed(() => modules.value.length > 0 || sections.value.length
 <template>
   <details class="interfaces glass">
     <summary>
-      <span class="interfaces-label"><span class="agent-avatar arch">AR</span><strong>Architect</strong></span>
+      <span class="interfaces-label">
+        <span class="agent-avatar arch">AR</span>
+        <strong>Architect</strong>
+      </span>
       <span class="interfaces-headline">{{ headline }}</span>
     </summary>
     <div v-if="hasBody" class="interfaces-body">
       <div v-for="mod in modules" :key="mod.path" class="interface-module">
-        <div class="interface-path"><AppIcon name="file" />{{ mod.path }}</div>
+        <div class="interface-path">
+          <AppIcon name="file" />
+          {{ mod.path }}
+        </div>
         <p class="interface-purpose">{{ mod.purpose }}</p>
         <pre v-if="mod.members.length" class="interface-members">{{ mod.members.map((member) => member.signature).join('\n') }}</pre>
         <p v-if="mod.dependsOn.length" class="interface-deps">{{ `依赖 ${mod.dependsOn.join('、')}` }}</p>
@@ -47,7 +59,9 @@ const hasBody = computed(() => modules.value.length > 0 || sections.value.length
       </div>
       <div v-for="section in sections" :key="section.title" class="interface-section" :class="section.className">
         <h4>{{ section.title }}</h4>
-        <ul><li v-for="(entry, index) in section.entries" :key="index">{{ entry }}</li></ul>
+        <ul>
+          <li v-for="(entry, index) in section.entries" :key="index">{{ entry }}</li>
+        </ul>
       </div>
     </div>
   </details>

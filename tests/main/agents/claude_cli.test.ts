@@ -8,7 +8,13 @@ import { PassThrough } from 'node:stream';
 import * as cli from '../../../src/main/agents/claude_cli.ts';
 
 // A stand-in child process that records what it was given.
-const fakeSpawn = ({ stdout = '', stderr = '', code = 0, error = null, hang = false }: { stdout?: string; stderr?: string; code?: number; error?: Error | null; hang?: boolean } = {}) => {
+const fakeSpawn = ({
+  stdout = '',
+  stderr = '',
+  code = 0,
+  error = null,
+  hang = false,
+}: { stdout?: string; stderr?: string; code?: number; error?: Error | null; hang?: boolean } = {}) => {
   const calls: { command: string; args: string[]; options: { cwd: string }; input: () => string }[] = [];
   const spawnFn = (command, args, options): any => {
     const child: any = new EventEmitter();
@@ -16,7 +22,9 @@ const fakeSpawn = ({ stdout = '', stderr = '', code = 0, error = null, hang = fa
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     let input = '';
-    child.stdin.on('data', (chunk) => { input += chunk; });
+    child.stdin.on('data', (chunk) => {
+      input += chunk;
+    });
     child.kill = () => setImmediate(() => child.emit('close', null));
     calls.push({ command, args, options, input: () => input });
     setImmediate(() => {
@@ -104,7 +112,10 @@ test('runStructured() retries once when the CLI exhausts its schema retries', as
   assert.equal(calls, 2);
 
   let always = 0;
-  const broken = (...args: [string, string[], object]) => { always += 1; return fakeSpawn({ stdout: exhausted }).spawnFn(...args); };
+  const broken = (...args: [string, string[], object]) => {
+    always += 1;
+    return fakeSpawn({ stdout: exhausted }).spawnFn(...args);
+  };
   await assert.rejects(() => cli.runStructured({ ...base, spawnFn: broken }), { code: 'agent_bad_output' });
   assert.equal(always, 2, 'only one retry');
 });

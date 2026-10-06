@@ -170,7 +170,22 @@ describe('execution store', () => {
     const execution = useExecutionStore();
     await execution.open('t1');
     const acceptance = [{ text: '登录成功', test: 'login works', status: 'verified', verified: true, manual: false }] as ipc.CriterionEvidence[];
-    api.verify.run.mockResolvedValueOnce({ ok: true, data: { kind: 'test', command: 'npm test', exitCode: 0, timedOut: false, durationMs: 1200, output: '', results: [], summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true }, report: { format: 'stdout', trusted: true, problem: null }, check: { stage: 'submit', blocking: true }, acceptance } });
+    api.verify.run.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        kind: 'test',
+        command: 'npm test',
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 1200,
+        output: '',
+        results: [],
+        summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true },
+        report: { format: 'stdout', trusted: true, problem: null },
+        check: { stage: 'submit', blocking: true },
+        acceptance,
+      },
+    });
     await execution.runVerification('test');
     expect(api.verify.run).toHaveBeenCalledWith('test', 't1');
     expect(execution.verifyKind).toBe('test');

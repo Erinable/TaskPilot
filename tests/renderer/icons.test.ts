@@ -14,9 +14,11 @@ import { SAMPLE_TASKS } from '../main/fixtures/sample_tasks.ts';
 const SOURCE = path.join(import.meta.dirname, '..', '..', 'src', 'renderer', 'src');
 const definitions = ICONS as Record<string, IconDefinition>;
 
-const sourceFiles = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true })
-  .flatMap((entry) => (entry.isDirectory() ? sourceFiles(path.join(dir, entry.name)) : [path.join(dir, entry.name)]))
-  .filter((file) => /\.(vue|ts)$/.test(file));
+const sourceFiles = (dir: string): string[] =>
+  fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => (entry.isDirectory() ? sourceFiles(path.join(dir, entry.name)) : [path.join(dir, entry.name)]))
+    .filter((file) => /\.(vue|ts)$/.test(file));
 
 test('every icon name written literally in the renderer is defined', () => {
   // vue-tsc checks typed names; this also catches names in untyped data.

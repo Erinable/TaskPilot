@@ -8,9 +8,15 @@ describe('release model', () => {
   test('start point line carries counts once a draft has them', () => {
     const startPoint = { kind: 'tag' as const, commit: 'abc', label: 'v1.2.0' };
     expect(model.startPointLine(startPoint, null)).toBe('从标签 v1.2.0 开始');
-    expect(model.startPointLine({ ...startPoint, commitCount: 12, commitsTruncated: false, packageCount: 3 }, null)).toBe('从标签 v1.2.0 开始（12 个提交，3 个完成的工作包）');
-    expect(model.startPointLine({ ...startPoint, kind: 'release' }, { commitCount: 200, commitsTruncated: true, fileCount: 1, filesTruncated: false, packageIds: ['p1'] }))
-      .toBe('从上次发布 v1.2.0 开始（200+ 个提交，1 个完成的工作包）');
+    expect(model.startPointLine({ ...startPoint, commitCount: 12, commitsTruncated: false, packageCount: 3 }, null)).toBe(
+      '从标签 v1.2.0 开始（12 个提交，3 个完成的工作包）',
+    );
+    expect(
+      model.startPointLine(
+        { ...startPoint, kind: 'release' },
+        { commitCount: 200, commitsTruncated: true, fileCount: 1, filesTruncated: false, packageIds: ['p1'] },
+      ),
+    ).toBe('从上次发布 v1.2.0 开始（200+ 个提交，1 个完成的工作包）');
   });
 
   test('times follow the business time zone', () => {

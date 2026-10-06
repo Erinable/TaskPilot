@@ -67,11 +67,28 @@ describe('ExecutionView', () => {
     current.task = taskView({
       title: payload,
       steps: [`运行 \`${payload}\``],
-      deviations: [{ note: payload, stepIndex: 0, filePath: 'src/auth.ts', reportedAt: '2026-01-02T00:00:00.000Z', resolution: { decision: 'dismiss', reason: payload, changes: [payload], decidedAt: '', afterContest: false, contested: false, reverted: false } }],
+      deviations: [
+        {
+          note: payload,
+          stepIndex: 0,
+          filePath: 'src/auth.ts',
+          reportedAt: '2026-01-02T00:00:00.000Z',
+          resolution: { decision: 'dismiss', reason: payload, changes: [payload], decidedAt: '', afterContest: false, contested: false, reverted: false },
+        },
+      ],
       review: {
-        status: 'rejected', error: null, startedAt: '', finishedAt: null, reasons: ['qa_rejected'], attention: [], checks: [], verification: null, acceptance: [],
+        status: 'rejected',
+        error: null,
+        startedAt: '',
+        finishedAt: null,
+        reasons: ['qa_rejected'],
+        attention: [],
+        checks: [],
+        verification: null,
+        acceptance: [],
         report: { verdict: 'reject', summary: payload, criteria: [], issues: [{ severity: 'major', text: payload, file: null, line: null }] },
-        diff: { files: [], skipped: [], outOfScope: [] }, costUsd: 0,
+        diff: { files: [], skipped: [], outOfScope: [] },
+        costUsd: 0,
       },
     });
     const { wrapper } = await mountOpen();

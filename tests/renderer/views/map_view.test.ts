@@ -25,7 +25,18 @@ const mapModule = (overrides: Partial<ipc.MapModule> = {}): ipc.MapModule => ({
 });
 
 const engineeringMap = (overrides: Partial<ipc.EngineeringMap> = {}): ipc.EngineeringMap => ({
-  modules: [mapModule(), mapModule({ path: 'src/main/tasks.ts', purpose: '示例数据', members: [], dependsOn: [], notes: [], freshness: 'stale', source: { ...source, requirementId: 'r2', title: '任务列表' } })],
+  modules: [
+    mapModule(),
+    mapModule({
+      path: 'src/main/tasks.ts',
+      purpose: '示例数据',
+      members: [],
+      dependsOn: [],
+      notes: [],
+      freshness: 'stale',
+      source: { ...source, requirementId: 'r2', title: '任务列表' },
+    }),
+  ],
   conventions: [{ text: '用 `node:test`', source }],
   gaps: [{ text: '没有读到 renderer', source }],
   files: ['src/main/ipc.ts', 'src/main/tasks.ts', 'src/main/index.ts', 'README.md'],
@@ -158,10 +169,15 @@ describe('MapView', () => {
 
   test('agent text stays text', async () => {
     const injected = '<img src=x onerror=alert(1)>';
-    state.result = { ok: true, data: engineeringMap({
-      modules: [mapModule({ purpose: injected, members: [{ name: injected, signature: injected }], notes: [injected], source: { ...source, title: injected } })],
-      conventions: [{ text: injected, source }],
-    }) };
+    state.result = {
+      ok: true,
+      data: engineeringMap({
+        modules: [
+          mapModule({ purpose: injected, members: [{ name: injected, signature: injected }], notes: [injected], source: { ...source, title: injected } }),
+        ],
+        conventions: [{ text: injected, source }],
+      }),
+    };
     const wrapper = await render();
     await wrapper.get('[data-module="src/main/ipc.ts"]').trigger('click');
     expect(wrapper.find('img').exists()).toBe(false);

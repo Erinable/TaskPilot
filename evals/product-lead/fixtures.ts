@@ -29,33 +29,61 @@ export interface EvalCase {
 }
 
 const TS_API = [
-  'package.json', 'tsconfig.json', 'README.md',
-  'src/index.ts', 'src/app.ts',
-  'src/auth/user-repository.ts', 'src/auth/user.ts', 'src/auth/token-service.ts',
-  'src/http/router.ts', 'src/http/middleware/error-handler.ts',
-  'src/db/client.ts', 'src/db/migrations/001_users.sql',
-  'tests/auth/user-repository.test.ts', 'tests/http/router.test.ts', 'tests/helpers/fake-db.ts',
+  'package.json',
+  'tsconfig.json',
+  'README.md',
+  'src/index.ts',
+  'src/app.ts',
+  'src/auth/user-repository.ts',
+  'src/auth/user.ts',
+  'src/auth/token-service.ts',
+  'src/http/router.ts',
+  'src/http/middleware/error-handler.ts',
+  'src/db/client.ts',
+  'src/db/migrations/001_users.sql',
+  'tests/auth/user-repository.test.ts',
+  'tests/http/router.test.ts',
+  'tests/helpers/fake-db.ts',
 ];
 
 const REACT_APP = [
-  'package.json', 'vite.config.ts', 'index.html',
-  'src/main.tsx', 'src/App.tsx',
-  'src/components/Button.tsx', 'src/components/Modal.tsx', 'src/components/Table.tsx',
-  'src/pages/SettingsPage.tsx', 'src/pages/OrdersPage.tsx',
-  'src/api/client.ts', 'src/api/orders.ts',
+  'package.json',
+  'vite.config.ts',
+  'index.html',
+  'src/main.tsx',
+  'src/App.tsx',
+  'src/components/Button.tsx',
+  'src/components/Modal.tsx',
+  'src/components/Table.tsx',
+  'src/pages/SettingsPage.tsx',
+  'src/pages/OrdersPage.tsx',
+  'src/api/client.ts',
+  'src/api/orders.ts',
   'src/hooks/useOrders.ts',
-  'src/components/__tests__/Button.test.tsx', 'src/pages/__tests__/OrdersPage.test.tsx',
+  'src/components/__tests__/Button.test.tsx',
+  'src/pages/__tests__/OrdersPage.test.tsx',
 ];
 
 const PY_SERVICE = [
-  'pyproject.toml', 'README.md',
-  'app/__init__.py', 'app/main.py', 'app/config.py',
-  'app/billing/__init__.py', 'app/billing/invoices.py', 'app/billing/models.py',
-  'app/notifications/__init__.py', 'app/notifications/email.py',
-  'tests/test_invoices.py', 'tests/conftest.py',
+  'pyproject.toml',
+  'README.md',
+  'app/__init__.py',
+  'app/main.py',
+  'app/config.py',
+  'app/billing/__init__.py',
+  'app/billing/invoices.py',
+  'app/billing/models.py',
+  'app/notifications/__init__.py',
+  'app/notifications/email.py',
+  'tests/test_invoices.py',
+  'tests/conftest.py',
 ];
 
-const SOURCES_BY_FILES = new Map<string[], Record<string, string>>([[TS_API, sources.TS_API], [REACT_APP, sources.REACT_APP], [PY_SERVICE, sources.PY_SERVICE]]);
+const SOURCES_BY_FILES = new Map<string[], Record<string, string>>([
+  [TS_API, sources.TS_API],
+  [REACT_APP, sources.REACT_APP],
+  [PY_SERVICE, sources.PY_SERVICE],
+]);
 
 export const cases: EvalCase[] = [
   {
@@ -68,7 +96,9 @@ export const cases: EvalCase[] = [
     files: TS_API,
     answers: {},
     expect: {
-      questions: [0, 1], packages: [1, 1], hours: [0.5, 2],
+      questions: [0, 1],
+      packages: [1, 1],
+      hours: [0.5, 2],
       mustTouch: ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts'],
       // Facts only visible in the code: the existing fake-db test helper, and
       // that the sibling getById throws NotFoundError (the requirement asks
@@ -92,7 +122,11 @@ export const cases: EvalCase[] = [
       hash: '密码已经用 bcrypt 存储。',
     },
     expect: {
-      questions: [1, 3], packages: [1, 3], hours: [2, 6], mustTouch: ['src/auth/user-repository.ts'], mustNotInvent: ['session'],
+      questions: [1, 3],
+      packages: [1, 3],
+      hours: [2, 6],
+      mustTouch: ['src/auth/user-repository.ts'],
+      mustNotInvent: ['session'],
       grounding: ['issue(', 'NotFoundError', 'route('],
     },
   },
@@ -120,7 +154,10 @@ export const cases: EvalCase[] = [
       setting: '设置存在客户表上，加一个布尔字段。',
     },
     expect: {
-      questions: [1, 4], packages: [3, 5], hours: [5, 14], mustTouch: ['app/billing/invoices.py', 'app/notifications/email.py'],
+      questions: [1, 4],
+      packages: [3, 5],
+      hours: [5, 14],
+      mustTouch: ['app/billing/invoices.py', 'app/notifications/email.py'],
       grounding: ['issue_invoice', 'send_email', 'session'],
     },
   },
@@ -134,7 +171,11 @@ export const cases: EvalCase[] = [
     files: REACT_APP,
     answers: { default: '接口已经有了。确认框用现有的 Modal 组件。' },
     expect: {
-      questions: [0, 2], packages: [1, 2], hours: [1, 4], mustTouch: ['src/pages/SettingsPage.tsx'], testPattern: /__tests__\//,
+      questions: [0, 2],
+      packages: [1, 2],
+      hours: [1, 4],
+      mustTouch: ['src/pages/SettingsPage.tsx'],
+      testPattern: /__tests__\//,
       grounding: ['request', 'Modal', 'variant="danger"'],
     },
   },

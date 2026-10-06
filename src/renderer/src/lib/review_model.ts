@@ -39,12 +39,13 @@ const UNAVAILABLE: Record<string, string> = {
   cancelled: '基线测量已取消。',
 };
 
-const failingCount = (baseline: ipc.BaselineChecks) => Object.values(baseline.checks ?? {})
-  .reduce((sum, check) => sum + (check && 'failing' in check ? check.failing.length : 0), 0);
+const failingCount = (baseline: ipc.BaselineChecks) =>
+  Object.values(baseline.checks ?? {}).reduce((sum, check) => sum + (check && 'failing' in check ? check.failing.length : 0), 0);
 
 const BASELINE: Record<ipc.BaselineStatus, (baseline: ipc.BaselineChecks) => string> = {
   measuring: () => '正在基线上运行提交前检查…',
-  measured: (baseline) => `基线已测量${failingCount(baseline) ? `：${failingCount(baseline)} 个测试在基线上就失败，不会算作这次改动引入` : '，所有检查在基线上都通过'}`,
+  measured: (baseline) =>
+    `基线已测量${failingCount(baseline) ? `：${failingCount(baseline)} 个测试在基线上就失败，不会算作这次改动引入` : '，所有检查在基线上都通过'}`,
   unavailable: (baseline) => UNAVAILABLE[baseline.reason ?? ''] ?? `没有测量基线（${baseline.reason ?? '未知原因'}）。`,
   contaminated: () => '测量期间工作树发生了变化，这次基线已作废。还原改动后可以重新测量。',
 };
@@ -76,22 +77,47 @@ export const CRITERION_EVIDENCE: Record<ipc.CriterionStatus, string> = {
 export const attentionText = (item: ipc.AttentionItem, acceptance: ipc.AcceptanceCriterion[] = []) => {
   const criterion = (index: number) => `「${acceptance[index]?.text ?? `条件 ${index + 1}`}」`;
   switch (item.code) {
-    case 'check_unverifiable': return `${KIND_LABELS[item.kind] ?? item.kind}无法验证：${REASONS[item.reason ?? ''] ?? item.reason}`;
-    case 'preexisting_failures': return `${KIND_LABELS[item.kind] ?? item.kind}有 ${item.count} 个测试在基线上就失败`;
-    case 'no_baseline': return `${KIND_LABELS[item.kind] ?? item.kind}没有基线，无法区分既有失败`;
-    case 'criterion_unverifiable': return `${criterion(item.index)}的关联测试无法验证，请人工确认`;
-    case 'criterion_manual': return `${criterion(item.index)}没有关联测试，请人工确认`;
-    case 'criterion_already_passing': return `${criterion(item.index)}的关联测试在改动前就已通过，不能证明这次改动有效`;
-    default: return (item as { code: string }).code;
+    case 'check_unverifiable':
+      return `${KIND_LABELS[item.kind] ?? item.kind}无法验证：${REASONS[item.reason ?? ''] ?? item.reason}`;
+    case 'preexisting_failures':
+      return `${KIND_LABELS[item.kind] ?? item.kind}有 ${item.count} 个测试在基线上就失败`;
+    case 'no_baseline':
+      return `${KIND_LABELS[item.kind] ?? item.kind}没有基线，无法区分既有失败`;
+    case 'criterion_unverifiable':
+      return `${criterion(item.index)}的关联测试无法验证，请人工确认`;
+    case 'criterion_manual':
+      return `${criterion(item.index)}没有关联测试，请人工确认`;
+    case 'criterion_already_passing':
+      return `${criterion(item.index)}的关联测试在改动前就已通过，不能证明这次改动有效`;
+    default:
+      return (item as { code: string }).code;
   }
 };
 
 // ========== Execution page ==========
 
-export type CriterionRow = { text: string; test: string | null; status: ipc.CriterionStatus | null; tone: string; icon: IconName; note: string; alreadyPassing: boolean };
+export type CriterionRow = {
+  text: string;
+  test: string | null;
+  status: ipc.CriterionStatus | null;
+  tone: string;
+  icon: IconName;
+  note: string;
+  alreadyPassing: boolean;
+};
 
-const CRITERION_TONES: Partial<Record<ipc.CriterionStatus, string>> = { verified: 'verified', failed: 'failed', missing: 'failed', unverifiable: 'unverifiable' };
-const CRITERION_MARKS: Partial<Record<ipc.CriterionStatus, IconName>> = { verified: 'check-circle', failed: 'x-circle', missing: 'x-circle', unverifiable: 'alert' };
+const CRITERION_TONES: Partial<Record<ipc.CriterionStatus, string>> = {
+  verified: 'verified',
+  failed: 'failed',
+  missing: 'failed',
+  unverifiable: 'unverifiable',
+};
+const CRITERION_MARKS: Partial<Record<ipc.CriterionStatus, IconName>> = {
+  verified: 'check-circle',
+  failed: 'x-circle',
+  missing: 'x-circle',
+  unverifiable: 'alert',
+};
 
 // Acceptance rows; `matched` comes from the last verification run or review, if any.
 export const criterionRows = (acceptance: ipc.AcceptanceCriterion[], matched: ipc.CriterionEvidence[] | null | undefined): CriterionRow[] => {
@@ -99,7 +125,15 @@ export const criterionRows = (acceptance: ipc.AcceptanceCriterion[], matched: ip
   return acceptance.map((criterion) => {
     const result = byText.get(criterion.text);
     // Reviews stored before evidence statuses existed carry only the flags.
-    const legacy: ipc.CriterionStatus | undefined = result ? (result.manual ? 'manual' : result.verified ? 'verified' : result.missing ? 'missing' : 'failed') : undefined;
+    const legacy: ipc.CriterionStatus | undefined = result
+      ? result.manual
+        ? 'manual'
+        : result.verified
+          ? 'verified'
+          : result.missing
+            ? 'missing'
+            : 'failed'
+      : undefined;
     const status: ipc.CriterionStatus | null = result?.status ?? legacy ?? (criterion.test ? null : 'manual');
     return {
       text: criterion.text,
@@ -136,10 +170,11 @@ export const SKIP_LABELS: Record<ipc.DiffSkipReason, string> = {
 };
 export const DECISION_LABELS: Record<ipc.DeviationResolution['decision'], string> = { dismiss: 'Architect 驳回：按原计划继续', replan: 'Architect 已重新规划' };
 
-export const resolutionTitle = (resolution: ipc.DeviationResolution) => DECISION_LABELS[resolution.decision]
-  + (resolution.afterContest ? '（应你的异议）' : '')
-  + (resolution.contested ? ' · 你已提出异议' : '')
-  + (resolution.reverted ? ' · 你已撤销' : '');
+export const resolutionTitle = (resolution: ipc.DeviationResolution) =>
+  DECISION_LABELS[resolution.decision] +
+  (resolution.afterContest ? '（应你的异议）' : '') +
+  (resolution.contested ? ' · 你已提出异议' : '') +
+  (resolution.reverted ? ' · 你已撤销' : '');
 
 // git prints several header lines before the hunks; they are neither
 // additions nor deletions even when they start with + or -.
@@ -147,8 +182,13 @@ const DIFF_META = /^(diff |index |new file |deleted file |old mode |new mode |si
 
 export type DiffLineKind = 'meta' | 'hunk' | 'add' | 'del' | '';
 
-export const diffLineKind = (line: string): DiffLineKind => (DIFF_META.test(line) || line.startsWith('+++') || line.startsWith('---') ? 'meta'
-  : line.startsWith('@@') ? 'hunk'
-    : line.startsWith('+') ? 'add'
-      : line.startsWith('-') ? 'del'
-        : '');
+export const diffLineKind = (line: string): DiffLineKind =>
+  DIFF_META.test(line) || line.startsWith('+++') || line.startsWith('---')
+    ? 'meta'
+    : line.startsWith('@@')
+      ? 'hunk'
+      : line.startsWith('+')
+        ? 'add'
+        : line.startsWith('-')
+          ? 'del'
+          : '';

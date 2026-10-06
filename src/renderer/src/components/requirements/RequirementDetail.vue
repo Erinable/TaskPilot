@@ -24,16 +24,18 @@ const publishing = ref(false);
 
 const running = computed(() => model.isRunning(props.item));
 const architectRunning = computed(() => running.value && props.item.phase === 'architect');
-const runningLabel = computed(() => (props.item.status === 'planning' ? '正在拆解工作包…'
-  : props.item.phase === 'architect' ? 'Architect 正在阅读相关代码…'
-    : '正在阅读需求，准备澄清问题…'));
+const runningLabel = computed(() =>
+  props.item.status === 'planning' ? '正在拆解工作包…' : props.item.phase === 'architect' ? 'Architect 正在阅读相关代码…' : '正在阅读需求，准备澄清问题…',
+);
 const failedStep = computed(() => (props.item.failedStep === 'planning' ? 'plan' : 'clarify'));
 
 const plan = computed(() => props.item.plan);
 const planTotal = computed(() => Math.round((plan.value?.packages ?? []).reduce((sum, pkg) => sum + pkg.estimateHours, 0) * 10) / 10);
 const planFiles = computed(() => new Set((plan.value?.packages ?? []).flatMap((pkg) => pkg.fileScope)).size);
 
-const report = (promise: Promise<unknown>) => { promise.catch((error) => console.error(error)); };
+const report = (promise: Promise<unknown>) => {
+  promise.catch((error) => console.error(error));
+};
 
 const onCancel = () => {
   cancelling.value = true;
@@ -56,12 +58,18 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
         <h2>{{ item.title || '未命名需求' }}</h2>
       </div>
       <ol class="req-stepper" aria-label="进度">
-        <li v-for="entry in model.STEPS" :key="entry.step" :data-step="entry.step" :class="model.stepClasses(item, entry.step)"><span class="step-dot"></span>{{ entry.label }}</li>
+        <li v-for="entry in model.STEPS" :key="entry.step" :data-step="entry.step" :class="model.stepClasses(item, entry.step)">
+          <span class="step-dot"></span>
+          {{ entry.label }}
+        </li>
       </ol>
     </header>
 
     <details class="req-original glass">
-      <summary><AppIcon name="file" />原始需求</summary>
+      <summary>
+        <AppIcon name="file" />
+        原始需求
+      </summary>
       <p>{{ item.text }}</p>
     </details>
 
@@ -71,9 +79,15 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
 
       <template v-if="running">
         <AgentBubble tone="running" :agent="item.phase === 'architect' ? 'arch' : 'pm'">
-          <div class="agent-running"><AppIcon name="spinner" class="spin" /><span>{{ runningLabel }}</span></div>
+          <div class="agent-running">
+            <AppIcon name="spinner" class="spin" />
+            <span>{{ runningLabel }}</span>
+          </div>
           <small>通常需要 20 秒到 1 分钟。可以先去做别的事，完成后这里会更新。</small>
-          <button class="secondary-button small" type="button" :disabled="cancelling" @click="onCancel"><AppIcon name="x" />取消</button>
+          <button class="secondary-button small" type="button" :disabled="cancelling" @click="onCancel">
+            <AppIcon name="x" />
+            取消
+          </button>
         </AgentBubble>
       </template>
 
@@ -82,8 +96,14 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
           <code v-if="item.error?.message && item.error.code !== 'agent_cancelled'" class="agent-error-detail">{{ item.error.message }}</code>
         </AgentBubble>
         <div class="req-actions">
-          <button class="primary-button" type="button" @click="report(store.runStep(item, failedStep))"><AppIcon name="refresh" />{{ failedStep === 'plan' ? '重新拆解' : '重新澄清' }}</button>
-          <button v-if="failedStep === 'plan'" class="secondary-button" type="button" @click="report(store.editAnswers(item))"><AppIcon name="arrow-left" />修改回答</button>
+          <button class="primary-button" type="button" @click="report(store.runStep(item, failedStep))">
+            <AppIcon name="refresh" />
+            {{ failedStep === 'plan' ? '重新拆解' : '重新澄清' }}
+          </button>
+          <button v-if="failedStep === 'plan'" class="secondary-button" type="button" @click="report(store.editAnswers(item))">
+            <AppIcon name="arrow-left" />
+            修改回答
+          </button>
         </div>
       </template>
 
@@ -93,11 +113,25 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
         <AgentBubble v-else :text="`开始拆解前，我有 ${item.questions.length} 个问题。没把握的可以留空，我会选一个合理的默认做法并说明。`" />
         <form class="req-questions" novalidate @submit.prevent="onSubmitAnswers">
           <div v-for="(question, index) in item.questions" :key="index" class="question-card glass">
-            <label class="question-text" :for="`reqAnswer${index}`"><span class="question-index">{{ index + 1 }}</span><span><InlineCode :text="question.text" /></span></label>
-            <el-input :id="`reqAnswer${index}`" v-model="answers[index]" type="textarea" :rows="2" :maxlength="model.MAX_ANSWER" placeholder="你的回答（可留空）" :data-index="index" />
+            <label class="question-text" :for="`reqAnswer${index}`">
+              <span class="question-index">{{ index + 1 }}</span>
+              <span><InlineCode :text="question.text" /></span>
+            </label>
+            <el-input
+              :id="`reqAnswer${index}`"
+              v-model="answers[index]"
+              type="textarea"
+              :rows="2"
+              :maxlength="model.MAX_ANSWER"
+              placeholder="你的回答（可留空）"
+              :data-index="index"
+            />
           </div>
           <div class="req-actions">
-            <button class="primary-button" type="submit"><AppIcon name="blocks" />开始拆解</button>
+            <button class="primary-button" type="submit">
+              <AppIcon name="blocks" />
+              开始拆解
+            </button>
           </div>
         </form>
       </template>
@@ -106,24 +140,51 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
         <AgentBubble v-if="item.status === 'published'" :text="`已发布 ${item.packages.length} 个工作包到工作队列。`" icon-name="check-circle" />
         <AgentBubble :text="plan.summary" />
         <div class="plan-summary">
-          <span><AppIcon name="blocks" />{{ `${plan.packages.length} 个工作包` }}</span>
-          <span><AppIcon name="clock" />{{ `合计约 ${planTotal} 小时` }}</span>
-          <span><AppIcon name="file" />{{ `${planFiles} 个文件` }}</span>
-          <span v-if="item.costUsd > 0" class="plan-cost"><AppIcon name="info" />{{ `本需求累计费用 $${item.costUsd.toFixed(3)}` }}</span>
+          <span>
+            <AppIcon name="blocks" />
+            {{ `${plan.packages.length} 个工作包` }}
+          </span>
+          <span>
+            <AppIcon name="clock" />
+            {{ `合计约 ${planTotal} 小时` }}
+          </span>
+          <span>
+            <AppIcon name="file" />
+            {{ `${planFiles} 个文件` }}
+          </span>
+          <span v-if="item.costUsd > 0" class="plan-cost">
+            <AppIcon name="info" />
+            {{ `本需求累计费用 $${item.costUsd.toFixed(3)}` }}
+          </span>
         </div>
         <PlanPackageCard v-for="(pkg, index) in plan.packages" :key="index" :pkg="pkg" :index="index" />
         <div class="req-actions sticky">
-          <button v-if="item.status === 'published'" class="primary-button" type="button" @click="report(store.showQueue())"><AppIcon name="arrow-right" />查看工作队列</button>
+          <button v-if="item.status === 'published'" class="primary-button" type="button" @click="report(store.showQueue())">
+            <AppIcon name="arrow-right" />
+            查看工作队列
+          </button>
           <template v-else>
-            <button class="secondary-button" type="button" @click="report(store.editAnswers(item))"><AppIcon name="arrow-left" />修改回答</button>
-            <button class="secondary-button" type="button" @click="report(store.runStep(item, 'plan'))"><AppIcon name="refresh" />重新拆解</button>
-            <button class="primary-button" type="button" :disabled="publishing" @click="report(onPublish())"><AppIcon name="send" />{{ `发布 ${plan.packages.length} 个工作包` }}</button>
+            <button class="secondary-button" type="button" @click="report(store.editAnswers(item))">
+              <AppIcon name="arrow-left" />
+              修改回答
+            </button>
+            <button class="secondary-button" type="button" @click="report(store.runStep(item, 'plan'))">
+              <AppIcon name="refresh" />
+              重新拆解
+            </button>
+            <button class="primary-button" type="button" :disabled="publishing" @click="report(onPublish())">
+              <AppIcon name="send" />
+              {{ `发布 ${plan.packages.length} 个工作包` }}
+            </button>
           </template>
         </div>
       </template>
 
       <div v-if="!running && item.status !== 'published'" class="req-delete">
-        <button class="link-button danger" type="button" @click="report(store.removeRequirement(item))"><AppIcon name="trash" />删除这个需求</button>
+        <button class="link-button danger" type="button" @click="report(store.removeRequirement(item))">
+          <AppIcon name="trash" />
+          删除这个需求
+        </button>
       </div>
     </div>
   </div>

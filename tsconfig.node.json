@@ -14,5 +14,14 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["electron.vite.config.ts", "vitest.config.ts", "uno.config.ts", "eslint.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "evals/**/*"]
+  "include": [
+    "electron.vite.config.ts",
+    "vitest.config.ts",
+    "uno.config.ts",
+    "eslint.config.ts",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "evals/**/*"
+  ]
 }

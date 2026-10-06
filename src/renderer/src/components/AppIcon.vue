@@ -9,9 +9,11 @@ const props = defineProps<{ name: IconName }>();
 // Typed names are checked by vue-tsc; a task's icon comes from data, so an
 // unknown name still renders an empty, sized box.
 const definition = computed<IconDefinition | undefined>(() => (ICONS as Record<string, IconDefinition>)[props.name]);
-const strokeProps = computed(() => (definition.value?.filled
-  ? { fill: 'currentColor', stroke: 'none' }
-  : { fill: 'none', stroke: 'currentColor', 'stroke-width': 1.75, 'stroke-linecap': 'round' as const, 'stroke-linejoin': 'round' as const }));
+const strokeProps = computed(() =>
+  definition.value?.filled
+    ? { fill: 'currentColor', stroke: 'none' }
+    : { fill: 'none', stroke: 'currentColor', 'stroke-width': 1.75, 'stroke-linecap': 'round' as const, 'stroke-linejoin': 'round' as const },
+);
 </script>
 
 <template>

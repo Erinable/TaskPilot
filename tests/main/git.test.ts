@@ -105,7 +105,10 @@ test('changesSince() includes untracked files that git diff omits', async () => 
   await fs.writeFile(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
   await fs.writeFile(path.join(dir, 'rogue.ts'), 'export const a = 1;\nexport const b = 2;\n');
 
-  assert.deepEqual((await git.diffStat(dir, baseline)).map((c) => c.path), ['a.txt']);
+  assert.deepEqual(
+    (await git.diffStat(dir, baseline)).map((c) => c.path),
+    ['a.txt'],
+  );
 
   const changes = await git.changesSince(dir, baseline);
   const byPath = Object.fromEntries(changes.map((c) => [c.path, c]));
@@ -155,10 +158,13 @@ test('diffFile() shows the contents of an untracked file', async () => {
 
 test('git errors surface a code and stderr instead of a raw exec failure', async () => {
   const { dir } = await makeRepo();
-  await assert.rejects(() => git.diffFile(dir, 'nonexistent-ref', 'a.txt'), (error: any) => {
-    assert.equal(error.name, 'GitError');
-    assert.equal(error.code, 'git_failed');
-    assert.ok(error.stderr.length > 0);
-    return true;
-  });
+  await assert.rejects(
+    () => git.diffFile(dir, 'nonexistent-ref', 'a.txt'),
+    (error: any) => {
+      assert.equal(error.name, 'GitError');
+      assert.equal(error.code, 'git_failed');
+      assert.ok(error.stderr.length > 0);
+      return true;
+    },
+  );
 });

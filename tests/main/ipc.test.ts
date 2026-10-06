@@ -29,7 +29,11 @@ import { createPathResolver } from '../../src/main/shell_env.ts';
 
 const run = promisify(execFile);
 
-const harness = async ({ withRepo = true, agent = null, seedState = null }: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) => {
+const harness = async ({
+  withRepo = true,
+  agent = null,
+  seedState = null,
+}: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
   let ipc: IpcHandle | null = null;
@@ -74,16 +78,29 @@ const harness = async ({ withRepo = true, agent = null, seedState = null }: { wi
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
     inherited: '/usr/bin:/bin',
-    read: async () => { shellReads += 1; return `/tp/shell/bin:${process.env.PATH}`; },
+    read: async () => {
+      shellReads += 1;
+      return `/tp/shell/bin:${process.env.PATH}`;
+    },
   });
   ipc = registerIpcHandlers(
     { handle: (channel, handler) => handlers.set(channel, handler) },
     {
-      store, configDir, getConfig: () => config, setConfig: (next) => { config = next; },
-      getPreferences: () => prefs, setPreferences: (next) => { prefs = next; },
+      store,
+      configDir,
+      getConfig: () => config,
+      setConfig: (next) => {
+        config = next;
+      },
+      getPreferences: () => prefs,
+      setPreferences: (next) => {
+        prefs = next;
+      },
       pathResolver,
       onPreferencesChanged: (next, previous) => changes.push({ next, previous }),
-      revealPath: async (dir) => { revealed.push(dir); },
+      revealPath: async (dir) => {
+        revealed.push(dir);
+      },
       appVersion: '9.9.9',
       requirements,
       activity,
@@ -97,12 +114,27 @@ const harness = async ({ withRepo = true, agent = null, seedState = null }: { wi
   );
 
   const call = (channel: Channel, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
-  const setCommands = (commands) => { config = workspace.normalize({ root: config.root, commands }); };
-  const setRoot = (next) => { config = { ...config, root: next }; };
+  const setCommands = (commands) => {
+    config = workspace.normalize({ root: config.root, commands });
+  };
+  const setRoot = (next) => {
+    config = { ...config, root: next };
+  };
   const getConfig = () => config;
   return {
     // Null only with withRepo: false, and those tests never read it.
-    call, store, root: root!, configDir, activity, setCommands, setRoot, getConfig, changes, revealed, requirements, agentCalls,
+    call,
+    store,
+    root: root!,
+    configDir,
+    activity,
+    setCommands,
+    setRoot,
+    getConfig,
+    changes,
+    revealed,
+    requirements,
+    agentCalls,
     shellReads: () => shellReads,
   };
 };
@@ -120,18 +152,31 @@ const settle = async (call, id) => {
 const CLARIFY_OUTPUT = { title: '邮箱登录', summary: '用户用邮箱和密码登录', questions: ['连续失败几次锁定？'] };
 const PLAN_OUTPUT = {
   summary: '一个工作包完成登录。',
-  packages: [{
-    title: '实现登录接口', description: '邮箱密码登录', module: 'auth', tags: ['auth'], priority: 'high',
-    estimateHours: 2, icon: 'key', steps: ['创建 `LoginUserUseCase`。'],
-    fileScope: ['src/auth/application/login-user.ts'],
-    acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
-  }],
+  packages: [
+    {
+      title: '实现登录接口',
+      description: '邮箱密码登录',
+      module: 'auth',
+      tags: ['auth'],
+      priority: 'high',
+      estimateHours: 2,
+      icon: 'key',
+      steps: ['创建 `LoginUserUseCase`。'],
+      fileScope: ['src/auth/application/login-user.ts'],
+      acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
+    },
+  ],
 };
 const SUMMARY_OUTPUT = {
-  modules: [{
-    path: 'src/auth/application/login-user.ts', purpose: '登录用例占位',
-    members: [{ name: 'placeholder', signature: 'export {}' }], dependsOn: [], notes: ['当前为空模块'],
-  }],
+  modules: [
+    {
+      path: 'src/auth/application/login-user.ts',
+      purpose: '登录用例占位',
+      members: [{ name: 'placeholder', signature: 'export {}' }],
+      dependsOn: [],
+      notes: ['当前为空模块'],
+    },
+  ],
   conventions: ['测试放在 tests/ 下'],
   gaps: [],
 };
@@ -151,29 +196,39 @@ const RELEASE_PLAN = {
   ],
 };
 /** Which agent step a schema belongs to. */
-const stepOf = (schema) => schema.properties.bump ? 'release'
-  : schema.properties.verdict ? 'review'
-  : schema.properties.decision ? 'adjudicate'
-  : schema.properties.install ? 'env'
-  : schema.properties.packages ? 'plan'
-  : schema.properties.questions ? 'clarify'
-  : schema.properties.modules ? 'summarize'
-  : 'select';
+const stepOf = (schema) =>
+  schema.properties.bump
+    ? 'release'
+    : schema.properties.verdict
+      ? 'review'
+      : schema.properties.decision
+        ? 'adjudicate'
+        : schema.properties.install
+          ? 'env'
+          : schema.properties.packages
+            ? 'plan'
+            : schema.properties.questions
+              ? 'clarify'
+              : schema.properties.modules
+                ? 'summarize'
+                : 'select';
 /** A fake team answering by which schema it was given. */
-const fakeAgent = (overrides: Record<string, unknown> = {}) => async ({ schema }) => {
-  const output = {
-    select: () => overrides.select ?? { files: ['src/auth/application/login-user.ts'] },
-    summarize: () => overrides.summarize ?? SUMMARY_OUTPUT,
-    clarify: () => overrides.clarify ?? CLARIFY_OUTPUT,
-    plan: () => overrides.plan ?? PLAN_OUTPUT,
-    review: () => overrides.review ?? QA_PASS,
-    env: () => overrides.env ?? ENV_PLAN,
-    adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
-    release: () => overrides.release ?? RELEASE_PLAN,
-  }[stepOf(schema)]();
-  if (output instanceof Error) throw output;
-  return { output, costUsd: 0.02 };
-};
+const fakeAgent =
+  (overrides: Record<string, unknown> = {}) =>
+  async ({ schema }) => {
+    const output = {
+      select: () => overrides.select ?? { files: ['src/auth/application/login-user.ts'] },
+      summarize: () => overrides.summarize ?? SUMMARY_OUTPUT,
+      clarify: () => overrides.clarify ?? CLARIFY_OUTPUT,
+      plan: () => overrides.plan ?? PLAN_OUTPUT,
+      review: () => overrides.review ?? QA_PASS,
+      env: () => overrides.env ?? ENV_PLAN,
+      adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
+      release: () => overrides.release ?? RELEASE_PLAN,
+    }[stepOf(schema)]();
+    if (output instanceof Error) throw output;
+    return { output, costUsd: 0.02 };
+  };
 const callFor = (calls, step) => calls.find((c) => stepOf(c.schema) === step);
 
 test('requirements: create clarifies, plan publishes into the work queue', async () => {
@@ -241,9 +296,10 @@ test('requirements: agent errors are recorded and the step can be retried', asyn
 });
 
 test('requirements: a running step can be cancelled', async () => {
-  const agent: FakeAgent = ({ signal }) => new Promise((_resolve, reject) => {
-    signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
-  });
+  const agent: FakeAgent = ({ signal }) =>
+    new Promise((_resolve, reject) => {
+      signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
+    });
   const { call } = await harness({ agent });
   const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
   assert.equal((await call(CHANNELS.requirementsCancel, data.id)).data, true);
@@ -401,9 +457,14 @@ test('claiming reads the baseline from git, not from the renderer', async () => 
 test('the renderer cannot act as an agent', async () => {
   // QA starts on submit; hold it so the package stays in review.
   let release;
-  const held = new Promise((resolve) => { release = resolve; });
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
   const { call, store, root, setCommands } = await harness({
-    agent: async () => { await held; return { output: QA_PASS, costUsd: 0 }; },
+    agent: async () => {
+      await held;
+      return { output: QA_PASS, costUsd: 0 };
+    },
   });
   setCommands({ test: EDGE_TESTS_PASS });
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
@@ -426,7 +487,10 @@ const EDGE_TESTS_PASS = {
 const QA_PASS = {
   verdict: 'pass',
   summary: '两个边界用例都已覆盖。',
-  criteria: [{ index: 0, status: 'met', note: '覆盖' }, { index: 1, status: 'met', note: '覆盖' }],
+  criteria: [
+    { index: 0, status: 'met', note: '覆盖' },
+    { index: 1, status: 'met', note: '覆盖' },
+  ],
   issues: [],
 };
 
@@ -457,7 +521,10 @@ test('review: submitting starts QA, which passes the package on to acceptance', 
   const task = await settleReview(h.call, 'auth-edge-tests');
   assert.equal(task.status, 'accepting');
   assert.equal(task.review.status, 'passed');
-  assert.deepEqual(task.review.diff.files.map((f) => f.path), ['tests/auth/login-user.test.ts']);
+  assert.deepEqual(
+    task.review.diff.files.map((f) => f.path),
+    ['tests/auth/login-user.test.ts'],
+  );
   const qaCall = callFor(h.agentCalls, 'review');
   assert.match(qaCall.prompt, /case-insensitive/);
   assert.equal(task.review.verification.summary.passed, 2);
@@ -465,7 +532,9 @@ test('review: submitting starts QA, which passes the package on to acceptance', 
 
 test('review: a QA rejection sends the package back with the issues', async () => {
   const h = await harness({
-    agent: fakeAgent({ review: { ...QA_PASS, verdict: 'reject', issues: [{ severity: 'blocker', text: '用例没有断言', file: 'tests/auth/login-user.test.ts', line: 1 }] } }),
+    agent: fakeAgent({
+      review: { ...QA_PASS, verdict: 'reject', issues: [{ severity: 'blocker', text: '用例没有断言', file: 'tests/auth/login-user.test.ts', line: 1 }] },
+    }),
   });
   h.setCommands({ test: EDGE_TESTS_PASS });
   await submitEdgeTests(h);
@@ -504,9 +573,10 @@ test('review: a failed run stays in review and can be retried', async () => {
 
 test('review: cancelling stops QA and leaves the package in review', async () => {
   const h = await harness({
-    agent: ({ signal }) => new Promise((_resolve, reject) => {
-      signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
-    }),
+    agent: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
+      }),
   });
   h.setCommands({ test: EDGE_TESTS_PASS });
   await submitEdgeTests(h);
@@ -728,11 +798,14 @@ test('env: plan, confirm steps one by one, then apply the scripts', async () => 
   const view = await settleEnv(call);
   assert.equal(view.status, 'ready', JSON.stringify(view.error));
   assert.deepEqual(view.blockers, []);
-  assert.deepEqual(view.steps.map((s) => [s.id, s.line]), [
-    ['install', 'npm install --ignore-scripts --no-audit --no-fund'],
-    ['test', 'npm test'],
-    ['lint', 'npm run lint'],
-  ]);
+  assert.deepEqual(
+    view.steps.map((s) => [s.id, s.line]),
+    [
+      ['install', 'npm install --ignore-scripts --no-audit --no-fund'],
+      ['test', 'npm test'],
+      ['lint', 'npm run lint'],
+    ],
+  );
 
   const installed = await call(CHANNELS.envRunStep, 'install');
   assert.equal(installed.ok, true, JSON.stringify(installed.error));
@@ -803,8 +876,15 @@ test('env: a repository without package.json is blocked before the model runs', 
 
 test('env: a second plan request while one runs is refused', async () => {
   let release;
-  const gate = new Promise((resolve) => { release = resolve; });
-  const { call } = await envHarness({ agent: async () => { await gate; return { output: ENV_PLAN, costUsd: 0 }; } });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { call } = await envHarness({
+    agent: async () => {
+      await gate;
+      return { output: ENV_PLAN, costUsd: 0 };
+    },
+  });
   await call(CHANNELS.envPlan);
   assert.equal((await call(CHANNELS.envPlan)).error.code, 'env_busy');
   release();
@@ -822,7 +902,10 @@ const settleBaseline = async (call, id) => {
 
 const LEGACY_FAILING = {
   command: process.execPath,
-  args: ['-e', "console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts\\nnot ok 3 - legacy report export'); process.exit(1)"],
+  args: [
+    '-e',
+    "console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts\\nnot ok 3 - legacy report export'); process.exit(1)",
+  ],
 };
 
 test('baseline: claiming measures submit checks on a clean tree', async () => {
@@ -929,7 +1012,11 @@ test('deviation: Architect reads the code and its replan becomes the package, wh
 test('deviation: a contested dismissal goes back to Architect, which must replan', async () => {
   let decision = 'dismiss';
   const h = await harness({
-    agent: fakeAgent({ get adjudicate() { return decision === 'dismiss' ? { decision, reason: '按原计划即可', changes: [] } : ADJUDICATE_REPLAN; } }),
+    agent: fakeAgent({
+      get adjudicate() {
+        return decision === 'dismiss' ? { decision, reason: '按原计划即可', changes: [] } : ADJUDICATE_REPLAN;
+      },
+    }),
   });
   await reportDeviation(h);
   let task = await settleAdjudication(h.call, 'auth-edge-tests');
@@ -971,7 +1058,10 @@ test('review: a clean pass with a measured baseline finishes the package without
   h.setCommands({
     test: {
       command: process.execPath,
-      args: ['-e', "if (require('fs').existsSync('tests/auth/login-user.test.ts')) console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts'); else console.log('ok 1 - placeholder');"],
+      args: [
+        '-e',
+        "if (require('fs').existsSync('tests/auth/login-user.test.ts')) console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts'); else console.log('ok 1 - placeholder');",
+      ],
     },
   });
   await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
@@ -1004,9 +1094,10 @@ test('activity: the requirement flow and a claim are recorded, newest first', as
   await call(CHANNELS.transition, `${item.id}-wp1`, 'claim');
 
   const overview = await overviewWith(call, 5);
-  assert.deepEqual(overview.recent.map((record) => record.kind), [
-    'package_transition', 'requirement_published', 'requirement_finished', 'requirement_finished', 'requirement_created',
-  ]);
+  assert.deepEqual(
+    overview.recent.map((record) => record.kind),
+    ['package_transition', 'requirement_published', 'requirement_finished', 'requirement_finished', 'requirement_created'],
+  );
   const [claim, published, planned] = overview.recent;
   assert.equal(claim.transition, 'claim');
   assert.equal(claim.actor, 'human');
@@ -1042,8 +1133,15 @@ test('activity: a failed append never fails the action', async () => {
 
 test('activity: team status reports busy agents and CLI availability', async () => {
   let release: () => void = () => {};
-  const blocked = new Promise<void>((resolve) => { release = resolve; });
-  const { call } = await harness({ agent: async (options) => { await blocked; return fakeAgent()(options); } });
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { call } = await harness({
+    agent: async (options) => {
+      await blocked;
+      return fakeAgent()(options);
+    },
+  });
   const created = await call(CHANNELS.requirementsCreate, { text: 't' });
   const busy = (await call(CHANNELS.activityOverview)).data.team.busy;
   assert.ok(busy.includes('architect') || busy.includes('product-lead'));
@@ -1133,7 +1231,10 @@ test('release: a start commit from the renderer must be the start point or a rec
     assert.equal(response.error.field ?? 'startCommit', 'startCommit');
   }
   const commits = (await h.call(CHANNELS.releaseRecentCommits)).data;
-  assert.deepEqual(commits.map((commit) => commit.subject), ['docs: readme', 'init']);
+  assert.deepEqual(
+    commits.map((commit) => commit.subject),
+    ['docs: readme', 'init'],
+  );
   assert.ok(commits.every((commit) => /^[0-9a-f]{40}$/.test(commit.sha) && commit.date));
 
   // HEAD itself is a recent commit, but the range would be empty.
@@ -1170,7 +1271,10 @@ test('release: finish refuses unchecked items, then records the release and its 
   assert.equal((await h.call(CHANNELS.releaseGenerate)).error.code, 'release_no_changes');
 
   const [event] = (await overviewWith(h.call, 1)).recent;
-  assert.deepEqual({ kind: event.kind, version: event.version, packageCount: event.packageCount }, { kind: 'release_finished', version: '0.4.0', packageCount: 0 });
+  assert.deepEqual(
+    { kind: event.kind, version: event.version, packageCount: event.packageCount },
+    { kind: 'release_finished', version: '0.4.0', packageCount: 0 },
+  );
 });
 
 test('release: write-notes validates the path and prepends under a dated heading', async () => {
@@ -1215,8 +1319,15 @@ test('release: write-notes validates the path and prepends under a dated heading
 
 test('release: a running generation shows Release Manager busy and can be cancelled', async () => {
   let unblock: () => void = () => {};
-  const blocked = new Promise<void>((resolve) => { unblock = resolve; });
-  const h = await harness({ agent: async (options) => { await blocked; return fakeAgent()(options); } });
+  const blocked = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+  const h = await harness({
+    agent: async (options) => {
+      await blocked;
+      return fakeAgent()(options);
+    },
+  });
   await releaseRepo(h.root);
   const started = await h.call(CHANNELS.releaseGenerate);
   assert.equal(started.data.running, true);

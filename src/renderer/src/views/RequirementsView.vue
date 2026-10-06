@@ -18,7 +18,10 @@ const store = useRequirementsStore();
         <button class="icon-button small" type="button" title="新建需求" aria-label="新建需求" @click="store.startCompose()"><AppIcon name="plus" /></button>
       </div>
       <div class="req-list" role="list">
-        <p v-if="store.items.length === 0" class="empty-hint"><AppIcon name="inbox" />还没有需求</p>
+        <p v-if="store.items.length === 0" class="empty-hint">
+          <AppIcon name="inbox" />
+          还没有需求
+        </p>
         <button
           v-for="item in store.items"
           :key="item.id"
@@ -46,7 +49,10 @@ const store = useRequirementsStore();
         <span class="req-empty-icon"><AppIcon name="sparkle" /></span>
         <h2>从一个需求开始</h2>
         <p>Product Lead 会澄清需求、拆解工作包，你确认后发布到工作队列。</p>
-        <button class="primary-button" type="button" @click="store.startCompose()"><AppIcon name="plus" />新建需求</button>
+        <button class="primary-button" type="button" @click="store.startCompose()">
+          <AppIcon name="plus" />
+          新建需求
+        </button>
       </div>
     </section>
   </div>

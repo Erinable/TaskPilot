@@ -26,13 +26,21 @@ const rows = computed(() => {
   ];
 });
 
-const refresh = () => { execution.refreshDiff().catch((error) => console.error(error)); };
+const refresh = () => {
+  execution.refreshDiff().catch((error) => console.error(error));
+};
 </script>
 
 <template>
   <section class="panel glass">
     <div class="panel-heading">
-      <div class="panel-title"><span class="panel-icon"><AppIcon name="folder" /></span><div><h2>文件范围</h2><p>工作包允许改动的文件</p></div></div>
+      <div class="panel-title">
+        <span class="panel-icon"><AppIcon name="folder" /></span>
+        <div>
+          <h2>文件范围</h2>
+          <p>工作包允许改动的文件</p>
+        </div>
+      </div>
       <button class="icon-button small" type="button" title="刷新" aria-label="刷新改动" @click="refresh"><AppIcon name="refresh" /></button>
     </div>
     <div class="scope-list">
@@ -40,7 +48,10 @@ const refresh = () => { execution.refreshDiff().catch((error) => console.error(e
         <AppIcon :name="row.kind === 'out' ? 'alert' : 'file'" class="scope-file" />
         <span class="scope-path">{{ row.filePath }}</span>
         <span v-if="row.churn?.untracked" class="scope-tag new">新文件</span>
-        <span v-if="row.churn && !row.churn.binary" class="scope-churn"><span class="added">+{{ row.churn.added }}</span> <span class="removed">-{{ row.churn.removed }}</span></span>
+        <span v-if="row.churn && !row.churn.binary" class="scope-churn">
+          <span class="added">+{{ row.churn.added }}</span>
+          <span class="removed">-{{ row.churn.removed }}</span>
+        </span>
         <span class="scope-tag" :class="row.kind">{{ LABELS[row.kind] }}</span>
       </div>
     </div>

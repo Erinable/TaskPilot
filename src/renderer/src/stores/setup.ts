@@ -61,7 +61,7 @@ export const useSetupStore = defineStore('setup', () => {
     const current = view.value;
     if (!current || current.status === 'idle') return '还没有分析过这个仓库。';
     if (current.status === 'planning') return '环境管家正在读取仓库并制定步骤…';
-    if (current.status === 'failed') return `分析失败：${current.error ? ERROR_HINTS[current.error.code] ?? current.error.message : ''}`;
+    if (current.status === 'failed') return `分析失败：${current.error ? (ERROR_HINTS[current.error.code] ?? current.error.message) : ''}`;
     const parts: string[] = [];
     if (current.stale) parts.push('工作区已切换，这份计划已过期，请重新分析。');
     else if (current.plan) parts.push(current.plan.summary);
@@ -84,7 +84,9 @@ export const useSetupStore = defineStore('setup', () => {
         value: [
           source.manifest?.engines?.node && `engines.node ${source.manifest.engines.node}`,
           ...source.versionFiles.map((file) => `${file.path} ${file.content}`),
-        ].filter(Boolean).join('  '),
+        ]
+          .filter(Boolean)
+          .join('  '),
       },
       { term: '本机 node / npm', value: `${source.tools.node ?? '未找到'} / ${source.tools.npm ?? '未找到'}` },
       { term: 'CI 配置', value: source.workflows.join('  ') },
@@ -114,17 +116,19 @@ export const useSetupStore = defineStore('setup', () => {
   const applyItems = computed(() => {
     const current = view.value;
     if (!current) return [];
-    return (['test', 'lint', 'build'] as const).filter((kind) => current.plan?.scripts[kind]).map((kind): ApplyItem => {
-      const proposed = current.steps.find((candidate) => candidate.id === kind)?.line ?? '';
-      const configured = current.configured[kind];
-      return {
-        kind,
-        proposed,
-        current: configured,
-        disabled: busy.value || current.stale || configured === proposed,
-        note: configured === proposed ? '已是当前配置' : configured ? `当前：${configured}` : '当前未配置',
-      };
-    });
+    return (['test', 'lint', 'build'] as const)
+      .filter((kind) => current.plan?.scripts[kind])
+      .map((kind): ApplyItem => {
+        const proposed = current.steps.find((candidate) => candidate.id === kind)?.line ?? '';
+        const configured = current.configured[kind];
+        return {
+          kind,
+          proposed,
+          current: configured,
+          disabled: busy.value || current.stale || configured === proposed,
+          note: configured === proposed ? '已是当前配置' : configured ? `当前：${configured}` : '当前未配置',
+        };
+      });
   });
 
   // ========== Actions ==========
@@ -143,7 +147,10 @@ export const useSetupStore = defineStore('setup', () => {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
     const waiting = view.value && (view.value.status === 'planning' || view.value.running);
-    if (waiting && visible()) pollTimer = setTimeout(() => { render().catch((error) => console.error(error)); }, POLL_MS);
+    if (waiting && visible())
+      pollTimer = setTimeout(() => {
+        render().catch((error) => console.error(error));
+      }, POLL_MS);
   };
 
   const render = async () => {
@@ -163,7 +170,9 @@ export const useSetupStore = defineStore('setup', () => {
     acting.value = true;
     // Long steps hold the call open; poll meanwhile so "运行中" and Cancel show.
     if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = setTimeout(() => { render().catch((error) => console.error(error)); }, 200);
+    pollTimer = setTimeout(() => {
+      render().catch((error) => console.error(error));
+    }, 200);
     try {
       setView(await call(promise));
       return true;
@@ -223,10 +232,29 @@ export const useSetupStore = defineStore('setup', () => {
 
   return {
     // Session
-    view, loadError, acting, selectedKinds, busy, ready, showCancel, planLabel, statusWarn, statusText,
+    view,
+    loadError,
+    acting,
+    selectedKinds,
+    busy,
+    ready,
+    showCancel,
+    planLabel,
+    statusWarn,
+    statusText,
     // Plan details
-    facts, notices, failedStep, retryText, applyItems,
+    facts,
+    notices,
+    failedStep,
+    retryText,
+    applyItems,
     // Actions
-    render, plan, replan, cancel, setAllowScripts, runStep, apply,
+    render,
+    plan,
+    replan,
+    cancel,
+    setAllowScripts,
+    runStep,
+    apply,
   };
 });

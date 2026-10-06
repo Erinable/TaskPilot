@@ -20,7 +20,9 @@ const pickColor = async (color: AvatarColor) => {
   swatches.value?.querySelector<HTMLElement>(`[data-color="${color}"]`)?.focus();
 };
 
-const onPick = (color: AvatarColor) => { pickColor(color).catch((error) => console.error(error)); };
+const onPick = (color: AvatarColor) => {
+  pickColor(color).catch((error) => console.error(error));
+};
 
 // Arrow keys move through the radiogroup, as for native radios.
 const onSwatchKeydown = (event: KeyboardEvent) => {
@@ -42,34 +44,63 @@ const onNameInput = (value: string) => {
 <template>
   <header class="settings-page-header">
     <h2>个人资料</h2>
-    <span class="scope-badge"><AppIcon name="laptop" />仅保存在本机</span>
+    <span class="scope-badge">
+      <AppIcon name="laptop" />
+      仅保存在本机
+    </span>
   </header>
   <h3 class="settings-section-title">个人信息</h3>
   <div v-if="settings.preferencesDraft" class="settings-card glass">
     <div class="setting-row">
-      <div class="setting-label"><strong>头像</strong><small>显示在顶栏，文字取自你的名字</small></div>
+      <div class="setting-label">
+        <strong>头像</strong>
+        <small>显示在顶栏，文字取自你的名字</small>
+      </div>
       <div class="setting-control avatar-control">
         <div id="avatarSwatches" ref="swatches" class="avatar-swatches" role="radiogroup" aria-label="头像颜色" @keydown="onSwatchKeydown">
           <button
-            v-for="color in AVATAR_COLOR_NAMES" :key="color" type="button" class="avatar-swatch" :class="color" :data-color="color" role="radio"
-            :aria-checked="color === settings.preferencesDraft.profile.avatarColor ? 'true' : 'false'" :aria-label="AVATAR_LABELS[color]"
+            v-for="color in AVATAR_COLOR_NAMES"
+            :key="color"
+            type="button"
+            class="avatar-swatch"
+            :class="color"
+            :data-color="color"
+            role="radio"
+            :aria-checked="color === settings.preferencesDraft.profile.avatarColor ? 'true' : 'false'"
+            :aria-label="AVATAR_LABELS[color]"
             :tabindex="color === settings.preferencesDraft.profile.avatarColor ? 0 : -1"
             @click="onPick(color)"
           ></button>
         </div>
-        <UserAvatar id="profileAvatarPreview" class="avatar large" :display-name="settings.preferencesDraft.profile.displayName" :avatar-color="settings.preferencesDraft.profile.avatarColor" />
+        <UserAvatar
+          id="profileAvatarPreview"
+          class="avatar large"
+          :display-name="settings.preferencesDraft.profile.displayName"
+          :avatar-color="settings.preferencesDraft.profile.avatarColor"
+        />
       </div>
     </div>
     <div class="setting-row">
-      <label class="setting-label" for="profileName"><strong>名字</strong><small>用于首页问候语</small></label>
+      <label class="setting-label" for="profileName">
+        <strong>名字</strong>
+        <small>用于首页问候语</small>
+      </label>
       <div class="setting-control">
         <el-input
-          id="profileName" :model-value="settings.preferencesDraft.profile.displayName" name="displayName" autocomplete="name" placeholder="怎么称呼你"
-          aria-describedby="profileNameStatus" :aria-invalid="String(settings.statuses.displayName.tone === 'error')" @update:model-value="onNameInput"
+          id="profileName"
+          :model-value="settings.preferencesDraft.profile.displayName"
+          name="displayName"
+          autocomplete="name"
+          placeholder="怎么称呼你"
+          aria-describedby="profileNameStatus"
+          :aria-invalid="String(settings.statuses.displayName.tone === 'error')"
+          @update:model-value="onNameInput"
         />
         <div class="field-meta">
           <FieldStatus id="profileNameStatus" :status="settings.statuses.displayName" />
-          <span id="profileNameCount" class="char-count" :class="{ over: settings.nameLength > MAX_NAME_LENGTH }">{{ settings.nameLength }}/{{ MAX_NAME_LENGTH }}</span>
+          <span id="profileNameCount" class="char-count" :class="{ over: settings.nameLength > MAX_NAME_LENGTH }">
+            {{ settings.nameLength }}/{{ MAX_NAME_LENGTH }}
+          </span>
         </div>
       </div>
     </div>

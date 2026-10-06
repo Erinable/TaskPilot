@@ -10,7 +10,9 @@ const visible = defineModel<boolean>({ required: true });
 const store = useReleaseStore();
 const path = ref(NOTES_PATH_SUGGESTIONS[0]);
 
-watch(visible, (open) => { if (open) store.clearWriteError(); });
+watch(visible, (open) => {
+  if (open) store.clearWriteError();
+});
 
 const onPathChange = (value: string) => {
   path.value = value;
@@ -28,8 +30,15 @@ const confirm = async () => {
     <p class="write-hint">把当前说明插入到工作区内这个 Markdown 文件的开头。文件不存在会新建。不会提交或推送。</p>
     <label class="write-label" for="release-notes-path">文件路径（相对工作区）</label>
     <el-select
-      id="release-notes-path" :model-value="path" class="write-path" filterable allow-create default-first-option
-      aria-label="文件路径" :aria-invalid="store.writeError ? 'true' : 'false'" aria-describedby="release-notes-path-error"
+      id="release-notes-path"
+      :model-value="path"
+      class="write-path"
+      filterable
+      allow-create
+      default-first-option
+      aria-label="文件路径"
+      :aria-invalid="store.writeError ? 'true' : 'false'"
+      aria-describedby="release-notes-path-error"
       @update:model-value="onPathChange"
     >
       <el-option v-for="suggestion in NOTES_PATH_SUGGESTIONS" :key="suggestion" :label="suggestion" :value="suggestion" />
@@ -43,11 +52,38 @@ const confirm = async () => {
 </template>
 
 <style scoped>
-.write-title { margin: 0; font-size: 16px; font-weight: 650; }
-.write-hint { margin: 0 0 14px; color: var(--text-muted); font-size: 14px; line-height: 1.6; }
-.write-label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: 14px; font-weight: 600; }
-.write-path { width: 100%; }
-.write-error { min-height: 20px; margin: 6px 0 0; color: var(--danger); font-size: 14px; }
-.primary-button, .secondary-button { font-size: 14px; }
-.write-confirm { margin-left: 8px; }
+.write-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+.write-hint {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.write-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.write-path {
+  width: 100%;
+}
+.write-error {
+  min-height: 20px;
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 14px;
+}
+.primary-button,
+.secondary-button {
+  font-size: 14px;
+}
+.write-confirm {
+  margin-left: 8px;
+}
 </style>

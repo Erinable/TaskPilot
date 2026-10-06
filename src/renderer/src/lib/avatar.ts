@@ -13,4 +13,5 @@ export const initialsOf = (name: string | null | undefined) => {
   return (first + last).toUpperCase();
 };
 
-export const avatarColorOf = (color: string | null | undefined): AvatarColor => (AVATAR_COLOR_NAMES as readonly string[]).includes(color ?? '') ? color as AvatarColor : 'sunset';
+export const avatarColorOf = (color: string | null | undefined): AvatarColor =>
+  (AVATAR_COLOR_NAMES as readonly string[]).includes(color ?? '') ? (color as AvatarColor) : 'sunset';

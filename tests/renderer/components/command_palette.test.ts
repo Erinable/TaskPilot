@@ -132,7 +132,7 @@ describe('CommandPalette', () => {
     expect(open).toHaveBeenCalledWith('profile');
   });
 
-  test('Escape closes, stays out of App\'s handler, and returns focus to the trigger', async () => {
+  test("Escape closes, stays out of App's handler, and returns focus to the trigger", async () => {
     const appHandler = vi.fn();
     document.addEventListener('keydown', appHandler);
     const input = await render();

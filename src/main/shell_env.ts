@@ -68,17 +68,17 @@ export const shellCommand = (shell: string): { file: string; args: string[] } =>
     throw new ShellEnvError(`Unsupported login shell: ${name}`, 'unsupported_shell');
   }
   // fish keeps PATH as a list, so join it explicitly.
-  const print = name === 'fish'
-    ? `printf '%s%s%s' ${MARKER} (string join : $PATH) ${MARKER}`
-    : `printf '%s%s%s' ${MARKER} "$PATH" ${MARKER}`;
+  const print = name === 'fish' ? `printf '%s%s%s' ${MARKER} (string join : $PATH) ${MARKER}` : `printf '%s%s%s' ${MARKER} "$PATH" ${MARKER}`;
   // -i is needed for zsh/bash to source the rc files where nvm and friends
   // usually live; -l picks up profile files.
   return { file: shell, args: ['-ilc', print] };
 };
 
-export const readLoginShellPath = (
-  { shell = env.shell, run = execFile as unknown as RunFile, timeoutMs = TIMEOUT_MS }: { shell?: string | null; run?: RunFile; timeoutMs?: number } = {},
-): Promise<string> =>
+export const readLoginShellPath = ({
+  shell = env.shell,
+  run = execFile as unknown as RunFile,
+  timeoutMs = TIMEOUT_MS,
+}: { shell?: string | null; run?: RunFile; timeoutMs?: number } = {}): Promise<string> =>
   new Promise((resolve, reject) => {
     if (!shell || !path.isAbsolute(shell)) {
       reject(new ShellEnvError('No login shell is configured (SHELL is unset)', 'no_shell'));
@@ -91,27 +91,34 @@ export const readLoginShellPath = (
       reject(error);
       return;
     }
-    run(command.file, command.args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: { ...processEnv(), TERM: 'dumb' } },
-      (error, stdout = '') => {
-        // rc files sometimes exit non-zero after printing PATH; trust the marker.
-        const value = extractPath(String(stdout));
-        if (value) resolve(value);
-        else if (error?.killed) reject(new ShellEnvError('Login shell did not respond in time', 'shell_timeout'));
-        else reject(new ShellEnvError('Login shell did not report a PATH', 'shell_no_path'));
-      });
+    run(command.file, command.args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, env: { ...processEnv(), TERM: 'dumb' } }, (error, stdout = '') => {
+      // rc files sometimes exit non-zero after printing PATH; trust the marker.
+      const value = extractPath(String(stdout));
+      if (value) resolve(value);
+      else if (error?.killed) reject(new ShellEnvError('Login shell did not respond in time', 'shell_timeout'));
+      else reject(new ShellEnvError('Login shell did not report a PATH', 'shell_no_path'));
+    });
   });
 
 // Caches the login-shell PATH for the session; `refresh()` re-reads it after
 // the user changes their shell config.
-export const createPathResolver = (
-  { inherited = env.path, read = readLoginShellPath }: { inherited?: string; read?: () => Promise<string> } = {},
-): PathResolver => {
+export const createPathResolver = ({
+  inherited = env.path,
+  read = readLoginShellPath,
+}: { inherited?: string; read?: () => Promise<string> } = {}): PathResolver => {
   let cached: string | null = null;
   let pending: Promise<string> | null = null;
 
   const loginShell = async (): Promise<string> => {
     if (cached !== null) return cached;
-    pending ??= read().then((value) => { cached = value; return value; }).finally(() => { pending = null; });
+    pending ??= read()
+      .then((value) => {
+        cached = value;
+        return value;
+      })
+      .finally(() => {
+        pending = null;
+      });
     return pending;
   };
 

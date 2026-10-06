@@ -30,8 +30,12 @@ const workspaceName = computed(() => {
       </div>
     </div>
     <div
-      class="workspace-picker" role="button" tabindex="0" title="工作区设置"
-      @click="settings.open('repository')" @keydown.enter.space.prevent="settings.open('repository')"
+      class="workspace-picker"
+      role="button"
+      tabindex="0"
+      title="工作区设置"
+      @click="settings.open('repository')"
+      @keydown.enter.space.prevent="settings.open('repository')"
     >
       <AppIcon name="git-branch" />
       <span>{{ workspaceName }}</span>
@@ -39,11 +43,18 @@ const workspaceName = computed(() => {
       <AppIcon name="chevron-down" class="chevron" />
     </div>
     <div class="top-actions">
-      <button class="icon-button" type="button" title="搜索（⌘K）" aria-label="搜索" aria-haspopup="dialog" @click="palette.openPalette()"><AppIcon name="search" /></button>
+      <button class="icon-button" type="button" title="搜索（⌘K）" aria-label="搜索" aria-haspopup="dialog" @click="palette.openPalette()">
+        <AppIcon name="search" />
+      </button>
       <NotificationCenter />
       <UserAvatar
-        tag="button" class="avatar" type="button" title="个人资料" aria-label="打开个人资料设置"
-        :display-name="app.preferences?.profile.displayName ?? ''" :avatar-color="app.preferences?.profile.avatarColor ?? 'sunset'"
+        tag="button"
+        class="avatar"
+        type="button"
+        title="个人资料"
+        aria-label="打开个人资料设置"
+        :display-name="app.preferences?.profile.displayName ?? ''"
+        :avatar-color="app.preferences?.profile.avatarColor ?? 'sunset'"
         @click="settings.open('profile')"
       />
     </div>

@@ -32,8 +32,7 @@ const knownDirs = (files: string[]): Set<string> => {
 };
 
 // The repo's test convention, from existing test file locations.
-const testConventions = (files: string[]): string[] =>
-  files.filter((file) => TEST_FILE.test(file)).map((file) => file.split('/').slice(0, -1).join('/'));
+const testConventions = (files: string[]): string[] => files.filter((file) => TEST_FILE.test(file)).map((file) => file.split('/').slice(0, -1).join('/'));
 
 export const check = (testCase: Pick<EvalCase, 'files' | 'expect'>, run: Pick<EvalRun, 'clarify' | 'plan'>): Record<string, CheckResult> => {
   const { files, expect } = testCase;
@@ -83,7 +82,7 @@ export const check = (testCase: Pick<EvalCase, 'files' | 'expect'>, run: Pick<Ev
       if (pattern) return !pattern.test(file);
       const dir = file.split('/').slice(0, -1).join('/');
       // Same top-level test root as an existing test (tests/, app/tests, src/**/__tests__).
-      return !conventions.some((existing) => dir.split('/')[0] === existing.split('/')[0] && (dir.includes('__tests__') === existing.includes('__tests__')));
+      return !conventions.some((existing) => dir.split('/')[0] === existing.split('/')[0] && dir.includes('__tests__') === existing.includes('__tests__'));
     });
     results.testConvention = {
       pass: offConvention.length === 0,

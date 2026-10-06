@@ -98,8 +98,14 @@ export const MAX_LISTED = 50;
 
 const counted = (results: TestResult[]) => results.filter((r) => !r.skipped && !r.todo);
 const keyOf = (r: TestResult) => r.fullName ?? r.name;
-const failingNames = (results: TestResult[]) => counted(results).filter((r) => !r.passed).map(keyOf);
-const passingNames = (results: TestResult[]) => counted(results).filter((r) => r.passed).map(keyOf);
+const failingNames = (results: TestResult[]) =>
+  counted(results)
+    .filter((r) => !r.passed)
+    .map(keyOf);
+const passingNames = (results: TestResult[]) =>
+  counted(results)
+    .filter((r) => r.passed)
+    .map(keyOf);
 
 // What is stored for a check run at the baseline.
 export const baselineRecord = (run: RunLike, line: string, at = new Date().toISOString()): BaselineRecord => {
@@ -112,7 +118,7 @@ export const baselineRecord = (run: RunLike, line: string, at = new Date().toISO
     timedOut: run.timedOut,
     // Non-zero exit with no failing test to blame: the runner itself broke.
     crashed: !run.timedOut && run.exitCode !== 0 && (failing.length === 0 || untrusted),
-    reportProblem: untrusted ? run.report?.problem ?? null : null,
+    reportProblem: untrusted ? (run.report?.problem ?? null) : null,
     failing: failing.slice(0, MAX_BASELINE_FAILING),
     passing: passingNames(run.results).slice(0, MAX_BASELINE_PASSING),
     at,
@@ -193,7 +199,10 @@ export const criteriaStatus = (
   for (const [kind, outcome] of Object.entries(runs)) {
     if (!outcome) continue;
     const item = evidence.find((e) => e.kind === kind);
-    if (outcome.error) { anyUntrusted = true; continue; }
+    if (outcome.error) {
+      anyUntrusted = true;
+      continue;
+    }
     const run = outcome as RunLike;
     if (run.timedOut || (run.report && !run.report.trusted) || item?.status === 'unverifiable') anyUntrusted = true;
     if (!run.report || run.report.trusted) trusted.push({ kind, results: run.results });
@@ -204,7 +213,10 @@ export const criteriaStatus = (
     let foundIn: string | null = null;
     for (const { kind, results } of trusted) {
       found = results.find((r) => r.name === criterion.test || keyOf(r) === criterion.test) ?? null;
-      if (found) { foundIn = kind; break; }
+      if (found) {
+        foundIn = kind;
+        break;
+      }
     }
     const status = found ? (found.passed ? 'verified' : 'failed') : anyUntrusted ? 'unverifiable' : 'missing';
     const baselineAt = foundIn ? baselines[foundIn] : null;

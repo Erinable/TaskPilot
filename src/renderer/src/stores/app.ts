@@ -13,7 +13,9 @@ export const useAppStore = defineStore('app', () => {
   // Set by the settings store: resolves true when it is fine to leave settings.
   let leaveGuard: () => Promise<boolean> = async () => true;
 
-  const setLeaveGuard = (guard: () => Promise<boolean>) => { leaveGuard = guard; };
+  const setLeaveGuard = (guard: () => Promise<boolean>) => {
+    leaveGuard = guard;
+  };
 
   // Leaving settings with unsaved edits asks first; resolves false to stay.
   const navigate = async (next: ViewName) => {
@@ -78,12 +80,21 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     // Navigation
-    view, setLeaveGuard, navigate,
+    view,
+    setLeaveGuard,
+    navigate,
     // Preferences
-    preferences, applyPreferences, loadPreferences,
+    preferences,
+    applyPreferences,
+    loadPreferences,
     // Workspace
-    workspaceInfo, workspaceError, refreshWorkspaceStatus,
+    workspaceInfo,
+    workspaceError,
+    refreshWorkspaceStatus,
     // Activity
-    activity, refreshActivity, startActivityPolling, stopActivityPolling,
+    activity,
+    refreshActivity,
+    startActivityPolling,
+    stopActivityPolling,
   };
 });

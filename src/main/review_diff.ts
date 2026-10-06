@@ -58,7 +58,7 @@ export const collectChanges = async (
   const { maxFiles, maxPatchBytes, maxTotalBytes } = { ...DEFAULT_LIMITS, ...limits };
   // `ignore` drops files TaskPilot's own checks produced (test reports), so
   // they are neither reviewed nor counted as the package's changes.
-  const all = (changes ?? await git.changesSince(root, baseline)).filter((c) => !ignore(c.path));
+  const all = (changes ?? (await git.changesSince(root, baseline))).filter((c) => !ignore(c.path));
   // Stable: preferred files first, otherwise git's order.
   const ordered = [...all.filter((c) => prioritize(c.path)), ...all.filter((c) => !prioritize(c.path))];
   const files: DiffFile[] = [];
@@ -69,11 +69,26 @@ export const collectChanges = async (
     const skip = (reason: DiffSkipReason) => skipped.push({ path: change.path, reason });
     // Renames are reported as "old → new" by git.status(); there is no single
     // path to read, so they are listed rather than diffed.
-    if (change.path.includes(' → ')) { skip('rename'); continue; }
-    if (!isInside(root, change.path)) { skip('outside_workspace'); continue; }
-    if (looksSecret(change.path)) { skip('secret'); continue; }
-    if (change.binary) { skip('binary'); continue; }
-    if (files.length >= maxFiles) { skip('file_limit'); continue; }
+    if (change.path.includes(' → ')) {
+      skip('rename');
+      continue;
+    }
+    if (!isInside(root, change.path)) {
+      skip('outside_workspace');
+      continue;
+    }
+    if (looksSecret(change.path)) {
+      skip('secret');
+      continue;
+    }
+    if (change.binary) {
+      skip('binary');
+      continue;
+    }
+    if (files.length >= maxFiles) {
+      skip('file_limit');
+      continue;
+    }
 
     let patch;
     try {
@@ -83,8 +98,14 @@ export const collectChanges = async (
       continue;
     }
     const bytes = Buffer.byteLength(patch);
-    if (bytes > maxPatchBytes) { skip('too_large'); continue; }
-    if (total + bytes > maxTotalBytes) { skip('budget'); continue; }
+    if (bytes > maxPatchBytes) {
+      skip('too_large');
+      continue;
+    }
+    if (total + bytes > maxTotalBytes) {
+      skip('budget');
+      continue;
+    }
     total += bytes;
     files.push({ path: change.path, patch, bytes, untracked: change.untracked === true });
   }

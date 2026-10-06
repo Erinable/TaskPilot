@@ -213,7 +213,11 @@ const requireEntry = (config: VerificationTarget, kind: string): { root: string;
 };
 
 // Executes one verification command and parses its stdout.
-export const run = async (config: VerificationTarget, kind: string, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath }: RunOptions = {}): Promise<RunResult> => {
+export const run = async (
+  config: VerificationTarget,
+  kind: string,
+  { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath }: RunOptions = {},
+): Promise<RunResult> => {
   const { root, entry } = requireEntry(config, kind);
   const outcome = await execute(root, entry, kind, { signal, timeoutMs, envPath, env: entry.env });
   const results = parseResults(outcome.output);
@@ -229,7 +233,10 @@ export const runCheck = async (config: VerificationTarget, kind: string, { signa
   const report = check.report ?? { format: 'stdout' };
   const before = report.format === 'junit' ? await testReport.statReport(root, report.path) : null;
   const outcome = await execute(root, check, kind, {
-    signal, timeoutMs: timeoutMs ?? check.timeoutMs ?? DEFAULT_TIMEOUT_MS, envPath, env: check.env,
+    signal,
+    timeoutMs: timeoutMs ?? check.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    envPath,
+    env: check.env,
   });
   let results: TestResult[];
   let reportInfo: ReportInfo;
@@ -241,7 +248,13 @@ export const runCheck = async (config: VerificationTarget, kind: string, { signa
     results = parseResults(outcome.output).map((r) => ({ ...r, fullName: r.fullName ?? r.name }));
     reportInfo = { format: 'stdout', trusted: true, problem: null };
   }
-  return { ...outcome, results, summary: summarize(results, outcome.exitCode), report: reportInfo, check: { stage: check.stage as CheckStage, blocking: check.blocking as boolean } };
+  return {
+    ...outcome,
+    results,
+    summary: summarize(results, outcome.exitCode),
+    report: reportInfo,
+    check: { stage: check.stage as CheckStage, blocking: check.blocking as boolean },
+  };
 };
 
 // Pairs acceptance criteria with test results. A criterion carrying a `test`

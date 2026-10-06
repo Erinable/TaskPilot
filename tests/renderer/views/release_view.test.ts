@@ -96,7 +96,15 @@ describe('ReleaseView', () => {
 
   test('a ready draft: version, notes, checklist gates 完成发布, model text stays text', async () => {
     state.current = fakes.releaseState({
-      draft: fakes.draft({ plan: fakes.plan({ reason: '<img src=x onerror=alert(1)>', checklist: [{ text: '<script>x</script>', evidence: ['<i>src/a.ts</i>'] }, { text: '更新 README', evidence: [] }] }) }),
+      draft: fakes.draft({
+        plan: fakes.plan({
+          reason: '<img src=x onerror=alert(1)>',
+          checklist: [
+            { text: '<script>x</script>', evidence: ['<i>src/a.ts</i>'] },
+            { text: '更新 README', evidence: [] },
+          ],
+        }),
+      }),
     });
     const view = await render();
     expect(view.find('.start-line').text()).toBe('从上次发布 0.1.0 开始（12 个提交，2 个完成的工作包）');
@@ -167,7 +175,9 @@ describe('ReleaseView', () => {
   });
 
   test('history: newest first, business-time dates, expandable, capped at 20', async () => {
-    const history = Array.from({ length: 23 }, (_, index) => fakes.release({ id: `r${index}`, version: `0.${23 - index}.0`, notesText: index === 0 ? '<b>说明</b>' : '说明' }));
+    const history = Array.from({ length: 23 }, (_, index) =>
+      fakes.release({ id: `r${index}`, version: `0.${23 - index}.0`, notesText: index === 0 ? '<b>说明</b>' : '说明' }),
+    );
     state.current = fakes.releaseState({ history });
     const view = await render();
     const rows = view.findAll('.history-row');

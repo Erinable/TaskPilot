@@ -14,18 +14,25 @@ const noteInput = ref<{ focus: () => void } | null>(null);
 const stepOptions = computed(() => props.task.steps.map((step, index) => ({ value: String(index), label: `指令 ${index + 1}：${step.replace(/`/g, '')}` })));
 const stepValue = computed({
   get: () => (execution.deviationForm.stepIndex === null ? '' : String(execution.deviationForm.stepIndex)),
-  set: (value: string) => { execution.deviationForm.stepIndex = value === '' ? null : Number(value); },
+  set: (value: string) => {
+    execution.deviationForm.stepIndex = value === '' ? null : Number(value);
+  },
 });
 const fileValue = computed({
   get: () => execution.deviationForm.filePath ?? '',
-  set: (value: string) => { execution.deviationForm.filePath = value || null; },
+  set: (value: string) => {
+    execution.deviationForm.filePath = value || null;
+  },
 });
 
 const focusNote = () => noteInput.value?.focus();
 
 const submit = () => {
-  execution.submitDeviation()
-    .then((filled) => { if (!filled) focusNote(); })
+  execution
+    .submitDeviation()
+    .then((filled) => {
+      if (!filled) focusNote();
+    })
     .catch((error) => console.error(error));
 };
 </script>
@@ -69,14 +76,24 @@ const submit = () => {
 
     <div class="modal-actions">
       <button class="secondary-button" type="button" @click="execution.closeDeviationForm()">取消</button>
-      <button class="primary-button" type="button" @click="submit"><AppIcon name="send" />提交偏差</button>
+      <button class="primary-button" type="button" @click="submit">
+        <AppIcon name="send" />
+        提交偏差
+      </button>
     </div>
   </el-dialog>
 </template>
 
 <style>
 /* Teleported, so not scoped: the legacy modal draws its own header and padding. */
-.el-dialog.deviation-dialog { position: relative; padding: 28px 30px 26px; }
-.el-dialog.deviation-dialog .el-dialog__header { display: none; }
-.el-dialog.deviation-dialog .el-dialog__body { padding: 0; }
+.el-dialog.deviation-dialog {
+  position: relative;
+  padding: 28px 30px 26px;
+}
+.el-dialog.deviation-dialog .el-dialog__header {
+  display: none;
+}
+.el-dialog.deviation-dialog .el-dialog__body {
+  padding: 0;
+}
 </style>

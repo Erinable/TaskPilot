@@ -6,10 +6,7 @@ import type { SettingsPage } from './settings_model.ts';
 
 export type SearchKind = 'task' | 'requirement' | 'setting';
 
-export type SearchTarget =
-  | { kind: 'task'; id: string }
-  | { kind: 'requirement'; id: string }
-  | { kind: 'setting'; page: SettingsPage };
+export type SearchTarget = { kind: 'task'; id: string } | { kind: 'requirement'; id: string } | { kind: 'setting'; page: SettingsPage };
 
 // One searchable row. `key` is unique across kinds (used for DOM ids).
 // The *Text fields are lowercased once when the index is built.
@@ -113,13 +110,14 @@ export const search = (entries: SearchEntry[], query: string): SearchGroup[] => 
     const score = scoreEntry(entry, terms);
     if (score > 0) buckets[entry.kind].push({ entry, score });
   }
-  return GROUP_ORDER
-    .map((kind) => ({
-      kind,
-      label: GROUP_LABELS[kind],
-      entries: buckets[kind].sort((a, b) => b.score - a.score).slice(0, GROUP_LIMIT).map((row) => row.entry),
-    }))
-    .filter((group) => group.entries.length > 0);
+  return GROUP_ORDER.map((kind) => ({
+    kind,
+    label: GROUP_LABELS[kind],
+    entries: buckets[kind]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, GROUP_LIMIT)
+      .map((row) => row.entry),
+  })).filter((group) => group.entries.length > 0);
 };
 
 // Next highlighted index in the flattened result list, wrapping around.

@@ -16,19 +16,27 @@ const execution = useExecutionStore();
 const view = computed((): { hint: string; icon: IconName; action: { name: 'cancel' | 'retry'; icon: IconName; label: string } | null } => {
   const { adjudication, deviations, status } = props.task;
   if (adjudication?.status === 'running') {
-    return { hint: adjudication.mustReplan ? 'Architect 正在按你的异议重新规划…' : 'Architect 正在读代码并裁决…', icon: 'spinner', action: { name: 'cancel', icon: 'x', label: '取消' } };
+    return {
+      hint: adjudication.mustReplan ? 'Architect 正在按你的异议重新规划…' : 'Architect 正在读代码并裁决…',
+      icon: 'spinner',
+      action: { name: 'cancel', icon: 'x', label: '取消' },
+    };
   }
   if (adjudication?.status === 'failed' && status === 'deviation') {
     return { hint: `裁决没有完成：${describeErrorInfo(adjudication.error)}`, icon: 'alert', action: { name: 'retry', icon: 'refresh', label: '重新裁决' } };
   }
   return { hint: deviations.length ? `共 ${deviations.length} 条，裁决结果已自动生效，可在上方撤销。` : '', icon: 'flag', action: null };
 });
-const revisionTitle = computed(() => (props.task.revision
-  ? `当前是第 ${props.task.revision.version} 版计划，${new Date(props.task.revision.revisedAt).toLocaleString('zh-CN')} 由 Architect 修订`
-  : ''));
+const revisionTitle = computed(() =>
+  props.task.revision
+    ? `当前是第 ${props.task.revision.version} 版计划，${new Date(props.task.revision.revisedAt).toLocaleString('zh-CN')} 由 Architect 修订`
+    : '',
+);
 const when = (iso: string) => new Date(iso).toLocaleString('zh-CN');
 
-const run = (action: 'cancel' | 'retry') => { execution.runDeviationAction(action).catch((error) => console.error(error)); };
+const run = (action: 'cancel' | 'retry') => {
+  execution.runDeviationAction(action).catch((error) => console.error(error));
+};
 </script>
 
 <template>
@@ -36,23 +44,46 @@ const run = (action: 'cancel' | 'retry') => { execution.runDeviationAction(actio
     <div class="panel-heading">
       <div class="panel-title">
         <span class="panel-icon danger"><AppIcon :name="view.icon" :class="{ spin: view.icon === 'spinner' }" /></span>
-        <div><h2>偏差与裁决</h2><p>{{ view.hint }}</p></div>
+        <div>
+          <h2>偏差与裁决</h2>
+          <p>{{ view.hint }}</p>
+        </div>
       </div>
       <div class="review-actions">
-        <button v-if="view.action" class="secondary-button small" type="button" :data-deviation="view.action.name" @click="run(view.action.name)"><AppIcon :name="view.action.icon" />{{ view.action.label }}</button>
+        <button v-if="view.action" class="secondary-button small" type="button" :data-deviation="view.action.name" @click="run(view.action.name)">
+          <AppIcon :name="view.action.icon" />
+          {{ view.action.label }}
+        </button>
       </div>
     </div>
-    <div v-if="task.revision" class="deviation-revision"><div class="deviation-revision-title"><AppIcon name="wand" />{{ revisionTitle }}</div></div>
+    <div v-if="task.revision" class="deviation-revision">
+      <div class="deviation-revision-title">
+        <AppIcon name="wand" />
+        {{ revisionTitle }}
+      </div>
+    </div>
     <div class="deviation-list">
       <div v-for="(deviation, index) in task.deviations" :key="index" class="deviation-item">
         <p><InlineCode :text="deviation.note" /></p>
         <small>
-          <span><AppIcon name="clock" />{{ when(deviation.reportedAt) }}</span>
-          <span v-if="deviation.stepIndex !== null"><AppIcon name="list-checks" />指令 {{ deviation.stepIndex + 1 }}</span>
-          <span v-if="deviation.filePath"><AppIcon name="file" />{{ deviation.filePath }}</span>
+          <span>
+            <AppIcon name="clock" />
+            {{ when(deviation.reportedAt) }}
+          </span>
+          <span v-if="deviation.stepIndex !== null">
+            <AppIcon name="list-checks" />
+            指令 {{ deviation.stepIndex + 1 }}
+          </span>
+          <span v-if="deviation.filePath">
+            <AppIcon name="file" />
+            {{ deviation.filePath }}
+          </span>
         </small>
         <div v-if="deviation.resolution" class="deviation-resolution" :class="deviation.resolution.decision">
-          <strong><AppIcon name="bot" />{{ resolutionTitle(deviation.resolution) }}</strong>
+          <strong>
+            <AppIcon name="bot" />
+            {{ resolutionTitle(deviation.resolution) }}
+          </strong>
           <p><InlineCode :text="deviation.resolution.reason" /></p>
           <ul v-if="deviation.resolution.changes?.length">
             <li v-for="(change, changeIndex) in deviation.resolution.changes" :key="changeIndex"><InlineCode :text="change" /></li>

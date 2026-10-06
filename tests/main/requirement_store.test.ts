@@ -6,7 +6,7 @@ import path from 'node:path';
 import { RequirementStore, REQUIREMENTS_FILENAME } from '../../src/main/requirement_store.ts';
 
 const newStore = async (dir?: string) => {
-  const configDir = dir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-req-'));
+  const configDir = dir ?? (await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-req-')));
   if (!dir) onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
   let n = 0;
   let t = 0;
@@ -37,7 +37,10 @@ test('the full flow: clarify, answer, plan, publish', async () => {
   let item = await store.finishClarify(id, clarified, 0.05);
   assert.equal(item.status, 'answering');
   assert.equal(item.title, '邮箱登录', 'agent title fills an empty user title');
-  assert.deepEqual(item.questions.map((q) => q.answer), ['', '']);
+  assert.deepEqual(
+    item.questions.map((q) => q.answer),
+    ['', ''],
+  );
 
   item = await store.setAnswers(id, ['5 次', '']);
   assert.equal(item.questions[0].answer, '5 次');
@@ -49,7 +52,10 @@ test('the full flow: clarify, answer, plan, publish', async () => {
 
   item = await store.publish(id, [{ id: `${id}-wp1` } as any]);
   assert.equal(item.status, 'published');
-  assert.deepEqual(store.publishedPackages().map((p) => p.id), ['req-1-wp1']);
+  assert.deepEqual(
+    store.publishedPackages().map((p) => p.id),
+    ['req-1-wp1'],
+  );
 });
 
 test('a user-supplied title is kept over the agent title', async () => {
@@ -125,7 +131,10 @@ test('list() is newest first and survives a reload; corrupt files load empty', a
   const { store, configDir } = await newStore();
   await store.create({ text: 'first' });
   await store.create({ text: 'second' });
-  assert.deepEqual(store.list().map((r) => r.text), ['second', 'first']);
+  assert.deepEqual(
+    store.list().map((r) => r.text),
+    ['second', 'first'],
+  );
   const { store: reloaded } = await newStore(configDir);
   assert.equal(reloaded.list().length, 2);
 

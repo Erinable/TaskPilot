@@ -101,7 +101,10 @@ export class RequirementStore {
   #newId: () => string;
   #now: () => Date;
 
-  constructor(configDir: string, { newId = () => `req-${crypto.randomBytes(4).toString('hex')}`, now = () => new Date() }: { newId?: () => string; now?: () => Date } = {}) {
+  constructor(
+    configDir: string,
+    { newId = () => `req-${crypto.randomBytes(4).toString('hex')}`, now = () => new Date() }: { newId?: () => string; now?: () => Date } = {},
+  ) {
     this.#file = path.join(configDir, REQUIREMENTS_FILENAME);
     this.#newId = newId;
     this.#now = now;
@@ -164,9 +167,7 @@ export class RequirementStore {
   }
 
   list(): Requirement[] {
-    return [...this.#items.values()]
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map((item) => structuredClone(item));
+    return [...this.#items.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => structuredClone(item));
   }
 
   get(id: string): Requirement {
@@ -200,9 +201,7 @@ export class RequirementStore {
   // Marks an agent step as running. Refuses if another run is in flight.
   async begin(id: string, step: RequirementStep): Promise<Requirement> {
     const item = this.#mustGet(id);
-    const allowed: RequirementStatus[] = step === 'clarifying'
-      ? ['draft', 'answering', 'failed']
-      : ['answering', 'reviewing', 'failed'];
+    const allowed: RequirementStatus[] = step === 'clarifying' ? ['draft', 'answering', 'failed'] : ['answering', 'reviewing', 'failed'];
     this.#expect(item, allowed);
     if (item.status === 'failed' && step === 'planning' && item.failedStep === 'clarifying') {
       fail('Clarification has not finished', 'invalid_state');

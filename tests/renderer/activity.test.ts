@@ -6,11 +6,29 @@ import { TRANSITIONS } from '../../src/main/work_package_status.ts';
 import type * as ipc from '../../src/shared/ipc_types.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
-const metrics = (overrides: Partial<ipc.QueueMetrics>): ipc.QueueMetrics => ({ doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null, ...overrides });
+const metrics = (overrides: Partial<ipc.QueueMetrics>): ipc.QueueMetrics => ({
+  doneThisWeek: 0,
+  donePreviousWeek: 0,
+  averageHours: null,
+  averageHoursPrevious: null,
+  ...overrides,
+});
 
 test('every transition has feed wording attributed to the right actor', () => {
   for (const transition of TRANSITIONS) {
-    const item = activity.toFeedItem({ kind: 'package_transition', packageId: 'p', title: 'T', transition: transition.name, actor: transition.actor, from: transition.from, to: transition.to, at: '2026-10-06T00:00:00Z' }, 0);
+    const item = activity.toFeedItem(
+      {
+        kind: 'package_transition',
+        packageId: 'p',
+        title: 'T',
+        transition: transition.name,
+        actor: transition.actor,
+        from: transition.from,
+        to: transition.to,
+        at: '2026-10-06T00:00:00Z',
+      },
+      0,
+    );
     assert.ok(item.what, transition.name);
     assert.equal(item.actor.avatar === 'you', transition.actor === 'human', transition.name);
   }
@@ -18,9 +36,15 @@ test('every transition has feed wording attributed to the right actor', () => {
 
 test('requirement events read as Product Lead or you', () => {
   const at = '2026-10-06T00:00:00Z';
-  assert.equal(activity.toFeedItem({ kind: 'requirement_finished', requirementId: 'r', title: '邮箱登录', step: 'planning', costUsd: 0.1, at }, 0).what, '拆解出了工作包');
+  assert.equal(
+    activity.toFeedItem({ kind: 'requirement_finished', requirementId: 'r', title: '邮箱登录', step: 'planning', costUsd: 0.1, at }, 0).what,
+    '拆解出了工作包',
+  );
   assert.equal(activity.toFeedItem({ kind: 'requirement_published', requirementId: 'r', title: 'x', packageCount: 2, at }, 0).what, '发布了 2 个工作包');
-  assert.equal(activity.toFeedItem({ kind: 'requirement_failed', requirementId: 'r', title: 'x', step: 'clarifying', code: 'agent_timeout', at }, 0).actor.name, 'Product Lead');
+  assert.equal(
+    activity.toFeedItem({ kind: 'requirement_failed', requirementId: 'r', title: 'x', step: 'clarifying', code: 'agent_timeout', at }, 0).actor.name,
+    'Product Lead',
+  );
 });
 
 test('a finished release reads as Release Manager', () => {

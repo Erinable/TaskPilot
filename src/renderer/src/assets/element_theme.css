@@ -24,7 +24,7 @@ html.dark {
   --el-fill-color-light: var(--fill-hover);
   --el-bg-color: var(--glass-bg-strong);
   --el-bg-color-overlay: var(--glass-bg-strong);
-  --el-overlay-color-lighter: rgba(10, 12, 20, .28);
+  --el-overlay-color-lighter: rgba(10, 12, 20, 0.28);
   --el-border-radius-base: var(--radius-sm);
   --el-font-family: var(--font-sans);
   --el-font-size-base: 14px;
@@ -43,10 +43,17 @@ html.dark {
 }
 
 .el-dialog,
-.el-message-box { border-radius: 20px; }
+.el-message-box {
+  border-radius: 20px;
+}
 
-.el-message { border-radius: 13px; background: var(--glass-bg-strong); }
-.el-message .el-message__content { color: var(--text); }
+.el-message {
+  border-radius: 13px;
+  background: var(--glass-bg-strong);
+}
+.el-message .el-message__content {
+  color: var(--text);
+}
 
 .el-overlay {
   -webkit-backdrop-filter: blur(8px) saturate(120%);
@@ -57,5 +64,8 @@ html.dark {
   .el-dialog,
   .el-message-box,
   .el-popper.is-light,
-  .el-message { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .el-message {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }

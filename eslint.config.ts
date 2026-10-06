@@ -30,8 +30,14 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         { selector: 'ExportNamedDeclaration[declaration=null][source=null]', message: 'Export inline where the symbol is defined.' },
-        { selector: "AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]", message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.' },
-        { selector: "CallExpression[callee.property.name='insertAdjacentHTML']", message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.' },
+        {
+          selector: 'AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]',
+          message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
+          message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
+        },
       ],
       // process.env is read in one config module only.
       'no-restricted-properties': ['error', { object: 'process', property: 'env', message: 'Read configuration from src/main/env.ts.' }],

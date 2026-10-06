@@ -6,8 +6,10 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const read = (relativePath: string) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 
-const filesUnder = (dir: string): string[] => fs.readdirSync(path.join(root, dir), { withFileTypes: true })
-  .flatMap((entry) => (entry.isDirectory() ? filesUnder(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
+const filesUnder = (dir: string): string[] =>
+  fs
+    .readdirSync(path.join(root, dir), { withFileTypes: true })
+    .flatMap((entry) => (entry.isDirectory() ? filesUnder(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
 
 test('package metadata runs the electron-vite build output with Vitest', () => {
   const packageJson = JSON.parse(read('package.json'));
