@@ -9,7 +9,7 @@ import * as envSetup from '../../src/main/env_setup.ts';
 
 const run = promisify(execFile);
 
-async function repo(files: Record<string, string>, { untracked = {} as Record<string, string> } = {}) {
+const repo = async (files: Record<string, string>, { untracked = {} as Record<string, string> } = {}) => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-env-')));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const g = (args) => run('git', args, { cwd: root });
@@ -27,7 +27,7 @@ async function repo(files: Record<string, string>, { untracked = {} as Record<st
     await fs.writeFile(path.join(root, file), content);
   }
   return root;
-}
+};
 
 const fakeVersions = (node: string | null = 'v22.1.0', npm: string | null = '10.7.0') => async (command) => (command === 'node' ? node : npm);
 

@@ -9,7 +9,7 @@ import { collectChanges } from '../../src/main/review_diff.ts';
 
 const run = promisify(execFile);
 
-async function repo() {
+const repo = async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-review-'));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const g = (args) => run('git', args, { cwd: root });
@@ -25,7 +25,7 @@ async function repo() {
     await fs.writeFile(path.join(root, file), content);
   };
   return { root, baseline, write };
-}
+};
 
 test('collects tracked and untracked changes, skipping secrets and binaries', async () => {
   const { root, baseline, write } = await repo();

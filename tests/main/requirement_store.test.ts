@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { RequirementStore, REQUIREMENTS_FILENAME } from '../../src/main/requirement_store.ts';
 
-async function newStore(dir?: string) {
+const newStore = async (dir?: string) => {
   const configDir = dir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-req-'));
   if (!dir) onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
   let n = 0;
@@ -15,7 +15,7 @@ async function newStore(dir?: string) {
     now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, t++)),
   }).load();
   return { store, configDir };
-}
+};
 
 const clarified = { title: '邮箱登录', summary: '用户用邮箱登录', questions: ['锁定策略？', '要记住我吗？'] };
 const plan: any = { summary: 'p', packages: [{ title: 'a' }] };

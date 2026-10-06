@@ -13,13 +13,13 @@ import crypto from 'node:crypto';
 import { formatNotes } from './agents/release_manager.ts';
 import type { ReleasePlan } from './agents/release_manager.ts';
 import type { ReleaseInputSummary } from '../shared/ipc_types.ts';
+import { CONTROL_CHARS } from './text_rules.ts';
 
 export const RELEASES_FILENAME = 'releases.json';
 export const MAX_HISTORY = 50;
 export const MAX_NOTES_TEXT = 20000;
 const DRAFT_STATUSES = ['generating', 'ready', 'failed'] as const;
 // Tabs and newlines are allowed in the Markdown body.
-const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type DraftStatus = (typeof DRAFT_STATUSES)[number];
 

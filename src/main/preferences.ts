@@ -3,6 +3,7 @@
 // repository or shared with anyone.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { LooseJson } from './loose_json.ts';
 
 export const PREFERENCES_FILENAME = 'preferences.json';
 export const THEMES = ['system', 'light', 'dark'] as const;
@@ -10,6 +11,8 @@ export const AVATAR_COLORS = ['sunset', 'ocean', 'violet', 'forest', 'graphite']
 export const PATH_SOURCES = ['inherit', 'login-shell'] as const;
 export const MAX_NAME_LENGTH = 40;
 // C0/C1 controls, plus bidi overrides that could visually reorder a name.
+// Display names refuse all C0/C1 controls and bidi overrides.
+// eslint-disable-next-line no-control-regex
 const DISALLOWED_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
 
 export type Theme = (typeof THEMES)[number];
@@ -57,7 +60,7 @@ const isValidName = (name: string) => codePoints(name) <= MAX_NAME_LENGTH && !DI
 export const normalize = (input: unknown): Preferences => {
   const base = defaults();
   if (!input || typeof input !== 'object') return base;
-  const raw = input as Record<string, any>;
+  const raw = input as LooseJson;
   const name = typeof raw.profile?.displayName === 'string' ? raw.profile.displayName.trim() : '';
   return {
     profile: {
@@ -80,7 +83,7 @@ export const validate = (input: unknown): Preferences => {
     throw new PreferencesError(message, code, field);
   };
   if (!input || typeof input !== 'object') fail('Preferences must be an object', 'invalid_preferences');
-  const raw = input as Record<string, any>;
+  const raw = input as LooseJson;
 
   const name = raw.profile?.displayName ?? '';
   if (typeof name !== 'string') fail('Display name must be text', 'invalid_name', 'displayName');

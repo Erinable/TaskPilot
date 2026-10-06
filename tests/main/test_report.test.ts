@@ -20,11 +20,11 @@ const JUNIT = `<?xml version="1.0" encoding="UTF-8"?>
   </testsuite>
 </testsuites>`;
 
-async function tempRoot() {
+const tempRoot = async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-report-')));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   return root;
-}
+};
 
 test('parseJunit() reads cases, failures, errors and skips with suite paths', () => {
   const results = testReport.parseJunit(JUNIT);

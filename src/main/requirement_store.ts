@@ -16,13 +16,13 @@ import crypto from 'node:crypto';
 import type { TaskDefinition } from './tasks.ts';
 import type { Plan } from './agents/product_lead.ts';
 import type { InterfaceSummary, SkippedFile } from './agents/architect.ts';
+import { CONTROL_CHARS } from './text_rules.ts';
 
 export const REQUIREMENTS_FILENAME = 'requirements.json';
 export const STATUSES = ['draft', 'clarifying', 'answering', 'planning', 'reviewing', 'published', 'failed'] as const;
 const MAX_TITLE = 60;
 export const MAX_TEXT = 4000;
 export const MAX_ANSWER = 1000;
-const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type RequirementStatus = (typeof STATUSES)[number];
 

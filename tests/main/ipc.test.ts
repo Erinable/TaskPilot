@@ -26,7 +26,7 @@ import { createPathResolver } from '../../src/main/shell_env.ts';
 
 const run = promisify(execFile);
 
-async function harness({ withRepo = true, agent = null, seedState = null }: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) {
+const harness = async ({ withRepo = true, agent = null, seedState = null }: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
   let ipc: IpcHandle | null = null;
@@ -102,17 +102,17 @@ async function harness({ withRepo = true, agent = null, seedState = null }: { wi
     call, store, root: root!, configDir, activity, setCommands, setRoot, getConfig, changes, revealed, requirements, agentCalls,
     shellReads: () => shellReads,
   };
-}
+};
 
 /** Polls until a requirement leaves a running state. */
-async function settle(call, id) {
+const settle = async (call, id) => {
   for (let i = 0; i < 200; i += 1) {
     const { data } = await call(CHANNELS.requirementsGet, id);
     if (data.status !== 'clarifying' && data.status !== 'planning') return data;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('requirement never settled');
-}
+};
 
 const CLARIFY_OUTPUT = { title: '邮箱登录', summary: '用户用邮箱和密码登录', questions: ['连续失败几次锁定？'] };
 const PLAN_OUTPUT = {
@@ -346,11 +346,11 @@ test('data:reveal only ever opens the config directory', async () => {
   assert.deepEqual(revealed, [configDir]);
 });
 
-async function handlersCall(call, channel, ...args) {
+const handlersCall = async (call, channel, ...args) => {
   const response = await call(channel, ...args);
   assert.equal(response.ok, true);
   return response.data;
-}
+};
 
 test('preload exposes every channel the main process registers', async () => {
   // The preload shares CHANNELS with the main process; guard against a
@@ -428,22 +428,22 @@ const QA_PASS = {
 };
 
 /** Claims auth-edge-tests, writes its test file, and submits it. */
-async function submitEdgeTests({ call, root }) {
+const submitEdgeTests = async ({ call, root }) => {
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
   await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
   return call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
-}
+};
 
 /** Polls until the package's review leaves 'running'. */
-async function settleReview(call, id) {
+const settleReview = async (call, id) => {
   for (let i = 0; i < 400; i += 1) {
     const { data } = await call(CHANNELS.getTask, id);
     if (data.review?.status !== 'running') return data;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('review never settled');
-}
+};
 
 test('review: submitting starts QA, which passes the package on to acceptance', async () => {
   const h = await harness({ agent: fakeAgent() });
@@ -695,7 +695,7 @@ const ENV_PLAN = {
 };
 
 /** Commits a dependency-free package.json and switches to the login-shell PATH so node/npm resolve. */
-async function envHarness(options: { overrides?: Record<string, unknown> } & Record<string, unknown> = {}) {
+const envHarness = async (options: { overrides?: Record<string, unknown> } & Record<string, unknown> = {}) => {
   const h = await harness({ agent: fakeAgent(options.overrides), ...options });
   const manifest = {
     name: 'env-fixture',
@@ -707,16 +707,16 @@ async function envHarness(options: { overrides?: Record<string, unknown> } & Rec
   await run('git', ['commit', '-qm', 'manifest'], { cwd: h.root });
   await h.call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }));
   return h;
-}
+};
 
-async function settleEnv(call) {
+const settleEnv = async (call) => {
   for (let i = 0; i < 400; i += 1) {
     const { data } = await call(CHANNELS.envGet);
     if (data.status !== 'planning') return data;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('environment plan never settled');
-}
+};
 
 test('env: plan, confirm steps one by one, then apply the scripts', async () => {
   const { call, configDir } = await envHarness();
@@ -808,14 +808,14 @@ test('env: a second plan request while one runs is refused', async () => {
   assert.equal((await settleEnv(call)).status, 'ready');
 });
 
-async function settleBaseline(call, id) {
+const settleBaseline = async (call, id) => {
   for (let i = 0; i < 400; i += 1) {
     const { data } = await call(CHANNELS.getTask, id);
     if (data.baselineChecks && data.baselineChecks.status !== 'measuring') return data.baselineChecks;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('baseline never settled');
-}
+};
 
 const LEGACY_FAILING = {
   command: process.execPath,
@@ -885,14 +885,14 @@ test('review: without a baseline the same failure rejects', async () => {
 /* Deviations: Architect rules, the human can override */
 
 /** Polls until the package's adjudication leaves 'running'. */
-async function settleAdjudication(call, id) {
+const settleAdjudication = async (call, id) => {
   for (let i = 0; i < 400; i += 1) {
     const { data } = await call(CHANNELS.getTask, id);
     if (data.adjudication?.status !== 'running') return data;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error('adjudication never settled');
-}
+};
 
 const reportDeviation = async ({ call }) => {
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');

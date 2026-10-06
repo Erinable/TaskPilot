@@ -79,7 +79,7 @@ const stepState = (step: ipc.EnvStep) => {
     </div>
     <h3 class="settings-section-title">写入验证命令</h3>
     <div class="settings-card glass">
-      <el-checkbox-group v-model="setup.selectedKinds" tag="ul" id="setupApply" class="setup-apply">
+      <el-checkbox-group id="setupApply" v-model="setup.selectedKinds" tag="ul" class="setup-apply">
         <li v-for="item in setup.applyItems" :key="item.kind" class="setup-apply-item">
           <el-checkbox :value="item.kind" :disabled="item.disabled">
             <span><strong>{{ KIND_LABEL[item.kind] }}</strong><code>{{ item.proposed }}</code><small>{{ item.note }}</small></span>

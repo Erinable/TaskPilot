@@ -41,7 +41,7 @@ describe('CommandPalette', () => {
   afterEach(() => {
     wrapper?.unmount();
     wrapper = null;
-    document.body.innerHTML = '';
+    document.body.replaceChildren();
   });
 
   const render = async () => {

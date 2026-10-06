@@ -10,7 +10,7 @@ import { listFiles } from '../../src/main/git.ts';
 
 const run = promisify(execFile);
 
-async function repo(files: Record<string, string | Buffer>, { untracked = {} as Record<string, string>, symlinks = {} as Record<string, string> } = {}) {
+const repo = async (files: Record<string, string | Buffer>, { untracked = {} as Record<string, string>, symlinks = {} as Record<string, string> } = {}) => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-reader-')));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const g = (args) => run('git', args, { cwd: root });
@@ -26,7 +26,7 @@ async function repo(files: Record<string, string | Buffer>, { untracked = {} as 
   await g(['commit', '-qm', 'init']);
   for (const [file, content] of Object.entries(untracked)) await fs.writeFile(path.join(root, file), content);
   return root;
-}
+};
 
 const reasons = (result) => Object.fromEntries(result.skipped.map((s) => [s.path, s.reason]));
 

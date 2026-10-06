@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import * as workspace from '../../src/main/workspace.ts';
 
-async function tempDir() {
+const tempDir = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ws-'));
   onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
   return dir;
-}
+};
 
 test('load() returns an empty config when the file is absent', async () => {
   const config = await workspace.load(await tempDir());

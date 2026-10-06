@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process';
 import { processEnv } from './env.ts';
 import { readTracked, indexEntries } from './repo_reader.ts';
 import type { CommandEntry } from './workspace.ts';
+import type { LooseJson } from './loose_json.ts';
 
 export const LOCKFILES: Record<string, string> = {
   'package-lock.json': 'npm',
@@ -99,7 +100,7 @@ const toolVersion: ToolVersion = (command, args, envPath) =>
   });
 
 export const parseManifest = (content: string): Manifest => {
-  let raw: any;
+  let raw: LooseJson | null;
   try {
     raw = JSON.parse(content);
   } catch {

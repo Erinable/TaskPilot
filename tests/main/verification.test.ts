@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import * as verification from '../../src/main/verification.ts';
 
-async function workspaceWith(commands) {
+const workspaceWith = async (commands) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-verify-'));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   return { root, commands };
-}
+};
 
 test('parseTap() reads pass, fail, skip, and todo lines', () => {
   const results = verification.parseTap([

@@ -25,7 +25,7 @@ const mountOpen = async () => {
 };
 
 beforeEach(() => {
-  document.body.innerHTML = '';
+  document.body.replaceChildren();
   current = { task: taskView() };
   api = installApi(current);
 });

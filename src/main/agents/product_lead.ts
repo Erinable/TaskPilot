@@ -11,13 +11,13 @@
 //     workspace settings (see ../workspace.ts).
 
 import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
+import { CONTROL_CHARS } from '../text_rules.ts';
 
 export const MAX_QUESTIONS = 5;
 export const MAX_PACKAGES = 6;
 const PRIORITIES = ['high', 'medium', 'low'] as const;
 // Icons the renderer defines (see renderer/src/lib/icons.ts) that suit a work package.
 export const PACKAGE_ICONS = ['key', 'flask', 'blocks', 'rocket', 'file', 'terminal', 'box', 'diff', 'git-branch', 'database'] as const;
-const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type Priority = (typeof PRIORITIES)[number];
 export type PackageIcon = (typeof PACKAGE_ICONS)[number];

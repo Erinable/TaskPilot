@@ -9,6 +9,7 @@
 // Checklist evidence must name a path or commit from the input, and anything
 // else is dropped.
 import { AgentOutputError, isObject } from './product_lead.ts';
+import { CONTROL_CHARS_NO_CR } from '../text_rules.ts';
 
 export const BUMPS = ['major', 'minor', 'patch'] as const;
 export const NOTE_GROUPS = ['added', 'fixed', 'changed', 'notes'] as const;
@@ -20,7 +21,6 @@ const MAX_REASON = 300;
 const MAX_CHECK_TEXT = 200;
 const MAX_EVIDENCE_CHARS = 300;
 const SHORT_SHA = 7;
-const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f‪-‮⁦-⁩]/;
 
 export type Bump = (typeof BUMPS)[number];
 export type NoteGroup = (typeof NOTE_GROUPS)[number];
@@ -172,7 +172,7 @@ const text = (value: unknown, at: string, max: number): string => {
   const trimmed = value.trim();
   if (!trimmed) fail(at, 'is empty');
   if ([...trimmed].length > max) fail(at, `is longer than ${max} characters`);
-  if (CONTROL_CHARS.test(trimmed)) fail(at, 'contains control characters');
+  if (CONTROL_CHARS_NO_CR.test(trimmed)) fail(at, 'contains control characters');
   return trimmed;
 };
 

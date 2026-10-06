@@ -11,7 +11,7 @@ const run = promisify(execFile);
 
 // A real repository is used rather than a mock: the point of these tests is
 // that the porcelain parsing matches what git actually emits.
-async function makeRepo() {
+const makeRepo = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-git-'));
   onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
   const g = (args) => run('git', args, { cwd: dir });
@@ -22,7 +22,7 @@ async function makeRepo() {
   await g(['add', 'a.txt']);
   await g(['commit', '-qm', 'init']);
   return { dir, g };
-}
+};
 
 test('isRepo() distinguishes a repository from a plain directory', async () => {
   const { dir } = await makeRepo();

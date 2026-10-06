@@ -19,11 +19,11 @@
 import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
 import type { RawObject } from './product_lead.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
+import { CONTROL_CHARS } from '../text_rules.ts';
 
 export const MAX_SELECTED = 12;
 const MAX_MODULES = 12;
 const MAX_MEMBERS = 20;
-const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
 
 export interface ArchitectRequirement {
   title?: string | null;

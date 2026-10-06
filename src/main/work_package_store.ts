@@ -581,7 +581,8 @@ export class WorkPackageStore {
       throw new StoreError('stepIndex must be a non-negative integer', 'invalid_step');
     }
     const set = new Set<number>(entry.completedSteps);
-    done ? set.add(stepIndex) : set.delete(stepIndex);
+    if (done) set.add(stepIndex);
+    else set.delete(stepIndex);
     entry.completedSteps = [...set].sort((a, b) => a - b);
     this.#state.set(id, entry);
     await this.#persist();

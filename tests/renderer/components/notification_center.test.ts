@@ -24,7 +24,7 @@ describe('NotificationCenter', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    document.body.innerHTML = '';
+    document.body.replaceChildren();
     pinia = createPinia();
     setActivePinia(pinia);
     state = { list: [requirement({ title: MARKUP, updatedAt: '2026-01-04T00:00:00.000Z' })] };

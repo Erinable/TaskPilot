@@ -2,7 +2,7 @@
 // generated and the user published from the requirement center; there are no
 // built-in samples. Inline code in `steps` is marked with backticks and
 // rendered as <code>.
-import { isStatus, type WorkPackageStatus } from './work_package_status.ts';
+import type { WorkPackageStatus } from './work_package_status.ts';
 import { isInside } from './workspace.ts';
 
 export const PRIORITIES = ['high', 'medium', 'low'] as const;

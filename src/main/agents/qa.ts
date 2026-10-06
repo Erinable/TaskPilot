@@ -18,12 +18,12 @@
 import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
 import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../evidence.ts';
 import type { CheckRun } from '../verification.ts';
+import { CONTROL_CHARS } from '../text_rules.ts';
 
 const MAX_ISSUES = 12;
 export const VERDICTS = ['pass', 'reject'] as const;
 export const CRITERION_STATUSES = ['met', 'unmet', 'unclear'] as const;
 export const SEVERITIES = ['blocker', 'major', 'minor'] as const;
-const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/;
 const MAX_OUTPUT_TAIL = 2000;
 
 export type Verdict = (typeof VERDICTS)[number];

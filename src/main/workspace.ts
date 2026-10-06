@@ -10,6 +10,11 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 
 import { env } from './env.ts';
+import type { LooseJson } from './loose_json.ts';
+
+// Report paths must not contain C0 controls.
+// eslint-disable-next-line no-control-regex
+const hasControlChar = (value: string) => /[\0-\x1f]/.test(value);
 
 export const CONFIG_FILENAME = 'workspace.json';
 export const CONFIG_VERSION = 2;
@@ -125,7 +130,7 @@ export const normalizeReportPath = (value: unknown, kind: string): string => {
   const clean = value.trim();
   const parts = clean.split(/[\\/]/);
   if (clean.length > 200 || path.isAbsolute(clean) || /^[A-Za-z]:/.test(clean)
-    || parts.some((part) => part === '..' || part === '') || /[\0-\x1f]/.test(clean)) {
+    || parts.some((part) => part === '..' || part === '') || hasControlChar(clean)) {
     throw new WorkspaceError(`${kind} report path must stay inside the workspace`, 'invalid_report', kind);
   }
   return parts.join('/');
@@ -142,7 +147,7 @@ export const normalizeCheck = (value: unknown, kind: CheckKind): Check | null =>
   // Non-null: value is neither null nor undefined here.
   const entry = normalizeCommand(value, kind) as CommandEntry;
   // normalizeCommand() has checked that value is a plain object.
-  const raw = value as Record<string, any>;
+  const raw = value as LooseJson;
   const defaults = CHECK_DEFAULTS[kind];
   const stage = raw.stage ?? defaults.stage;
   if (!isStage(stage)) throw new WorkspaceError(`${kind} stage must be step or submit`, 'invalid_check', kind);
@@ -341,7 +346,7 @@ export const resolveExecutable = async (command: string, {
 export const normalize = (input: unknown): WorkspaceConfig => {
   const config = emptyConfig();
   if (input && typeof input === 'object') {
-    const raw = input as Record<string, any>;
+    const raw = input as LooseJson;
     if (typeof raw.root === 'string' && raw.root.trim()) config.root = raw.root.trim();
     const source = raw.checks && typeof raw.checks === 'object' ? raw.checks : raw.commands;
     for (const kind of COMMAND_KINDS) {

@@ -10,11 +10,11 @@ const SAMPLE: any[] = [
   { id: 'b', status: 'clarifying', steps: ['one'] },
 ];
 
-async function newStore(dir?: string) {
+const newStore = async (dir?: string) => {
   const configDir = dir ?? await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
   if (!dir) onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
   return { store: await new WorkPackageStore(configDir).load(SAMPLE), configDir };
-}
+};
 
 test('seeds state from the task definitions', async () => {
   const { store } = await newStore();
@@ -152,10 +152,10 @@ test('saved entries for unknown ids or unknown statuses are ignored', async () =
 
 /* QA review */
 
-async function inReview(store, id = 'a') {
+const inReview = async (store, id = 'a') => {
   await store.transition(id, 'claim', 'human', { baseline: 'abc123' });
   await store.transition(id, 'submit_for_review', 'human');
-}
+};
 const reviewResult = (passed: boolean): any => ({
   passed,
   reasons: passed ? [] : ['qa_rejected'],
@@ -202,12 +202,12 @@ const replan: any = {
   read: [], skipped: [], costUsd: 0.03,
 };
 
-async function inDeviation(store) {
+const inDeviation = async (store) => {
   await store.transition('a', 'claim', 'human', { baseline: 'c1' });
   await store.setStepDone('a', 0, true);
   await store.transition('a', 'report_deviation', 'human', { deviation: { note: '接口不存在' } });
   await store.beginAdjudication('a');
-}
+};
 
 test('a dismissal returns the package with progress intact and can be contested once', async () => {
   const { store } = await newStore();

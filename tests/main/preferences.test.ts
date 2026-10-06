@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import * as preferences from '../../src/main/preferences.ts';
 
-async function tempDir() {
+const tempDir = async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-prefs-'));
   onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
   return dir;
-}
+};
 
 const valid = (overrides: any = {}) => ({
   profile: { displayName: 'Ada Lovelace', avatarColor: 'ocean', ...overrides.profile },

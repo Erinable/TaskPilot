@@ -29,7 +29,7 @@ describe('ReleaseView', () => {
   afterEach(() => {
     wrapper?.unmount();
     wrapper = null;
-    document.body.innerHTML = '';
+    document.body.replaceChildren();
     vi.useRealTimers();
   });
 
