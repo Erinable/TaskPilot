@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import ElementPlus from 'element-plus';
+import zhCn from 'element-plus/es/locale/lang/zh-cn.mjs';
 import 'element-plus/dist/index.css';
 import 'element-plus/theme-chalk/dark/css-vars.css';
 import 'virtual:uno.css';
@@ -16,4 +17,4 @@ const syncScheme = () => document.documentElement.classList.toggle('dark', schem
 syncScheme();
 scheme.addEventListener('change', syncScheme);
 
-createApp(App).use(createPinia()).use(ElementPlus).mount('#app');
+createApp(App).use(createPinia()).use(ElementPlus, { locale: zhCn }).mount('#app');
