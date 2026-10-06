@@ -76,12 +76,14 @@ describe('requirements store', () => {
     expect(store.attentionCount).toBe(3);
   });
 
-  test('a failed list load empties the list', async () => {
-    api.requirements.list.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
+  test('a failed list load keeps the last list', async () => {
+    state.list = [requirement()];
     const store = useRequirementsStore();
+    await store.refreshList();
+    api.requirements.list.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     await store.refreshList();
-    expect(store.items).toEqual([]);
+    expect(store.items.map((item) => item.id)).toEqual(['r1']);
     spy.mockRestore();
   });
 

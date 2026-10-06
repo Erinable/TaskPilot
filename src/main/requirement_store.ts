@@ -41,7 +41,7 @@ export interface RequirementQuestion {
 export interface RequirementInterfaces {
   summary: InterfaceSummary | null;
   text: string | null;
-  read: unknown[];
+  read: { path: string; sha?: string }[];
   skipped: SkippedFile[];
   error: { code: string; message: string } | null;
 }

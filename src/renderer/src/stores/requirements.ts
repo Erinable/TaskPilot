@@ -27,8 +27,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     try {
       items.value = await call(window.taskpilot.requirements.list());
     } catch (error) {
+      // Keep the last list: clearing it would drop the badge and the
+      // notifications' read state over one failed poll.
       console.error('Failed to load requirements', error);
-      items.value = [];
     }
   };
 

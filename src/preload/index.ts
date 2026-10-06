@@ -9,7 +9,14 @@ import type * as ipc from '../shared/ipc_types.ts';
 
 const invoke = <T>(channel: Channel, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<ipc.IpcResult<T>>;
 
+// Passed by the main process (see BrowserWindow additionalArguments).
+const TIME_ZONE_ARG = '--taskpilot-time-zone=';
+const timeZoneArg = process.argv.find((arg) => arg.startsWith(TIME_ZONE_ARG));
+if (!timeZoneArg) throw new Error('The main process did not pass the business time zone');
+
 const api = {
+  // IANA name; day boundaries and displayed times follow it.
+  businessTimeZone: timeZoneArg.slice(TIME_ZONE_ARG.length),
   listTasks: () => invoke<ipc.TaskView[]>(CHANNELS.listTasks),
   getTask: (id: string) => invoke<ipc.TaskView>(CHANNELS.getTask, id),
 
@@ -77,6 +84,11 @@ const api = {
 
   activity: {
     overview: () => invoke<ipc.ActivityOverview>(CHANNELS.activityOverview),
+    page: (before: string | null) => invoke<ipc.ActivityPage>(CHANNELS.activityPage, before),
+  },
+
+  engineeringMap: {
+    get: () => invoke<ipc.EngineeringMap>(CHANNELS.engineeringMap),
   },
 
   env: {

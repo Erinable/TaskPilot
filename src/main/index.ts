@@ -52,6 +52,8 @@ const createWindow = (appearance: Appearance) => {
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 20, y: 22 },
     webPreferences: {
+      // The renderer's only source for the business time zone (see preload).
+      additionalArguments: [`--taskpilot-time-zone=${env.businessTimeZone}`],
       preload: path.join(import.meta.dirname, '..', 'preload', 'index.cjs'),
       contextIsolation: true,
       sandbox: true,

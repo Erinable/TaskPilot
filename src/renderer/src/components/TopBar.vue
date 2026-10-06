@@ -2,12 +2,15 @@
 import { computed } from 'vue';
 
 import AppIcon from './AppIcon.vue';
+import NotificationCenter from './NotificationCenter.vue';
 import UserAvatar from './UserAvatar.vue';
 import { useAppStore } from '@/stores/app.ts';
+import { usePaletteStore } from '@/stores/palette.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 
 const app = useAppStore();
 const settings = useSettingsStore();
+const palette = usePaletteStore();
 
 const workspaceName = computed(() => {
   const info = app.workspaceInfo;
@@ -36,8 +39,8 @@ const workspaceName = computed(() => {
       <AppIcon name="chevron-down" class="chevron" />
     </div>
     <div class="top-actions">
-      <button class="icon-button" title="搜索" aria-label="搜索"><AppIcon name="search" /></button>
-      <button class="icon-button" title="通知" aria-label="通知"><AppIcon name="bell" /><span class="notification-dot"></span></button>
+      <button class="icon-button" type="button" title="搜索（⌘K）" aria-label="搜索" aria-haspopup="dialog" @click="palette.openPalette()"><AppIcon name="search" /></button>
+      <NotificationCenter />
       <UserAvatar
         tag="button" class="avatar" type="button" title="个人资料" aria-label="打开个人资料设置"
         :display-name="app.preferences?.profile.displayName ?? ''" :avatar-color="app.preferences?.profile.avatarColor ?? 'sunset'"

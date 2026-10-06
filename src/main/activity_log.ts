@@ -70,6 +70,24 @@ export class ActivityLog {
     return records.slice(0, limit);
   }
 
+  // One page of the full feed: whole business days, newest first, starting
+  // at `before` (exclusive) and stopping once `minEvents` are collected or
+  // the retention window ends. `nextBefore` continues from the last day read.
+  async page({ before, minEvents }: { before: string | null; minEvents: number }): Promise<{ days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null }> {
+    const window = recentDays(this.#now(), this.#timeZone, RETENTION_DAYS);
+    const start = before ? window.findIndex((day) => day < before) : 0;
+    if (start < 0) return { days: [], nextBefore: null };
+    const days: { day: string; records: ActivityRecord[] }[] = [];
+    let count = 0;
+    let index = start;
+    for (; index < window.length && count < minEvents; index += 1) {
+      const records = (await this.#readDay(window[index])).reverse();
+      if (records.length) days.push({ day: window[index], records });
+      count += records.length;
+    }
+    return { days, nextBefore: index < window.length ? window[index - 1] : null };
+  }
+
   // Every event from the last `days` business days, oldest first (metrics).
   async window(days: number): Promise<ActivityRecord[]> {
     const perDay = await Promise.all(recentDays(this.#now(), this.#timeZone, days).map((day) => this.#readDay(day)));

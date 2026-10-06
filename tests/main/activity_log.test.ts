@@ -99,3 +99,22 @@ test('computeMetrics() counts done packages per week and averages claim-to-done 
 test('computeMetrics() reports no average without finished work', () => {
   assert.deepEqual(computeMetrics([], new Date(), SHANGHAI), { doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null });
 });
+
+test('page() walks whole days newest first and continues from nextBefore', async () => {
+  const dir = await tempDir();
+  let now = new Date('2026-10-01T02:00:00Z');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  for (const [day, count] of [['2026-10-01', 2], ['2026-10-03', 1], ['2026-10-05', 3]] as const) {
+    now = new Date(`${day}T02:00:00Z`);
+    for (let i = 0; i < count; i += 1) await log.append({ kind: 'requirement_created', requirementId: `${day}-${i}`, title: 't' });
+  }
+  now = new Date('2026-10-06T02:00:00Z');
+  const first = await log.page({ before: null, minEvents: 3 });
+  assert.deepEqual(first.days.map((entry) => [entry.day, entry.records.length]), [['2026-10-05', 3]]);
+  assert.equal(first.days[0].records[0].kind === 'requirement_created' && first.days[0].records[0].requirementId, '2026-10-05-2');
+  const second = await log.page({ before: first.nextBefore, minEvents: 3 });
+  assert.deepEqual(second.days.map((entry) => entry.day), ['2026-10-03', '2026-10-01']);
+  const last = await log.page({ before: second.nextBefore, minEvents: 3 });
+  assert.deepEqual(last.days, []);
+  assert.equal(last.nextBefore, null);
+});

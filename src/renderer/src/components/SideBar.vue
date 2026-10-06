@@ -32,6 +32,10 @@ const showQueue = async () => {
   if (await app.navigate('queue')) execution.close();
 };
 
+const openView = async (view: 'map' | 'activity') => {
+  if (await app.navigate(view)) execution.close();
+};
+
 const team = computed(() => activity.TEAM.map(({ agent, actor }) => {
   const presence = activity.presenceOf(app.activity?.team ?? null, agent);
   return { ...actor, presence, label: activity.PRESENCE_LABELS[presence] };
@@ -49,8 +53,8 @@ const team = computed(() => activity.TEAM.map(({ agent, actor }) => {
         <AppIcon name="sparkle" class="nav-icon" /><span>需求中心</span>
         <span v-if="requirements.attentionCount > 0" class="nav-count attention">{{ requirements.attentionCount }}</span>
       </button>
-      <button class="nav-item"><AppIcon name="map" class="nav-icon" /><span>工程地图</span></button>
-      <button class="nav-item"><AppIcon name="activity" class="nav-icon" /><span>活动记录</span></button>
+      <button class="nav-item" :class="{ active: app.view === 'map' }" @click="openView('map')"><AppIcon name="map" class="nav-icon" /><span>工程地图</span></button>
+      <button class="nav-item" :class="{ active: app.view === 'activity' }" @click="openView('activity')"><AppIcon name="activity" class="nav-icon" /><span>活动记录</span></button>
     </nav>
     <div class="side-section-label team-label">AI TEAM</div>
     <div class="team-list">

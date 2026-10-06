@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 
 import QueueView from '../../../src/renderer/src/views/QueueView.vue';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
@@ -21,7 +22,7 @@ describe('QueueView', () => {
     installApi({ list: [] });
   });
 
-  const render = () => mount(QueueView, { global: { plugins: [pinia] } });
+  const render = () => mount(QueueView, { global: { plugins: [pinia, ElementPlus] } });
 
   test('an empty queue guides the user to the requirement center', async () => {
     const requirements = useRequirementsStore();
@@ -74,5 +75,23 @@ describe('QueueView', () => {
     expect(wrapper.findAll('.metric-card strong').map((node) => node.text()).slice(1)).toEqual(['–', '–']);
     expect(wrapper.find('.team-presence').exists()).toBe(false);
     expect(wrapper.find('.activity-list .empty-hint').exists()).toBe(false);
+  });
+
+  test('done packages are hidden by default and the footer shows them all', async () => {
+    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key' };
+    useTasksStore().tasks = [
+      { ...base, id: 'low', title: '低', status: 'pending', priority: 'low' },
+      { ...base, id: 'done', title: '完成', status: 'done', priority: 'high' },
+      { ...base, id: 'high', title: '高', status: 'in_progress', priority: 'high' },
+    ] as unknown as ipc.TaskView[];
+    const wrapper = mount(QueueView, { global: { plugins: [pinia, ElementPlus] } });
+    await flushPromises();
+    expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['高', '低']);
+    expect(wrapper.find('.filter-button').text()).toBe('未完成');
+    const footer = wrapper.find('.view-all-button');
+    expect(footer.text()).toBe('查看全部 3 个工作包');
+    await footer.trigger('click');
+    expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['完成', '高', '低']);
+    expect(wrapper.find('.filter-button').text()).toBe('全部状态');
   });
 });

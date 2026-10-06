@@ -40,6 +40,8 @@ export const CHANNELS = {
   envCancel: 'env:cancel',
   baselineMeasure: 'baseline:measure',
   activityOverview: 'activity:overview',
+  engineeringMap: 'map:get',
+  activityPage: 'activity:page',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

@@ -21,6 +21,8 @@ import { env as appEnv } from './env.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 import { computeMetrics, RETENTION_DAYS } from './activity_log.ts';
 import type { ActivityLog } from './activity_log.ts';
+import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
+import { indexEntries } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
 import type { BaselineChecks, BaselineChecksStatus, DeviationInput, WorkPackageStore } from './work_package_store.ts';
@@ -789,6 +791,25 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       team: { available: Boolean(executable), busy: [...busy] },
       timeZone: activity.timeZone,
     };
+  }));
+
+  // The full feed, a few business days per page.
+  ipcMain.handle(CHANNELS.activityPage, wrap(async (_event, before): Promise<ipc.ActivityPage> => {
+    if (!activity) return failWith('Activity is unavailable', 'unsupported');
+    // A day key from an earlier page; anything else starts from today.
+    const cursor = typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before) ? before : null;
+    const page = await activity.page({ before: cursor, minEvents: 50 });
+    return { ...page, timeZone: activity.timeZone, retentionDays: RETENTION_DAYS };
+  }));
+
+  // Architect's summaries merged by file, beside the tracked tree. Without a
+  // workspace the summaries still show, with unknown freshness.
+  ipcMain.handle(CHANNELS.engineeringMap, wrap(async (): Promise<ipc.EngineeringMap> => {
+    const root = getConfig().root;
+    const [index, paths] = root
+      ? await Promise.all([indexEntries(root), git.listFiles(root, { limit: MAX_TREE_FILES + 1 })])
+      : [null, []];
+    return buildEngineeringMap(requirements?.list() ?? [], index, paths);
   }));
 
   // Whether the Claude Code CLI can be found on the command PATH.

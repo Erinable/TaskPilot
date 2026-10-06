@@ -1,5 +1,6 @@
 // Wording for the activity feed, the queue metrics and team presence.
 import type * as ipc from '@shared/ipc_types.ts';
+import { businessDay, previousDay } from './time_zone.ts';
 
 export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'you'; initials: string; name: string };
 
@@ -61,11 +62,10 @@ export const relativeTime = (at: string, now: Date, timeZone: string) => {
   const minutes = Math.floor((now.getTime() - Date.parse(at)) / 60_000);
   if (minutes < 1) return '刚刚';
   if (minutes < 60) return `${minutes} 分钟前`;
-  const day = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-  const today = day(now);
-  const then = day(new Date(at));
+  const today = businessDay(now, timeZone);
+  const then = businessDay(new Date(at), timeZone);
   if (then === today) return `${Math.floor(minutes / 60)} 小时前`;
-  if (then === day(new Date(Date.parse(`${today}T12:00:00Z`) - 24 * 60 * 60 * 1000))) return '昨天';
+  if (then === previousDay(today)) return '昨天';
   return then.slice(5);
 };
 

@@ -480,6 +480,23 @@ export type TeamStatus = { available: boolean; busy: ActivityAgent[] };
 
 export type ActivityOverview = { recent: ActivityRecord[]; metrics: QueueMetrics; team: TeamStatus; timeZone: string };
 
+// Business days newest first; pass `nextBefore` back for the next page, null at the end.
+export type ActivityPage = { days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null; timeZone: string; retentionDays: number };
+
+// ========== engineering map ==========
+
+export type MapSource = { requirementId: string; title: string; at: string };
+
+// current: the file is unchanged since Architect read it; stale: it changed;
+// removed: no longer tracked; unknown: no workspace or no recorded blob.
+export type MapFreshness = 'current' | 'stale' | 'removed' | 'unknown';
+
+export type MapModule = InterfaceModule & { source: MapSource; freshness: MapFreshness };
+
+export type MapNote = { text: string; source: MapSource };
+
+export type EngineeringMap = { modules: MapModule[]; conventions: MapNote[]; gaps: MapNote[]; files: string[]; truncated: boolean };
+
 // ========== Environment Steward ==========
 
 export type InstallMode = 'ci' | 'install' | 'skip';

@@ -6,5 +6,5 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } },
-  test: { include: ['tests/**/*.test.{js,ts}'], environment: 'node' },
+  test: { include: ['tests/**/*.test.{js,ts}'], environment: 'node', setupFiles: ['tests/setup/renderer_globals.ts'] },
 });
