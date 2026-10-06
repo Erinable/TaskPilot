@@ -20,7 +20,8 @@ TaskPilot is an Electron app built with electron-vite: TypeScript in the main pr
   - `product_lead.ts` plans from the summary and the file list, and never sees source code;
   - `qa.ts` reviews a submitted package against its steps, scope and acceptance criteria. `decide()` combines the model's verdict with TaskPilot's own evidence: a failing blocking check or a failed/missing linked test rejects regardless of the model, and the model can only make a review stricter;
   - `env_steward.ts` (Environment Steward) reads the facts `env_setup.ts` gathers and picks an install mode and existing `package.json` script names. It never writes a command, and its suggested fixes are shown to the user but never run;
-  - `pipeline.ts` runs Architect's steps, QA's review and the steward's plan; `claude_cli.ts` runs the isolated, tool-less CLI.
+  - `release_manager.ts` (Release Manager) drafts a version bump, release notes and a pre-release checklist from the commit subjects, changed paths (no contents) and finished packages since the last release. TaskPilot never tags, commits, pushes or runs release commands; the one repository write is inserting the notes into a `.md` file the user names (`release:write-notes`, path-checked). Releases and the draft live in `userData/releases.json` (`src/main/release_store.ts`);
+  - `pipeline.ts` runs Architect's steps, QA's review, the steward's plan and the release draft; `claude_cli.ts` runs the isolated, tool-less CLI.
 
   All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect` (see `evals/product-lead/README.md`).
 - `src/main/repo_reader.ts` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.

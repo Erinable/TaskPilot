@@ -99,6 +99,16 @@ const api = {
     apply: (kinds: ipc.ScriptKind[]) => invoke<ipc.EnvApplyResult>(CHANNELS.envApply, kinds),
     cancel: () => invoke<boolean>(CHANNELS.envCancel),
   },
+
+  release: {
+    get: () => invoke<ipc.ReleaseState>(CHANNELS.releaseGet),
+    recentCommits: () => invoke<ipc.ReleaseCommit[]>(CHANNELS.releaseRecentCommits),
+    generate: (startCommit?: string) => invoke<ipc.ReleaseState>(CHANNELS.releaseGenerate, startCommit),
+    updateDraft: (input: ipc.ReleaseDraftInput) => invoke<ipc.ReleaseState>(CHANNELS.releaseUpdateDraft, input),
+    finish: () => invoke<ipc.Release>(CHANNELS.releaseFinish),
+    writeNotes: (input: ipc.ReleaseWriteInput) => invoke<ipc.ReleaseWriteResult>(CHANNELS.releaseWriteNotes, input),
+    cancel: () => invoke<boolean>(CHANNELS.releaseCancel),
+  },
 };
 
 export type TaskPilotApi = typeof api;

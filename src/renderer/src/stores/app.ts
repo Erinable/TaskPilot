@@ -5,7 +5,7 @@ import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
-export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity';
+export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release';
 
 export const useAppStore = defineStore('app', () => {
   // ========== Navigation ==========

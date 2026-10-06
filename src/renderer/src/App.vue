@@ -9,6 +9,7 @@ import RequirementsView from './views/RequirementsView.vue';
 import SettingsView from './views/SettingsView.vue';
 import MapView from './views/MapView.vue';
 import ActivityView from './views/ActivityView.vue';
+import ReleaseView from './views/ReleaseView.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import { useAppStore } from './stores/app.ts';
 import { useTasksStore } from './stores/tasks.ts';
@@ -80,6 +81,7 @@ onBeforeUnmount(() => {
         <RequirementsView v-else-if="app.view === 'requirements'" />
         <MapView v-else-if="app.view === 'map'" />
         <ActivityView v-else-if="app.view === 'activity'" />
+        <ReleaseView v-else-if="app.view === 'release'" />
         <!-- Settings stays mounted so unsaved drafts survive leaving and coming back. -->
         <SettingsView v-show="app.view === 'settings'" />
       </main>

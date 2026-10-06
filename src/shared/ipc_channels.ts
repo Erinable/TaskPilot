@@ -42,6 +42,13 @@ export const CHANNELS = {
   activityOverview: 'activity:overview',
   engineeringMap: 'map:get',
   activityPage: 'activity:page',
+  releaseGet: 'release:get',
+  releaseRecentCommits: 'release:recent-commits',
+  releaseGenerate: 'release:generate',
+  releaseUpdateDraft: 'release:update-draft',
+  releaseFinish: 'release:finish',
+  releaseWriteNotes: 'release:write-notes',
+  releaseCancel: 'release:cancel',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

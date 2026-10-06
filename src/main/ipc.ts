@@ -13,21 +13,23 @@ import * as claudeCli from './agents/claude_cli.ts';
 import * as productLead from './agents/product_lead.ts';
 import * as envSetup from './env_setup.ts';
 import * as evidence from './evidence.ts';
-import { summarizeForRequirement, reviewWorkPackage, adjudicateDeviation, planEnvironment, throwIfCancelled } from './agents/pipeline.ts';
+import { summarizeForRequirement, reviewWorkPackage, adjudicateDeviation, planEnvironment, planRelease, throwIfCancelled, RELEASE_MAX_COMMITS } from './agents/pipeline.ts';
 import { STATE_FILENAME, humanTransitions } from './work_package_store.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
-import { computeMetrics, RETENTION_DAYS } from './activity_log.ts';
+import { businessDay, computeMetrics, RETENTION_DAYS } from './activity_log.ts';
 import type { ActivityLog } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
-import { indexEntries } from './repo_reader.ts';
+import { indexEntries, looksSecret } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
 import type { BaselineChecks, BaselineChecksStatus, DeviationInput, WorkPackageStore } from './work_package_store.ts';
 import type { Requirement, RequirementStore } from './requirement_store.ts';
 import type { EnvFailure } from './agents/env_steward.ts';
+import type { ReleaseStore } from './release_store.ts';
+import type { ReleasePackage } from './agents/pipeline.ts';
 import type { TaskDefinition } from './tasks.ts';
 
 // An Error carrying the machine-readable fields IPC failures send.
@@ -177,6 +179,8 @@ export type IpcDeps = {
   onPackagesPublished?: (definitions: TaskDefinition[]) => void;
   // Records state changes for metrics and the activity feed.
   activity?: ActivityLog | null;
+  // Enables Release Manager.
+  releases?: ReleaseStore | null;
 };
 
 export type IpcHandle = { shutdown: () => Promise<void> };
@@ -192,6 +196,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     runAgent = claudeCli.runStructured,
     onPackagesPublished,
     activity = null,
+    releases = null,
   } = deps;
 
   // The PATH verification commands run with, per the user's preference.
@@ -782,6 +787,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const busy = new Set<ipc.ActivityAgent>();
     if (reviews.size) busy.add('qa');
     if (adjudications.size) busy.add('architect');
+    if (releaseController) busy.add('release-manager');
     for (const id of runs.keys()) {
       busy.add(requirements?.get(id).phase === 'architect' ? 'architect' : 'product-lead');
     }
@@ -1042,10 +1048,214 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     return true;
   }));
 
+  // Release Manager: proposes a version, notes and a checklist. TaskPilot
+  // never tags, commits or pushes; release:write-notes is the only write.
+
+  let releaseController: AbortController | null = null;
+  const RECENT_COMMITS = 30;
+  const MAX_RELEASE_PACKAGES = 50;
+  const MAX_PACKAGE_TEXT = 500;
+
+  const requireReleases = () => {
+    if (!releases) return failWith('Releases are unavailable', 'unsupported');
+    return releases;
+  };
+
+  const NO_START: ipc.ReleaseStartPoint = { kind: 'none', commit: null, label: null, commitCount: 0, commitsTruncated: false, packageCount: 0 };
+
+  // The last finished release's end commit while it is still in HEAD's
+  // history, else the newest tag reachable from HEAD, else none.
+  const findStart = async (root: string, store: ReleaseStore) => {
+    const head = await git.resolveCommit(root, 'HEAD');
+    if (!head) return null;
+    const latest = store.latest();
+    if (latest && await git.isAncestor(root, latest.endCommit, head)) return { head, kind: 'release' as const, commit: latest.endCommit, label: latest.version };
+    const tag = await git.latestTag(root);
+    return tag ? { head, kind: 'tag' as const, commit: tag.commit, label: tag.name } : null;
+  };
+
+  // The start point plus a cheap preview: a capped rev-list count and the
+  // package filter a run would use.
+  const releaseStartPoint = async (root: string, store: ReleaseStore): Promise<ipc.ReleaseStartPoint> => {
+    const found = await findStart(root, store);
+    if (!found) return NO_START;
+    const counted = await git.countRange(root, found.commit, found.head, { limit: RELEASE_MAX_COMMITS + 1 });
+    return {
+      kind: found.kind,
+      commit: found.commit,
+      label: found.label,
+      commitCount: Math.min(counted, RELEASE_MAX_COMMITS),
+      commitsTruncated: counted > RELEASE_MAX_COMMITS,
+      packageCount: unreleasedPackages(store).length,
+    };
+  };
+
+  const releaseState = async (): Promise<ipc.ReleaseState> => {
+    const store = requireReleases();
+    const root = getConfig().root;
+    return {
+      configured: Boolean(root),
+      draft: store.draft(),
+      history: store.history(),
+      startPoint: root ? await releaseStartPoint(root, store) : null,
+      running: releaseController !== null,
+    };
+  };
+
+  // Done packages no earlier release included, with the text the notes are
+  // written from. Recorded per release, so this does not depend on the
+  // activity log's retention window.
+  const unreleasedPackages = (store: ReleaseStore): ReleasePackage[] => {
+    const state = workPackages.all();
+    return tasks.listTasks()
+      .filter((task) => state[task.id]?.status === 'done' && !store.isReleased(task.id))
+      .slice(0, MAX_RELEASE_PACKAGES)
+      .map((task) => {
+        const effective = workPackages.effective(task);
+        return {
+          id: task.id,
+          title: effective.title,
+          description: effective.description.slice(0, MAX_PACKAGE_TEXT),
+          acceptance: effective.acceptance.map((criterion) => criterion.text.slice(0, MAX_PACKAGE_TEXT)),
+        };
+      });
+  };
+
+  ipcMain.handle(CHANNELS.releaseGet, wrap((): Promise<ipc.ReleaseState> => releaseState()));
+
+  ipcMain.handle(CHANNELS.releaseRecentCommits, wrap(async (): Promise<ipc.ReleaseCommit[]> => {
+    requireReleases();
+    return git.recentCommits(requireRoot(), { limit: RECENT_COMMITS });
+  }));
+
+  // Starts Release Manager in the background; the renderer polls release:get.
+  // A start commit from the renderer is only taken when it is the computed
+  // start point or one of the recent commits, so it cannot name arbitrary refs.
+  ipcMain.handle(CHANNELS.releaseGenerate, wrap(async (_event, rawStart): Promise<ipc.ReleaseState> => {
+    const store = requireReleases();
+    const root = requireRoot();
+    if (releaseController) failWith('Release Manager is already running', 'release_busy');
+    const endCommit = await git.resolveCommit(root, 'HEAD');
+    if (!endCommit) return failWith('The repository has no commits', 'release_no_changes');
+    const point = await findStart(root, store);
+    let startCommit = point?.commit ?? null;
+    let startLabel = point?.label ?? null;
+    if (rawStart !== undefined && rawStart !== null) {
+      const requested = requireString(rawStart, 'startCommit');
+      if (requested !== startCommit) {
+        const recent = (await git.recentCommits(root, { limit: RECENT_COMMITS })).find((commit) => commit.sha === requested);
+        if (!recent) return failWith('Pick the start point or one of the recent commits', 'release_bad_start', 'startCommit');
+        startCommit = recent.sha;
+        startLabel = `${recent.sha.slice(0, 7)} ${recent.subject}`;
+      }
+    }
+    if (!startCommit || !startLabel) return failWith('There is no previous release or tag; pick a start commit', 'release_no_start', 'startCommit');
+    if (startCommit === endCommit) failWith('There are no commits since the start point', 'release_no_changes');
+
+    const packages = unreleasedPackages(store);
+    await store.begin({ startCommit, endCommit });
+    const controller = new AbortController();
+    releaseController = controller;
+    const { path: envPath } = await commandPath();
+    const fixedStart = startCommit;
+    const fixedLabel = startLabel;
+    track((async () => {
+      let outcome: { result: Awaited<ReturnType<typeof planRelease>> } | { error: unknown };
+      try {
+        const result = await planRelease({ root, startCommit: fixedStart, startLabel: fixedLabel, endCommit, packages, runAgent, envPath, signal: controller.signal });
+        throwIfCancelled(controller.signal);
+        outcome = { result };
+      } catch (error) {
+        outcome = { error: controller.signal.aborted ? Object.assign(new Error('Release Manager was cancelled'), { code: 'agent_cancelled' }) : error };
+      }
+      // Drop the run first, so nobody sees a settled draft that still looks cancellable.
+      if (releaseController === controller) releaseController = null;
+      if ('error' in outcome) {
+        await store.failRun(asAgentError(outcome.error)).catch((error) => console.error('[release] failRun failed', error));
+        return;
+      }
+      const { input, plan, costUsd } = outcome.result;
+      const summary: ipc.ReleaseInputSummary = {
+        commitCount: input.commits.length,
+        commitsTruncated: input.commitsTruncated,
+        fileCount: input.files.length,
+        filesTruncated: input.filesTruncated,
+        packageIds: input.packages.map((item) => item.id),
+      };
+      await store.complete(plan, summary, costUsd)
+        .catch((error) => store.failRun(asAgentError(error)).catch((failure) => console.error('[release] failRun failed', failure)));
+    })());
+    return releaseState();
+  }));
+
+  // The store validates the notes length and the checklist indices.
+  ipcMain.handle(CHANNELS.releaseUpdateDraft, wrap(async (_event, raw): Promise<ipc.ReleaseState> => {
+    await requireReleases().update(raw);
+    return releaseState();
+  }));
+
+  // The store refuses while any checklist item is unticked.
+  ipcMain.handle(CHANNELS.releaseFinish, wrap(async (): Promise<ipc.Release> => {
+    const store = requireReleases();
+    const draft = store.draft();
+    const release = await store.finish({ packageIds: draft?.input?.packageIds ?? [] });
+    record({ kind: 'release_finished', version: release.version, packageCount: release.packageIds.length });
+    return release;
+  }));
+
+  // Writes the notes into a Markdown file in the workspace: the ready draft's,
+  // or else the latest finished release's. The path must be a relative .md
+  // path inside the root, outside .git, not secret-looking, in an existing
+  // directory that does not resolve outside the root through a symlink.
+  // Nothing is staged or committed.
+  ipcMain.handle(CHANNELS.releaseWriteNotes, wrap(async (_event, raw): Promise<ipc.ReleaseWriteResult> => {
+    const store = requireReleases();
+    const root = requireRoot();
+    const requested = requireString((raw as { path?: unknown } | null | undefined)?.path, 'path').trim();
+    if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) failWith('Use a path relative to the workspace', 'path_not_relative', 'path');
+    if (!workspace.isInside(root, requested)) failWith(`Path is outside the workspace: ${requested}`, 'path_outside_workspace', 'path');
+    const relative = path.relative(root, path.resolve(root, requested)).split(path.sep).join('/');
+    if (!relative.toLowerCase().endsWith('.md')) failWith('Release notes go in a .md file', 'path_not_markdown', 'path');
+    if (relative.split('/').some((segment) => segment.toLowerCase() === '.git')) failWith('Paths inside .git are refused', 'path_in_git', 'path');
+    if (looksSecret(relative)) failWith('That path looks like it holds secrets', 'path_secret', 'path');
+
+    const draft = store.draft();
+    const latest = store.latest();
+    const source = draft?.status === 'ready' && draft.plan
+      ? { version: draft.plan.nextVersion, notes: draft.notesText }
+      : latest ? { version: latest.version, notes: latest.notesText } : null;
+    if (!source || !source.notes.trim()) return failWith('There are no release notes to write', 'invalid_state');
+
+    const target = path.join(root, relative);
+    let realParent: string;
+    try {
+      realParent = await fs.realpath(path.dirname(target));
+    } catch {
+      return failWith(`Directory not found: ${path.posix.dirname(relative)}`, 'invalid_argument', 'path');
+    }
+    const realRoot = await fs.realpath(root);
+    if (realParent !== realRoot && !workspace.isInside(realRoot, realParent)) failWith('The path leaves the workspace through a link', 'path_outside_workspace', 'path');
+    const existing = await fs.lstat(target).catch(() => null);
+    if (existing && !existing.isFile()) failWith('The path is not a regular file', 'invalid_argument', 'path');
+
+    const previous = existing ? await fs.readFile(target, 'utf8') : '';
+    const day = businessDay(new Date(), appEnv.businessTimeZone);
+    const entry = `## ${source.version} — ${day}\n\n${source.notes.trim()}\n`;
+    await fs.writeFile(target, previous ? `${entry}\n${previous}` : entry);
+    return { path: relative };
+  }));
+
+  ipcMain.handle(CHANNELS.releaseCancel, wrap((): boolean => {
+    if (!releaseController) return false;
+    releaseController.abort();
+    return true;
+  }));
+
   return {
     // Cancels running agents and waits for their final writes.
     async shutdown() {
       envController?.abort();
+      releaseController?.abort();
       for (const controller of baselineRuns.values()) controller.abort();
       for (const controller of runs.values()) controller.abort();
       for (const controller of reviews.values()) controller.abort();

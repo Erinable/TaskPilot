@@ -7,6 +7,7 @@ import type { IpcHandle } from './ipc.ts';
 import { WorkPackageStore } from './work_package_store.ts';
 import { listTasks, setGeneratedTasks } from './tasks.ts';
 import { RequirementStore } from './requirement_store.ts';
+import { ReleaseStore } from './release_store.ts';
 import * as workspace from './workspace.ts';
 import * as preferences from './preferences.ts';
 import { createPathResolver } from './shell_env.ts';
@@ -87,6 +88,7 @@ app.whenReady().then(async () => {
   setGeneratedTasks(requirements.publishedPackages());
   const store = await new WorkPackageStore(configDir).load(listTasks());
   const activity = new ActivityLog(configDir, { timeZone: env.businessTimeZone });
+  const releases = await new ReleaseStore(configDir).load();
   // Expired day files go at startup; a failure only leaves old files behind.
   activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -105,6 +107,7 @@ app.whenReady().then(async () => {
     appVersion: app.getVersion(),
     requirements,
     activity,
+    releases,
     onPreferencesChanged: (next) => {
       nativeTheme.themeSource = next.appearance.theme;
       for (const window of BrowserWindow.getAllWindows()) {

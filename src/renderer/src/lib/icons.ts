@@ -127,6 +127,7 @@ export const ICONS = {
     ],
   },
   commit: { shapes: [['circle', { cx: 12, cy: 12, r: 3.5 }], ['path', { d: 'M3 12h5.5M15.5 12H21' }]] },
+  copy: { shapes: [['rect', { x: 8.5, y: 8.5, width: 12, height: 12, rx: 2 }], ['path', { d: 'M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3' }]] },
 
   // Verification kinds
   flask: {

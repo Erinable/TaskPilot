@@ -2,7 +2,7 @@
 import type * as ipc from '@shared/ipc_types.ts';
 import { businessDay, previousDay } from './time_zone.ts';
 
-export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'you'; initials: string; name: string };
+export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'you'; initials: string; name: string };
 
 export type FeedItem = { key: string; actor: FeedActor; what: string; detail: string; at: string };
 
@@ -10,10 +10,11 @@ const AGENTS: Record<ipc.ActivityAgent, FeedActor> = {
   'product-lead': { avatar: 'pm', initials: 'PM', name: 'Product Lead' },
   architect: { avatar: 'arch', initials: 'AR', name: 'Architect' },
   qa: { avatar: 'qa', initials: 'QA', name: 'QA Partner' },
+  'release-manager': { avatar: 'rel', initials: 'RM', name: 'Release Manager' },
 };
 const YOU: FeedActor = { avatar: 'you', initials: '你', name: '你' };
 
-export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa'] as const)
+export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager'] as const)
   .map((agent) => ({ agent, actor: AGENTS[agent] }));
 
 // What a transition reads as, and who did it.
@@ -53,6 +54,8 @@ export const toFeedItem = (record: ipc.ActivityRecord, index: number): FeedItem 
       return { key, actor: AGENTS['product-lead'], what: record.step === 'clarifying' ? '澄清没有完成' : '拆解没有完成', detail: record.title, at: record.at };
     case 'requirement_published':
       return { key, actor: YOU, what: `发布了 ${record.packageCount} 个工作包`, detail: record.title, at: record.at };
+    case 'release_finished':
+      return { key, actor: AGENTS['release-manager'], what: `完成了版本 ${record.version} 的发布准备`, detail: `包含 ${record.packageCount} 个工作包`, at: record.at };
   }
 };
 

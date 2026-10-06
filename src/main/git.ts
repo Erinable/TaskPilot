@@ -207,3 +207,90 @@ export const describe = async (cwd: string): Promise<RepoDescription> => {
   const [commit, branch, entries] = await Promise.all([head(cwd), currentBranch(cwd), status(cwd)]);
   return { commit, branch, dirty: entries.length > 0, changedFiles: entries.length };
 };
+
+// One commit as release notes see it; `date` is the committer date (ISO).
+export interface CommitInfo {
+  sha: string;
+  subject: string;
+  date: string;
+}
+
+// Fields split by the unit separator, records by NUL, so subjects with any
+// printable text parse safely.
+const COMMIT_FORMAT = '--format=%H%x1f%cI%x1f%s%x00';
+
+const parseCommits = (raw: string): CommitInfo[] => raw.split('\0').map((record) => record.replace(/^\n/, '')).filter(Boolean).map((record) => {
+  const [sha, date, subject = ''] = record.split('\x1f');
+  return { sha, subject, date };
+});
+
+// The full sha `ref` resolves to as a commit, or null when it does not.
+export const resolveCommit = async (cwd: string, ref: string): Promise<string | null> => {
+  // A leading dash would be read as an option.
+  if (!ref || ref.startsWith('-')) return null;
+  try {
+    return (await git(cwd, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim() || null;
+  } catch {
+    return null;
+  }
+};
+
+// The newest tag reachable from HEAD, with the commit it points at.
+export const latestTag = async (cwd: string): Promise<{ name: string; commit: string } | null> => {
+  let name: string;
+  try {
+    name = (await git(cwd, ['describe', '--tags', '--abbrev=0', 'HEAD'])).trim();
+  } catch {
+    return null; // no tags, or no commits
+  }
+  const commit = name ? await resolveCommit(cwd, `refs/tags/${name}`) : null;
+  return commit ? { name, commit } : null;
+};
+
+export const isAncestor = async (cwd: string, ancestor: string, descendant: string): Promise<boolean> => {
+  try {
+    await git(cwd, ['merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// The newest `limit` commits reachable from HEAD.
+export const recentCommits = async (cwd: string, { limit }: { limit: number }): Promise<CommitInfo[]> => {
+  try {
+    return parseCommits(await git(cwd, ['log', `--max-count=${limit}`, COMMIT_FORMAT, 'HEAD', '--']));
+  } catch {
+    return []; // no commits yet
+  }
+};
+
+// Commits in start..end, newest first, at most `limit`; `truncated` when more exist.
+export const commitRange = async (cwd: string, start: string, end: string, { limit }: { limit: number }): Promise<{ commits: CommitInfo[]; truncated: boolean }> => {
+  const commits = parseCommits(await git(cwd, ['log', `--max-count=${limit + 1}`, COMMIT_FORMAT, `${start}..${end}`, '--']));
+  return { commits: commits.slice(0, limit), truncated: commits.length > limit };
+};
+
+// How many commits start..end holds, counting at most `limit`.
+export const countRange = async (cwd: string, start: string, end: string, { limit }: { limit: number }): Promise<number> =>
+  Number((await git(cwd, ['rev-list', '--count', `--max-count=${limit}`, `${start}..${end}`, '--'])).trim());
+
+// Per-file line counts between two commits, committed history only. Renames
+// are reported under their new path.
+export const rangeStat = async (cwd: string, start: string, end: string): Promise<Omit<FileChange, 'untracked'>[]> => {
+  const fields = (await git(cwd, ['diff', '--numstat', '-z', '--no-renames', start, end, '--'])).split('\0').filter(Boolean);
+  return fields.map((line) => {
+    const [added, removed, filePath] = line.split('\t');
+    const binary = added === '-' || removed === '-';
+    return { path: filePath, added: binary ? 0 : Number(added), removed: binary ? 0 : Number(removed), binary };
+  });
+};
+
+// A tracked file's contents at `commit`, or null when it is not in that tree.
+export const showFile = async (cwd: string, commit: string, filePath: string): Promise<string | null> => {
+  try {
+    return await git(cwd, ['show', `${commit}:${filePath}`]);
+  } catch {
+    return null;
+  }
+};

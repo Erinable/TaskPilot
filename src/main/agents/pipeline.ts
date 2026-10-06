@@ -8,6 +8,9 @@
 import * as architect from './architect.ts';
 import * as qa from './qa.ts';
 import * as envSteward from './env_steward.ts';
+import * as releaseManager from './release_manager.ts';
+import * as git from '../git.ts';
+import { looksSecret } from '../repo_reader.ts';
 import * as envSetup from '../env_setup.ts';
 import { readTracked } from '../repo_reader.ts';
 import { collectChanges } from '../review_diff.ts';
@@ -17,6 +20,7 @@ import type { RunAgent } from './claude_cli.ts';
 import type { AdjudicationResult, AdjudicationTask, DeviationRecord, InterfaceSummary, SkippedFile, SourceFile } from './architect.ts';
 import type { CompactRun, RejectReason, ReviewReport, ReviewTask } from './qa.ts';
 import type { EnvFailure, EnvPlan } from './env_steward.ts';
+import type { ReleaseInput, ReleasePlan } from './release_manager.ts';
 import type { Blocker, EnvFacts } from '../env_setup.ts';
 import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../evidence.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
@@ -295,4 +299,82 @@ export const adjudicateDeviation = async (task: AdjudicationTask, {
     skipped,
     costUsd: costUsd ?? 0,
   };
+};
+
+export const RELEASE_MAX_COMMITS = 200;
+export const RELEASE_MAX_FILES = 500;
+
+export type ReleasePackage = ReleaseInput['packages'][number];
+
+export interface ReleasePlanResult {
+  input: ReleaseInput;
+  plan: ReleasePlan;
+  costUsd: number;
+}
+
+// The package.json version committed at `commit`; null when the file is
+// missing, unparsable or not semver. The working tree is never read.
+export const committedVersion = async (root: string, commit: string): Promise<string | null> => {
+  const raw = await git.showFile(root, commit, 'package.json');
+  if (raw === null) return null;
+  try {
+    const version = (JSON.parse(raw) as { version?: unknown } | null)?.version;
+    return releaseManager.parseVersion(version) && typeof version === 'string' ? version.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
+// Everything Release Manager sees, from committed history only: subjects,
+// changed paths with line counts (secret-looking paths dropped), and the
+// version at the release commit. No file contents.
+export const collectReleaseInput = async (root: string, { startCommit, startLabel, endCommit, packages }: {
+  startCommit: string;
+  startLabel: string;
+  endCommit: string;
+  packages: ReleasePackage[];
+}): Promise<ReleaseInput> => {
+  const [range, changes, currentVersion] = await Promise.all([
+    git.commitRange(root, startCommit, endCommit, { limit: RELEASE_MAX_COMMITS }),
+    git.rangeStat(root, startCommit, endCommit),
+    committedVersion(root, endCommit),
+  ]);
+  const files = changes.filter((change) => !looksSecret(change.path));
+  return {
+    currentVersion,
+    startCommit,
+    startLabel,
+    endCommit,
+    commits: range.commits.map((commit) => ({ sha: commit.sha, subject: commit.subject })),
+    commitsTruncated: range.truncated,
+    files: files.slice(0, RELEASE_MAX_FILES),
+    filesTruncated: files.length > RELEASE_MAX_FILES,
+    packages,
+  };
+};
+
+// Release Manager's turn: collect the input, then ask for a bump, notes and
+// a checklist. Nothing to release (no commits) fails before the model runs.
+export const planRelease = async ({ root, startCommit, startLabel, endCommit, packages, runAgent, envPath, signal }: {
+  root: string;
+  startCommit: string;
+  startLabel: string;
+  endCommit: string;
+  packages: ReleasePackage[];
+  runAgent: RunAgent;
+  envPath?: string | null;
+  signal?: AbortSignal;
+}): Promise<ReleasePlanResult> => {
+  throwIfCancelled(signal);
+  const input = await collectReleaseInput(root, { startCommit, startLabel, endCommit, packages });
+  if (input.commits.length === 0) throw Object.assign(new Error('There are no commits since the start point'), { code: 'release_no_changes' });
+  throwIfCancelled(signal);
+  const { output, costUsd } = await runAgent({
+    prompt: releaseManager.planPrompt(input),
+    systemPrompt: releaseManager.SYSTEM_PROMPT,
+    schema: releaseManager.PLAN_SCHEMA,
+    envPath,
+    signal,
+  });
+  return { input, plan: releaseManager.validatePlan(output, input), costUsd: costUsd ?? 0 };
 };

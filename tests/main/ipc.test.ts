@@ -18,13 +18,15 @@ import { listTasks, setGeneratedTasks } from '../../src/main/tasks.ts';
 import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
 import { RequirementStore } from '../../src/main/requirement_store.ts';
 import { ActivityLog } from '../../src/main/activity_log.ts';
+import { ReleaseStore } from '../../src/main/release_store.ts';
+import { STATE_FILENAME } from '../../src/main/work_package_store.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import * as preferences from '../../src/main/preferences.ts';
 import { createPathResolver } from '../../src/main/shell_env.ts';
 
 const run = promisify(execFile);
 
-async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; agent?: FakeAgent | null } = {}) {
+async function harness({ withRepo = true, agent = null, seedState = null }: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
   let ipc: IpcHandle | null = null;
@@ -52,6 +54,9 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
     await g(['commit', '-qm', 'init']);
   }
 
+  // Saved package state, as if from an earlier session.
+  if (seedState) await fs.writeFile(path.join(configDir, STATE_FILENAME), JSON.stringify(seedState));
+
   let config = workspace.normalize({ root });
   const handlers = new Map<Channel, (event: unknown, ...args: unknown[]) => any>();
   const store = await new WorkPackageStore(configDir).load(listTasks());
@@ -61,6 +66,7 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
   let shellReads = 0;
   const requirements = await new RequirementStore(configDir).load();
   const activity = new ActivityLog(configDir, { timeZone: 'Asia/Shanghai' });
+  const releases = await new ReleaseStore(configDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
@@ -78,6 +84,7 @@ async function harness({ withRepo = true, agent = null }: { withRepo?: boolean; 
       appVersion: '9.9.9',
       requirements,
       activity,
+      releases,
       runAgent: async (options) => {
         agentCalls.push(options);
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
@@ -131,8 +138,18 @@ const ADJUDICATE_REPLAN = {
   changes: ['文件范围改为 `tests/auth/login.test.ts`'],
   revision: { steps: ['在 `tests/auth/login.test.ts` 添加用例。'], fileScope: ['tests/auth/login.test.ts'], acceptance: [{ text: '用例通过' }] },
 };
+const RELEASE_PLAN = {
+  bump: 'minor',
+  reason: '新增登录相关能力。',
+  notes: { added: ['支持邮箱登录'], fixed: [], changed: [], notes: [] },
+  checklist: [
+    { text: '确认登录接口的错误码', evidence: ['src/auth/application/login-user.ts', 'src/not-in-input.ts'] },
+    { text: '更新 README', evidence: [] },
+  ],
+};
 /** Which agent step a schema belongs to. */
-const stepOf = (schema) => schema.properties.verdict ? 'review'
+const stepOf = (schema) => schema.properties.bump ? 'release'
+  : schema.properties.verdict ? 'review'
   : schema.properties.decision ? 'adjudicate'
   : schema.properties.install ? 'env'
   : schema.properties.packages ? 'plan'
@@ -149,6 +166,7 @@ const fakeAgent = (overrides: Record<string, unknown> = {}) => async ({ schema }
     review: () => overrides.review ?? QA_PASS,
     env: () => overrides.env ?? ENV_PLAN,
     adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
+    release: () => overrides.release ?? RELEASE_PLAN,
   }[stepOf(schema)]();
   if (output instanceof Error) throw output;
   return { output, costUsd: 0.02 };
@@ -1029,4 +1047,191 @@ test('activity: team status reports busy agents and CLI availability', async () 
   release();
   await settle(call, created.data.id);
   assert.deepEqual((await call(CHANNELS.activityOverview)).data.team.busy, []);
+});
+
+// ========== Release Manager ==========
+
+const gitIn = async (root: string, args: string[]) => (await run('git', args, { cwd: root })).stdout.trim();
+
+// Tags the harness's first commit and adds one more, so tag..HEAD has a change.
+const releaseRepo = async (root: string) => {
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'demo', version: '0.3.1' }));
+  await gitIn(root, ['add', '.']);
+  await gitIn(root, ['commit', '-qm', 'chore: add manifest']);
+  await gitIn(root, ['tag', 'v0.3.1']);
+  await fs.writeFile(path.join(root, 'src/auth/application/login-user.ts'), 'export const login = () => true;\n');
+  await gitIn(root, ['commit', '-qam', 'feat: email login']);
+  return gitIn(root, ['rev-parse', 'HEAD']);
+};
+
+const settleRelease = async (call) => {
+  for (let i = 0; i < 200; i += 1) {
+    const { data } = await call(CHANNELS.releaseGet);
+    if (data.draft && data.draft.status !== 'generating' && !data.running) return data;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('release never settled');
+};
+
+const readyRelease = async (h) => {
+  const head = await releaseRepo(h.root);
+  const started = await h.call(CHANNELS.releaseGenerate);
+  assert.equal(started.ok, true, JSON.stringify(started.error));
+  const state = await settleRelease(h.call);
+  assert.equal(state.draft.status, 'ready', JSON.stringify(state.draft.error));
+  return { head, state };
+};
+
+test('release: generate from the newest tag yields a ready draft with computed version', async () => {
+  const done = { status: 'done', baseline: null, claimedAt: null, completedSteps: [], deviations: [], review: null };
+  const h = await harness({ agent: fakeAgent(), seedState: { 'auth-email-login': done } });
+  const before = (await h.call(CHANNELS.releaseGet)).data;
+  assert.equal(before.configured, true);
+  assert.deepEqual(before.startPoint, { kind: 'none', commit: null, label: null, commitCount: 0, commitsTruncated: false, packageCount: 0 });
+
+  await releaseRepo(h.root);
+  const preview = (await h.call(CHANNELS.releaseGet)).data.startPoint;
+  assert.deepEqual([preview.kind, preview.commitCount, preview.commitsTruncated, preview.packageCount], ['tag', 1, false, 1]);
+  assert.equal(h.agentCalls.length, 0, 'the preview never calls the model');
+
+  const started = await h.call(CHANNELS.releaseGenerate);
+  assert.equal(started.ok, true);
+  const state = await settleRelease(h.call);
+  const head = await gitIn(h.root, ['rev-parse', 'HEAD']);
+  assert.equal(state.startPoint.kind, 'tag');
+  assert.equal(state.startPoint.label, 'v0.3.1');
+  assert.equal(state.draft.endCommit, head);
+  assert.equal(state.draft.plan.currentVersion, '0.3.1');
+  assert.equal(state.draft.plan.nextVersion, '0.4.0');
+  assert.deepEqual(state.draft.plan.checklist[0].evidence, ['src/auth/application/login-user.ts']);
+  assert.match(state.draft.notesText, /支持邮箱登录/);
+  assert.deepEqual(state.draft.input.packageIds, ['auth-email-login']);
+
+  const prompt = callFor(h.agentCalls, 'release').prompt;
+  assert.match(prompt, /feat: email login/);
+  assert.doesNotMatch(prompt, /chore: add manifest/, 'commits before the tag are not in range');
+  assert.doesNotMatch(prompt, /export const login/, 'file contents never reach the prompt');
+  assert.match(prompt, /<package id="auth-email-login">/);
+});
+
+test('release: a start commit from the renderer must be the start point or a recent commit', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  const first = await gitIn(h.root, ['rev-parse', 'HEAD']);
+  await fs.writeFile(path.join(h.root, 'README.md'), '# demo\n');
+  await gitIn(h.root, ['add', '.']);
+  await gitIn(h.root, ['commit', '-qm', 'docs: readme']);
+
+  // No release and no tag: the user must pick.
+  assert.equal((await h.call(CHANNELS.releaseGenerate)).error.code, 'release_no_start');
+  for (const bad of ['HEAD', first.slice(0, 7), '--output=/tmp/x', 'f'.repeat(40), 42]) {
+    const response = await h.call(CHANNELS.releaseGenerate, bad);
+    assert.equal(response.ok, false, String(bad));
+    assert.equal(response.error.code, typeof bad === 'string' ? 'release_bad_start' : 'invalid_argument', String(bad));
+    assert.equal(response.error.field ?? 'startCommit', 'startCommit');
+  }
+  const commits = (await h.call(CHANNELS.releaseRecentCommits)).data;
+  assert.deepEqual(commits.map((commit) => commit.subject), ['docs: readme', 'init']);
+  assert.ok(commits.every((commit) => /^[0-9a-f]{40}$/.test(commit.sha) && commit.date));
+
+  // HEAD itself is a recent commit, but the range would be empty.
+  assert.equal((await h.call(CHANNELS.releaseGenerate, commits[0].sha)).error.code, 'release_no_changes');
+  assert.equal((await h.call(CHANNELS.releaseGenerate, first)).ok, true);
+  const state = await settleRelease(h.call);
+  assert.equal(state.draft.status, 'ready');
+  assert.equal(state.draft.startCommit, first);
+  assert.equal(h.agentCalls.filter((c) => stepOf(c.schema) === 'release').length, 1);
+});
+
+test('release: finish refuses unchecked items, then records the release and its activity', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  const { head } = await readyRelease(h);
+  assert.equal((await h.call(CHANNELS.releaseFinish)).error.code, 'release_unchecked');
+  assert.equal((await h.call(CHANNELS.releaseUpdateDraft, { checked: [0] })).ok, true);
+  assert.equal((await h.call(CHANNELS.releaseFinish)).error.code, 'release_unchecked');
+  assert.equal((await h.call(CHANNELS.releaseUpdateDraft, { checked: [5] })).error.code, 'invalid_argument');
+  assert.equal((await h.call(CHANNELS.releaseUpdateDraft, { notes: 'x'.repeat(20001) })).error.code, 'too_long');
+  assert.equal((await h.call(CHANNELS.releaseUpdateDraft, null)).error.code, 'invalid_argument');
+
+  const edited = await h.call(CHANNELS.releaseUpdateDraft, { notes: '### 新增\n\n- 手改的说明', checked: [0, 1] });
+  assert.deepEqual(edited.data.draft.checked, [0, 1]);
+  const finished = await h.call(CHANNELS.releaseFinish);
+  assert.equal(finished.ok, true);
+  assert.equal(finished.data.version, '0.4.0');
+  assert.equal(finished.data.endCommit, head);
+  assert.equal(finished.data.notesText, '### 新增\n\n- 手改的说明');
+
+  const state = (await h.call(CHANNELS.releaseGet)).data;
+  assert.equal(state.draft, null);
+  assert.equal(state.history.length, 1);
+  assert.deepEqual(state.startPoint, { kind: 'release', commit: head, label: '0.4.0', commitCount: 0, commitsTruncated: false, packageCount: 0 });
+  assert.equal((await h.call(CHANNELS.releaseGenerate)).error.code, 'release_no_changes');
+
+  const [event] = (await overviewWith(h.call, 1)).recent;
+  assert.deepEqual({ kind: event.kind, version: event.version, packageCount: event.packageCount }, { kind: 'release_finished', version: '0.4.0', packageCount: 0 });
+});
+
+test('release: write-notes validates the path and prepends under a dated heading', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  assert.equal((await h.call(CHANNELS.releaseWriteNotes, { path: 'CHANGELOG.md' })).error.code, 'invalid_state');
+  await readyRelease(h);
+  await fs.mkdir(path.join(h.root, 'outside-link-target'), { recursive: true });
+  const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-elsewhere-'));
+  onTestFinished(() => fs.rm(elsewhere, { recursive: true, force: true }));
+  await fs.symlink(elsewhere, path.join(h.root, 'linked'));
+
+  const refused = {
+    '../CHANGELOG.md': 'path_outside_workspace',
+    [path.join(h.root, 'CHANGELOG.md')]: 'path_not_relative',
+    '.git/CHANGELOG.md': 'path_in_git',
+    'CHANGELOG.txt': 'path_not_markdown',
+    'secrets.md': 'path_secret',
+    'missing-dir/CHANGELOG.md': 'invalid_argument',
+    'linked/CHANGELOG.md': 'path_outside_workspace',
+    'outside-link-target': 'path_not_markdown',
+  };
+  for (const [candidate, code] of Object.entries(refused)) {
+    const response = await h.call(CHANNELS.releaseWriteNotes, { path: candidate });
+    assert.equal(response.ok, false, candidate);
+    assert.equal(response.error.code, code, candidate);
+    assert.equal(response.error.field, 'path', candidate);
+  }
+  assert.equal((await h.call(CHANNELS.releaseWriteNotes, {})).error.code, 'invalid_argument');
+  assert.deepEqual(await fs.readdir(elsewhere), []);
+
+  await fs.writeFile(path.join(h.root, 'CHANGELOG.md'), '## 0.3.1 — 2026-01-01\n\n- 旧版本\n');
+  const written = await h.call(CHANNELS.releaseWriteNotes, { path: './CHANGELOG.md' });
+  assert.deepEqual(written.data, { path: 'CHANGELOG.md' });
+  const text = await fs.readFile(path.join(h.root, 'CHANGELOG.md'), 'utf8');
+  assert.match(text, /^## 0\.4\.0 — \d{4}-\d{2}-\d{2}\n\n### 新增\n\n- 支持邮箱登录\n\n## 0\.3\.1 — 2026-01-01/);
+
+  // A new file in an existing directory is created; nothing is staged.
+  assert.equal((await h.call(CHANNELS.releaseWriteNotes, { path: 'src/RELEASE.md' })).ok, true);
+  assert.match(await fs.readFile(path.join(h.root, 'src/RELEASE.md'), 'utf8'), /^## 0\.4\.0 — /);
+  assert.equal(await gitIn(h.root, ['diff', '--cached', '--name-only']), '');
+});
+
+test('release: a running generation shows Release Manager busy and can be cancelled', async () => {
+  let unblock: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+  const h = await harness({ agent: async (options) => { await blocked; return fakeAgent()(options); } });
+  await releaseRepo(h.root);
+  const started = await h.call(CHANNELS.releaseGenerate);
+  assert.equal(started.data.running, true);
+  assert.equal(started.data.draft.status, 'generating');
+  assert.equal((await h.call(CHANNELS.releaseGenerate)).error.code, 'release_busy');
+  assert.ok((await h.call(CHANNELS.activityOverview)).data.team.busy.includes('release-manager'));
+  assert.equal((await h.call(CHANNELS.releaseCancel)).data, true);
+  unblock();
+  const state = await settleRelease(h.call);
+  assert.equal(state.draft.status, 'failed');
+  assert.equal(state.draft.error.code, 'agent_cancelled');
+  assert.equal((await h.call(CHANNELS.releaseCancel)).data, false);
+});
+
+test('release: without a workspace the page reports it unconfigured', async () => {
+  const { call } = await harness({ withRepo: false });
+  const state = (await call(CHANNELS.releaseGet)).data;
+  assert.equal(state.configured, false);
+  assert.equal(state.startPoint, null);
+  assert.equal((await call(CHANNELS.releaseGenerate)).error.code, 'no_workspace');
 });

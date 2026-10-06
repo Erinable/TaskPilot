@@ -33,6 +33,16 @@ export const ERROR_HINTS: Record<string, string> = {
   env_stale: '工作区已经换了仓库，请重新分析环境。',
   env_busy: '环境管家正在忙，请等当前操作结束。',
   env_blocked: '仓库还有阻塞问题，这一步不能运行。',
+  release_busy: 'Release Manager 正在起草，请等它完成或先取消。',
+  release_no_changes: '起点之后没有新的提交，不需要发布。',
+  release_no_start: '还没有发布记录或标签，请先选择起始提交。',
+  release_bad_start: '请选择上次发布的位置或列表里的提交。',
+  release_unchecked: '检查清单还有没勾选的项。',
+  path_outside_workspace: '路径不在工作区内。',
+  path_not_relative: '请填写相对于仓库根目录的路径。',
+  path_not_markdown: '更新说明只能写入 .md 文件。',
+  path_in_git: '不能写入 .git 目录。',
+  path_secret: '这个路径看起来是敏感文件，已拒绝。',
 };
 
 export const describeError = (error: unknown) => (error instanceof Error ? ERROR_HINTS[(error as IpcError).code] ?? error.message : String(error));

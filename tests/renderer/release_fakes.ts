@@ -1,0 +1,84 @@
+// Shared fakes for the release page tests: state builders and a
+// window.taskpilot.release stub whose calls resolve {ok: true, data}.
+import { vi } from 'vitest';
+
+import type * as ipc from '../../src/shared/ipc_types.ts';
+
+export const plan = (overrides: Partial<ipc.ReleasePlan> = {}): ipc.ReleasePlan => ({
+  bump: 'minor',
+  reason: '新增了 `release` 页面',
+  currentVersion: '0.1.0',
+  nextVersion: '0.2.0',
+  notes: { added: ['发布页'], fixed: [], changed: [], notes: [] },
+  checklist: [
+    { text: '运行 `npm test`', evidence: ['tests/renderer/release.test.ts'] },
+    { text: '更新 README', evidence: [] },
+  ],
+  ...overrides,
+});
+
+export const draft = (overrides: Partial<ipc.ReleaseDraft> = {}): ipc.ReleaseDraft => ({
+  status: 'ready',
+  error: null,
+  startCommit: 'aaaaaaa1',
+  endCommit: 'bbbbbbb2',
+  input: { commitCount: 12, commitsTruncated: false, fileCount: 30, filesTruncated: false, packageIds: ['p1', 'p2'] },
+  plan: plan(),
+  notesText: '## 新增\n- 发布页',
+  checked: [],
+  costUsd: 0.02,
+  startedAt: '2026-10-06T02:00:00.000Z',
+  updatedAt: '2026-10-06T02:01:00.000Z',
+  ...overrides,
+});
+
+export const release = (overrides: Partial<ipc.Release> = {}): ipc.Release => ({
+  id: 'rel1',
+  version: '0.1.0',
+  startCommit: 'a',
+  endCommit: 'b',
+  notesText: '## 初始版本',
+  checklist: [{ text: '运行测试', evidence: [], checked: true }],
+  packageIds: ['p0'],
+  finishedAt: '2026-10-01T04:05:06.000Z',
+  ...overrides,
+});
+
+export const releaseState = (overrides: Partial<ipc.ReleaseState> = {}): ipc.ReleaseState => ({
+  configured: true,
+  draft: null,
+  history: [],
+  startPoint: { kind: 'release', commit: 'aaaaaaa1', label: '0.1.0' },
+  running: false,
+  ...overrides,
+});
+
+export const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
+export const fail = (code: string, message: string, field?: string) => Promise.resolve({ ok: false as const, error: { code, message, field } });
+
+// `state.current` is what release.get() returns; generate/updateDraft merge into it.
+export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
+  const release = {
+    get: vi.fn(() => ok(state.current)),
+    recentCommits: vi.fn(() => ok<ipc.ReleaseCommit[]>([
+      { sha: 'c0ffee1234', subject: '<b>初始提交</b>', date: '2026-09-30T16:30:00.000Z' },
+      { sha: 'deadbeef99', subject: '第二个提交', date: '2026-10-02T03:00:00.000Z' },
+    ])),
+    generate: vi.fn((_startCommit?: string) => {
+      state.current = { ...state.current, running: true, draft: draft({ status: 'generating', plan: null, input: null, notesText: '' }) };
+      return ok(state.current);
+    }),
+    updateDraft: vi.fn((input: ipc.ReleaseDraftInput) => {
+      const current = state.current.draft!;
+      state.current = { ...state.current, draft: { ...current, notesText: input.notes ?? current.notesText, checked: input.checked ?? current.checked } };
+      return ok(state.current);
+    }),
+    finish: vi.fn(() => ok(finishedRelease(state))),
+    writeNotes: vi.fn((input: ipc.ReleaseWriteInput) => ok<ipc.ReleaseWriteResult>({ path: input.path })),
+    cancel: vi.fn(() => ok(true)),
+  };
+  (window as unknown as { taskpilot: unknown }).taskpilot = { release };
+  return release;
+};
+
+const finishedRelease = (state: { current: ipc.ReleaseState }) => release({ id: 'rel2', version: state.current.draft?.plan?.nextVersion ?? '0.2.0' });

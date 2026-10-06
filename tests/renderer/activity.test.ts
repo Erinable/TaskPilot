@@ -23,6 +23,13 @@ test('requirement events read as Product Lead or you', () => {
   assert.equal(activity.toFeedItem({ kind: 'requirement_failed', requirementId: 'r', title: 'x', step: 'clarifying', code: 'agent_timeout', at }, 0).actor.name, 'Product Lead');
 });
 
+test('a finished release reads as Release Manager', () => {
+  const item = activity.toFeedItem({ kind: 'release_finished', version: '1.2.0', packageCount: 3, at: '2026-10-06T00:00:00Z' }, 0);
+  assert.equal(item.actor.name, 'Release Manager');
+  assert.equal(item.actor.initials, 'RM');
+  assert.match(item.what, /1\.2\.0/);
+});
+
 test('relativeTime() uses business-zone calendar days', () => {
   const now = new Date('2026-10-06T02:00:00Z'); // 10:00 in Shanghai
   assert.equal(activity.relativeTime('2026-10-06T01:59:40Z', now, SHANGHAI), '刚刚');
@@ -55,7 +62,7 @@ test('presence follows CLI availability and running agents', () => {
   assert.equal(activity.presenceOf({ available: false, busy: [] }, 'qa'), 'offline');
   assert.equal(activity.presenceOf({ available: true, busy: ['qa'] }, 'qa'), 'busy');
   assert.equal(activity.presenceOf({ available: true, busy: ['qa'] }, 'architect'), 'online');
-  assert.equal(activity.presenceSummary({ available: true, busy: [] }), '3 个 AI 成员在线');
+  assert.equal(activity.presenceSummary({ available: true, busy: [] }), '4 个 AI 成员在线');
   assert.equal(activity.presenceSummary({ available: true, busy: ['qa', 'architect'] }), '2 个 AI 成员正在工作');
   assert.equal(activity.presenceSummary({ available: false, busy: [] }), 'AI 团队离线');
 });

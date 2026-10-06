@@ -1,0 +1,188 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
+
+import ReleaseView from '../../../src/renderer/src/views/ReleaseView.vue';
+import WriteNotesDialog from '../../../src/renderer/src/components/release/WriteNotesDialog.vue';
+import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
+import * as model from '../../../src/renderer/src/lib/release_model.ts';
+import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
+import * as fakes from '../release_fakes.ts';
+import type * as ipc from '../../../src/shared/ipc_types.ts';
+
+vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+
+describe('ReleaseView', () => {
+  let state: { current: ipc.ReleaseState };
+  let api: ReturnType<typeof fakes.installReleaseApi>;
+  let wrapper: ReturnType<typeof mount> | null = null;
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    state = { current: fakes.releaseState() };
+    api = fakes.installReleaseApi(state);
+    vi.mocked(feedback.showToast).mockClear();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  const render = async () => {
+    wrapper = mount(ReleaseView, { attachTo: document.body, global: { plugins: [ElementPlus] } });
+    await flushPromises();
+    return wrapper;
+  };
+
+  test('without a workspace it points to the repository settings', async () => {
+    state.current = fakes.releaseState({ configured: false, startPoint: null });
+    const open = vi.spyOn(useSettingsStore(), 'open').mockResolvedValue();
+    const view = await render();
+    expect(view.find('.generate-release').exists()).toBe(false);
+    await view.find('.no-workspace button').trigger('click');
+    expect(open).toHaveBeenCalledWith('repository');
+  });
+
+  test('generating shows a spinner and cancel, and polling stops on unmount', async () => {
+    vi.useFakeTimers();
+    const view = await render();
+    expect(view.find('.start-line').text()).toBe('从上次发布 0.1.0 开始');
+    await view.find('.generate-release').trigger('click');
+    await flushPromises();
+    expect(view.find('.generating').exists()).toBe(true);
+    await view.find('.cancel-release').trigger('click');
+    await flushPromises();
+    expect(api.cancel).toHaveBeenCalled();
+
+    const calls = api.get.mock.calls.length;
+    view.unmount();
+    wrapper = null;
+    await vi.advanceTimersByTimeAsync(model.POLL_MS * 3);
+    expect(api.get).toHaveBeenCalledTimes(calls);
+  });
+
+  test('a failed draft shows the error and 重试', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft({ status: 'failed', plan: null, error: { code: 'agent_timeout', message: 'timeout' } }) });
+    const view = await render();
+    expect(view.find('.draft-error').text()).toBe('智能体超过 3 分钟没有完成，已停止。');
+    expect(view.find('.generate-release').text()).toBe('重试');
+  });
+
+  test('kind none lists recent commits as text and requires a pick', async () => {
+    state.current = fakes.releaseState({ startPoint: { kind: 'none', commit: null, label: null } });
+    const view = await render();
+    await view.find('.generate-release').trigger('click');
+    await flushPromises();
+    expect(api.generate).not.toHaveBeenCalled();
+    expect(view.find('.start-error').text()).toBe('请先选择从哪个提交开始。');
+
+    await view.find('.start-select .el-select__wrapper').trigger('click');
+    await flushPromises();
+    const options = document.querySelectorAll('.el-select-dropdown__item');
+    expect(options).toHaveLength(2);
+    expect(options[0].textContent).toContain('<b>初始提交</b>');
+    expect(document.querySelector('.el-select-dropdown__item b')).toBeNull();
+    (options[1] as HTMLElement).click();
+    await flushPromises();
+    await view.find('.generate-release').trigger('click');
+    await flushPromises();
+    expect(api.generate).toHaveBeenCalledWith('deadbeef99');
+  });
+
+  test('a ready draft: version, notes, checklist gates 完成发布, model text stays text', async () => {
+    state.current = fakes.releaseState({
+      draft: fakes.draft({ plan: fakes.plan({ reason: '<img src=x onerror=alert(1)>', checklist: [{ text: '<script>x</script>', evidence: ['<i>src/a.ts</i>'] }, { text: '更新 README', evidence: [] }] }) }),
+    });
+    const view = await render();
+    expect(view.find('.start-line').text()).toBe('从上次发布 0.1.0 开始（12 个提交，2 个完成的工作包）');
+    expect(view.find('.version-from').text()).toBe('0.1.0');
+    expect(view.find('.version-next').text()).toBe('0.2.0');
+    expect(view.find('.version-reason').text()).toContain('<img src=x onerror=alert(1)>');
+    expect(view.find('.release-view img').exists()).toBe(false);
+    expect(view.find('.checklist-item script').exists()).toBe(false);
+    expect(view.find('.evidence code').text()).toBe('<i>src/a.ts</i>');
+    expect((view.find('.notes-editor textarea').element as HTMLTextAreaElement).value).toBe('## 新增\n- 发布页');
+
+    const finish = view.find('.finish-release');
+    expect(finish.attributes('disabled')).toBeDefined();
+    const boxes = view.findAll('.checklist-item input[type="checkbox"]');
+    await boxes[0].setValue(true);
+    await flushPromises();
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ checked: [0] });
+    expect(view.find('.finish-release').attributes('disabled')).toBeDefined();
+    await boxes[1].setValue(true);
+    await flushPromises();
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ checked: [0, 1] });
+    expect(view.find('.finish-release').attributes('disabled')).toBeUndefined();
+    await view.find('.finish-release').trigger('click');
+    await flushPromises();
+    expect(feedback.confirmAction).toHaveBeenCalled();
+    expect(api.finish).toHaveBeenCalled();
+  });
+
+  test('notes save on blur and show 已保存', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const view = await render();
+    const textarea = view.find('.notes-editor textarea');
+    await textarea.setValue('## 改过');
+    await textarea.trigger('blur');
+    await flushPromises();
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ notes: '## 改过' });
+    expect(view.find('.notes-status').text()).toBe('已保存');
+  });
+
+  test('write-notes dialog: error under the input, success closes with a toast', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const view = await render();
+    await view.find('.write-notes').trigger('click');
+    await flushPromises();
+    const dialog = () => document.querySelector('.release-write-dialog') as HTMLElement;
+    expect(dialog()).not.toBeNull();
+
+    api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
+    (dialog().querySelector('.write-confirm') as HTMLElement).click();
+    await flushPromises();
+    expect(api.writeNotes).toHaveBeenLastCalledWith({ path: 'CHANGELOG.md' });
+    expect(dialog().querySelector('#release-notes-path-error')!.textContent).toBe('路径不在工作区内');
+
+    (dialog().querySelector('.write-confirm') as HTMLElement).click();
+    await flushPromises();
+    expect(feedback.showToast).toHaveBeenLastCalledWith('已写入 CHANGELOG.md');
+    expect(view.findComponent(WriteNotesDialog).props('modelValue')).toBe(false);
+  });
+
+  test('复制说明 copies the editor text', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const view = await render();
+    await view.find('.copy-notes').trigger('click');
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith('## 新增\n- 发布页');
+  });
+
+  test('history: newest first, business-time dates, expandable, capped at 20', async () => {
+    const history = Array.from({ length: 23 }, (_, index) => fakes.release({ id: `r${index}`, version: `0.${23 - index}.0`, notesText: index === 0 ? '<b>说明</b>' : '说明' }));
+    state.current = fakes.releaseState({ history });
+    const view = await render();
+    const rows = view.findAll('.history-row');
+    expect(rows).toHaveLength(20);
+    expect(rows[0].find('.history-version').text()).toBe('0.23.0');
+    expect(rows[0].find('time').text()).toBe('2026-10-01 12:05:06');
+    expect(rows[0].find('.history-count').text()).toBe('1 个工作包');
+
+    await rows[0].find('.history-summary').trigger('click');
+    expect(view.find('.history-notes').text()).toBe('<b>说明</b>');
+    expect(view.find('.history-notes b').exists()).toBe(false);
+    expect(view.find('.history-checklist').text()).toContain('运行测试');
+
+    await view.find('.release-history .view-all-button').trigger('click');
+    expect(view.findAll('.history-row')).toHaveLength(23);
+    expect(view.find('.release-history .view-all-button').exists()).toBe(false);
+  });
+});
