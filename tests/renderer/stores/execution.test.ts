@@ -58,6 +58,35 @@ describe('execution store', () => {
     expect(feedback.showToast).toHaveBeenCalledWith('已提交，QA 正在审查。');
   });
 
+  test('a second transition is ignored while one is in flight', async () => {
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    const first = execution.runTransition('submit_for_review');
+    expect(execution.transitioning).toBe('submit_for_review');
+    await execution.runTransition('submit_for_review');
+    await first;
+    expect(api.transition).toHaveBeenCalledTimes(1);
+    expect(execution.transitioning).toBe(null);
+  });
+
+  test('a failed transition clears the in-flight state', async () => {
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    api.transition.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await execution.runTransition('submit_for_review');
+    spy.mockRestore();
+    expect(execution.transitioning).toBe(null);
+  });
+
+  test('a saved step also updates the queue copy of the package', async () => {
+    const execution = useExecutionStore();
+    useTasksStore().tasks = [taskView(), taskView({ id: 't2' })];
+    await execution.open('t1');
+    expect(await execution.setStepDone(1, true)).toBe(true);
+    expect(useTasksStore().tasks.map((task) => task.completedSteps)).toEqual([[1], []]);
+  });
+
   test('confirmed transitions ask first and stop when declined', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');

@@ -154,9 +154,10 @@ const teamOnline = computed(() => overview.value?.team.available === true);
           <p v-else-if="visibleTasks.length === 0" class="empty-hint" data-empty="filter">
             <AppIcon name="filter" />
             没有「{{ filterLabel }}」的工作包
+            <button class="empty-action" type="button" @click="filter = 'all'">查看全部</button>
           </p>
           <button v-for="task in visibleTasks" :key="task.id" class="task-item" type="button" @click="execution.open(task.id)">
-            <!-- task.icon comes from tasks.ts; an unknown name renders blank. -->
+            <!-- task.icon comes from tasks.ts; an unknown name falls back to the package icon. -->
             <div class="task-state" :class="`priority-${task.priority}`"><AppIcon :name="task.icon as IconName" /></div>
             <div class="task-main">
               <div class="task-title">{{ task.title }}</div>
@@ -164,6 +165,13 @@ const teamOnline = computed(() => overview.value?.team.available === true);
               <div class="task-tags">
                 <span class="status-pill" :class="task.status">{{ task.statusLabel }}</span>
                 <span v-for="tag in task.tags" :key="tag" class="tag">{{ tag }}</span>
+              </div>
+              <!-- Step progress once a package is underway. -->
+              <div v-if="task.status !== 'pending' && task.steps.length > 0" class="task-progress" data-progress>
+                <span class="progress-track" aria-hidden="true">
+                  <span class="progress-fill" :style="{ width: `${(task.completedSteps.length / task.steps.length) * 100}%` }"></span>
+                </span>
+                <span>{{ task.completedSteps.length }} / {{ task.steps.length }} 步</span>
               </div>
             </div>
             <div class="task-side">
@@ -193,7 +201,9 @@ const teamOnline = computed(() => overview.value?.team.available === true);
             <h2>AI 团队动态</h2>
             <p>项目上下文正在持续更新</p>
           </div>
-          <button class="icon-button small" aria-label="更多"><AppIcon name="more" /></button>
+          <button class="icon-button small" type="button" title="查看完整活动记录" aria-label="查看完整活动记录" @click="app.navigate('activity')">
+            <AppIcon name="arrow-right" />
+          </button>
         </div>
         <div class="activity-list">
           <div v-for="item in feed" :key="item.key" class="activity-item">
@@ -210,6 +220,7 @@ const teamOnline = computed(() => overview.value?.team.available === true);
           <p v-if="overview && feed.length === 0" class="empty-hint">
             <AppIcon name="activity" />
             还没有动态。提交需求或推进工作包后会出现在这里。
+            <button class="empty-action" type="button" @click="requirements.open({ compose: true })">新建需求</button>
           </p>
         </div>
         <button class="view-all-button" @click="app.navigate('activity')">

@@ -83,9 +83,12 @@ onBeforeUnmount(() => execution.close());
           :class="actionClass(action)"
           type="button"
           :data-transition="action.name"
+          :disabled="execution.transitioning !== null"
+          :aria-busy="execution.transitioning === action.name"
           @click="transition(action.name)"
         >
-          <AppIcon :name="action.icon" />
+          <AppIcon v-if="execution.transitioning === action.name" name="spinner" class="spin" />
+          <AppIcon v-else :name="action.icon" />
           {{ action.label }}
         </button>
       </div>

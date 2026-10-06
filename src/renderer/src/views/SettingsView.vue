@@ -76,7 +76,10 @@ const onSearch = (event: Event) => settings.search((event.target as HTMLInputEle
           </button>
         </template>
       </nav>
-      <p v-show="settings.visiblePages.size === 0" id="settingsSearchEmpty" class="settings-search-empty">没有匹配的设置</p>
+      <p v-show="settings.visiblePages.size === 0" id="settingsSearchEmpty" class="settings-search-empty">
+        没有匹配的设置
+        <button class="empty-action" type="button" @click="settings.search('')">清除搜索</button>
+      </p>
     </aside>
 
     <div class="settings-content">
@@ -137,7 +140,10 @@ const onSearch = (event: Event) => settings.search((event.target as HTMLInputEle
             <AppIcon name="check-circle" />
             检查
           </button>
-          <button id="saveSettings" class="primary-button" type="button" :disabled="settings.saving" @click="onSubmit">保存</button>
+          <button id="saveSettings" class="primary-button" type="button" :disabled="settings.saving" :aria-busy="settings.saving" @click="onSubmit">
+            <AppIcon v-if="settings.saving" name="spinner" class="spin" />
+            {{ settings.saving ? '保存中…' : '保存' }}
+          </button>
         </div>
       </div>
     </div>

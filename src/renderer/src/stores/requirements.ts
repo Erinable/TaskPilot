@@ -144,7 +144,12 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   // ========== Actions ==========
+  // The step request in flight, until the requirement reports it is running.
+  const acting = ref<'clarify' | 'plan' | 'edit' | null>(null);
+
   const runStep = async (item: ipc.Requirement, step: 'clarify' | 'plan', answers?: ipc.RequirementAnswers) => {
+    if (acting.value) return;
+    acting.value = step;
     try {
       const next =
         step === 'plan' ? await call(window.taskpilot.requirements.plan(item.id, answers)) : await call(window.taskpilot.requirements.clarify(item.id));
@@ -154,11 +159,15 @@ export const useRequirementsStore = defineStore('requirements', () => {
     } catch (error) {
       console.error(error);
       showToast(`操作失败：${describeError(error)}`);
+    } finally {
+      acting.value = null;
     }
   };
 
   // Back to the question form with the current answers, discarding the plan.
   const editAnswers = async (item: ipc.Requirement) => {
+    if (acting.value) return;
+    acting.value = 'edit';
     try {
       const next = await call(
         window.taskpilot.requirements.answer(
@@ -171,6 +180,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     } catch (error) {
       console.error(error);
       showToast(`操作失败：${describeError(error)}`);
+    } finally {
+      acting.value = null;
     }
   };
 
@@ -304,6 +315,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     onComposeInput,
     submitNew,
     // Actions
+    acting,
     runStep,
     editAnswers,
     publishPlan,

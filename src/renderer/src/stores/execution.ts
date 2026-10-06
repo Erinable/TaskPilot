@@ -108,9 +108,13 @@ export const useExecutionStore = defineStore('execution', () => {
   // ========== Steps ==========
   const setStepDone = async (stepIndex: number, done: boolean) => {
     if (!current.value) return false;
+    const id = current.value.id;
     try {
-      const state = await call(window.taskpilot.setStepDone(current.value.id, stepIndex, done));
-      current.value = { ...current.value, completedSteps: state.completedSteps };
+      const state = await call(window.taskpilot.setStepDone(id, stepIndex, done));
+      if (current.value?.id === id) current.value = { ...current.value, completedSteps: state.completedSteps };
+      // Keep the queue's progress in step without reloading it.
+      const tasks = useTasksStore();
+      tasks.tasks = tasks.tasks.map((task) => (task.id === id ? { ...task, completedSteps: state.completedSteps } : task));
       return true;
     } catch (error) {
       console.error(error);
@@ -319,14 +323,18 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Transitions ==========
+  // The transition in flight; its button spins and the others wait.
+  const transitioning = ref<ipc.HumanTransition | null>(null);
+
   const runTransition = async (name: ipc.HumanTransition) => {
-    if (!current.value) return;
+    if (!current.value || transitioning.value) return;
     if (name === 'report_deviation') {
       openDeviationForm();
       return;
     }
     const confirm = TRANSITION_CONFIRMS[name];
     if (confirm && !(await confirmAction(confirm))) return;
+    transitioning.value = name;
     try {
       await call(window.taskpilot.transition(current.value.id, name));
       await reloadCurrent();
@@ -334,6 +342,8 @@ export const useExecutionStore = defineStore('execution', () => {
     } catch (error) {
       console.error(error);
       showToast(`操作失败：${describeError(error)}`);
+    } finally {
+      transitioning.value = null;
     }
   };
 
@@ -397,6 +407,7 @@ export const useExecutionStore = defineStore('execution', () => {
     verifyError,
     runVerification,
     // Transitions
+    transitioning,
     runTransition,
     // Modals
     deviationOpen,

@@ -104,7 +104,7 @@ describe('QueueView', () => {
   });
 
   test('done packages are hidden by default and the footer shows them all', async () => {
-    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key' };
+    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key', steps: [], completedSteps: [] };
     useTasksStore().tasks = [
       { ...base, id: 'low', title: '低', status: 'pending', priority: 'low' },
       { ...base, id: 'done', title: '完成', status: 'done', priority: 'high' },
@@ -119,5 +119,28 @@ describe('QueueView', () => {
     await footer.trigger('click');
     expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['完成', '高', '低']);
     expect(wrapper.find('.filter-button').text()).toBe('全部状态');
+  });
+
+  test('started packages show step progress; pending ones do not', async () => {
+    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key', priority: 'high', steps: ['a', 'b', 'c', 'd'] };
+    useTasksStore().tasks = [
+      { ...base, id: 'run', title: '执行中', status: 'in_progress', completedSteps: [0, 2] },
+      { ...base, id: 'new', title: '待执行', status: 'pending', completedSteps: [] },
+    ] as unknown as ipc.TaskView[];
+    const wrapper = render();
+    await flushPromises();
+    const items = wrapper.findAll('.task-item');
+    expect(items[0].find('[data-progress]').text()).toBe('2 / 4 步');
+    expect(items[0].find('.progress-fill').attributes('style')).toContain('width: 50%');
+    expect(items[1].find('[data-progress]').exists()).toBe(false);
+  });
+
+  test('an empty filter offers to show every package', async () => {
+    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key', priority: 'high', steps: [], completedSteps: [] };
+    useTasksStore().tasks = [{ ...base, id: 'done', title: '完成', status: 'done' }] as unknown as ipc.TaskView[];
+    const wrapper = render();
+    await flushPromises();
+    await wrapper.find('[data-empty="filter"] .empty-action').trigger('click');
+    expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['完成']);
   });
 });

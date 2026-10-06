@@ -96,8 +96,8 @@ const onSubmit = () => {
       </template>
     </div>
     <div class="req-actions">
-      <button class="primary-button" type="submit" :disabled="store.submitting">
-        <AppIcon name="send" />
+      <button class="primary-button" type="submit" :disabled="store.submitting" :aria-busy="store.submitting">
+        <AppIcon :name="store.submitting ? 'spinner' : 'send'" :class="{ spin: store.submitting }" />
         交给 Product Lead
       </button>
     </div>

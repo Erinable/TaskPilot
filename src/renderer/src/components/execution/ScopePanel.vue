@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
@@ -26,8 +26,13 @@ const rows = computed(() => {
   ];
 });
 
+const refreshing = ref(false);
 const refresh = () => {
-  execution.refreshDiff().catch((error) => console.error(error));
+  refreshing.value = true;
+  execution
+    .refreshDiff()
+    .catch((error) => console.error(error))
+    .finally(() => (refreshing.value = false));
 };
 </script>
 
@@ -41,7 +46,9 @@ const refresh = () => {
           <p>工作包允许改动的文件</p>
         </div>
       </div>
-      <button class="icon-button small" type="button" title="刷新" aria-label="刷新改动" @click="refresh"><AppIcon name="refresh" /></button>
+      <button class="icon-button small" type="button" title="刷新" aria-label="刷新改动" :disabled="refreshing" @click="refresh">
+        <AppIcon :name="refreshing ? 'spinner' : 'refresh'" :class="{ spin: refreshing }" />
+      </button>
     </div>
     <div class="scope-list">
       <div v-for="row in rows" :key="`${row.kind}:${row.filePath}`" class="scope-row" :class="row.kind">

@@ -96,12 +96,25 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
           <code v-if="item.error?.message && item.error.code !== 'agent_cancelled'" class="agent-error-detail">{{ item.error.message }}</code>
         </AgentBubble>
         <div class="req-actions">
-          <button class="primary-button" type="button" @click="report(store.runStep(item, failedStep))">
-            <AppIcon name="refresh" />
+          <button
+            class="primary-button"
+            type="button"
+            :disabled="store.acting !== null"
+            :aria-busy="store.acting === failedStep"
+            @click="report(store.runStep(item, failedStep))"
+          >
+            <AppIcon :name="store.acting === failedStep ? 'spinner' : 'refresh'" :class="{ spin: store.acting === failedStep }" />
             {{ failedStep === 'plan' ? '重新拆解' : '重新澄清' }}
           </button>
-          <button v-if="failedStep === 'plan'" class="secondary-button" type="button" @click="report(store.editAnswers(item))">
-            <AppIcon name="arrow-left" />
+          <button
+            v-if="failedStep === 'plan'"
+            class="secondary-button"
+            type="button"
+            :disabled="store.acting !== null"
+            :aria-busy="store.acting === 'edit'"
+            @click="report(store.editAnswers(item))"
+          >
+            <AppIcon :name="store.acting === 'edit' ? 'spinner' : 'arrow-left'" :class="{ spin: store.acting === 'edit' }" />
             修改回答
           </button>
         </div>
@@ -128,8 +141,8 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             />
           </div>
           <div class="req-actions">
-            <button class="primary-button" type="submit">
-              <AppIcon name="blocks" />
+            <button class="primary-button" type="submit" :disabled="store.acting !== null" :aria-busy="store.acting === 'plan'">
+              <AppIcon :name="store.acting === 'plan' ? 'spinner' : 'blocks'" :class="{ spin: store.acting === 'plan' }" />
               开始拆解
             </button>
           </div>
@@ -164,16 +177,28 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             查看工作队列
           </button>
           <template v-else>
-            <button class="secondary-button" type="button" @click="report(store.editAnswers(item))">
-              <AppIcon name="arrow-left" />
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="store.acting !== null || publishing"
+              :aria-busy="store.acting === 'edit'"
+              @click="report(store.editAnswers(item))"
+            >
+              <AppIcon :name="store.acting === 'edit' ? 'spinner' : 'arrow-left'" :class="{ spin: store.acting === 'edit' }" />
               修改回答
             </button>
-            <button class="secondary-button" type="button" @click="report(store.runStep(item, 'plan'))">
-              <AppIcon name="refresh" />
+            <button
+              class="secondary-button"
+              type="button"
+              :disabled="store.acting !== null || publishing"
+              :aria-busy="store.acting === 'plan'"
+              @click="report(store.runStep(item, 'plan'))"
+            >
+              <AppIcon :name="store.acting === 'plan' ? 'spinner' : 'refresh'" :class="{ spin: store.acting === 'plan' }" />
               重新拆解
             </button>
-            <button class="primary-button" type="button" :disabled="publishing" @click="report(onPublish())">
-              <AppIcon name="send" />
+            <button class="primary-button" type="button" :disabled="publishing || store.acting !== null" :aria-busy="publishing" @click="report(onPublish())">
+              <AppIcon :name="publishing ? 'spinner' : 'send'" :class="{ spin: publishing }" />
               {{ `发布 ${plan.packages.length} 个工作包` }}
             </button>
           </template>

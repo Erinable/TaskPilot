@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Release page. Release Manager only proposes; TaskPilot never tags, commits,
 // pushes or runs release commands. Model and repository text is text only.
-import { computed, onBeforeUnmount, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import ReleaseDraftPanel from '@/components/release/ReleaseDraftPanel.vue';
@@ -24,6 +24,15 @@ const run = (action: () => Promise<unknown>) => {
   action().catch((error) => console.error(error));
 };
 const openRepositorySettings = () => run(() => settings.open('repository'));
+// Covers the gap between the click and the draft reporting it is generating.
+const starting = ref(false);
+const generate = () => {
+  starting.value = true;
+  store
+    .generate()
+    .catch((error) => console.error(error))
+    .finally(() => (starting.value = false));
+};
 
 onMounted(() => run(store.enter));
 onBeforeUnmount(() => store.leave());
@@ -43,6 +52,7 @@ onBeforeUnmount(() => store.leave());
     <p v-if="store.loadError" class="empty-hint load-error">
       <AppIcon name="alert" />
       读取发布信息失败：{{ store.loadError }}
+      <button class="empty-action" type="button" @click="run(store.load)">重试</button>
     </p>
 
     <div v-if="store.state && !store.state.configured" class="panel glass req-empty no-workspace">
@@ -84,8 +94,9 @@ onBeforeUnmount(() => store.leave());
               </span>
               <button class="secondary-button cancel-release" type="button" @click="run(store.cancel)">取消</button>
             </template>
-            <button v-else class="primary-button generate-release" type="button" @click="run(store.generate)">
-              <AppIcon :name="draft?.status === 'failed' ? 'refresh' : 'sparkle'" />
+            <button v-else class="primary-button generate-release" type="button" :disabled="starting" :aria-busy="starting" @click="generate">
+              <AppIcon v-if="starting" name="spinner" class="spin" />
+              <AppIcon v-else :name="draft?.status === 'failed' ? 'refresh' : 'sparkle'" />
               {{ draft?.status === 'failed' ? '重试' : draft ? '重新生成' : '生成' }}
             </button>
           </div>

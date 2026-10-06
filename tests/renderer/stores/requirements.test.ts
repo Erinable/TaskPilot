@@ -98,6 +98,19 @@ describe('requirements store', () => {
     expect(store.attentionCount).toBe(3);
   });
 
+  test('a step request runs once while in flight and then clears', async () => {
+    state.list = [requirement({ status: 'failed' })];
+    const store = useRequirementsStore();
+    await store.refreshList();
+    const first = store.runStep(state.list[0], 'clarify');
+    expect(store.acting).toBe('clarify');
+    await store.runStep(state.list[0], 'clarify');
+    await first;
+    expect(api.requirements.clarify).toHaveBeenCalledTimes(1);
+    expect(store.acting).toBe(null);
+    store.stopPolling();
+  });
+
   test('a failed list load keeps the last list', async () => {
     state.list = [requirement()];
     const store = useRequirementsStore();

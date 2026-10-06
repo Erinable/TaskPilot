@@ -158,7 +158,8 @@ describe('MapView', () => {
   test('errors show the described message, and refresh reloads', async () => {
     state.result = { ok: false, error: { code: 'no_workspace', message: 'x' } };
     const wrapper = await render();
-    expect(wrapper.get('[data-error]').text()).toBe('尚未配置工作区，请先在设置里指定仓库路径。');
+    expect(wrapper.get('[data-error]').text()).toBe('尚未配置工作区，请先在设置里指定仓库路径。 重试');
+    expect(wrapper.get('[data-error] .empty-action').text()).toBe('重试');
     state.result = { ok: true, data: engineeringMap() };
     await wrapper.get('[data-action="refresh"]').trigger('click');
     await flushPromises();

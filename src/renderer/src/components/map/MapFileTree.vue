@@ -41,6 +41,7 @@ const onNodeClick = (data: TreeNodeData) => {
     <p v-if="onlySummarized && roots.length === 0" class="empty-hint" data-empty="filtered">
       <AppIcon name="info" />
       没有已摘要的文件
+      <button class="empty-action" type="button" @click="onlySummarized = false">显示全部文件</button>
     </p>
     <el-tree v-else :key="treeKey" class="map-tree-body" lazy :load="load" :props="treeProps" node-key="path" highlight-current @node-click="onNodeClick">
       <template #default="{ data }">

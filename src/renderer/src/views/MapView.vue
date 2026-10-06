@@ -75,7 +75,7 @@ onMounted(() => {
           data-action="refresh"
           @click="load().catch((caught) => console.error(caught))"
         >
-          <AppIcon :name="loading ? 'spinner' : 'refresh'" />
+          <AppIcon :name="loading ? 'spinner' : 'refresh'" :class="{ spin: loading }" />
         </button>
       </div>
     </div>
@@ -83,6 +83,7 @@ onMounted(() => {
     <p v-if="error" class="empty-hint glass map-error" data-error>
       <AppIcon name="alert" />
       {{ error }}
+      <button class="empty-action" type="button" :disabled="loading" @click="load().catch((caught) => console.error(caught))">重试</button>
     </p>
 
     <div v-else-if="map && map.modules.length === 0" class="req-empty" data-empty="modules">
@@ -147,7 +148,7 @@ onMounted(() => {
     </div>
 
     <p v-else class="empty-hint" data-loading>
-      <AppIcon name="spinner" />
+      <AppIcon name="spinner" class="spin" />
       正在读取工程地图…
     </p>
   </div>

@@ -32,6 +32,7 @@ const changes = computed(() => execution.diff?.changes ?? []);
       <p v-else-if="changes.length === 0" class="empty-hint">
         <AppIcon name="check-circle" />
         相对基线还没有改动。
+        <button class="empty-action" type="button" @click="execution.refreshDiff().catch((error) => console.error(error))">刷新</button>
       </p>
       <!-- Keyed by refresh so every reload starts collapsed and re-fetches patches. -->
       <DiffFile v-for="change in changes" v-else :key="`${execution.diffVersion}:${change.path}`" :task-id="task.id" :change="change" />

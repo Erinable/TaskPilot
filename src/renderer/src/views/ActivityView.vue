@@ -98,7 +98,7 @@ onMounted(() => loadPage(null));
       <div class="heading-actions">
         <el-segmented v-model="who" :options="WHO_OPTIONS" aria-label="按操作者筛选" />
         <button class="icon-button" type="button" title="刷新" aria-label="刷新活动记录" :disabled="loading" @click="loadPage(null)">
-          <AppIcon name="refresh" />
+          <AppIcon :name="loading ? 'spinner' : 'refresh'" :class="{ spin: loading }" />
         </button>
       </div>
     </div>
@@ -107,10 +107,15 @@ onMounted(() => loadPage(null));
       <p v-if="error" class="empty-hint">
         <AppIcon name="alert" />
         读取活动记录失败：{{ error }}
+        <button class="empty-action" type="button" :disabled="loading" @click="loadPage(null)">重试</button>
       </p>
       <p v-else-if="loaded && groups.length === 0 && !nextBefore" class="empty-hint">
         <AppIcon name="activity" />
         {{ who === 'all' ? '还没有动态。提交需求或推进工作包后会出现在这里。' : '这段时间没有匹配的动态。' }}
+        <button v-if="who === 'all'" class="empty-action" type="button" @click="requirements.open({ compose: true }).catch((caught) => console.error(caught))">
+          新建需求
+        </button>
+        <button v-else class="empty-action" type="button" @click="who = 'all'">查看全部成员</button>
       </p>
       <section v-for="group in groups" :key="group.day" class="activity-day" :aria-label="group.label">
         <h2 class="activity-day-label">{{ group.label }}</h2>
