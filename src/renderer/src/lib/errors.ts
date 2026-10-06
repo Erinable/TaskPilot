@@ -1,0 +1,41 @@
+// User-facing wording for the error codes the main process returns.
+import type { IpcError } from './ipc.ts';
+import type { ErrorInfo } from '@shared/ipc_types.ts';
+
+export const ERROR_HINTS: Record<string, string> = {
+  no_workspace: '尚未配置工作区，请先在设置里指定仓库路径。',
+  not_configured: '工作区没有配置这个命令。',
+  command_missing: '找不到可执行文件，请检查命令配置。',
+  no_baseline: '请先领取工作包。',
+  not_a_repo: '该目录不在 git 仓库中。',
+  root_not_absolute: '请填写绝对路径。',
+  root_not_found: '目录不存在。',
+  shell_syntax: '不支持 shell 语法，请改用 package.json 脚本。',
+  unterminated_quote: '引号没有闭合。',
+  invalid_command: '命令格式不正确。',
+  name_too_long: '最多 40 个字符。',
+  invalid_name: '名字不能包含控制字符。',
+  invalid_choice: '选项无效。',
+  open_failed: '系统无法打开这个目录。',
+  agent_unavailable: '找不到 Claude Code CLI。请确认已安装 `claude`，或在「设置 → 运行环境」里改为从登录 shell 读取 PATH。',
+  agent_timeout: '智能体超过 3 分钟没有完成，已停止。',
+  agent_cancelled: '已取消。',
+  agent_budget: '本次调用超出了 1 美元的费用上限，已停止。',
+  agent_bad_output: '智能体返回的内容不符合格式要求，已丢弃。可以重试。',
+  agent_interrupted: 'TaskPilot 在智能体运行时退出了。',
+  agent_failed: '智能体运行失败。',
+  review_running: 'QA 正在审查。',
+  invalid_state: '当前状态下不能执行这个操作。',
+  required: '请填写这一项。',
+  too_long: '内容太长了。',
+  invalid_text: '内容包含控制字符。',
+  env_no_plan: '请先让环境管家分析环境。',
+  env_stale: '工作区已经换了仓库，请重新分析环境。',
+  env_busy: '环境管家正在忙，请等当前操作结束。',
+  env_blocked: '仓库还有阻塞问题，这一步不能运行。',
+};
+
+export const describeError = (error: unknown) => (error instanceof Error ? ERROR_HINTS[(error as IpcError).code] ?? error.message : String(error));
+
+// Agent errors are stored as plain {code, message} objects, not Error instances.
+export const describeErrorInfo = (error: Partial<ErrorInfo> | null | undefined) => (error?.code ? ERROR_HINTS[error.code] : undefined) ?? error?.message ?? '';

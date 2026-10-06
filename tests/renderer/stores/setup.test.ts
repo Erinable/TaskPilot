@@ -1,0 +1,121 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+
+import * as feedback from '@/lib/feedback.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
+import { resultText, useSetupStore } from '@/stores/setup.ts';
+import { envState, fail, installApi, ok } from '../settings_fakes.ts';
+
+vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
+
+let api: ReturnType<typeof installApi>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  api = installApi();
+  setActivePinia(createPinia());
+});
+
+afterEach(() => vi.useRealTimers());
+
+const onSetupPage = async () => {
+  await useSettingsStore().open('setup');
+  const setup = useSetupStore();
+  await vi.waitFor(() => expect(setup.view).not.toBeNull());
+  return setup;
+};
+
+test('opening the page only reads the session; no step runs on its own', async () => {
+  const setup = await onSetupPage();
+  expect(api.env.get).toHaveBeenCalled();
+  expect(api.env.runStep).not.toHaveBeenCalled();
+  expect(api.env.plan).not.toHaveBeenCalled();
+  expect(setup.statusText).toBe('先安装依赖再跑测试。');
+});
+
+test('a step runs by id when clicked', async () => {
+  const setup = await onSetupPage();
+  expect(await setup.runStep('install')).toBe(true);
+  expect(api.env.runStep).toHaveBeenCalledWith('install');
+});
+
+test('steps do not run while busy or stale', async () => {
+  const setup = await onSetupPage();
+  api.env.get.mockReturnValue(ok(envState({ stale: true })));
+  await setup.render();
+  expect(await setup.runStep('install')).toBe(false);
+  api.env.get.mockReturnValue(ok(envState({ running: 'test' })));
+  await setup.render();
+  expect(await setup.runStep('install')).toBe(false);
+  expect(api.env.runStep).not.toHaveBeenCalled();
+});
+
+test('allowing install scripts asks first; declining sends nothing', async () => {
+  const setup = await onSetupPage();
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+  expect(await setup.setAllowScripts(true)).toBe(false);
+  expect(api.env.setAllowScripts).not.toHaveBeenCalled();
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  expect(await setup.setAllowScripts(true)).toBe(true);
+  expect(api.env.setAllowScripts).toHaveBeenCalledWith(true);
+  // Turning it off needs no confirmation.
+  await setup.setAllowScripts(false);
+  expect(feedback.confirmAction).toHaveBeenCalledTimes(2);
+});
+
+test('a failed step offers a replan with the failure', async () => {
+  const setup = await onSetupPage();
+  const failed = { line: 'npm ci', ok: false, exitCode: 1, timedOut: false, durationMs: 2500, summary: null, output: 'gyp ERR', at: '' };
+  api.env.get.mockReturnValue(ok(envState({ steps: [{ id: 'install', kind: 'install', script: null, line: 'npm ci', result: failed }] })));
+  await setup.render();
+  expect(setup.failedStep?.id).toBe('install');
+  expect(setup.retryText).toContain('允许依赖的安装脚本');
+  await setup.replan();
+  expect(api.env.plan).toHaveBeenCalledWith({ withFailure: true });
+  expect(resultText(failed)).toBe('失败（退出码 1）· 2.5s');
+});
+
+test('a successful unconfigured script is ticked for writing by default', async () => {
+  const setup = await onSetupPage();
+  const passed = { line: 'npm run test', ok: true, exitCode: 0, timedOut: false, durationMs: 1000, summary: null, output: '', at: '' };
+  api.env.get.mockReturnValue(ok(envState({ steps: [{ id: 'test', kind: 'test', script: 'test', line: 'npm run test', result: passed }] })));
+  await setup.render();
+  expect(setup.selectedKinds).toEqual(['test']);
+  expect(setup.applyItems).toEqual([{ kind: 'test', proposed: 'npm run test', current: '', disabled: false, note: '当前未配置' }]);
+});
+
+test('apply with nothing ticked only hints', async () => {
+  const setup = await onSetupPage();
+  setup.selectedKinds = [];
+  expect(await setup.apply()).toBe(false);
+  expect(feedback.showToast).toHaveBeenCalledWith('请先勾选要写入的命令。', 'info');
+  expect(api.env.apply).not.toHaveBeenCalled();
+});
+
+test('a failed action toasts, but a cancelled one stays quiet', async () => {
+  const setup = await onSetupPage();
+  api.env.plan.mockReturnValueOnce(fail('agent_failed', 'x'));
+  expect(await setup.plan()).toBe(false);
+  expect(feedback.showToast).toHaveBeenCalledWith('分析失败：智能体运行失败。', 'error');
+  vi.mocked(feedback.showToast).mockClear();
+  api.env.plan.mockReturnValueOnce(fail('agent_cancelled', 'x'));
+  await setup.plan();
+  expect(feedback.showToast).not.toHaveBeenCalled();
+});
+
+test('planning polls while the page is visible', async () => {
+  vi.useFakeTimers();
+  api.env.get.mockReturnValue(ok(envState({ status: 'planning' })));
+  await useSettingsStore().open('setup');
+  await vi.advanceTimersByTimeAsync(0);
+  const calls = api.env.get.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(800);
+  expect(api.env.get.mock.calls.length).toBe(calls + 1);
+  expect(useSetupStore().statusText).toBe('环境管家正在读取仓库并制定步骤…');
+  // Leaving the page stops the polling.
+  useSettingsStore().openPage('data');
+  await vi.advanceTimersByTimeAsync(1600);
+  expect(api.env.get.mock.calls.length).toBe(calls + 2);
+});

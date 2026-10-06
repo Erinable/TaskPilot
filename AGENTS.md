@@ -2,44 +2,65 @@
 
 ## Project Structure & Module Organization
 
-TaskPilot is an Electron app using plain HTML, CSS, and JavaScript (no bundler).
+TaskPilot is an Electron app built with electron-vite: TypeScript in the main process and preload, Vue 3 + Pinia + Element Plus + UnoCSS in the renderer.
 
-- `src/main.js` — main process: window creation and IPC registration.
-- `src/ipc.js` — IPC channel names and handlers; testable with a fake `ipcMain`.
-- `src/preload.js` — exposes `window.taskpilot` to the renderer via `contextBridge`. It runs sandboxed, so it can only `require('electron')`; channel names are duplicated here and guarded by `tests/ipc.test.js`.
-- `src/tasks.js` — sample work-package data, the single source of truth until real integrations exist.
-- `src/renderer/` — UI. Build DOM with `textContent`/DOM APIs, never `innerHTML` with data. The page has a strict CSP (`script-src 'self'`, `style-src 'self'`), so no inline scripts or styles.
-- `src/renderer/icons.js` — the SVG icon set. Use `<i data-icon="name">` in markup or `icon('name')` in `renderer.js`; `tests/renderer/icons.test.js` fails on any unknown name.
-- `src/renderer/settings.js` — settings page controller; `settings-model.js` holds its pure logic (dirty tracking, search) and is tested directly. New settings pages need a nav entry, a `.settings-page` section, and an entry in `PAGE_STORES`.
-- `src/agents/` — the AI team. Each agent sees only its layer:
-  - `architect.js` reads code (through `src/repo-reader.js`) and publishes a module interface summary;
-  - `product-lead.js` plans from the summary and the file list, and never sees source code;
-  - `qa.js` reviews a submitted package against its steps, scope and acceptance criteria. `decide()` combines the model's verdict with TaskPilot's own evidence: a failing blocking check or a failed/missing linked test rejects regardless of the model, and the model can only make a review stricter;
-  - `env-steward.js` (Environment Steward) reads the facts `env-setup.js` gathers and picks an install mode and existing `package.json` script names. It never writes a command, and its suggested fixes are shown to the user but never run;
-  - `pipeline.js` runs Architect's steps, QA's review and the steward's plan; `claude-cli.js` runs the isolated, tool-less CLI.
+- `src/main/index.ts` — main process: window creation and IPC registration. In dev it loads the electron-vite dev server, otherwise `out/renderer/index.html`.
+- `src/main/env.ts` — the only reader of `process.env` in the main process.
+- `src/main/ipc.ts` — IPC handlers; testable with a fake `ipcMain`.
+- `src/shared/ipc_channels.ts` / `src/shared/ipc_types.ts` — channel names and the typed wire contract shared by main, preload and renderer. `src/shared` must not import from `src/main`.
+- `src/preload/index.ts` — exposes `window.taskpilot` (typed as `TaskPilotApi`) via `contextBridge`. It is bundled to CommonJS (`out/preload/index.cjs`) because sandboxed preloads cannot be ES modules.
+- `src/main/tasks.ts` — sample work-package data, the single source of truth until real integrations exist.
+- `src/renderer/src/` — the Vue app: `App.vue`, `views/` (one per top-level view), `components/`, `stores/` (Pinia setup stores), `lib/` (pure logic and IPC helpers). Agent-written text is rendered with `{{ }}` only, never `v-html`. The page has a strict CSP (`script-src 'self'`, `style-src 'self'` in production).
+- `src/renderer/src/lib/icons.ts` + `components/AppIcon.vue` — the SVG icon set. `IconName` is typed, so vue-tsc rejects unknown names; `tests/renderer/icons.test.ts` also checks names in data.
+- `src/renderer/src/stores/settings.ts` — settings state; `lib/settings_model.ts` holds its pure logic (dirty tracking, search). New settings pages need a nav entry in `SettingsView.vue`, a page component under `components/settings/`, and an entry in `PAGE_STORES`.
+- `src/main/agents/` — the AI team. Each agent sees only its layer:
+  - `architect.ts` reads code (through `src/main/repo_reader.ts`) and publishes a module interface summary;
+  - `product_lead.ts` plans from the summary and the file list, and never sees source code;
+  - `qa.ts` reviews a submitted package against its steps, scope and acceptance criteria. `decide()` combines the model's verdict with TaskPilot's own evidence: a failing blocking check or a failed/missing linked test rejects regardless of the model, and the model can only make a review stricter;
+  - `env_steward.ts` (Environment Steward) reads the facts `env_setup.ts` gathers and picks an install mode and existing `package.json` script names. It never writes a command, and its suggested fixes are shown to the user but never run;
+  - `pipeline.ts` runs Architect's steps, QA's review and the steward's plan; `claude_cli.ts` runs the isolated, tool-less CLI.
 
   All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect` (see `evals/product-lead/README.md`).
-- `src/repo-reader.js` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.
-- `src/review-diff.js` — the only source of working-tree diffs for QA. It reads only paths git reports as changed since the baseline (untracked included), refuses secret-looking paths with the same patterns as `repo-reader.js`, skips binaries, caps sizes, and reports every skipped file.
-- `src/env-setup.js` — Node/npm environment setup. It probes tracked manifests, lockfiles, version pins and CI workflows, and builds every setup command from fixed npm options plus validated script names (`--ignore-scripts` unless the user allows lifecycle scripts). The renderer only sends a step id; `ipc.js` rebuilds the command from the stored plan and runs it after the user's click.
-- `src/workspace.js` / `src/verification.js` — verification checks (`test`, `lint`, `build`, `smoke`), each with a stage (`step` = manual, `submit` = runs before QA), a blocking flag, and a report format (`stdout` TAP/spec, or a JUnit file read by `src/test-report.js`). `workspace.json` is version 2 (`checks`); v1 `commands` are upgraded on load.
-- `src/evidence.js` — pure rules that turn check runs into `pass / fail / unverifiable` evidence, comparing against the baseline measured when a package is claimed (clean tree only, in the background; see `measureBaseline` in `ipc.js`). Failures already present at the baseline do not reject; unverifiable evidence never rejects but is listed as `attention` for the human at acceptance. Its decision table is tested row by row in `tests/evidence.test.js`.
-- `src/preferences.js` / `src/shell-env.js` — per-machine preferences and the login-shell PATH lookup used by verification commands.
-- `src/renderer/styles.css` — frosted-glass theme. Surfaces use the `.glass` / `.glass-strong` classes and the CSS variables at the top; light and dark follow the system.
+- `src/main/repo_reader.ts` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.
+- `src/main/review_diff.ts` — the only source of working-tree diffs for QA. It reads only paths git reports as changed since the baseline (untracked included), refuses secret-looking paths with the same patterns as `repo_reader.ts`, skips binaries, caps sizes, and reports every skipped file.
+- `src/main/env_setup.ts` — Node/npm environment setup. It probes tracked manifests, lockfiles, version pins and CI workflows, and builds every setup command from fixed npm options plus validated script names (`--ignore-scripts` unless the user allows lifecycle scripts). The renderer only sends a step id; `ipc.ts` rebuilds the command from the stored plan and runs it after the user's click.
+- `src/main/workspace.ts` / `src/main/verification.ts` — verification checks (`test`, `lint`, `build`, `smoke`), each with a stage (`step` = manual, `submit` = runs before QA), a blocking flag, and a report format (`stdout` TAP/spec, or a JUnit file read by `src/main/test_report.ts`). `workspace.json` is version 2 (`checks`); v1 `commands` are upgraded on load.
+- `src/main/evidence.ts` — pure rules that turn check runs into `pass / fail / unverifiable` evidence, comparing against the baseline measured when a package is claimed (clean tree only, in the background; see `measureBaseline` in `ipc.ts`). Failures already present at the baseline do not reject; unverifiable evidence never rejects but is listed as `attention` for the human at acceptance. Its decision table is tested row by row in `tests/main/evidence.test.ts`.
+- `src/main/preferences.ts` / `src/main/shell_env.ts` — per-machine preferences and the login-shell PATH lookup used by verification commands.
+- `src/renderer/src/assets/styles.css` — frosted-glass theme. Surfaces use the `.glass` / `.glass-strong` classes and the CSS variables at the top; light and dark follow the system. `element_theme.css` maps Element Plus variables onto it.
+- Main-process source must not contain the text `require(`, `__dirname` or `__filename`: electron-vite then injects a CommonJS shim that can land inside a string literal (guarded by `tests/migration.test.ts`).
 
 Keep automated tests under `tests/`, static files under `assets/`, and scripts under `scripts/`. Mirror the `src/` layout in `tests/`.
 
 ## Build, Test, and Development Commands
 
-- `npm install` — install dependencies (Electron).
-- `npm start` / `npm run dev` — launch the app.
-- `npm test` — run `tests/**/*.test.js` with the built-in `node:test` runner.
+- `npm install` — install dependencies.
+- `npm run dev` — electron-vite dev server with hot reload.
+- `npm run build` — bundle main, preload and renderer into `out/`.
+- `npm start` — run the built app (`electron-vite preview`).
+- `npm test` — run `tests/**/*.test.ts` with Vitest. Component tests opt into a DOM with `// @vitest-environment happy-dom`.
+- `npm run typecheck` — vue-tsc over main, preload, renderer and tests.
+- `npm run eval:product-lead` — Product Lead eval harness; Node runs the `.ts` files directly.
 
-There is no build step, linter, or formatter configured yet. Do not introduce duplicate commands that bypass these scripts.
+No linter or formatter is configured yet. Do not introduce duplicate commands that bypass these scripts.
 
 ## Coding Style & Naming Conventions
 
-Use the formatter and linter selected by the project configuration, and format changed files before opening a pull request. Until a language-specific configuration exists, use two spaces for JavaScript, TypeScript, JSON, YAML, and Markdown; use four spaces for Python. Use `camelCase` for variables and functions, `PascalCase` for classes and components, and `kebab-case` for directories and command-line scripts. Prefer small modules with descriptive names over catch-all files.
+Stack: electron-vite + TypeScript + Vue 3 + Pinia + Element Plus + UnoCSS, tested with Vitest. All source is TypeScript or Vue.
+
+- Indent with two spaces (JS, TS, Vue, JSON, YAML, Markdown).
+- File and directory names are lowercase joined with underscores, for example work_package_store.ts. Vue components are PascalCase .vue files. Project imports carry their full suffix (.ts, .vue).
+- camelCase for variables and functions, PascalCase for classes, types and Vue components.
+- Spell names out in full (groupId, not gid). Loop variables use the singular of the collection (for (const row of rows)); short names only in one-line lambdas.
+- Define functions with const arrow functions, not function declarations. Return in one line when the body is one expression.
+- Comments use // only.
+- Export inline where a symbol is defined; no aggregated export { a, b } at the end of a file.
+- Library imports first, project imports below, one blank line between. More than three imports from one project module use a namespace import (import * as store from './work_package_store').
+- Internal config that is missing throws; do not paper over it with || defaults. Defaults with || are for external input only.
+- No (x as any).prop = value to get around types.
+- process.env is read in one config module only; everything else imports from it.
+- No over-abstraction: one-off logic stays inline instead of becoming a helper. Prefer small modules with descriptive names over catch-all files.
+- Renderer templates use {{ }} interpolation only, never v-html.
 
 ## Testing Guidelines
 

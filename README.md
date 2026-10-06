@@ -13,21 +13,23 @@ TaskPilot 是一个面向程序员的桌面工作台：AI 团队负责需求澄�
 
 ```bash
 npm install
-npm start
-```
-
-开发模式目前与启动命令相同：
-
-```bash
 npm run dev
 ```
 
-运行基础检查：
+开发模式带热更新。构建并运行打包后的应用：
+
+```bash
+npm run build
+npm start
+```
+
+运行测试和类型检查：
 
 ```bash
 npm test
+npm run typecheck
 ```
 
 ## 技术栈
 
-当前版本使用 Electron、原生 HTML、CSS 和 JavaScript，保持依赖轻量，方便先验证“AI 出工作包、人类执行代码”的核心流程。后续可接入 GitHub、项目文件系统和模型服务，将静态示例替换成真实任务状态。
+Electron + electron-vite 构建。主进程和 preload 用 TypeScript，渲染层用 Vue 3、Pinia、Element Plus 和 UnoCSS，测试用 Vitest。主进程、preload 和渲染层之间的 IPC 契约定义在 `src/shared/` 里，三端共用同一份类型。

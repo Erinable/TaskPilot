@@ -2,8 +2,8 @@
 
 Runs Product Lead's clarify and plan steps against fixed cases using the real Claude CLI, then scores each result two ways:
 
-- `checks.js`: deterministic checks covering question count, package count and size, total hours, files that must be touched, grounding in existing directories, test file conventions, scope overlap, test-backed acceptance criteria, and things the answers ruled out.
-- `judge.js`: a separate Claude call that scores five rubric criteria from 1 to 5, each with a reason.
+- `checks.ts`: deterministic checks covering question count, package count and size, total hours, files that must be touched, grounding in existing directories, test file conventions, scope overlap, test-backed acceptance criteria, and things the answers ruled out.
+- `judge.ts`: a separate Claude call that scores five rubric criteria from 1 to 5, each with a reason.
 
 ```sh
 npm run eval:product-lead                      # all cases, ~$1.5
@@ -28,7 +28,7 @@ v2 tells Product Lead to infer from the file list before asking, to plan only wh
 
 ## Architect
 
-`--architect` runs Architect first. Each fixture is materialized as a temporary git repository (`sources.js` holds file contents), so Architect reads through the same `repo-reader.js` path the app uses. Product Lead then plans against Architect's interface summary.
+`--architect` runs Architect first. Each fixture is materialized as a temporary git repository (`sources.ts` holds file contents), so Architect reads through the same `src/main/repo_reader.ts` path the app uses. Product Lead then plans against Architect's interface summary.
 
 From this version on, the judge always sees the fixture source code, with or without Architect, so it can tell a plan that matches the code from one that only matches file names. Scores in this section are therefore not comparable with the table above.
 

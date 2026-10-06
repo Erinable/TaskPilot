@@ -5,6 +5,7 @@ node_modules/
 !.env.example
 dist/
 out/
+*.tsbuildinfo
 evals/product-lead/reports/
 
 # TaskPilot check reports written into the workspace
