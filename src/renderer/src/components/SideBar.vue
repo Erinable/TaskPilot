@@ -46,7 +46,7 @@ const team = computed(() =>
 
 <template>
   <aside class="sidebar glass">
-    <div class="side-section-label">WORKSPACE</div>
+    <div class="side-section-label">工作区</div>
     <nav class="main-nav">
       <button class="nav-item" :class="{ active: app.view === 'queue' || app.view === 'execution' }" @click="showQueue">
         <AppIcon name="queue" class="nav-icon" />
@@ -71,7 +71,7 @@ const team = computed(() =>
         <span>发布</span>
       </button>
     </nav>
-    <div class="side-section-label team-label">AI TEAM</div>
+    <div class="side-section-label team-label">AI 团队</div>
     <div class="team-list">
       <div v-for="member in team" :key="member.initials" class="team-member" :title="member.label">
         <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span>

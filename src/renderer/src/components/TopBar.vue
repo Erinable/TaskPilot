@@ -26,7 +26,7 @@ const workspaceName = computed(() => {
       <div class="brand-mark"><AppIcon name="logo" /></div>
       <div>
         <div class="brand-name">TaskPilot</div>
-        <div class="brand-caption">AI Team Workspace</div>
+        <div class="brand-caption">AI 团队工作台</div>
       </div>
     </div>
     <div

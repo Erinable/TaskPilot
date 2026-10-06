@@ -58,9 +58,10 @@ test('AppIcon fills instead of strokes for filled icons', () => {
   assert.equal(svg.attributes('stroke-width'), undefined);
 });
 
-test('AppIcon renders an empty box for an unknown name instead of throwing', () => {
+test('AppIcon falls back to the package icon for an unknown name', () => {
   const svg = mount(AppIcon, { props: { name: 'no-such-icon' as IconName } }).find('svg');
-  assert.equal(svg.element.children.length, 0);
+  assert.equal(svg.element.children.length, ICONS.box.shapes.length);
+  assert.equal(svg.attributes('stroke'), 'currentColor');
   assert.equal(svg.attributes('class'), 'icon');
 });
 

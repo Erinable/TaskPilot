@@ -7,8 +7,8 @@ import type { IconDefinition, IconName } from '@/lib/icons.ts';
 const props = defineProps<{ name: IconName }>();
 
 // Typed names are checked by vue-tsc; a task's icon comes from data, so an
-// unknown name still renders an empty, sized box.
-const definition = computed<IconDefinition | undefined>(() => (ICONS as Record<string, IconDefinition>)[props.name]);
+// unknown name falls back to the generic package icon.
+const definition = computed<IconDefinition>(() => (ICONS as Record<string, IconDefinition>)[props.name] ?? ICONS.box);
 const strokeProps = computed(() =>
   definition.value?.filled
     ? { fill: 'currentColor', stroke: 'none' }
@@ -17,7 +17,7 @@ const strokeProps = computed(() =>
 </script>
 
 <template>
-  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" v-bind="definition ? strokeProps : {}">
-    <component :is="tag" v-for="([tag, attributes], index) in definition?.shapes ?? []" :key="index" v-bind="attributes" />
+  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" v-bind="strokeProps">
+    <component :is="tag" v-for="([tag, attributes], index) in definition.shapes" :key="index" v-bind="attributes" />
   </svg>
 </template>

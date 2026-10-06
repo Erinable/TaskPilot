@@ -48,7 +48,7 @@ const submit = () => {
   >
     <button class="icon-button small modal-close" type="button" aria-label="关闭" @click="execution.closeDeviationForm()"><AppIcon name="x" /></button>
     <div class="modal-badge"><AppIcon name="flag" /></div>
-    <div class="modal-kicker">REPORT A DEVIATION</div>
+    <div class="modal-kicker">执行中发现偏差</div>
     <h2 id="deviationTitle">报告偏差</h2>
     <p class="modal-intro">设计和代码对不上时，在这里说明。提交后工作包会交回 AI 团队重新评估，不要自行偏离指令。</p>
 

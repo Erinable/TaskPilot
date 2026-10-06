@@ -19,10 +19,13 @@ const tasks = useTasksStore();
 const requirements = useRequirementsStore();
 const execution = useExecutionStore();
 
+// Greeting and date follow the business time zone, like every day label.
 const now = new Date();
-const hour = now.getHours();
+const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: businessTimeZone(), hour: 'numeric', hourCycle: 'h23' }).format(now));
 const greeting = hour < 12 ? '早上好' : hour < 18 ? '下午好' : '晚上好';
-const todayLabel = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase();
+const todayLabel = new Intl.DateTimeFormat('zh-CN', { timeZone: businessTimeZone(), weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }).format(
+  now,
+);
 const greetingName = computed(() => (app.preferences?.profile.displayName ? `，${app.preferences.profile.displayName}` : ''));
 
 // Done packages leave the default view; the filter brings them back.

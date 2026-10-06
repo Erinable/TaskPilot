@@ -28,6 +28,15 @@ html.dark {
   --el-border-radius-base: var(--radius-sm);
   --el-font-family: var(--font-sans);
   --el-font-size-base: 14px;
+  /* Small controls keep the 14px floor too. */
+  --el-font-size-small: 14px;
+  --el-font-size-extra-small: 14px;
+}
+
+/* A checked box marks the state; its label keeps the text colour so it does
+ * not read as a link. */
+.el-checkbox__input.is-checked + .el-checkbox__label {
+  color: var(--el-checkbox-text-color);
 }
 
 /* Floating surfaces (dialogs, message boxes, popovers, toasts) are glass. */
