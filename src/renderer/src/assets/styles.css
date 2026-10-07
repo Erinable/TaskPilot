@@ -66,7 +66,7 @@
   --panel-pad: var(--space-5);
   --page-pad-x: var(--space-8);
   --page-pad-y: var(--space-6);
-  --sidebar-width: 220px;
+  --sidebar-width: 236px;
   --sidebar-collapsed: 64px;
   --topbar-height: 56px;
   /* Type scale, desktop sizes for Chinese UI text (13px body, as in Feishu
@@ -410,9 +410,15 @@ code {
 
 /* Sidebar */
 .app-grid {
+  /* The sidebar's current width, also read by fixed bars that centre on the main column. */
+  --sidebar-current: var(--sidebar-width);
   display: grid;
-  grid-template-columns: 236px 1fr;
+  grid-template-columns: var(--sidebar-current) 1fr;
   min-height: calc(100vh - var(--topbar-height));
+  transition: grid-template-columns 0.2s var(--ease);
+}
+.app-grid.sidebar-collapsed {
+  --sidebar-current: var(--sidebar-collapsed);
 }
 .sidebar {
   position: sticky;
@@ -423,6 +429,48 @@ code {
   padding: 22px 12px 16px;
   border-width: 0 1px 0 0;
   border-radius: 0;
+  overflow: hidden auto;
+}
+/* Collapsed to an icon rail: labels leave the layout but stay readable to screen readers. */
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .side-section-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sidebar.collapsed .nav-item,
+.sidebar.collapsed .team-member,
+.sidebar.collapsed .sync-card {
+  position: relative;
+  justify-content: center;
+  padding-inline: 0;
+}
+.sidebar.collapsed .sync-card {
+  padding-block: 6px;
+}
+/* Counts shrink to a corner badge on the icon. */
+.sidebar.collapsed .nav-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  box-shadow: 0 0 0 2px var(--glass-border);
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+}
+.sidebar.collapsed .presence {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  margin: 0;
+  box-shadow: 0 0 0 2px var(--glass-border);
+}
+.sidebar.collapsed .team-list {
+  margin-top: var(--space-6);
 }
 .sidebar.glass {
   box-shadow: inset -1px 0 0 var(--line-soft);
@@ -2996,12 +3044,12 @@ button.avatar:hover {
 .settings-savebar {
   position: fixed;
   bottom: 20px;
-  left: calc(236px + 240px + (100vw - 236px - 240px) / 2);
+  left: calc(var(--sidebar-current) + 240px + (100vw - var(--sidebar-current) - 240px) / 2);
   z-index: 8;
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  width: min(680px, calc(100vw - 236px - 240px - 64px));
+  width: min(680px, calc(100vw - var(--sidebar-current) - 240px - 64px));
   padding: 10px 10px 10px 16px;
   border-radius: var(--radius-lg);
   transform: translateX(-50%);
@@ -4155,8 +4203,8 @@ body.vibrancy .glass {
     padding: 32px 28px 120px;
   }
   .settings-savebar {
-    left: calc(236px + 200px + (100vw - 236px - 200px) / 2);
-    width: min(680px, calc(100vw - 236px - 200px - 48px));
+    left: calc(var(--sidebar-current) + 200px + (100vw - var(--sidebar-current) - 200px) / 2);
+    width: min(680px, calc(100vw - var(--sidebar-current) - 200px - 48px));
   }
   .setting-row {
     grid-template-columns: 1fr;

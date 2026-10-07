@@ -45,51 +45,81 @@ const team = computed(() =>
 </script>
 
 <template>
-  <aside class="sidebar glass">
+  <aside class="sidebar glass" :class="{ collapsed: app.sidebarCollapsed }">
+    <!-- Collapsed, labels stay in the DOM for screen readers and show as native tooltips. -->
     <div class="side-section-label">工作区</div>
     <nav class="main-nav">
-      <button class="nav-item" :class="{ active: app.view === 'queue' || app.view === 'execution' }" @click="showQueue">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'queue' || app.view === 'execution' }"
+        :title="app.sidebarCollapsed ? `工作队列（${tasks.pendingCount} 个待办）` : undefined"
+        @click="showQueue"
+      >
         <AppIcon name="queue" class="nav-icon" />
-        <span>工作队列</span>
+        <span class="nav-label">工作队列</span>
         <span class="nav-count">{{ tasks.pendingCount }}</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'requirements' }" @click="requirements.open()">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'requirements' }"
+        :title="app.sidebarCollapsed ? '需求中心' : undefined"
+        @click="requirements.open()"
+      >
         <AppIcon name="sparkle" class="nav-icon" />
-        <span>需求中心</span>
+        <span class="nav-label">需求中心</span>
         <span v-if="requirements.attentionCount > 0" class="nav-count attention">{{ requirements.attentionCount }}</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'map' }" @click="openView('map')">
+      <button class="nav-item" :class="{ active: app.view === 'map' }" :title="app.sidebarCollapsed ? '工程地图' : undefined" @click="openView('map')">
         <AppIcon name="map" class="nav-icon" />
-        <span>工程地图</span>
+        <span class="nav-label">工程地图</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'activity' }" @click="openView('activity')">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'activity' }"
+        :title="app.sidebarCollapsed ? '活动记录' : undefined"
+        @click="openView('activity')"
+      >
         <AppIcon name="activity" class="nav-icon" />
-        <span>活动记录</span>
+        <span class="nav-label">活动记录</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'release' }" @click="openView('release')">
+      <button class="nav-item" :class="{ active: app.view === 'release' }" :title="app.sidebarCollapsed ? '发布' : undefined" @click="openView('release')">
         <AppIcon name="rocket" class="nav-icon" />
-        <span>发布</span>
+        <span class="nav-label">发布</span>
       </button>
     </nav>
     <div class="side-section-label team-label">AI 团队</div>
     <div class="team-list">
-      <div v-for="member in team" :key="member.initials" class="team-member" :title="member.label">
+      <div v-for="member in team" :key="member.initials" class="team-member" :title="`${member.name}：${member.label}`">
         <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span>
-        <span>{{ member.name }}</span>
+        <span class="nav-label">{{ member.name }}</span>
         <span class="presence" :class="member.presence" role="img" :aria-label="member.label"></span>
       </div>
     </div>
     <div class="sidebar-bottom">
-      <div class="sync-card">
+      <div class="sync-card" :title="app.sidebarCollapsed ? `${syncTitle} · ${syncDetail}` : undefined">
         <span class="sync-icon" :class="{ off: !configured }"><AppIcon name="refresh" /></span>
-        <div>
+        <div class="nav-label">
           <strong>{{ syncTitle }}</strong>
           <small>{{ syncDetail }}</small>
         </div>
       </div>
-      <button class="settings-link nav-item" :class="{ active: app.view === 'settings' }" @click="settings.open()">
+      <button
+        class="settings-link nav-item"
+        :class="{ active: app.view === 'settings' }"
+        :title="app.sidebarCollapsed ? '设置' : undefined"
+        @click="settings.open()"
+      >
         <AppIcon name="settings" class="nav-icon" />
-        <span>设置</span>
+        <span class="nav-label">设置</span>
+      </button>
+      <button
+        class="nav-item sidebar-toggle"
+        :aria-expanded="!app.sidebarCollapsed"
+        :title="app.sidebarCollapsed ? '展开侧栏' : undefined"
+        @click="app.toggleSidebar()"
+      >
+        <AppIcon name="sidebar" class="nav-icon" />
+        <span class="nav-label">{{ app.sidebarCollapsed ? '展开侧栏' : '收起侧栏' }}</span>
       </button>
     </div>
   </aside>

@@ -7,6 +7,8 @@ import type * as ipc from '@shared/ipc_types.ts';
 
 export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release';
 
+export const SIDEBAR_STORAGE_KEY = 'taskpilot.sidebar.collapsed';
+
 export const useAppStore = defineStore('app', () => {
   // ========== Navigation ==========
   const view = ref<ViewName>('queue');
@@ -26,6 +28,24 @@ export const useAppStore = defineStore('app', () => {
     if (view.value === 'settings' && next !== 'settings' && !(await leaveGuard())) return false;
     view.value = next;
     return true;
+  };
+
+  // ========== Layout ==========
+  // A per-machine layout choice; storage that is missing or unreadable means expanded.
+  const sidebarCollapsed = ref(false);
+  try {
+    sidebarCollapsed.value = globalThis.localStorage?.getItem(SIDEBAR_STORAGE_KEY) === 'true';
+  } catch {
+    // Keep the default.
+  }
+
+  const toggleSidebar = () => {
+    sidebarCollapsed.value = !sidebarCollapsed.value;
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value));
+    } catch (error) {
+      console.error('[app] sidebar state not saved', error);
+    }
   };
 
   // ========== Preferences ==========
@@ -88,6 +108,9 @@ export const useAppStore = defineStore('app', () => {
     setLeaveGuard,
     confirmLeaveSettings,
     navigate,
+    // Layout
+    sidebarCollapsed,
+    toggleSidebar,
     // Preferences
     preferences,
     applyPreferences,

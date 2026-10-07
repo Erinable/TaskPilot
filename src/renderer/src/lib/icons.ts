@@ -300,6 +300,12 @@ export const ICONS = {
       ['path', { d: 'M5.5 18.5c.3-1.6 1-2.4 2.5-2.5-.1 1.5-.9 2.2-2.5 2.5z' }],
     ],
   },
+  sidebar: {
+    shapes: [
+      ['rect', { x: 3.5, y: 4.5, width: 17, height: 15, rx: 2.5 }],
+      ['path', { d: 'M9.5 4.5v15' }],
+    ],
+  },
 } satisfies Record<string, IconDefinition>;
 
 export type IconName = keyof typeof ICONS;

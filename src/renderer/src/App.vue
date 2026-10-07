@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
 
   <div class="window-shell">
     <TopBar />
-    <div class="app-grid">
+    <div class="app-grid" :class="{ 'sidebar-collapsed': app.sidebarCollapsed }">
       <SideBar />
       <!-- Settings and the requirement center lay out their own columns edge to edge. -->
       <main class="main-content" :class="{ 'full-bleed': app.view === 'settings' || app.view === 'requirements' }">
