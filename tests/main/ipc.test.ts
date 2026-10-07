@@ -1135,6 +1135,11 @@ test('activity: the requirement flow and a claim are recorded, newest first', as
   assert.equal(planned.step, 'planning');
   assert.equal(overview.timeZone, 'Asia/Shanghai');
   assert.equal(overview.metrics.doneThisWeek, 0);
+  // Each fake run costs $0.02: Architect selects and summarizes once, Product Lead clarifies and plans.
+  assert.ok(Math.abs(overview.costs.byAgent.architect - 0.04) < 1e-9);
+  assert.ok(Math.abs(overview.costs.byAgent['product-lead'] - 0.04) < 1e-9);
+  assert.equal(overview.costs.byAgent.qa, 0);
+  assert.equal(typeof overview.costs.since, 'string');
 });
 
 test('activity: QA finishing a review is recorded as an agent transition', async () => {
@@ -1147,6 +1152,7 @@ test('activity: QA finishing a review is recorded as an agent transition', async
   assert.equal(review.transition, 'review_passed');
   assert.equal(review.actor, 'agent');
   assert.equal(review.to, 'accepting');
+  assert.ok(Math.abs(overview.costs.byAgent.qa - 0.02) < 1e-9);
 });
 
 test('activity: a failed append never fails the action', async () => {
@@ -1171,12 +1177,17 @@ test('activity: team status reports busy agents and CLI availability', async () 
       return fakeAgent()(options);
     },
   });
-  const created = await call(CHANNELS.requirementsCreate, { text: 't' });
-  const busy = (await call(CHANNELS.activityOverview)).data.team.busy;
-  assert.ok(busy.includes('architect') || busy.includes('product-lead'));
+  const created = await call(CHANNELS.requirementsCreate, { text: '邮箱登录' });
+  const { team } = (await call(CHANNELS.activityOverview)).data;
+  assert.ok(team.busy.includes('architect') || team.busy.includes('product-lead'));
+  assert.equal(team.work.length, 1);
+  assert.equal(team.work[0].kind, 'requirement');
+  assert.deepEqual(team.busy, [team.work[0].agent]);
   release();
   await settle(call, created.data.id);
-  assert.deepEqual((await call(CHANNELS.activityOverview)).data.team.busy, []);
+  const settled = (await call(CHANNELS.activityOverview)).data.team;
+  assert.deepEqual(settled.busy, []);
+  assert.deepEqual(settled.work, []);
 });
 
 // ========== Release Manager ==========

@@ -1,5 +1,5 @@
 // Append-only record of what happened to work packages and requirements,
-// the source of the queue's metrics and the activity feed.
+// the source of the queue's metrics, the activity feed and agent spend.
 //
 // One JSONL file per business day (events/YYYY-MM-DD.jsonl). Readers open only
 // the days they need, so their work does not grow with history, and expired
@@ -9,7 +9,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ActivityEvent, ActivityRecord, QueueMetrics } from '../shared/ipc_types.ts';
+import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, QueueMetrics } from '../shared/ipc_types.ts';
+
+// One agent run's model spend. Stored beside the feed events so it expires
+// with them, but never shown in the feed: it is not something that happened.
+export type AgentCostEvent = { kind: 'agent_cost'; agent: ActivityAgent; costUsd: number };
+export type LoggedEvent = ActivityEvent | AgentCostEvent;
+export type LoggedRecord = LoggedEvent & { at: string };
+
+const isFeedRecord = (record: LoggedRecord): record is ActivityRecord => record.kind !== 'agent_cost';
 
 export const EVENTS_DIRNAME = 'events';
 export const RETENTION_DAYS = 30;
@@ -60,9 +68,9 @@ export class ActivityLog {
   }
 
   // Records one event. Callers on the request path do not await it.
-  append(event: ActivityEvent): Promise<void> {
+  append(event: LoggedEvent): Promise<void> {
     const at = this.#now();
-    const record: ActivityRecord = { ...event, at: at.toISOString() };
+    const record: LoggedRecord = { ...event, at: at.toISOString() };
     const file = path.join(this.#dir, `${businessDay(at, this.#timeZone)}.jsonl`);
     const write = this.#writes.then(async () => {
       await fs.mkdir(this.#dir, { recursive: true });
@@ -76,7 +84,7 @@ export class ActivityLog {
   async recent({ days, limit }: { days: number; limit: number }): Promise<ActivityRecord[]> {
     const records: ActivityRecord[] = [];
     for (const day of recentDays(this.#now(), this.#timeZone, days)) {
-      const dayRecords = await this.#readDay(day);
+      const dayRecords = (await this.#readDay(day)).filter(isFeedRecord);
       records.push(...dayRecords.reverse());
       if (records.length >= limit) break;
     }
@@ -100,15 +108,15 @@ export class ActivityLog {
     let count = 0;
     let index = start;
     for (; index < window.length && count < minEvents; index += 1) {
-      const records = (await this.#readDay(window[index])).reverse();
+      const records = (await this.#readDay(window[index])).filter(isFeedRecord).reverse();
       if (records.length) days.push({ day: window[index], records });
       count += records.length;
     }
     return { days, nextBefore: index < window.length ? window[index - 1] : null };
   }
 
-  // Every event from the last `days` business days, oldest first (metrics).
-  async window(days: number): Promise<ActivityRecord[]> {
+  // Every record from the last `days` business days, oldest first (metrics and spend).
+  async window(days: number): Promise<LoggedRecord[]> {
     const perDay = await Promise.all(recentDays(this.#now(), this.#timeZone, days).map((day) => this.#readDay(day)));
     return perDay.reverse().flat();
   }
@@ -132,7 +140,7 @@ export class ActivityLog {
     return expired;
   }
 
-  async #readDay(day: string): Promise<ActivityRecord[]> {
+  async #readDay(day: string): Promise<LoggedRecord[]> {
     let text: string;
     try {
       text = await fs.readFile(path.join(this.#dir, `${day}.jsonl`), 'utf8');
@@ -144,7 +152,7 @@ export class ActivityLog {
     return text.split('\n').flatMap((line) => {
       if (!line.trim()) return [];
       try {
-        const record = JSON.parse(line) as ActivityRecord;
+        const record = JSON.parse(line) as LoggedRecord;
         return typeof record?.kind === 'string' && typeof record.at === 'string' ? [record] : [];
       } catch {
         return [];
@@ -157,7 +165,7 @@ const METRIC_DAYS = 7;
 
 // Claim-to-done durations need the claim, which may be older than the week
 // the package finished in; the whole retention window is scanned once.
-export const computeMetrics = (records: ActivityRecord[], now: Date, timeZone: string): QueueMetrics => {
+export const computeMetrics = (records: LoggedRecord[], now: Date, timeZone: string): QueueMetrics => {
   const thisWeek = new Set(recentDays(now, timeZone, METRIC_DAYS));
   const previousWeek = new Set(recentDays(now, timeZone, METRIC_DAYS * 2).slice(METRIC_DAYS));
   const claimedAt = new Map<string, number>();
@@ -179,4 +187,21 @@ export const computeMetrics = (records: ActivityRecord[], now: Date, timeZone: s
   }
   const mean = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
   return { doneThisWeek, donePreviousWeek, averageHours: mean(durations.current), averageHoursPrevious: mean(durations.previous) };
+};
+
+// Each agent's spend over the metrics week. Spend was not recorded before
+// 2026-10-07, so a week starting before the earliest recorded run is partial.
+export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: string): AgentCosts => {
+  const week = recentDays(now, timeZone, METRIC_DAYS);
+  const thisWeek = new Set(week);
+  const byAgent: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 };
+  let since: string | null = null;
+  for (const record of records) {
+    // A hand-edited or future line with an unknown agent or bad amount is skipped.
+    if (record.kind !== 'agent_cost' || !Object.hasOwn(byAgent, record.agent) || !Number.isFinite(record.costUsd)) continue;
+    if (since === null || record.at < since) since = record.at;
+    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) byAgent[record.agent] += record.costUsd;
+  }
+  const weekStart = week.at(-1) as string;
+  return { byAgent, since, partial: since === null || businessDay(new Date(since), timeZone) > weekStart };
 };

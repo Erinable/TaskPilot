@@ -539,6 +539,14 @@ code {
   color: var(--text-secondary);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.team-member:hover {
+  color: var(--text);
+  background: var(--fill);
 }
 .agent-avatar,
 .activity-avatar {

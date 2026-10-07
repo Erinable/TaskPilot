@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ActivityLog, EVENTS_DIRNAME, RETENTION_DAYS, businessDay, computeMetrics, recentDays } from '../../src/main/activity_log.ts';
+import { ActivityLog, EVENTS_DIRNAME, RETENTION_DAYS, businessDay, computeAgentCosts, computeMetrics, recentDays } from '../../src/main/activity_log.ts';
+import type { LoggedRecord } from '../../src/main/activity_log.ts';
 import type { ActivityRecord } from '../../src/shared/ipc_types.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
@@ -143,4 +144,54 @@ test('page() walks whole days newest first and continues from nextBefore', async
   const last = await log.page({ before: second.nextBefore, minEvents: 3 });
   assert.deepEqual(last.days, []);
   assert.equal(last.nextBefore, null);
+});
+
+const cost = (agent: string, costUsd: number, at: string): LoggedRecord => ({ kind: 'agent_cost', agent: agent as never, costUsd, at });
+
+test('agent spend is stored with the events but kept out of the feed', async () => {
+  const dir = await tempDir();
+  const now = new Date('2026-10-07T02:00:00Z');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  await log.append({ kind: 'requirement_created', requirementId: 'a', title: 'a' });
+  await log.append({ kind: 'agent_cost', agent: 'qa', costUsd: 0.2 });
+  assert.deepEqual(
+    (await log.recent({ days: 7, limit: 10 })).map((record) => record.kind),
+    ['requirement_created'],
+  );
+  const page = await log.page({ before: null, minEvents: 10 });
+  assert.deepEqual(
+    page.days.flatMap((day) => day.records.map((record) => record.kind)),
+    ['requirement_created'],
+  );
+  assert.deepEqual(
+    (await log.window(7)).map((record) => record.kind),
+    ['requirement_created', 'agent_cost'],
+  );
+});
+
+test('computeAgentCosts() sums the metrics week per agent and flags a partly recorded week', () => {
+  const now = new Date('2026-10-07T04:00:00Z');
+  const records = [
+    cost('qa', 0.1, '2026-10-07T01:00:00Z'),
+    cost('qa', 0.25, '2026-10-06T01:00:00Z'),
+    cost('architect', 0.5, '2026-10-05T01:00:00Z'),
+    cost('nobody', 9, '2026-10-05T01:00:00Z'), // unknown agent
+    cost('qa', Number.NaN, '2026-10-05T01:00:00Z'), // bad amount
+  ];
+  const costs = computeAgentCosts(records, now, SHANGHAI);
+  assert.deepEqual(costs.byAgent, { 'product-lead': 0, architect: 0.5, qa: 0.35, 'release-manager': 0 });
+  assert.equal(costs.since, '2026-10-05T01:00:00Z');
+  assert.equal(costs.partial, true);
+});
+
+test('computeAgentCosts() counts only the week once spend has a full week of history', () => {
+  const now = new Date('2026-10-20T04:00:00Z');
+  const costs = computeAgentCosts([cost('release-manager', 1, '2026-10-01T01:00:00Z'), cost('release-manager', 0.4, '2026-10-19T01:00:00Z')], now, SHANGHAI);
+  assert.equal(costs.byAgent['release-manager'], 0.4);
+  assert.equal(costs.partial, false);
+});
+
+test('computeAgentCosts() with no spend yet is empty and partial', () => {
+  const costs = computeAgentCosts([], new Date(), SHANGHAI);
+  assert.deepEqual(costs, { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 }, since: null, partial: true });
 });

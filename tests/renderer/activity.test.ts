@@ -83,10 +83,31 @@ test('durationTrend() treats shorter as better and small changes as stable', () 
 
 test('presence follows CLI availability and running agents', () => {
   assert.equal(activity.presenceOf(null, 'qa'), 'offline');
-  assert.equal(activity.presenceOf({ available: false, busy: [] }, 'qa'), 'offline');
-  assert.equal(activity.presenceOf({ available: true, busy: ['qa'] }, 'qa'), 'busy');
-  assert.equal(activity.presenceOf({ available: true, busy: ['qa'] }, 'architect'), 'online');
-  assert.equal(activity.presenceSummary({ available: true, busy: [] }), '4 个 AI 成员在线');
-  assert.equal(activity.presenceSummary({ available: true, busy: ['qa', 'architect'] }), '2 个 AI 成员正在工作');
-  assert.equal(activity.presenceSummary({ available: false, busy: [] }), 'AI 团队离线');
+  assert.equal(activity.presenceOf({ available: false, busy: [], work: [] }, 'qa'), 'offline');
+  assert.equal(activity.presenceOf({ available: true, busy: ['qa'], work: [] }, 'qa'), 'busy');
+  assert.equal(activity.presenceOf({ available: true, busy: ['qa'], work: [] }, 'architect'), 'online');
+  assert.equal(activity.presenceSummary({ available: true, busy: [], work: [] }), '4 个 AI 成员在线');
+  assert.equal(activity.presenceSummary({ available: true, busy: ['qa', 'architect'], work: [] }), '2 个 AI 成员正在工作');
+  assert.equal(activity.presenceSummary({ available: false, busy: [], work: [] }), 'AI 团队离线');
+});
+
+test('workText() names what a member is running, by kind', () => {
+  const status: ipc.TeamStatus = {
+    available: true,
+    busy: ['architect', 'release-manager'],
+    work: [
+      { agent: 'architect', kind: 'adjudication', label: '登录接口' },
+      { agent: 'release-manager', kind: 'release', label: '发布说明' },
+    ],
+  };
+  assert.equal(activity.workText(status, 'architect'), '正在裁决偏差「登录接口」');
+  assert.equal(activity.workText(status, 'release-manager'), '正在起草「发布说明」');
+  assert.equal(activity.workText(status, 'qa'), null);
+  assert.equal(activity.workText(null, 'qa'), null);
+});
+
+test('formatCost() keeps three decimals under a dollar', () => {
+  assert.equal(activity.formatCost(0), '$0.00');
+  assert.equal(activity.formatCost(0.0342), '$0.034');
+  assert.equal(activity.formatCost(1.5), '$1.50');
 });

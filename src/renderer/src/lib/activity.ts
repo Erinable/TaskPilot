@@ -115,3 +115,27 @@ export const presenceSummary = (team: ipc.TeamStatus | null) => {
   if (!team.available) return 'AI 团队离线';
   return team.busy.length ? `${team.busy.length} 个 AI 成员正在工作` : `${TEAM.length} 个 AI 成员在线`;
 };
+
+// What each member does, in plain words for people new to the workflow.
+export const ROLES: Record<ipc.ActivityAgent, string> = {
+  'product-lead': '把你的需求问清楚，再拆成一个个能直接动手的工作包。',
+  architect: '先读相关代码，告诉团队接口长什么样；你发现计划和代码对不上时，由它决定怎么改。',
+  qa: '你提交工作包后检查代码和测试，确认验收条件都做到了。',
+  'release-manager': '根据最近的提交和完成的工作包，起草版本号、更新说明和发布清单。',
+};
+
+const WORK_TEXT: Record<ipc.AgentWork['kind'], string> = {
+  requirement: '正在处理需求',
+  review: '正在审查工作包',
+  adjudication: '正在裁决偏差',
+  release: '正在起草',
+};
+
+// "正在审查工作包「登录接口」"; null when the member is not running anything.
+export const workText = (team: ipc.TeamStatus | null, agent: ipc.ActivityAgent) => {
+  const work = team?.work.find((item) => item.agent === agent);
+  return work ? `${WORK_TEXT[work.kind]}「${work.label}」` : null;
+};
+
+// "$0.123", or "$0.00" for nothing spent; tiny amounts keep three decimals.
+export const formatCost = (costUsd: number) => (costUsd === 0 ? '$0.00' : `$${costUsd.toFixed(costUsd < 1 ? 3 : 2)}`);

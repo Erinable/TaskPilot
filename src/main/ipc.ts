@@ -30,8 +30,8 @@ import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
-import { businessDay, computeMetrics, RETENTION_DAYS } from './activity_log.ts';
-import type { ActivityLog } from './activity_log.ts';
+import { businessDay, computeAgentCosts, computeMetrics, RETENTION_DAYS } from './activity_log.ts';
+import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
@@ -300,8 +300,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Activity is a side record: a failed append is logged and never fails the
   // action that caused it.
-  const record = (event: ipc.ActivityEvent) => {
+  const record = (event: LoggedEvent) => {
     activity?.append(event).catch((error) => console.error('[activity] append failed', error));
+  };
+
+  // One agent run's spend, for the team page's weekly total. Free runs (the
+  // outcome was certain without the model) record nothing.
+  const recordCost = (agent: ipc.ActivityAgent, costUsd: number) => {
+    if (costUsd > 0) record({ kind: 'agent_cost', agent, costUsd });
   };
 
   // Records a package moving between statuses.
@@ -397,6 +403,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if ('error' in outcome) await store.failReview(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
+        recordCost('qa', outcome.result.costUsd);
         await store
           .completeReview(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
@@ -445,6 +452,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if ('error' in outcome) await store.failAdjudication(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
+        recordCost('architect', outcome.result.costUsd);
         await store
           .completeAdjudication(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
@@ -807,6 +815,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             signal: controller.signal,
           });
           architectCost = result.costUsd;
+          recordCost('architect', architectCost);
           await store.setInterfaces(
             id,
             result.summary
@@ -824,6 +833,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           envPath,
           signal: controller.signal,
         });
+        recordCost('product-lead', costUsd ?? 0);
         outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost };
       } catch (error) {
         outcome = { error };
@@ -952,17 +962,21 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         activity.window(RETENTION_DAYS),
         workspace.resolveExecutable('claude', { envPath }),
       ]);
-      const busy = new Set<ipc.ActivityAgent>();
-      if (reviews.size) busy.add('qa');
-      if (adjudications.size) busy.add('architect');
-      if (releaseController) busy.add('release-manager');
-      for (const id of runs.keys()) {
-        busy.add(requirements?.get(id).phase === 'architect' ? 'architect' : 'product-lead');
-      }
+      const work: ipc.AgentWork[] = [
+        ...[...runs.keys()].map((id): ipc.AgentWork => {
+          const item = requirements?.get(id);
+          return { agent: item?.phase === 'architect' ? 'architect' : 'product-lead', kind: 'requirement', label: item?.title || id };
+        }),
+        ...[...reviews.keys()].map((id): ipc.AgentWork => ({ agent: 'qa', kind: 'review', label: tasks.getTask(id)?.title ?? id })),
+        ...[...adjudications.keys()].map((id): ipc.AgentWork => ({ agent: 'architect', kind: 'adjudication', label: tasks.getTask(id)?.title ?? id })),
+        ...(releaseController ? [{ agent: 'release-manager', kind: 'release', label: '发布说明' } satisfies ipc.AgentWork] : []),
+      ];
+      const now = new Date();
       return {
         recent,
-        metrics: computeMetrics(window, new Date(), activity.timeZone),
-        team: { available: Boolean(executable), busy: [...busy] },
+        metrics: computeMetrics(window, now, activity.timeZone),
+        team: { available: Boolean(executable), busy: [...new Set(work.map((item) => item.agent))], work },
+        costs: computeAgentCosts(window, now, activity.timeZone),
         timeZone: activity.timeZone,
       };
     }),
@@ -1439,6 +1453,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             return;
           }
           const { input, plan, costUsd } = outcome.result;
+          recordCost('release-manager', costUsd);
           const summary: ipc.ReleaseInputSummary = {
             commitCount: input.commits.length,
             commitsTruncated: input.commitsTruncated,

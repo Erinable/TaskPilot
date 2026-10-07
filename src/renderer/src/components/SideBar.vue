@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, nextTick } from 'vue';
 
 import AppIcon from './AppIcon.vue';
 import { useAppStore } from '@/stores/app.ts';
@@ -8,6 +8,7 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import * as activity from '@/lib/activity.ts';
+import type * as ipc from '@shared/ipc_types.ts';
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -32,14 +33,22 @@ const showQueue = async () => {
   if (await app.navigate('queue')) execution.close();
 };
 
-const openView = async (view: 'map' | 'activity' | 'release') => {
+const openView = async (view: 'map' | 'activity' | 'release' | 'team') => {
   if (await app.navigate(view)) execution.close();
+};
+
+// Opens the team page with that member's card focused.
+const openMember = async (agent: ipc.ActivityAgent) => {
+  if (!(await app.navigate('team'))) return;
+  execution.close();
+  await nextTick();
+  document.getElementById(`team-${agent}`)?.focus();
 };
 
 const team = computed(() =>
   activity.TEAM.map(({ agent, actor }) => {
     const presence = activity.presenceOf(app.activity?.team ?? null, agent);
-    return { ...actor, presence, label: activity.PRESENCE_LABELS[presence] };
+    return { ...actor, agent, presence, label: activity.PRESENCE_LABELS[presence] };
   }),
 );
 </script>
@@ -89,11 +98,22 @@ const team = computed(() =>
     </nav>
     <div class="side-section-label team-label">AI 团队</div>
     <div class="team-list">
-      <div v-for="member in team" :key="member.initials" class="team-member" :title="`${member.name}：${member.label}`">
+      <button class="nav-item" :class="{ active: app.view === 'team' }" :title="app.sidebarCollapsed ? 'AI 团队' : undefined" @click="openView('team')">
+        <AppIcon name="bot" class="nav-icon" />
+        <span class="nav-label">团队概览</span>
+      </button>
+      <button
+        v-for="member in team"
+        :key="member.agent"
+        class="team-member"
+        type="button"
+        :title="`${member.name}：${member.label}`"
+        @click="openMember(member.agent)"
+      >
         <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span>
         <span class="nav-label">{{ member.name }}</span>
         <span class="presence" :class="member.presence" role="img" :aria-label="member.label"></span>
-      </div>
+      </button>
     </div>
     <div class="sidebar-bottom">
       <div class="sync-card" :title="app.sidebarCollapsed ? `${syncTitle} · ${syncDetail}` : undefined">

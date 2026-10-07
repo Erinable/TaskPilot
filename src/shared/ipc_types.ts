@@ -490,10 +490,18 @@ export type ActivityRecord = ActivityEvent & { at: string };
 
 export type QueueMetrics = { doneThisWeek: number; donePreviousWeek: number; averageHours: number | null; averageHoursPrevious: number | null };
 
-// Which agents are busy right now; availability comes from AgentStatus.
-export type TeamStatus = { available: boolean; busy: ActivityAgent[] };
+// What an agent is running right now. `label` is the requirement or package title.
+export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release'; label: string };
 
-export type ActivityOverview = { recent: ActivityRecord[]; metrics: QueueMetrics; team: TeamStatus; timeZone: string };
+// Which agents are busy right now; availability comes from AgentStatus.
+export type TeamStatus = { available: boolean; busy: ActivityAgent[]; work: AgentWork[] };
+
+// Model spend per agent over the metrics week. Spend is recorded from
+// 2026-10-07; `since` is the earliest recorded run in the retention window
+// (null if none), so a week that starts before it is only partly counted.
+export type AgentCosts = { byAgent: Record<ActivityAgent, number>; since: string | null; partial: boolean };
+
+export type ActivityOverview = { recent: ActivityRecord[]; metrics: QueueMetrics; team: TeamStatus; costs: AgentCosts; timeZone: string };
 
 // Business days newest first; pass `nextBefore` back for the next page, null at the end.
 export type ActivityPage = { days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null; timeZone: string; retentionDays: number };
