@@ -193,6 +193,6 @@ onMounted(() => {
 .empty-hint,
 .panel-heading p,
 .req-empty p {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

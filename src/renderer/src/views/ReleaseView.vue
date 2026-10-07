@@ -117,7 +117,7 @@ onBeforeUnmount(() => store.leave());
 
 <style scoped>
 .release-intro {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .release-view > .panel + .panel,
 .release-view :deep(.panel + .panel) {
@@ -135,7 +135,7 @@ onBeforeUnmount(() => store.leave());
   flex: 1;
   margin: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .start-pick {
   flex: 1;
@@ -146,7 +146,7 @@ onBeforeUnmount(() => store.leave());
 }
 .start-label {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .start-select {
   max-width: 520px;
@@ -161,7 +161,7 @@ onBeforeUnmount(() => store.leave());
   align-items: center;
   gap: 6px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .generating .icon {
   width: 15px;
@@ -174,7 +174,7 @@ onBeforeUnmount(() => store.leave());
   gap: 6px;
   margin: 10px 0 0;
   color: var(--danger);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .draft-error .icon {
   width: 15px;
@@ -182,15 +182,15 @@ onBeforeUnmount(() => store.leave());
 }
 .primary-button,
 .secondary-button {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .load-error {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .no-workspace h2 {
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 .no-workspace p {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

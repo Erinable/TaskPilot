@@ -83,14 +83,14 @@ onUnmounted(() => store.stopAutoRefresh());
 }
 .notification-header h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 700;
   color: var(--text);
 }
 .notification-empty {
   padding: 24px 6px;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .notification-list {
   max-height: 420px;
@@ -145,7 +145,7 @@ onUnmounted(() => store.stopAutoRefresh());
 .notification-title {
   overflow: hidden;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -155,13 +155,13 @@ onUnmounted(() => store.stopAutoRefresh());
   color: var(--text-secondary);
 }
 .notification-text {
-  font-size: 14px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .notification-time {
   flex: none;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 .sr-only {

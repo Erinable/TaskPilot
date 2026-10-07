@@ -54,20 +54,20 @@ const confirm = async () => {
 <style scoped>
 .write-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 650;
 }
 .write-hint {
   margin: 0 0 14px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .write-label {
   display: block;
   margin-bottom: 6px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 .write-path {
@@ -77,11 +77,11 @@ const confirm = async () => {
   min-height: 20px;
   margin: 6px 0 0;
   color: var(--danger);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .primary-button,
 .secondary-button {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .write-confirm {
   margin-left: 8px;

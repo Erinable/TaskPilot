@@ -76,7 +76,7 @@ const toggle = (id: string) => {
   gap: 14px;
   padding: 12px 20px;
   text-align: left;
-  font-size: 14px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -109,7 +109,7 @@ const toggle = (id: string) => {
   word-break: break-word;
   background: var(--fill);
   border-radius: var(--radius-sm);
-  font: 14px/1.6 var(--font-mono);
+  font: var(--text-sm)/1.6 var(--font-mono);
   color: var(--text-secondary);
 }
 .history-checklist {
@@ -118,7 +118,7 @@ const toggle = (id: string) => {
   list-style: none;
   display: grid;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .history-checklist li {
   display: flex;

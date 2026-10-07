@@ -52,7 +52,7 @@ const createWindow = (appearance: Appearance) => {
     backgroundColor: vibrant ? '#00000000' : canvasColor(),
     ...(vibrant ? { vibrancy: 'under-window' as const, visualEffectState: 'followWindow' as const } : {}),
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 20, y: 22 },
+    trafficLightPosition: { x: 20, y: 20 },
     webPreferences: {
       // The renderer's only source for the business time zone (see preload).
       additionalArguments: [`--taskpilot-time-zone=${env.businessTimeZone}`],

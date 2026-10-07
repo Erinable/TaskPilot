@@ -55,19 +55,19 @@ const shown = computed(() => props.modules.slice(0, limit.value));
 }
 .map-module-path {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   word-break: break-all;
 }
 .map-module-top .status-pill {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .map-module-purpose {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 .view-all-button {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

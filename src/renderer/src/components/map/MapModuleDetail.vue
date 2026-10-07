@@ -77,23 +77,23 @@ const emit = defineEmits<{ select: [path: string]; source: [requirementId: strin
 }
 .map-detail-path {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
   word-break: break-all;
 }
 .map-freshness {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .map-detail-purpose {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .map-detail-section h3 {
   margin: 0 0 8px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 .map-detail-section ul {
@@ -114,12 +114,12 @@ const emit = defineEmits<{ select: [path: string]; source: [requirementId: strin
 }
 .map-member-name {
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 .map-member-signature {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   word-break: break-all;
   white-space: pre-wrap;
 }
@@ -131,7 +131,7 @@ const emit = defineEmits<{ select: [path: string]; source: [requirementId: strin
 .map-depend-plain {
   padding: 3px 8px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .map-depend-link {
   color: var(--accent-strong);
@@ -148,7 +148,7 @@ const emit = defineEmits<{ select: [path: string]; source: [requirementId: strin
 }
 .map-notes-list li {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .map-detail-source {
@@ -157,7 +157,7 @@ const emit = defineEmits<{ select: [path: string]; source: [requirementId: strin
 }
 .map-source-link {
   color: var(--accent-strong);
-  font-size: 14px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 .map-source-link:hover {

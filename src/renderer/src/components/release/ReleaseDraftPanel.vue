@@ -120,7 +120,7 @@ const onCopy = () => {
   align-items: center;
   gap: 10px;
   font-family: var(--font-mono);
-  font-size: 18px;
+  font-size: var(--text-xl);
 }
 .version-line .icon {
   width: 16px;
@@ -138,15 +138,15 @@ const onCopy = () => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 14px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 .version-reason .tag {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .draft-input {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 .notes-actions {
@@ -156,7 +156,7 @@ const onCopy = () => {
 }
 .notes-status {
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .notes-status.saved {
   color: var(--success);
@@ -168,17 +168,17 @@ const onCopy = () => {
   padding: 0 20px 20px;
 }
 .notes-editor :deep(textarea) {
-  font: 14px/1.6 var(--font-mono);
+  font: var(--text-sm)/1.6 var(--font-mono);
 }
 .primary-button,
 .secondary-button {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .checklist-hint {
   margin: 0;
   padding: 0 20px 8px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .checklist {
   margin: 0;
@@ -193,7 +193,7 @@ const onCopy = () => {
   align-items: flex-start;
 }
 .checklist-item :deep(.el-checkbox__label) {
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--text);
 }
@@ -207,7 +207,7 @@ const onCopy = () => {
   padding: 1px 6px;
   background: var(--fill);
   border-radius: 5px;
-  font: 14px var(--font-mono);
+  font: var(--text-sm) var(--font-mono);
   color: var(--text-muted);
 }
 </style>

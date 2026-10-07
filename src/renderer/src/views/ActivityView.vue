@@ -159,7 +159,7 @@ onMounted(() => loadPage(null));
 .activity-day-label {
   margin: 16px 0 4px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 .activity-item.clickable {
@@ -173,6 +173,6 @@ onMounted(() => loadPage(null));
 }
 .activity-item p,
 .activity-item small {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

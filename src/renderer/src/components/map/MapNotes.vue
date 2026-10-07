@@ -44,13 +44,13 @@ const emit = defineEmits<{ source: [requirementId: string] }>();
 }
 .map-note-text {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .map-note-source {
   align-self: flex-start;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   text-align: left;
 }
 .map-note-source:hover {
@@ -59,6 +59,6 @@ const emit = defineEmits<{ source: [requirementId: string] }>();
 }
 .empty-hint,
 .tag {
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

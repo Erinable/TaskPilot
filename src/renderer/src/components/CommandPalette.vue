@@ -211,14 +211,14 @@ onBeforeUnmount(() => {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 .el-dialog.command-palette .palette-kbd {
   padding: 2px 6px;
   border-radius: 6px;
   background: var(--fill);
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .el-dialog.command-palette .palette-results {
   max-height: min(60vh, 460px);
@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
 .el-dialog.command-palette .palette-group-label {
   padding: 10px 10px 4px;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .el-dialog.command-palette .palette-option {
   display: flex;
@@ -237,7 +237,7 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   border-radius: 10px;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .el-dialog.command-palette .palette-option[aria-selected='true'] {
@@ -261,11 +261,11 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .el-dialog.command-palette .palette-empty {
   margin: 0;
   padding: 18px;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 </style>

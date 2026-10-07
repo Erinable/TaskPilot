@@ -71,7 +71,7 @@ const onNodeClick = (data: TreeNodeData) => {
 }
 .map-tree-total {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .map-tree-note {
   display: flex;
@@ -82,7 +82,7 @@ const onNodeClick = (data: TreeNodeData) => {
   color: var(--warning);
   background: var(--warning-soft);
   border-radius: 8px;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .map-tree-note .icon {
   width: 15px;
@@ -101,7 +101,7 @@ const onNodeClick = (data: TreeNodeData) => {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
 }
 .map-node .icon {
@@ -126,7 +126,7 @@ const onNodeClick = (data: TreeNodeData) => {
   margin-left: auto;
   padding-left: 12px;
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 .map-node-badge {
@@ -135,7 +135,7 @@ const onNodeClick = (data: TreeNodeData) => {
   color: var(--accent-strong);
   background: var(--accent-soft);
   border-radius: 5px;
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 </style>
