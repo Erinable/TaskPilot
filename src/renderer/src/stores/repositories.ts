@@ -23,6 +23,7 @@ const BUSY_LABELS: Record<ipc.BusyKind, string> = {
   baseline: '基线测量',
   release: 'Release Manager',
   environment: '环境管家',
+  tutor: '导师讲解',
 };
 
 export const useRepositoriesStore = defineStore('repositories', () => {

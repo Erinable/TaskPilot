@@ -8,7 +8,11 @@ import RequirementsView from '../../../src/renderer/src/views/RequirementsView.v
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { installApi, planPackage, requirement } from '../requirements_fakes.ts';
 
-vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
+  const showToast = vi.fn();
+  // announceAgent adds a system notification only in the background; tests see the toast.
+  return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
+});
 
 const MARKUP = '<img src=x onerror="alert(1)">';
 
@@ -106,6 +110,28 @@ describe('RequirementsView', () => {
     await flushPromises();
     expect(api.requirements.plan).toHaveBeenCalledWith('r1', ['已有', '第二个']);
     expect(wrapper.find('.agent-running').text()).toBe('正在拆解工作包…');
+    wrapper.unmount();
+  });
+
+  test('"不确定，用推荐做法" clears the answer, so Product Lead picks a default', async () => {
+    state.list = [
+      requirement({
+        questions: [
+          { text: 'q1', answer: '草稿' },
+          { text: 'q2', answer: '' },
+        ],
+      }),
+    ];
+    const { wrapper } = await render();
+    const button = wrapper.get('[data-default="0"]');
+    expect(button.text()).toBe('不确定，用推荐做法');
+    await button.trigger('click');
+    expect(button.text()).toBe('将使用推荐做法');
+    expect(button.attributes('aria-pressed')).toBe('true');
+    expect((wrapper.findAll('.question-card textarea')[0].element as HTMLTextAreaElement).value).toBe('');
+    await wrapper.get('.req-questions').trigger('submit');
+    await flushPromises();
+    expect(api.requirements.plan).toHaveBeenCalledWith('r1', ['', '']);
     wrapper.unmount();
   });
 

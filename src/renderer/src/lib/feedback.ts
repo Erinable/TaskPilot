@@ -23,6 +23,20 @@ export const showToast = (message: string, tone: ToastTone = /失败|无效|无�
   ElMessage({ message, type: tone === 'error' ? 'error' : tone === 'info' ? 'info' : 'success', duration: 2800, customClass: 'glass-strong', grouping: true });
 };
 
+// An AI teammate finished something. A toast when the window is in front; a
+// system notification as well when it is not, so nobody has to wait watching
+// a spinner. Text only: the body can quote agent output.
+export const announceAgent = (message: string, tone?: ToastTone) => {
+  showToast(message, tone);
+  if (document.hasFocus() || typeof Notification === 'undefined') return;
+  try {
+    const notice = new Notification('TaskPilot', { body: message, silent: false });
+    notice.onclick = () => window.focus();
+  } catch (error) {
+    console.error('[feedback] system notification failed', error);
+  }
+};
+
 export type ConfirmOptions = { title: string; body: string; accept: string; danger?: boolean };
 
 // Resolves true when the user accepts.

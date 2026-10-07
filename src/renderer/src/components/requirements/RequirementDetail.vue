@@ -19,6 +19,13 @@ const props = defineProps<{ item: ipc.Requirement }>();
 const store = useRequirementsStore();
 
 const answers = ref(props.item.questions.map((question) => question.answer ?? ''));
+// Questions handed back to Product Lead: a blank answer tells it to pick a
+// sensible default and say so in the plan (see product_lead.planPrompt).
+const defaults = ref(props.item.questions.map(() => false));
+const useDefault = (index: number) => {
+  answers.value[index] = '';
+  defaults.value[index] = true;
+};
 const cancelling = ref(false);
 const publishing = ref(false);
 
@@ -123,7 +130,10 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
       <template v-else-if="item.status === 'answering' || item.status === 'draft'">
         <AgentBubble v-if="item.summary" :text="`我理解的需求：${item.summary}`" />
         <AgentBubble v-if="item.questions.length === 0" text="需求已经足够清楚，没有需要澄清的问题。可以直接拆解。" />
-        <AgentBubble v-else :text="`开始拆解前，我有 ${item.questions.length} 个问题。没把握的可以留空，我会选一个合理的默认做法并说明。`" />
+        <AgentBubble
+          v-else
+          :text="`开始拆解前，我有 ${item.questions.length} 个问题。看不懂或拿不准的，点「不确定，用推荐做法」，我会选一个简单稳妥的做法并在计划里写明。`"
+        />
         <form class="req-questions" novalidate @submit.prevent="onSubmitAnswers">
           <div v-for="(question, index) in item.questions" :key="index" class="question-card glass">
             <label class="question-text" :for="`reqAnswer${index}`">
@@ -136,9 +146,21 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
               type="textarea"
               :rows="2"
               :maxlength="model.MAX_ANSWER"
-              placeholder="你的回答（可留空）"
+              :placeholder="defaults[index] ? '将使用推荐做法' : '你的回答（可留空）'"
               :data-index="index"
+              @input="defaults[index] = false"
             />
+            <button
+              class="link-button"
+              type="button"
+              :aria-pressed="defaults[index]"
+              :class="{ chosen: defaults[index] }"
+              :data-default="index"
+              @click="useDefault(index)"
+            >
+              <AppIcon :name="defaults[index] ? 'check' : 'sparkle'" />
+              {{ defaults[index] ? '将使用推荐做法' : '不确定，用推荐做法' }}
+            </button>
           </div>
           <div class="req-actions">
             <button class="primary-button" type="submit" :disabled="store.acting !== null" :aria-busy="store.acting === 'plan'">

@@ -8,10 +8,14 @@ import QueueView from '../../../src/renderer/src/views/QueueView.vue';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
-import { installApi } from '../requirements_fakes.ts';
+import { installApi, requirement } from '../requirements_fakes.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
 
-vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
+  const showToast = vi.fn();
+  // announceAgent adds a system notification only in the background; tests see the toast.
+  return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
+});
 
 describe('QueueView', () => {
   let pinia: ReturnType<typeof createPinia>;
@@ -142,5 +146,29 @@ describe('QueueView', () => {
     await flushPromises();
     await wrapper.find('[data-empty="filter"] .empty-action').trigger('click');
     expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['完成']);
+  });
+
+  test('a new user sees the getting-started checklist with the next step highlighted', async () => {
+    const wrapper = render();
+    await flushPromises();
+    const checklist = wrapper.get('[data-onboarding]');
+    expect(checklist.get('h2').text()).toBe('开始使用 TaskPilot');
+    // The fake CLI is available; no repository is set up yet.
+    expect(checklist.get('[data-step="cli"]').classes()).toContain('done');
+    expect(checklist.get('[data-step="repository"]').classes()).toContain('next');
+    expect(checklist.get('[data-step="checks"] button').attributes('disabled')).toBeDefined();
+  });
+
+  test('a fully set-up user never sees the checklist', async () => {
+    const api = installApi({ list: [requirement()] });
+    api.workspace.info.mockImplementation(
+      () => Promise.resolve({ ok: true, data: { configured: true, root: '/r', commit: 'a', branch: 'main', dirty: false, changedFiles: 0 } }) as never,
+    );
+    api.workspace.get.mockImplementation(() => Promise.resolve({ ok: true, data: { lines: { test: 'npm test' } } }) as never);
+    await useAppStore().refreshWorkspaceStatus();
+    await useRequirementsStore().refreshList();
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.find('[data-onboarding]').exists()).toBe(false);
   });
 });

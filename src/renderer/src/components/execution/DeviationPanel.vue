@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { resolutionTitle } from '@/lib/review_model.ts';
@@ -45,7 +46,7 @@ const run = (action: 'cancel' | 'retry') => {
       <div class="panel-title">
         <span class="panel-icon danger"><AppIcon :name="view.icon" :class="{ spin: view.icon === 'spinner' }" /></span>
         <div>
-          <h2>偏差与裁决</h2>
+          <h2><TermHint term="deviation">偏差与裁决</TermHint></h2>
           <p>{{ view.hint }}</p>
         </div>
       </div>

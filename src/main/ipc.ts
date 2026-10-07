@@ -13,6 +13,8 @@ import * as claudeCli from './agents/claude_cli.ts';
 import * as productLead from './agents/product_lead.ts';
 import * as envSetup from './env_setup.ts';
 import * as evidence from './evidence.ts';
+import * as gitCommit from './git_commit.ts';
+import * as tutorAgent from './agents/tutor.ts';
 import {
   summarizeForRequirement,
   reviewWorkPackage,
@@ -31,13 +33,14 @@ import { CHANNELS } from '../shared/ipc_channels.ts';
 import { businessDay, computeMetrics, RETENTION_DAYS } from './activity_log.ts';
 import type { ActivityLog } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
-import { indexEntries, looksSecret } from './repo_reader.ts';
+import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
 import type { BaselineChecks, BaselineChecksStatus, DeviationInput, WorkPackageStore } from './work_package_store.ts';
 import type { Requirement, RequirementStore } from './requirement_store.ts';
 import type { EnvFailure } from './agents/env_steward.ts';
 import type { ReleaseStore } from './release_store.ts';
+import type { TutorStore } from './tutor_store.ts';
 import type { RepositoryEntry, RepositoryRegistry } from './repositories.ts';
 import type { ReleasePackage } from './agents/pipeline.ts';
 import type { TaskDefinition } from './tasks.ts';
@@ -202,6 +205,8 @@ export type IpcDeps = {
   activity?: ActivityLog | null;
   // Enables Release Manager.
   releases?: ReleaseStore | null;
+  // Enables Tutor.
+  tutor?: TutorStore | null;
 };
 
 export type IpcHandle = { shutdown: () => Promise<void> };
@@ -225,6 +230,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     onPackagesPublished,
     activity = null,
     releases = null,
+    tutor = null,
   } = deps;
 
   // The PATH verification commands run with, per the user's preference.
@@ -1528,6 +1534,143 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
+  // Committing a finished package (src/main/git_commit.ts)
+
+  // Only once the work is accepted: committing earlier would put unreviewed
+  // code in history, and claiming the next package wants a clean tree.
+  const COMMITTABLE: ipc.WorkPackageStatus[] = ['accepting', 'done'];
+
+  const requireCommittable = (id: string) => {
+    const task = requireTask(id);
+    if (!COMMITTABLE.includes(store.get(id).status)) failWith('Only an accepted package can be committed', 'invalid_state');
+    return task;
+  };
+
+  // The package title as the subject (git's 72-column habit), its id below.
+  const suggestedMessage = (task: TaskDefinition) => {
+    const subject = task.title.length > gitCommit.MAX_SUBJECT ? `${task.title.slice(0, gitCommit.MAX_SUBJECT - 1)}…` : task.title;
+    return `${subject}\n\nTaskPilot 工作包 ${task.id}`;
+  };
+
+  ipcMain.handle(
+    CHANNELS.commitPreview,
+    wrap(async (_event, rawId): Promise<ipc.CommitPreview> => {
+      const task = requireCommittable(requireString(rawId, 'id'));
+      const { committable, skipped } = await gitCommit.preview(requireRoot(), task.fileScope);
+      return { files: committable, skipped, message: suggestedMessage(task) };
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.commitCreate,
+    wrap(async (_event, rawId, rawMessage, rawFiles): Promise<ipc.CommitResult> => {
+      const task = requireCommittable(requireString(rawId, 'id'));
+      const message = gitCommit.validateMessage(rawMessage);
+      if (!Array.isArray(rawFiles) || rawFiles.some((file) => typeof file !== 'string')) failWith('files must be a list of paths', 'invalid_argument');
+      const files = rawFiles as string[];
+      const commit = await gitCommit.commitPaths(requireRoot(), task.fileScope, files, message);
+      console.debug(`[commit] package=${task.id} files=${files.length} commit=${commit.slice(0, 8)}`);
+      return { commit, files };
+    }),
+  );
+
+  // Tutor (src/main/agents/tutor.ts): one step explained, on request.
+
+  // One in-flight answer per package step; failures are kept until retried.
+  const tutorRuns = new Map<string, AbortController>();
+  const tutorFailures = new Map<string, ipc.ErrorInfo>();
+  const tutorKey = (id: string, stepIndex: number) => `${id}#${stepIndex}`;
+
+  const requireTutor = () => {
+    if (!tutor) return failWith('Tutor is unavailable', 'unsupported');
+    return tutor;
+  };
+
+  const requireStep = (rawId: unknown, rawIndex: unknown) => {
+    const task = requireTask(requireString(rawId, 'id'));
+    if (!Number.isInteger(rawIndex) || (rawIndex as number) < 0 || (rawIndex as number) >= task.steps.length) {
+      failWith('stepIndex is not a step of this package', 'invalid_step');
+    }
+    return { task, stepIndex: rawIndex as number, step: task.steps[rawIndex as number] };
+  };
+
+  const tutorState = (id: string, stepIndex: number, step: string): ipc.TutorState => {
+    const key = tutorKey(id, stepIndex);
+    if (tutorRuns.has(key)) return { status: 'running', answer: null, error: null, costUsd: 0 };
+    const saved = requireTutor().get(id, stepIndex, step);
+    if (saved) return { status: 'done', answer: saved.answer, error: null, costUsd: saved.costUsd };
+    const error = tutorFailures.get(key);
+    return error ? { status: 'failed', answer: null, error, costUsd: 0 } : { status: 'idle', answer: null, error: null, costUsd: 0 };
+  };
+
+  ipcMain.handle(
+    CHANNELS.tutorGet,
+    wrap((_event, rawId, rawIndex): ipc.TutorState => {
+      const { task, stepIndex, step } = requireStep(rawId, rawIndex);
+      return tutorState(task.id, stepIndex, step);
+    }),
+  );
+
+  // A saved answer is returned as is: asking again costs nothing.
+  ipcMain.handle(
+    CHANNELS.tutorAsk,
+    wrap(async (_event, rawId, rawIndex): Promise<ipc.TutorState> => {
+      const store = requireTutor();
+      const { task, stepIndex, step } = requireStep(rawId, rawIndex);
+      const key = tutorKey(task.id, stepIndex);
+      const current = tutorState(task.id, stepIndex, step);
+      if (current.status === 'running' || current.status === 'done') return current;
+      // Fixed at the start, like the other runs.
+      const { root } = getConfig();
+      const controller = new AbortController();
+      tutorRuns.set(key, controller);
+      tutorFailures.delete(key);
+      const { path: envPath } = await commandPath();
+      console.debug(`[tutor] ask package=${task.id} step=${stepIndex}`);
+      track(
+        (async () => {
+          try {
+            // Scope files as committed; ones the step creates are missing.
+            const read = root ? await readTracked(root, task.fileScope.slice(0, tutorAgent.MAX_TUTOR_FILES)) : { files: [], skipped: [] };
+            const missing = read.skipped.filter((item) => item.reason === 'not_tracked').map((item) => item.path);
+            throwIfCancelled(controller.signal);
+            const { output, costUsd } = await runAgent({
+              prompt: tutorAgent.tutorPrompt({ task, stepIndex, sources: read.files, missing }),
+              systemPrompt: tutorAgent.SYSTEM_PROMPT,
+              schema: tutorAgent.TUTOR_SCHEMA,
+              envPath,
+              signal: controller.signal,
+            });
+            throwIfCancelled(controller.signal);
+            const answer = tutorAgent.validateAnswer(output);
+            await store.put({ packageId: task.id, stepIndex, step, answer, costUsd: costUsd ?? 0, createdAt: new Date().toISOString() });
+          } catch (error) {
+            const cancelled = controller.signal.aborted;
+            if (!cancelled) console.error('[tutor] run failed', error);
+            const info = asAgentError(error);
+            tutorFailures.set(
+              key,
+              cancelled ? { code: 'agent_cancelled', message: 'Tutor was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
+            );
+          } finally {
+            tutorRuns.delete(key);
+          }
+        })(),
+      );
+      return tutorState(task.id, stepIndex, step);
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.tutorCancel,
+    wrap((_event, rawId, rawIndex): boolean => {
+      const { task, stepIndex } = requireStep(rawId, rawIndex);
+      const controller = tutorRuns.get(tutorKey(task.id, stepIndex));
+      controller?.abort();
+      return Boolean(controller);
+    }),
+  );
+
   // Repositories
 
   // What a switch would cancel, named for the confirmation dialog.
@@ -1540,6 +1683,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       ...[...baselineRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'baseline', label: packageTitle(id) })),
       ...(releaseController ? [{ kind: 'release', label: '发布说明' } as ipc.BusyRun] : []),
       ...(envController ? [{ kind: 'environment', label: '环境初始化' } as ipc.BusyRun] : []),
+      ...[...tutorRuns.keys()].map((key): ipc.BusyRun => ({ kind: 'tutor', label: packageTitle(key.split('#')[0]) })),
     ];
   };
 
@@ -1552,7 +1696,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of runs.values()) controller.abort();
     for (const controller of reviews.values()) controller.abort();
     for (const controller of adjudications.values()) controller.abort();
+    for (const controller of tutorRuns.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
+    tutorFailures.clear();
   };
 
   const repositoryList = async (): Promise<ipc.RepositoryList> => {
@@ -1577,7 +1723,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // work package store loads, or saved progress is dropped as unknown ids.
   const openRepository = async (id: string) => {
     await cancelAll();
-    await Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush()]);
+    await Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush()]);
     await repositories.open(id);
     const dir = repositories.dataDir();
     setConfig(await repositories.loadConfig());
@@ -1588,6 +1734,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     await store.open(dir, tasks.listTasks());
     await releases?.open(dir);
     await activity?.open(dir);
+    await tutor?.open(dir);
     activity?.prune().catch((error) => console.error('[activity] prune failed', error));
     // The steward's plan described the previous repository's toolchain.
     env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null };

@@ -119,6 +119,19 @@ const api = {
     relocate: (id: string, root: string) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesRelocate, id, root),
     busy: () => invoke<ipc.BusyRun[]>(CHANNELS.repositoriesBusy),
   },
+
+  commit: {
+    preview: (id: string) => invoke<ipc.CommitPreview>(CHANNELS.commitPreview, id),
+    // `files` is the list the developer reviewed; a changed list is refused.
+    create: (id: string, message: string, files: string[]) => invoke<ipc.CommitResult>(CHANNELS.commitCreate, id, message, files),
+  },
+
+  tutor: {
+    get: (id: string, stepIndex: number) => invoke<ipc.TutorState>(CHANNELS.tutorGet, id, stepIndex),
+    // Starts Tutor in the background; poll get() for the answer.
+    ask: (id: string, stepIndex: number) => invoke<ipc.TutorState>(CHANNELS.tutorAsk, id, stepIndex),
+    cancel: (id: string, stepIndex: number) => invoke<boolean>(CHANNELS.tutorCancel, id, stepIndex),
+  },
 };
 
 export type TaskPilotApi = typeof api;

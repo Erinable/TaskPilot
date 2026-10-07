@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
 import { criterionRows } from '@/lib/review_model.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
@@ -24,7 +25,7 @@ const rows = computed(() => {
       <div class="panel-title">
         <span class="panel-icon success"><AppIcon name="check-circle" /></span>
         <div>
-          <h2>验收条件</h2>
+          <h2><TermHint term="acceptance" /></h2>
           <p>关联测试通过后自动勾选</p>
         </div>
       </div>

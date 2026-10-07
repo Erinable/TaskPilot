@@ -24,7 +24,7 @@ const syncTitle = computed(() => {
 const syncDetail = computed(() => {
   const info = app.workspaceInfo;
   if (app.workspaceError) return app.workspaceError;
-  if (!info?.configured) return '前往设置指定仓库';
+  if (!info?.configured) return '点顶栏的仓库菜单添加';
   return `${info.commit.slice(0, 8)} · ${info.branch ?? 'detached'}`;
 });
 

@@ -62,6 +62,17 @@ export const installApi = (current: { task: ipc.TaskView }) => {
     },
     verify: { run: vi.fn() },
     workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })) },
+    commit: {
+      preview: vi.fn(() =>
+        ok<ipc.CommitPreview>({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+      ),
+      create: vi.fn((_id: string, _message: string, files: string[]) => ok<ipc.CommitResult>({ commit: 'c0ffee1234', files })),
+    },
+    tutor: {
+      get: vi.fn(() => ok<ipc.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),
+      ask: vi.fn(() => ok<ipc.TutorState>({ status: 'running', answer: null, error: null, costUsd: 0 })),
+      cancel: vi.fn(() => ok(true)),
+    },
   };
   Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
   return api;

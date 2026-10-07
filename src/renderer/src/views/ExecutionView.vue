@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import AcceptancePanel from '@/components/execution/AcceptancePanel.vue';
+import CommitPanel from '@/components/execution/CommitPanel.vue';
 import DeviationDialog from '@/components/execution/DeviationDialog.vue';
 import DeviationPanel from '@/components/execution/DeviationPanel.vue';
 import DiffPanel from '@/components/execution/DiffPanel.vue';
@@ -10,6 +11,8 @@ import ReviewPanel from '@/components/execution/ReviewPanel.vue';
 import ScopePanel from '@/components/execution/ScopePanel.vue';
 import StepsPanel from '@/components/execution/StepsPanel.vue';
 import VerifyPanel from '@/components/execution/VerifyPanel.vue';
+import TermHint from '@/components/TermHint.vue';
+import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { ACTIONS, useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
@@ -25,7 +28,11 @@ const actions = computed(() => {
   const allowed = new Set(task.value?.humanTransitions ?? []);
   return ACTIONS.filter((action) => allowed.has(action.name));
 });
-const actionClass = (action: (typeof ACTIONS)[number]) => (action.primary ? 'primary-button' : `secondary-button${action.danger ? ' danger' : ''}`);
+const advice = computed(() => (task.value ? nextStep(task.value) : null));
+// The advised action is the main button; the rest wait under "more". While
+// steps remain, the advice is to write code, so no button leads.
+const leading = computed(() => actions.value.find((action) => action.name === advice.value?.action) ?? null);
+const others = computed(() => actions.value.filter((action) => action !== leading.value));
 
 const back = () => {
   app
@@ -71,34 +78,59 @@ onBeforeUnmount(() => execution.close());
           </span>
           <span class="meta-chip">
             <AppIcon name="commit" />
-            <span>{{ task.baseline ? `基线 ${task.baseline.slice(0, 8)}` : '未领取' }}</span>
+            <TermHint v-if="task.baseline" term="baseline">基线 {{ task.baseline.slice(0, 8) }}</TermHint>
+            <span v-else>未领取</span>
           </span>
         </div>
       </div>
 
+      <div v-if="advice?.text" class="next-step" role="status" data-next-step>
+        <AppIcon name="sparkle" />
+        <div>
+          <strong>下一步</strong>
+          <p>{{ advice.text }}</p>
+        </div>
+      </div>
       <div class="exec-actions">
         <button
-          v-for="action in actions"
-          :key="action.name"
-          :class="actionClass(action)"
+          v-if="leading"
+          :class="leading.danger ? 'secondary-button danger' : 'primary-button'"
           type="button"
-          :data-transition="action.name"
+          :data-transition="leading.name"
           :disabled="execution.transitioning !== null"
-          :aria-busy="execution.transitioning === action.name"
-          @click="transition(action.name)"
+          :aria-busy="execution.transitioning === leading.name"
+          @click="transition(leading.name)"
         >
-          <AppIcon v-if="execution.transitioning === action.name" name="spinner" class="spin" />
-          <AppIcon v-else :name="action.icon" />
-          {{ action.label }}
+          <AppIcon v-if="execution.transitioning === leading.name" name="spinner" class="spin" />
+          <AppIcon v-else :name="leading.icon" />
+          {{ leading.label }}
         </button>
-      </div>
-      <div v-if="actions.length === 0" class="exec-notice">
-        <AppIcon name="info" />
-        <span>当前状态「{{ task.statusLabel }}」由 AI 团队推进，你无需操作。</span>
+        <el-dropdown v-if="others.length" trigger="click" @command="transition">
+          <button class="secondary-button" type="button" data-action="more-transitions" :disabled="execution.transitioning !== null">
+            <AppIcon name="more" />
+            更多操作
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="action in others"
+                :key="action.name"
+                :command="action.name"
+                :data-transition="action.name"
+                :class="{ danger: action.danger }"
+              >
+                <AppIcon :name="action.icon" />
+                {{ action.label }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
 
       <div class="exec-columns">
         <div class="exec-column">
+          <!-- Accepted work goes into git before the next package starts. -->
+          <CommitPanel v-if="task.status === 'accepting' || task.status === 'done'" :task="task" />
           <ReviewPanel v-if="task.review" :task="task" :review="task.review" />
           <StepsPanel :task="task" />
           <AcceptancePanel :task="task" />

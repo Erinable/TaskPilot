@@ -9,7 +9,11 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 
-vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
+  const showToast = vi.fn();
+  // announceAgent adds a system notification only in the background; tests see the toast.
+  return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
+});
 
 const running: ipc.Review = { status: 'running', error: null, startedAt: '', finishedAt: null };
 

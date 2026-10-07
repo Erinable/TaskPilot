@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -42,7 +43,7 @@ const refresh = () => {
       <div class="panel-title">
         <span class="panel-icon"><AppIcon name="folder" /></span>
         <div>
-          <h2>文件范围</h2>
+          <h2><TermHint term="scope" /></h2>
           <p>工作包允许改动的文件</p>
         </div>
       </div>

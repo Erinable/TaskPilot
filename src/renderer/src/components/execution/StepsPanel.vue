@@ -3,6 +3,7 @@ import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
+import StepTutor from './StepTutor.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -47,6 +48,7 @@ const onToggle = (event: Event, index: number) => {
           <span class="step-check"><AppIcon name="check" /></span>
           <span class="step-text"><InlineCode :text="step" /></span>
         </label>
+        <StepTutor v-if="claimed && !done.has(index)" :task-id="task.id" :step-index="index" />
       </li>
     </ol>
   </section>

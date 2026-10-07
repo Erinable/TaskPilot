@@ -13,6 +13,7 @@ import { createPathResolver } from './shell_env.ts';
 import { env } from './env.ts';
 import { ActivityLog } from './activity_log.ts';
 import { RepositoryRegistry } from './repositories.ts';
+import { TutorStore } from './tutor_store.ts';
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -93,6 +94,7 @@ app.whenReady().then(async () => {
   const store = await new WorkPackageStore(repoDir).load(listTasks());
   const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
   const releases = await new ReleaseStore(repoDir).load();
+  const tutor = await new TutorStore(repoDir).load();
   // Expired day files go at startup; a failure only leaves old files behind.
   activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -117,6 +119,7 @@ app.whenReady().then(async () => {
     requirements,
     activity,
     releases,
+    tutor,
     onPreferencesChanged: (next) => {
       nativeTheme.themeSource = next.appearance.theme;
       for (const window of BrowserWindow.getAllWindows()) {

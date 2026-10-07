@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import OnboardingChecklist from '@/components/OnboardingChecklist.vue';
 import { useAppStore } from '@/stores/app.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
@@ -73,6 +74,8 @@ const teamOnline = computed(() => overview.value?.team.available === true);
         </button>
       </div>
     </div>
+
+    <OnboardingChecklist />
 
     <section class="metrics-row">
       <div class="metric-card glass">

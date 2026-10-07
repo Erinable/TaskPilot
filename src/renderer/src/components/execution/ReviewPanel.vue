@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
@@ -42,7 +43,7 @@ const run = (action: 'cancel' | 'retry') => {
       <div class="panel-title">
         <span class="panel-icon" :class="view.tone"><AppIcon :name="view.icon" :class="{ spin: review.status === 'running' }" /></span>
         <div>
-          <h2>QA 审查</h2>
+          <h2><TermHint term="review">QA 审查</TermHint></h2>
           <p>{{ view.hint }}</p>
         </div>
       </div>

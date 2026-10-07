@@ -15,6 +15,7 @@ import { EVENTS_DIRNAME } from './activity_log.ts';
 import { RELEASES_FILENAME } from './release_store.ts';
 import { REQUIREMENTS_FILENAME } from './requirement_store.ts';
 import { STATE_FILENAME } from './work_package_store.ts';
+import { TUTOR_FILENAME } from './tutor_store.ts';
 
 export const REGISTRY_FILENAME = 'repositories.json';
 export const REGISTRY_VERSION = 1;
@@ -24,7 +25,7 @@ export const UNASSIGNED_ID = 'unassigned';
 // A copy of the pre-repository files, taken once before they move.
 export const BACKUP_DIRNAME = 'backup-before-repositories';
 // What lives in each repository's directory.
-export const REPO_FILES = [workspace.CONFIG_FILENAME, REQUIREMENTS_FILENAME, STATE_FILENAME, RELEASES_FILENAME, EVENTS_DIRNAME];
+export const REPO_FILES = [workspace.CONFIG_FILENAME, REQUIREMENTS_FILENAME, STATE_FILENAME, RELEASES_FILENAME, EVENTS_DIRNAME, TUTOR_FILENAME];
 
 export interface RepositoryEntry {
   id: string;

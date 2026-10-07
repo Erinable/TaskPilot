@@ -55,7 +55,10 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
       cancel: vi.fn(() => ok(true)),
     },
     agent: { status: vi.fn(() => ok<ipc.AgentStatus>({ available: true, command: 'claude' })) },
-    workspace: { info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)) },
+    workspace: {
+      info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)),
+      get: vi.fn(() => ok({ lines: { test: '' } } as ipc.WorkspaceView)),
+    },
     listTasks: vi.fn(() => ok([])),
   };
   (globalThis as unknown as { window: unknown }).window ??= globalThis;

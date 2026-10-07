@@ -6,7 +6,7 @@ import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
-import { confirmAction, showToast } from '@/lib/feedback.ts';
+import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import type { ConfirmOptions } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
 import type * as ipc from '@shared/ipc_types.ts';
@@ -188,20 +188,20 @@ export const useExecutionStore = defineStore('execution', () => {
   const announceReview = (task: ipc.TaskView) => {
     const review = task.review;
     if (!review) return;
-    if (review.status === 'passed') showToast(task.status === 'done' ? 'QA 审查通过，工作包已完成。' : 'QA 审查通过，有几项需要你确认后验收。');
-    else if (review.status === 'rejected') showToast('QA 审查未通过，请查看问题。', 'error');
-    else if (review.status === 'failed' && review.error.code !== 'agent_cancelled') showToast(`QA 审查失败：${describeErrorInfo(review.error)}`);
+    if (review.status === 'passed') announceAgent(task.status === 'done' ? 'QA 审查通过，工作包已完成。' : 'QA 审查通过，有几项需要你确认后验收。');
+    else if (review.status === 'rejected') announceAgent('QA 审查未通过，请查看问题。', 'error');
+    else if (review.status === 'failed' && review.error.code !== 'agent_cancelled') announceAgent(`QA 审查失败：${describeErrorInfo(review.error)}`);
   };
 
   const announceAdjudication = (task: ipc.TaskView) => {
     const adjudication = task.adjudication;
     if (adjudication?.status === 'failed') {
-      if (adjudication.error.code !== 'agent_cancelled') showToast(`Architect 裁决失败：${describeErrorInfo(adjudication.error)}`);
+      if (adjudication.error.code !== 'agent_cancelled') announceAgent(`Architect 裁决失败：${describeErrorInfo(adjudication.error)}`);
       return;
     }
     const decision = task.deviations[task.deviations.length - 1]?.resolution?.decision;
-    if (decision === 'dismiss') showToast('Architect 驳回了偏差，请查看理由后继续。');
-    else if (decision === 'replan') showToast('Architect 已重新规划，工作包回到队列。');
+    if (decision === 'dismiss') announceAgent('Architect 驳回了偏差，请查看理由后继续。');
+    else if (decision === 'replan') announceAgent('Architect 已重新规划，工作包回到队列。');
   };
 
   // Re-reads the open package while QA or Architect runs, until it settles.
@@ -323,6 +323,18 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Transitions ==========
+  // Claiming on a dirty tree records no baseline, so failures that were
+  // already there would count against the package. Say so before claiming.
+  const confirmDirtyClaim = async () => {
+    const info = await useAppStore().refreshWorkspaceStatus();
+    if (!info?.configured || !info.dirty) return true;
+    return confirmAction({
+      title: '项目里还有没提交的改动',
+      body: `有 ${info.changedFiles} 个文件改过但还没提交。建议先把它们提交（上一个工作包完成后可以在「保存到 git」里提交），或者还原。现在开始也可以，但 TaskPilot 分不清哪些问题是这次引入的。`,
+      accept: '仍然开始',
+    });
+  };
+
   // The transition in flight; its button spins and the others wait.
   const transitioning = ref<ipc.HumanTransition | null>(null);
 
@@ -334,6 +346,7 @@ export const useExecutionStore = defineStore('execution', () => {
     }
     const confirm = TRANSITION_CONFIRMS[name];
     if (confirm && !(await confirmAction(confirm))) return;
+    if (name === 'claim' && !(await confirmDirtyClaim())) return;
     transitioning.value = name;
     try {
       await call(window.taskpilot.transition(current.value.id, name));

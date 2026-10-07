@@ -738,6 +738,233 @@ code {
   transform: translateX(3px);
 }
 
+/* Tutor: help under one step */
+.step-tutor {
+  padding: 0 8px 6px 40px;
+}
+.step-tutor > .link-button {
+  color: var(--accent-strong);
+}
+.tutor-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 14px 16px;
+  color: var(--text-secondary);
+  background: var(--accent-soft);
+  border-radius: 12px;
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+.tutor-card p,
+.tutor-card ol,
+.tutor-card dl {
+  margin: 0;
+}
+.tutor-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tutor-status.error {
+  color: var(--danger);
+}
+.tutor-hints {
+  padding-left: 1.4em;
+}
+.tutor-snippet {
+  overflow: hidden;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+.tutor-snippet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--line-soft);
+}
+.tutor-snippet pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font: var(--text-sm) / 1.6 var(--font-mono);
+}
+.tutor-terms {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+}
+.tutor-terms dt {
+  color: var(--text);
+  font-weight: 600;
+}
+.tutor-note {
+  color: var(--text-tertiary);
+}
+
+/* Saving a finished package into git */
+.commit-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 20px 18px;
+}
+.commit-files,
+.commit-skipped ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.commit-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.commit-files .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+.commit-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.commit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.commit-skipped {
+  margin: 0 20px 18px;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  background: var(--fill);
+  border-radius: 10px;
+  font-size: var(--text-sm);
+}
+.commit-skipped p {
+  margin: 0 0 6px;
+}
+.commit-skipped li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.commit-skipped li span {
+  color: var(--text-tertiary);
+}
+.commit-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 20px 18px;
+  color: var(--success);
+  font-size: var(--text-sm);
+}
+
+/* Read by screen readers only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Getting-started checklist on the queue page */
+.onboarding {
+  margin-bottom: 20px;
+}
+.onboarding-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 12px 12px;
+  list-style: none;
+}
+.onboarding-step {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: start;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+}
+.onboarding-step.next {
+  background: var(--accent-soft);
+}
+.onboarding-step.waiting {
+  opacity: 0.6;
+}
+.onboarding-mark {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--fill);
+  border-radius: 50%;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.onboarding-step.next .onboarding-mark {
+  color: #fff;
+  background: var(--accent-gradient);
+}
+.onboarding-step.done .onboarding-mark {
+  color: #fff;
+  background: var(--success);
+}
+.onboarding-mark .icon {
+  width: 15px;
+  height: 15px;
+}
+.onboarding-body strong {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+.onboarding-step.done .onboarding-body strong {
+  color: var(--text-muted);
+}
+.onboarding-body p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.onboarding-step.done .onboarding-body p {
+  display: none;
+}
+.onboarding-install {
+  margin-top: 10px;
+}
+.onboarding-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.onboarding-command code {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  overflow-x: auto;
+  color: var(--text);
+  background: var(--fill);
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
 /* Metrics */
 .metrics-row {
   display: grid;
@@ -1245,22 +1472,64 @@ code {
 .exec-actions:empty {
   display: none;
 }
-.exec-notice {
+/* The one thing to do now, above the actions */
+.next-step {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-  padding: 12px 15px;
-  color: var(--warning);
-  background: var(--warning-soft);
-  border: 1px solid rgba(214, 129, 23, 0.2);
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 13px 16px;
+  color: var(--text-secondary);
+  background: var(--accent-soft);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
+  line-height: 1.65;
+}
+.next-step > .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--accent);
+}
+.next-step strong {
+  color: var(--accent-strong);
+}
+.next-step p {
+  margin: 2px 0 0;
+}
+.el-dropdown-menu__item.danger {
+  color: var(--danger);
+}
+
+/* A term with a "?" that explains it */
+.term-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.term-mark {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-tertiary);
+  background: var(--fill-hover);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.term-mark:hover,
+.term-mark:focus-visible {
+  color: #fff;
+  background: var(--accent);
+}
+.term-tooltip {
+  max-width: 280px;
   line-height: 1.6;
 }
-.exec-notice[hidden] {
-  display: none;
-}
+
 .exec-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(360px, 1fr);
@@ -3348,6 +3617,9 @@ body.vibrancy .glass {
   padding: 14px 16px;
   border-radius: 13px;
 }
+.question-card > .link-button {
+  margin-top: 6px;
+}
 .question-text {
   display: flex;
   align-items: flex-start;
@@ -3530,6 +3802,10 @@ body.vibrancy .glass {
 .link-button.danger:hover {
   color: var(--danger);
   background: var(--danger-soft);
+}
+.link-button.chosen {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
 }
 .link-button .icon {
   width: 13px;

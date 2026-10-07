@@ -5,7 +5,7 @@ import { computed, ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
-import { confirmAction, showToast } from '@/lib/feedback.ts';
+import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/components/requirements/requirement_model.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
@@ -241,9 +241,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const announce = (item: ipc.Requirement) => {
-    if (item.status === 'answering') showToast('Product Lead 提出了澄清问题。', 'info');
-    else if (item.status === 'reviewing') showToast('工作包拆解完成，请确认。', 'info');
-    else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') showToast(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);
+    if (item.status === 'answering') announceAgent('Product Lead 提出了澄清问题，等你回答。', 'info');
+    else if (item.status === 'reviewing') announceAgent('工作包拆解完成，请确认。', 'info');
+    else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);
   };
 
   // While any requirement is running, re-reads the list; re-renders the open

@@ -10,7 +10,11 @@ import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../../src/renderer/src/lib/inline_code.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
 
-vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
+  const showToast = vi.fn();
+  // announceAgent adds a system notification only in the background; tests see the toast.
+  return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
+});
 
 describe('requirement model', () => {
   test('every status has a pill label and tone', () => {
@@ -161,7 +165,7 @@ describe('requirements store', () => {
     state.list = [requirement({ status: 'answering' })];
     await vi.advanceTimersByTimeAsync(model.POLL_MS);
     expect(store.current?.status).toBe('answering');
-    expect(feedback.showToast).toHaveBeenCalledWith('Product Lead 提出了澄清问题。', 'info');
+    expect(feedback.showToast).toHaveBeenCalledWith('Product Lead 提出了澄清问题，等你回答。', 'info');
   });
 
   test('open selects the first requirement, or shows the empty pane', async () => {

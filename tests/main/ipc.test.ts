@@ -27,6 +27,7 @@ import * as workspace from '../../src/main/workspace.ts';
 import * as preferences from '../../src/main/preferences.ts';
 import { createPathResolver } from '../../src/main/shell_env.ts';
 import { RepositoryRegistry } from '../../src/main/repositories.ts';
+import { TutorStore } from '../../src/main/tutor_store.ts';
 import * as git from '../../src/main/git.ts';
 
 const run = promisify(execFile);
@@ -85,6 +86,7 @@ const harness = async ({
   const requirements = await new RequirementStore(repoDir).load();
   const activity = new ActivityLog(repoDir, { timeZone: 'Asia/Shanghai' });
   const releases = await new ReleaseStore(repoDir).load();
+  const tutor = await new TutorStore(repoDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
@@ -117,6 +119,7 @@ const harness = async ({
       requirements,
       activity,
       releases,
+      tutor,
       runAgent: async (options) => {
         agentCalls.push(options);
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
@@ -211,21 +214,30 @@ const RELEASE_PLAN = {
 };
 /** Which agent step a schema belongs to. */
 const stepOf = (schema) =>
-  schema.properties.bump
-    ? 'release'
-    : schema.properties.verdict
-      ? 'review'
-      : schema.properties.decision
-        ? 'adjudicate'
-        : schema.properties.install
-          ? 'env'
-          : schema.properties.packages
-            ? 'plan'
-            : schema.properties.questions
-              ? 'clarify'
-              : schema.properties.modules
-                ? 'summarize'
-                : 'select';
+  schema.properties.hints
+    ? 'tutor'
+    : schema.properties.bump
+      ? 'release'
+      : schema.properties.verdict
+        ? 'review'
+        : schema.properties.decision
+          ? 'adjudicate'
+          : schema.properties.install
+            ? 'env'
+            : schema.properties.packages
+              ? 'plan'
+              : schema.properties.questions
+                ? 'clarify'
+                : schema.properties.modules
+                  ? 'summarize'
+                  : 'select';
+const TUTOR_ANSWER = {
+  explanation: '在测试文件里加一个用例，检查邮箱大小写不同也能登录。',
+  hints: ['打开 tests/auth/login-user.test.ts', '仿照已有用例写一个新的 test()'],
+  snippet: { language: 'ts', code: "test('email is case-insensitive', () => {\n  // ...\n});" },
+  terms: [{ term: '用例', meaning: '一个独立的测试，检查一种情况。' }],
+};
+
 /** A fake team answering by which schema it was given. */
 const fakeAgent =
   (overrides: Record<string, unknown> = {}) =>
@@ -239,6 +251,7 @@ const fakeAgent =
       env: () => overrides.env ?? ENV_PLAN,
       adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
       release: () => overrides.release ?? RELEASE_PLAN,
+      tutor: () => overrides.tutor ?? TUTOR_ANSWER,
     }[stepOf(schema)]();
     if (output instanceof Error) throw output;
     return { output, costUsd: 0.02 };
@@ -1426,4 +1439,127 @@ test('repositories: a moved repository is flagged and can be pointed at its new 
 test('repositories: switching to an unknown id is refused', async () => {
   const { call } = await harness();
   assert.equal((await call(CHANNELS.repositoriesSwitch, 'nope')).error.code, 'unknown_repository');
+});
+
+/* Committing a finished package */
+
+const doneState = { status: 'done', baseline: null, claimedAt: null, completedSteps: [], deviations: [], review: null };
+
+const commitHarness = async () => {
+  const h = await harness({ seedState: { 'auth-edge-tests': doneState } });
+  const g = (args: string[]) => run('git', args, { cwd: h.root });
+  await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
+  await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'test("x", () => {});\n');
+  // Out of scope, and a secret-looking file: both held back.
+  await fs.writeFile(path.join(h.root, 'notes.md'), 'scratch\n');
+  await fs.writeFile(path.join(h.root, '.env'), 'TOKEN=x\n');
+  return { ...h, g };
+};
+
+test('commit: the preview lists scope files, holds back the rest and suggests a message', async () => {
+  const { call } = await commitHarness();
+  const { data } = await call(CHANNELS.commitPreview, 'auth-edge-tests');
+  assert.deepEqual(data.files, ['tests/auth/login-user.test.ts']);
+  assert.deepEqual(data.skipped.map((item) => [item.path, item.reason]).sort(), [
+    ['.env', 'secret'],
+    ['notes.md', 'out_of_scope'],
+  ]);
+  assert.equal(data.message.split('\n')[0], '补充登录模块边界测试');
+});
+
+test('commit: commits only the reviewed scope files, never pushes, keeps other changes', async () => {
+  const { call, g } = await commitHarness();
+  // Something the developer staged themselves stays staged and out of this commit.
+  await fs.writeFile(path.join((await call(CHANNELS.workspaceInfo)).data.root, 'staged.txt'), 'mine\n');
+  await g(['add', 'staged.txt']);
+
+  const result = await call(CHANNELS.commitCreate, 'auth-edge-tests', '补充登录边界测试\n\n详情', ['tests/auth/login-user.test.ts']);
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  const { stdout: files } = await g(['show', '--name-only', '--format=%s', 'HEAD']);
+  assert.deepEqual(files.trim().split('\n'), ['补充登录边界测试', '', 'tests/auth/login-user.test.ts']);
+  const { stdout: status } = await g(['status', '--porcelain']);
+  assert.match(status, /^A {2}staged\.txt$/m);
+  assert.match(status, /^\?\? notes\.md$/m);
+  assert.match(status, /^\?\? \.env$/m);
+  // Nothing left to commit for the package.
+  assert.deepEqual((await call(CHANNELS.commitPreview, 'auth-edge-tests')).data.files, []);
+});
+
+test('commit: a list that changed since the developer looked commits nothing', async () => {
+  const { call, g } = await commitHarness();
+  const before = (await g(['rev-parse', 'HEAD'])).stdout;
+  const response = await call(CHANNELS.commitCreate, 'auth-edge-tests', 'x', ['tests/auth/other.test.ts']);
+  assert.equal(response.error.code, 'changes_changed');
+  assert.equal((await g(['rev-parse', 'HEAD'])).stdout, before);
+});
+
+test('commit: refuses a package that is not accepted yet, and an empty message', async () => {
+  const { call } = await harness();
+  assert.equal((await call(CHANNELS.commitPreview, 'auth-edge-tests')).error.code, 'invalid_state');
+  const { call: callDone } = await commitHarness();
+  assert.equal((await callDone(CHANNELS.commitCreate, 'auth-edge-tests', '  \n', ['tests/auth/login-user.test.ts'])).error.code, 'invalid_message');
+});
+
+/* Tutor */
+
+const claimedState = { status: 'in_progress', baseline: null, claimedAt: null, completedSteps: [], deviations: [], review: null };
+
+const settleTutor = async (call, id, stepIndex) => {
+  for (let i = 0; i < 200; i += 1) {
+    const { data } = await call(CHANNELS.tutorGet, id, stepIndex);
+    if (data.status !== 'running') return data;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('tutor never settled');
+};
+
+test('tutor: answers a step from the committed scope files, once', async () => {
+  const { call, root, agentCalls } = await harness({ agent: fakeAgent(), seedState: { 'auth-edge-tests': claimedState } });
+  // A tracked scope file is read; an untracked one never is.
+  await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });
+  await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'untracked draft\n');
+
+  assert.equal((await call(CHANNELS.tutorGet, 'auth-edge-tests', 0)).data.status, 'idle');
+  assert.equal((await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0)).data.status, 'running');
+  const done = await settleTutor(call, 'auth-edge-tests', 0);
+  assert.equal(done.status, 'done', JSON.stringify(done.error));
+  assert.equal(done.answer.hints.length, 2);
+  const prompt = callFor(agentCalls, 'tutor').prompt;
+  assert.match(prompt, /1\. 在 `tests\/auth\/login-user\.test\.ts` 添加邮箱大小写不敏感的用例。 {3}<- this step/);
+  assert.match(prompt, /<missing_files>\ntests\/auth\/login-user\.test\.ts/);
+  assert.doesNotMatch(prompt, /untracked draft/);
+
+  // Asking again returns the saved answer without another call.
+  const calls = agentCalls.length;
+  assert.equal((await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0)).data.status, 'done');
+  assert.equal(agentCalls.length, calls);
+});
+
+test('tutor: bad output fails the step, which can be retried', async () => {
+  let output: unknown = { explanation: '', hints: [], snippet: null, terms: [] };
+  const agent: FakeAgent = async () => ({ output, costUsd: 0 });
+  const { call } = await harness({ agent, seedState: { 'auth-edge-tests': claimedState } });
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => errors.mockRestore());
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 1);
+  const failed = await settleTutor(call, 'auth-edge-tests', 1);
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'agent_bad_output');
+  output = TUTOR_ANSWER;
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 1);
+  assert.equal((await settleTutor(call, 'auth-edge-tests', 1)).status, 'done');
+});
+
+test('tutor: a running answer can be cancelled; an out-of-range step is refused', async () => {
+  const agent: FakeAgent = ({ signal }) =>
+    new Promise((_resolve, reject) => {
+      signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
+    });
+  const { call } = await harness({ agent, seedState: { 'auth-edge-tests': claimedState } });
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  assert.deepEqual((await call(CHANNELS.repositoriesBusy)).data, [{ kind: 'tutor', label: '补充登录模块边界测试' }]);
+  assert.equal((await call(CHANNELS.tutorCancel, 'auth-edge-tests', 0)).data, true);
+  const state = await settleTutor(call, 'auth-edge-tests', 0);
+  assert.equal(state.error.code, 'agent_cancelled');
+  assert.equal((await call(CHANNELS.tutorAsk, 'auth-edge-tests', 9)).error.code, 'invalid_step');
 });

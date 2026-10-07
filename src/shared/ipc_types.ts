@@ -705,5 +705,39 @@ export type Repository = {
 export type RepositoryList = { repositories: Repository[]; current: string | null };
 
 // Background work a switch would cancel.
-export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment';
+export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor';
 export type BusyRun = { kind: BusyKind; label: string };
+
+// ========== commit ==========
+
+export type CommitSkipReason = 'out_of_scope' | 'secret' | 'rename';
+
+// What committing a finished package would include, from git status.
+export type CommitPreview = {
+  // Inside the package's file scope; committed as listed.
+  files: string[];
+  // Held back; the developer commits these by hand if they mean to.
+  skipped: { path: string; reason: CommitSkipReason }[];
+  // Suggested message; the developer may edit it.
+  message: string;
+};
+
+export type CommitResult = { commit: string; files: string[] };
+
+// ========== tutor ==========
+
+export type TutorAnswer = {
+  explanation: string;
+  hints: string[];
+  snippet: { language: string; code: string } | null;
+  terms: { term: string; meaning: string }[];
+};
+
+// One step's help: idle (never asked, or asked for an older wording),
+// running, done or failed.
+export type TutorState = {
+  status: 'idle' | 'running' | 'done' | 'failed';
+  answer: TutorAnswer | null;
+  error: ErrorInfo | null;
+  costUsd: number;
+};

@@ -21,7 +21,8 @@ const run = (action: Promise<unknown>) => {
     </span>
   </header>
   <p class="settings-page-intro">
-    TaskPilot 只读观察仓库：计算 diff、检查文件范围，不会修改工作树或提交历史。每个仓库的需求、工作包、验证命令和活动记录分开保存，在顶栏切换。
+    TaskPilot 观察仓库来计算 diff、检查文件范围。它只在你点「提交」时把完成的工作包写进 git
+    历史，从不推送、不切换分支。每个仓库的需求、工作包、验证命令和活动记录分开保存，在顶栏切换。
   </p>
   <div class="settings-card glass">
     <div class="setting-row stacked">
