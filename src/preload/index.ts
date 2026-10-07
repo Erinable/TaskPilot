@@ -40,6 +40,7 @@ const api = {
     check: (form: ipc.WorkspaceForm) => invoke<ipc.WorkspaceCheck>(CHANNELS.workspaceCheck, form),
     pickRoot: () => invoke<string | null>(CHANNELS.workspacePickRoot),
     info: () => invoke<ipc.WorkspaceInfo>(CHANNELS.workspaceInfo),
+    openFile: (filePath: string, line: number | null = null) => invoke<ipc.OpenedWith>(CHANNELS.workspaceOpenFile, filePath, line),
   },
 
   diff: {

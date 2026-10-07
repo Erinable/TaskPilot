@@ -187,4 +187,83 @@ describe('ExecutionView', () => {
     expect(card.get('.tutor-terms dt').text()).toBe('导出');
     wrapper.unmount();
   });
+
+  test('each scope file opens in the editor', async () => {
+    const { wrapper } = await mountOpen();
+    const open = wrapper.get('.scope-row .scope-open');
+    expect(open.attributes('aria-label')).toBe('在编辑器中打开 src/auth.ts');
+    await open.trigger('click');
+    await flushPromises();
+    expect(api.workspace.openFile).toHaveBeenCalledWith('src/auth.ts', null);
+    wrapper.unmount();
+  });
+
+  test('a QA issue jumps to its file and line, and a failed test run is explained', async () => {
+    current.task = taskView({
+      status: 'in_progress',
+      review: {
+        status: 'rejected',
+        error: null,
+        startedAt: '',
+        finishedAt: null,
+        reasons: ['tests_failed'],
+        attention: [],
+        checks: [],
+        verification: {
+          kind: 'test',
+          command: 'npm test',
+          exitCode: 1,
+          timedOut: false,
+          durationMs: 10,
+          summary: { total: 2, passed: 1, failed: 1, skipped: 0, ok: false },
+          report: null,
+          failing: ['login works'],
+          outputTail: 'not ok 2 - login works\n  expected: 200\n  actual: 401',
+        },
+        acceptance: [],
+        report: { verdict: 'reject', summary: 's', criteria: [], issues: [{ severity: 'major', text: '没有校验邮箱', file: 'src/auth.ts', line: 42 }] },
+        diff: { files: [], skipped: [], outOfScope: [] },
+        costUsd: 0,
+      },
+    });
+    const { wrapper } = await mountOpen();
+    const location = wrapper.get('.review-issue .issue-location');
+    expect(location.text()).toBe('src/auth.ts:42');
+    await location.trigger('click');
+    await flushPromises();
+    expect(api.workspace.openFile).toHaveBeenCalledWith('src/auth.ts', 42);
+    const explained = wrapper.get('.failure-explain');
+    expect(explained.get('strong').text()).toBe('1 个测试没通过');
+    // The raw tail stays one click away, folded.
+    const details = wrapper.get('.verify-output-details');
+    expect(details.attributes('open')).toBeUndefined();
+    expect(details.get('pre').text()).toContain('actual: 401');
+    wrapper.unmount();
+  });
+
+  test('a failed verification run explains itself above the folded log', async () => {
+    api.verify.run.mockResolvedValue({
+      ok: true,
+      data: {
+        kind: 'test',
+        command: 'npm test',
+        exitCode: 1,
+        timedOut: false,
+        durationMs: 20,
+        output: "Error: Cannot find module './session'",
+        results: [],
+        summary: { total: 0, passed: 0, failed: 0, skipped: 0, ok: false },
+        report: { format: 'stdout', trusted: true, problem: null },
+        check: { stage: 'step', blocking: true },
+      },
+    });
+    const { wrapper } = await mountOpen();
+    await wrapper.get('[data-verify="test"]').trigger('click');
+    await flushPromises();
+    const explained = wrapper.get('.verify-result .failure-explain');
+    expect(explained.get('strong').text()).toBe('有一个模块找不到');
+    expect(explained.get('code').text()).toBe('./session');
+    expect(wrapper.get('.verify-result .verify-output').text()).toContain('Cannot find module');
+    wrapper.unmount();
+  });
 });

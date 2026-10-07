@@ -7,6 +7,7 @@ import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore, VERIFY_LABELS } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 import EvidenceRow from './EvidenceRow.vue';
+import FailureExplain from './FailureExplain.vue';
 
 const SEGMENTS: { kind: ipc.CheckKind; icon: IconName; label: string }[] = [
   { kind: 'test', icon: 'flask', label: '测试' },
@@ -33,7 +34,8 @@ const reportNote = computed(() => {
   return reviewModel.REASONS[`report_${report.problem}`] ?? String(report.problem);
 });
 const failures = computed(() => (result.value?.results ?? []).filter((entry) => !entry.passed && !entry.skipped && !entry.todo));
-// The raw log is the fallback when nothing could be parsed.
+// A failure is explained in plain words with the log folded below; a run with
+// nothing parsed shows its log open, as the only evidence there is.
 const showOutput = computed(() => !!result.value && (!result.value.summary.ok || result.value.summary.total === 0));
 
 const run = (kind: ipc.CheckKind) => {
@@ -113,7 +115,10 @@ const remeasure = () => {
             {{ entry.fullName ?? entry.name }}
           </div>
         </div>
-        <pre v-if="showOutput" class="verify-output">{{ result.output.trim() || '(无输出)' }}</pre>
+        <FailureExplain
+          v-if="showOutput"
+          :input="{ kind: result.kind, exitCode: result.exitCode, timedOut: result.timedOut, output: result.output, failed: failures.length }"
+        />
       </template>
       <p v-else class="empty-hint">
         <AppIcon name="terminal" />

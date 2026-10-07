@@ -34,6 +34,7 @@ export const planPackage = (overrides: Partial<ipc.PlanPackage> = {}): ipc.PlanP
   steps: ['新增 `login()`'],
   fileScope: ['src/auth.ts'],
   acceptance: [{ text: '登录成功', test: 'login works' }],
+  difficulty: { level: 'easy', reason: '照着现有代码改一个文件。' },
   ...overrides,
 });
 

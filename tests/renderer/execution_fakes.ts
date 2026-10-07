@@ -61,7 +61,7 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       file: vi.fn(() => ok('')),
     },
     verify: { run: vi.fn() },
-    workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })) },
+    workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<ipc.OpenedWith>('vscode')) },
     commit: {
       preview: vi.fn(() =>
         ok<ipc.CommitPreview>({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),

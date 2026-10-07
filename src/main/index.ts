@@ -134,6 +134,8 @@ app.whenReady().then(async () => {
       const failure = await shell.openPath(dir);
       if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
     },
+    // Only reached with a path open_file.ts has confined to the workspace.
+    revealFile: (file) => shell.showItemInFolder(file),
     pickDirectory: async (defaultPath) => {
       const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
       const parent = BrowserWindow.getFocusedWindow();

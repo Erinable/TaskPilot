@@ -2,6 +2,7 @@
 // generated and the user published from the requirement center; there are no
 // built-in samples. Inline code in `steps` is marked with backticks and
 // rendered as <code>.
+import type { PackageDifficulty } from '../shared/ipc_types.ts';
 import type { WorkPackageStatus } from './work_package_status.ts';
 import { isInside } from './workspace.ts';
 
@@ -31,6 +32,8 @@ export interface TaskDefinition {
   steps: string[];
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
+  // Absent on packages planned before difficulty existed.
+  difficulty?: PackageDifficulty;
 }
 
 // The part of a definition Architect can replan.

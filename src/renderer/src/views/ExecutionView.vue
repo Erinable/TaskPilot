@@ -11,6 +11,7 @@ import ReviewPanel from '@/components/execution/ReviewPanel.vue';
 import ScopePanel from '@/components/execution/ScopePanel.vue';
 import StepsPanel from '@/components/execution/StepsPanel.vue';
 import VerifyPanel from '@/components/execution/VerifyPanel.vue';
+import DifficultyChip from '@/components/DifficultyChip.vue';
 import TermHint from '@/components/TermHint.vue';
 import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -76,6 +77,7 @@ onBeforeUnmount(() => execution.close());
             <AppIcon name="clock" />
             <span>{{ task.estimate }}</span>
           </span>
+          <DifficultyChip :difficulty="task.difficulty" />
           <span class="meta-chip">
             <AppIcon name="commit" />
             <TermHint v-if="task.baseline" term="baseline">基线 {{ task.baseline.slice(0, 8) }}</TermHint>

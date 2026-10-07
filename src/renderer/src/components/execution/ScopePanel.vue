@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
+import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -61,6 +62,15 @@ const refresh = () => {
           <span class="removed">-{{ row.churn.removed }}</span>
         </span>
         <span class="scope-tag" :class="row.kind">{{ LABELS[row.kind] }}</span>
+        <button
+          class="icon-button small scope-open"
+          type="button"
+          :title="`在编辑器中打开 ${row.filePath}`"
+          :aria-label="`在编辑器中打开 ${row.filePath}`"
+          @click="openWorkspaceFile(row.filePath)"
+        >
+          <AppIcon name="external-link" />
+        </button>
       </div>
     </div>
   </section>

@@ -5,8 +5,10 @@ import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import * as reviewModel from '@/lib/review_model.ts';
+import { openWorkspaceFile } from '@/lib/open_file.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 import EvidenceRow from './EvidenceRow.vue';
+import FailureExplain from './FailureExplain.vue';
 
 export type ReviewOutcome = Extract<ipc.Review, { status: 'passed' | 'rejected' }>;
 
@@ -22,6 +24,12 @@ const testLine = computed(() => {
   return `测试 ${run.summary.passed}/${run.summary.total} 通过${run.summary.ok ? '' : `（退出码 ${run.exitCode}${run.timedOut ? '，超时' : ''}）`}`;
 });
 const failing = computed(() => (verification.value && 'failing' in verification.value ? verification.value.failing : []));
+// A test run that failed, explained from the output tail the review kept.
+const failedRun = computed(() => {
+  const run = verification.value;
+  if (!run || 'error' in run || run.summary.ok) return null;
+  return { kind: run.kind, exitCode: run.exitCode, timedOut: run.timedOut, output: run.outputTail ?? '', failed: run.failing.length };
+});
 const finishedAt = computed(() => (props.review.finishedAt ? new Date(props.review.finishedAt).toLocaleString('zh-CN') : ''));
 const criterionText = (index: number) => props.task.acceptance[index]?.text ?? `条件 ${index + 1}`;
 const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `${issue.file}:${issue.line}` : issue.file);
@@ -55,10 +63,18 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
         <span class="severity-tag" :class="issue.severity">{{ reviewModel.SEVERITY_LABELS[issue.severity] }}</span>
         <div>
           <p><InlineCode :text="issue.text" /></p>
-          <small v-if="issue.file">
+          <!-- The location is model text; the main process confines it to the workspace. -->
+          <button
+            v-if="issue.file"
+            class="issue-location"
+            type="button"
+            :title="`在编辑器中打开 ${issueLocation(issue)}`"
+            @click="openWorkspaceFile(issue.file, issue.line)"
+          >
             <AppIcon name="file" />
             {{ issueLocation(issue) }}
-          </small>
+            <AppIcon name="external-link" class="issue-open" />
+          </button>
         </div>
       </div>
       <p v-if="report.issues.length === 0" class="empty-hint">
@@ -109,4 +125,5 @@ const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `
       {{ name }}
     </div>
   </div>
+  <FailureExplain v-if="failedRun" :input="failedRun" output-label="查看测试输出的最后部分" />
 </template>

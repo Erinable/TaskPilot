@@ -14,6 +14,7 @@ const validPackage = (overrides = {}) => ({
   steps: ['创建 `LoginUserUseCase`。'],
   fileScope: ['src/auth/login.ts'],
   acceptance: [{ text: '成功返回 token', test: 'login succeeds' }, { text: 'lint 通过' }],
+  difficulty: { level: 'easy', reason: '照着现有的登录代码改一个文件。' },
   ...overrides,
 });
 const validPlan = (packages = [validPackage()]) => ({ summary: '按两步实现。', packages });
@@ -63,6 +64,11 @@ test('validatePlan() rejects values outside the allowlists and limits', () => {
     validPackage({ steps: [] }),
     validPackage({ title: 'x'.repeat(61) }),
     validPackage({ acceptance: [{ text: 'ok', test: 7 }] }),
+    validPackage({ difficulty: undefined }),
+    validPackage({ difficulty: { level: 'trivial', reason: 'x' } }),
+    validPackage({ difficulty: { level: 'easy', reason: '' } }),
+    validPackage({ difficulty: { level: 'easy', reason: 'x'.repeat(121) } }),
+    validPackage({ difficulty: { level: 'easy', reason: '换行\u0007' } }),
   ];
   for (const pkg of cases) assert.throws(() => productLead.validatePlan(validPlan([pkg])), { code: 'agent_bad_output' });
   const seven = Array.from({ length: 7 }, () => validPackage());
@@ -108,4 +114,13 @@ test('toTaskDefinitions() builds queue-ready packages with stable ids', () => {
   assert.equal(def.requirementId, 'req-1');
   assert.equal(def.estimate, '预计 2 小时');
   assert.match(def.intro, /登录/);
+  // The difficulty reaches the queue as validated, trimmed text.
+  assert.deepEqual(def.difficulty, { level: 'easy', reason: '照着现有的登录代码改一个文件。' });
+});
+
+test('the plan schema asks for a difficulty level from the allowlist', () => {
+  const item = productLead.PLAN_SCHEMA.properties.packages.items;
+  assert.ok(item.required.includes('difficulty'));
+  assert.deepEqual(item.properties.difficulty.properties.level.enum, productLead.DIFFICULTIES);
+  assert.match(productLead.planPrompt({ text: '登录' }), /Difficulty, for a developer who may be new to programming/);
 });

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import DifficultyChip from '@/components/DifficultyChip.vue';
 import OnboardingChecklist from '@/components/OnboardingChecklist.vue';
 import { useAppStore } from '@/stores/app.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
@@ -187,6 +188,7 @@ const teamOnline = computed(() => overview.value?.team.available === true);
                   <AppIcon name="clock" />
                   {{ task.estimate }}
                 </span>
+                <DifficultyChip :difficulty="task.difficulty" />
               </div>
               <AppIcon name="chevron-right" class="task-go" />
             </div>

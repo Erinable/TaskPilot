@@ -82,6 +82,7 @@ const harness = async ({
   let prefs = preferences.defaults();
   const changes: { next: preferences.Preferences; previous: preferences.Preferences }[] = [];
   const revealed: string[] = [];
+  const launched: { file: string; args: string[] }[] = [];
   let shellReads = 0;
   const requirements = await new RequirementStore(repoDir).load();
   const activity = new ActivityLog(repoDir, { timeZone: 'Asia/Shanghai' });
@@ -115,6 +116,8 @@ const harness = async ({
       revealPath: async (dir) => {
         revealed.push(dir);
       },
+      revealFile: (file) => void revealed.push(file),
+      launchEditor: async (file, args) => void launched.push({ file, args }),
       appVersion: '9.9.9',
       requirements,
       activity,
@@ -150,6 +153,7 @@ const harness = async ({
     getConfig,
     changes,
     revealed,
+    launched,
     requirements,
     agentCalls,
     shellReads: () => shellReads,
@@ -181,6 +185,7 @@ const PLAN_OUTPUT = {
       steps: ['创建 `LoginUserUseCase`。'],
       fileScope: ['src/auth/application/login-user.ts'],
       acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
+      difficulty: { level: 'medium', reason: '要用到异步读写数据库。' },
     },
   ],
 };
@@ -430,6 +435,22 @@ test('data:reveal only ever opens the config directory', async () => {
   // Arguments from the renderer are ignored.
   await handlersCall(call, CHANNELS.dataReveal, '/etc');
   assert.deepEqual(revealed, [configDir]);
+});
+
+test('workspace:open-file opens workspace files and refuses anything outside', async () => {
+  const { call, root, revealed, launched } = await harness();
+  await fs.mkdir(path.join(root, 'src'), { recursive: true });
+  await fs.writeFile(path.join(root, 'src/a.ts'), 'x\n');
+  const opened = await call(CHANNELS.workspaceOpenFile, 'src/a.ts', 4);
+  assert.equal(opened.ok, true);
+  // Wherever it went, it went with the real path inside the workspace.
+  const target = launched.at(-1)?.args.at(-1) ?? revealed.at(-1) ?? '';
+  assert.ok(target.endsWith(`${path.sep}src${path.sep}a.ts`) || target.endsWith(`a.ts:4`), target);
+  const outside = await call(CHANNELS.workspaceOpenFile, '../../etc/passwd', null);
+  assert.equal(outside.ok, false);
+  assert.equal(outside.error.code, 'path_outside_workspace');
+  const missing = await call(CHANNELS.workspaceOpenFile, 'src/nope.ts', null);
+  assert.equal(missing.error.code, 'file_missing');
 });
 
 const handlersCall = async (call, channel, ...args) => {

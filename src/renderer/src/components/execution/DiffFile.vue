@@ -5,6 +5,7 @@ import AppIcon from '@/components/AppIcon.vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
+import { openWorkspaceFile } from '@/lib/open_file.ts';
 import type { DiffLineKind } from '@/lib/review_model.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -39,15 +40,27 @@ const toggle = () => {
 
 <template>
   <div class="diff-file">
-    <button class="diff-file-header" type="button" :aria-expanded="expanded ? 'true' : 'false'" @click="toggle">
-      <AppIcon name="chevron-right" class="diff-chevron" />
-      <span class="scope-path">{{ change.path }}</span>
-      <span v-if="change.untracked" class="scope-tag new">新文件</span>
-      <span v-if="!change.binary" class="scope-churn">
-        <span class="added">+{{ change.added }}</span>
-        <span class="removed">-{{ change.removed }}</span>
-      </span>
-    </button>
+    <!-- Two buttons side by side: a button may not contain another one. -->
+    <div class="diff-file-row">
+      <button class="diff-file-header" type="button" :aria-expanded="expanded ? 'true' : 'false'" @click="toggle">
+        <AppIcon name="chevron-right" class="diff-chevron" />
+        <span class="scope-path">{{ change.path }}</span>
+        <span v-if="change.untracked" class="scope-tag new">新文件</span>
+        <span v-if="!change.binary" class="scope-churn">
+          <span class="added">+{{ change.added }}</span>
+          <span class="removed">-{{ change.removed }}</span>
+        </span>
+      </button>
+      <button
+        class="icon-button small scope-open"
+        type="button"
+        :title="`在编辑器中打开 ${change.path}`"
+        :aria-label="`在编辑器中打开 ${change.path}`"
+        @click="openWorkspaceFile(change.path)"
+      >
+        <AppIcon name="external-link" />
+      </button>
+    </div>
     <div class="diff-body" :hidden="!expanded">
       <div v-for="(line, index) in lines ?? []" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
     </div>

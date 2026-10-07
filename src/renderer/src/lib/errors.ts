@@ -50,6 +50,9 @@ export const ERROR_HINTS: Record<string, string> = {
   path_not_markdown: '更新说明只能写入 .md 文件。',
   path_in_git: '不能写入 .git 目录。',
   path_secret: '这个路径看起来是敏感文件，已拒绝。',
+  file_missing: '这个文件还不存在。按执行指令新建它后再打开。',
+  not_a_file: '这不是一个文件。',
+  invalid_line: '行号无效。',
 };
 
 export const describeError = (error: unknown) => (error instanceof Error ? (ERROR_HINTS[(error as IpcError).code] ?? error.message) : String(error));

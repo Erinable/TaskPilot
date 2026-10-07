@@ -306,6 +306,12 @@ export const ICONS = {
       ['path', { d: 'M9.5 4.5v15' }],
     ],
   },
+  'external-link': {
+    shapes: [
+      ['path', { d: 'M13.5 4.5h6v6M19.5 4.5l-8 8' }],
+      ['path', { d: 'M17.5 13.5v4.5a1.5 1.5 0 0 1-1.5 1.5H6a1.5 1.5 0 0 1-1.5-1.5V8A1.5 1.5 0 0 1 6 6.5h4.5' }],
+    ],
+  },
 } satisfies Record<string, IconDefinition>;
 
 export type IconName = keyof typeof ICONS;

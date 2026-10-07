@@ -1804,6 +1804,16 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Open in editor: quiet until the row is hovered or the button focused. */
+.scope-open {
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+.scope-row:hover .scope-open,
+.diff-file-row:hover .scope-open,
+.scope-open:focus-visible {
+  opacity: 1;
+}
 .scope-churn {
   margin-left: auto;
   color: var(--text-tertiary);
@@ -1991,7 +2001,14 @@ code {
 .diff-file + .diff-file {
   margin-top: 4px;
 }
+.diff-file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
 .diff-file-header {
+  min-width: 0;
+  flex: 1;
   width: 100%;
   display: flex;
   align-items: center;
@@ -2215,6 +2232,34 @@ code {
 .review-issue small .icon {
   width: 12px;
   height: 12px;
+}
+/* A QA issue's file:line, opening the editor there. */
+.issue-location {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  margin-top: var(--space-1);
+  padding: 2px 6px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  font: var(--text-xs) var(--font-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.issue-location:hover {
+  background: var(--fill-hover);
+  text-decoration: underline;
+}
+.issue-location .icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+.issue-location .issue-open {
+  opacity: 0.7;
 }
 .review-issue p {
   margin: 0;

@@ -33,6 +33,7 @@ import { CHANNELS } from '../shared/ipc_channels.ts';
 import { businessDay, computeAgentCosts, computeMetrics, recentByAgent, RETENTION_DAYS } from './activity_log.ts';
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
+import { openWorkspaceFile } from './open_file.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
@@ -193,6 +194,10 @@ export type IpcDeps = {
   onPreferencesChanged?: (next: preferences.Preferences, previous: preferences.Preferences) => void;
   // Opens a folder in the OS.
   revealPath?: (dir: string) => Promise<void>;
+  // Shows a workspace file in the OS file manager (shell.showItemInFolder).
+  revealFile?: (file: string) => void;
+  // Replaces how open_file.ts starts the editor (tests).
+  launchEditor?: (file: string, args: string[]) => Promise<void>;
   // Shown on the environment page.
   appVersion?: string;
   // Enables the requirement flow.
@@ -224,6 +229,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     pathResolver = createPathResolver(),
     onPreferencesChanged,
     revealPath,
+    revealFile,
+    launchEditor,
     appVersion,
     requirements = null,
     runAgent = claudeCli.runStructured,
@@ -1032,6 +1039,21 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const config = getConfig();
       if (!config.root) return { configured: false };
       return { configured: true, root: config.root, ...(await git.describe(config.root)) };
+    }),
+  );
+
+  // Opens a workspace file in the developer's editor, at a line when given.
+  // The path may come from a QA issue (model text); open_file.ts confines it
+  // to the workspace after symlinks.
+  ipcMain.handle(
+    CHANNELS.workspaceOpenFile,
+    wrap(async (_event, filePath, line): Promise<ipc.OpenedWith> => {
+      if (!revealFile) return failWith('Opening files is unavailable', 'unsupported');
+      const root = requireRoot();
+      const { path: envPath } = await commandPath();
+      // Anything but a number or null is passed as NaN, which open_file.ts rejects as invalid_line.
+      const lineNumber = line === null || line === undefined ? null : typeof line === 'number' ? line : Number.NaN;
+      return openWorkspaceFile(root, requireString(filePath, 'path'), lineNumber, { envPath, launch: launchEditor, reveal: revealFile });
     }),
   );
 

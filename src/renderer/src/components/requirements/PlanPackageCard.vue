@@ -3,6 +3,7 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import DifficultyChip from '@/components/DifficultyChip.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { PRIORITY_LABELS } from './requirement_model.ts';
 import type { IconName } from '@/lib/icons.ts';
@@ -38,6 +39,7 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
     <div class="task-tags">
       <span v-for="(tag, tagIndex) in tags" :key="tagIndex" class="tag">{{ tag }}</span>
     </div>
+    <DifficultyChip :difficulty="pkg.difficulty" detailed class="plan-difficulty" />
     <div class="plan-section">
       <h4>执行指令</h4>
       <ol class="plan-steps">

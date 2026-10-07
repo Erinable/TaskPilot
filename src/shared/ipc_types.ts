@@ -35,6 +35,11 @@ export type AgentTransition = 'breakdown_done' | 'review_accepted' | 'review_pas
 
 export type Priority = 'high' | 'medium' | 'low';
 
+// How hard a package is for someone new to programming, and why, in plain
+// words. Product Lead sets it; packages planned before it existed have none.
+export type Difficulty = 'easy' | 'medium' | 'hard';
+export type PackageDifficulty = { level: Difficulty; reason: string };
+
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
 
@@ -56,6 +61,7 @@ export type TaskDefinition = {
   acceptance: AcceptanceCriterion[];
   // Set on packages generated from a requirement.
   requirementId?: string;
+  difficulty?: PackageDifficulty;
 };
 
 // The parts of a definition Architect's replan replaces.
@@ -362,6 +368,10 @@ export type WorkspaceCheck = {
 
 export type WorkspaceInfo = { configured: false } | ({ configured: true; root: string } & RepoInfo);
 
+// workspace:open-file: where the file ended up. 'folder' means no editor was
+// found and the file was shown in the file manager instead.
+export type OpenedWith = 'vscode' | 'text_editor' | 'folder';
+
 // ========== preferences, environment, data ==========
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -425,6 +435,7 @@ export type PlanPackage = {
   steps: string[];
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
+  difficulty?: PackageDifficulty;
 };
 
 export type RequirementPlan = { summary: string; packages: PlanPackage[] };

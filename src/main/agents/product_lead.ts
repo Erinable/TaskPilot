@@ -4,18 +4,20 @@
 // SECURITY: everything the model returns is untrusted. It is validated here
 // against fixed limits before it reaches the store or the UI:
 //   - text fields have length caps and no control characters;
-//   - enums (priority, icon) come from allowlists;
+//   - enums (priority, icon, difficulty) come from allowlists;
 //   - file scopes must be plain relative paths with no `..`, so they can't
 //     point diff reads outside the repository;
 //   - packages never carry commands. Verification commands come only from
 //     workspace settings (see ../workspace.ts).
 
+import type { PackageDifficulty } from '../../shared/ipc_types.ts';
 import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 
 export const MAX_QUESTIONS = 5;
 export const MAX_PACKAGES = 6;
 const PRIORITIES = ['high', 'medium', 'low'] as const;
+export const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
 // Icons the renderer defines (see renderer/src/lib/icons.ts) that suit a work package.
 export const PACKAGE_ICONS = ['key', 'flask', 'blocks', 'rocket', 'file', 'terminal', 'box', 'diff', 'git-branch', 'database'] as const;
 
@@ -56,6 +58,7 @@ export interface PlanPackage {
   steps: string[];
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
+  difficulty: PackageDifficulty;
 }
 
 export interface Plan {
@@ -153,6 +156,12 @@ export const planPrompt = ({ title, text, questions, files, interfaces }: Requir
     '- Acceptance criteria are checkable outcomes. Give every package at least one criterion with `test` set to the exact name of a test the developer should write; test names must be unique across the plan.',
     '- Never include shell commands to run.',
     '',
+    'Difficulty, for a developer who may be new to programming:',
+    '- easy: follows a pattern already in the repository, in one or two files, with no new concepts.',
+    '- medium: touches several files, or uses one idea the developer may not know yet (async code, a new library call, a database query).',
+    '- hard: new structure, several unfamiliar ideas together, or tricky cases such as concurrency, security or data migration.',
+    '- reason names the concrete thing that makes it easy or hard, in one plain sentence without jargon.',
+    '',
     '<requirement>',
     title ? `Title: ${title}` : null,
     text,
@@ -199,7 +208,7 @@ export const PLAN_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['title', 'description', 'module', 'tags', 'priority', 'estimateHours', 'icon', 'steps', 'fileScope', 'acceptance'],
+        required: ['title', 'description', 'module', 'tags', 'priority', 'estimateHours', 'icon', 'steps', 'fileScope', 'acceptance', 'difficulty'],
         properties: {
           title: str(60),
           description: str(120, 'One line shown in the work queue'),
@@ -219,6 +228,15 @@ export const PLAN_SCHEMA = {
               additionalProperties: false,
               required: ['text'],
               properties: { text: str(200), test: str(120, 'Exact name of the test that proves this') },
+            },
+          },
+          difficulty: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['level', 'reason'],
+            properties: {
+              level: { type: 'string', enum: DIFFICULTIES },
+              reason: str(120, 'Why, in one plain sentence a beginner understands'),
             },
           },
         },
@@ -269,6 +287,12 @@ export const scopePath = (value: unknown, path: string): string => {
   return segments.join('/');
 };
 
+// A package's difficulty: a level from the allowlist and a short reason.
+const difficulty = (value: unknown, path: string): PackageDifficulty => {
+  if (!isObject(value)) fail(path, 'is not an object');
+  return { level: oneOf(value.level, DIFFICULTIES, `${path}.level`), reason: text(value.reason, `${path}.reason`, 120) };
+};
+
 export const validateClarify = (raw: unknown): Clarification => {
   if (!isObject(raw)) fail('output', 'is not an object');
   return {
@@ -303,6 +327,7 @@ export const validatePlan = (raw: unknown): Plan => {
         if (testName) criterion.test = testName;
         return criterion;
       }),
+      difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
     };
   });
   return { summary: text(raw.summary, 'summary', 800), packages };
@@ -333,5 +358,6 @@ export const toTaskDefinitions = (requirement: { id: string; title: string }, pa
     steps: pkg.steps,
     fileScope: pkg.fileScope,
     acceptance: pkg.acceptance,
+    difficulty: pkg.difficulty,
     requirementId: requirement.id,
   }));
