@@ -92,6 +92,15 @@ export class ReleaseStore {
     this.#now = now;
   }
 
+  // Rebinds the store to another data directory (a repository switch) and
+  // loads it. Pending writes land in the old directory first.
+  async open(configDir: string): Promise<this> {
+    await this.flush();
+    this.#file = path.join(configDir, RELEASES_FILENAME);
+    this.#state = { draft: null, history: [], releasedPackageIds: [] };
+    return this.load();
+  }
+
   async load(): Promise<this> {
     try {
       const saved = JSON.parse(await fs.readFile(this.#file, 'utf8')) as Partial<SavedState> | null;
@@ -124,6 +133,11 @@ export class ReleaseStore {
     });
     this.#writes = write.catch(() => {});
     return write;
+  }
+
+  // Resolves once every write so far has landed.
+  flush(): Promise<void> {
+    return this.#writes;
   }
 
   #mustDraft(statuses: DraftStatus[]): ReleaseDraft {

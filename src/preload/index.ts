@@ -109,6 +109,16 @@ const api = {
     writeNotes: (input: ipc.ReleaseWriteInput) => invoke<ipc.ReleaseWriteResult>(CHANNELS.releaseWriteNotes, input),
     cancel: () => invoke<boolean>(CHANNELS.releaseCancel),
   },
+
+  repositories: {
+    list: () => invoke<ipc.RepositoryList>(CHANNELS.repositoriesList),
+    // Validates and registers a root; `open` also switches to it.
+    add: (root: string, open: boolean) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesAdd, root, open),
+    // Cancels running work first; ask with busy() before calling.
+    switch: (id: string) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesSwitch, id),
+    relocate: (id: string, root: string) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesRelocate, id, root),
+    busy: () => invoke<ipc.BusyRun[]>(CHANNELS.repositoriesBusy),
+  },
 };
 
 export type TaskPilotApi = typeof api;

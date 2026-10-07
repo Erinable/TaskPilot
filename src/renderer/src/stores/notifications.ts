@@ -1,6 +1,6 @@
 // The notification center behind the top-bar bell: what needs the human,
 // derived from the tasks and requirements stores, with read state kept on
-// this machine in localStorage.
+// this machine in localStorage, one key per repository.
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
@@ -12,10 +12,13 @@ import { useTasksStore } from './tasks.ts';
 export const READ_STORAGE_KEY = 'taskpilot.notifications.read';
 export const REFRESH_MS = 30_000;
 
+// Package and requirement ids are only unique within a repository.
+export const readStorageKey = (repositoryId: string | null) => (repositoryId ? `${READ_STORAGE_KEY}.${repositoryId}` : READ_STORAGE_KEY);
+
 // localStorage is per-machine convenience data; anything unreadable is empty.
-const loadRead = (): string[] => {
+const loadRead = (key: string): string[] => {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(READ_STORAGE_KEY) ?? '[]');
+    const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
     return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
   } catch (error) {
     console.error('[notifications] read state unreadable', error);
@@ -32,13 +35,19 @@ export const useNotificationsStore = defineStore('notifications', () => {
   const items = computed(() => all.value.slice(0, notifications.MAX_NOTIFICATIONS));
 
   // ========== Read state ==========
-  const readIds = ref(new Set(loadRead()));
+  let storageKey = READ_STORAGE_KEY;
+  const readIds = ref(new Set(loadRead(storageKey)));
+  // Called when a repository opens, so its own read state applies.
+  const useRepository = (repositoryId: string | null) => {
+    storageKey = readStorageKey(repositoryId);
+    readIds.value = new Set(loadRead(storageKey));
+  };
   const isRead = (id: string) => readIds.value.has(id);
   const unreadCount = computed(() => items.value.filter((item) => !readIds.value.has(item.id)).length);
 
   const saveRead = (ids: Iterable<string>) => {
     readIds.value = new Set(ids);
-    localStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...readIds.value]));
+    localStorage.setItem(storageKey, JSON.stringify([...readIds.value]));
   };
 
   const markRead = (id: string) => {
@@ -92,6 +101,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     items,
     // Read state
     readIds,
+    useRepository,
     isRead,
     unreadCount,
     markRead,

@@ -8,11 +8,11 @@ import { WorkPackageStore } from './work_package_store.ts';
 import { listTasks, setGeneratedTasks } from './tasks.ts';
 import { RequirementStore } from './requirement_store.ts';
 import { ReleaseStore } from './release_store.ts';
-import * as workspace from './workspace.ts';
 import * as preferences from './preferences.ts';
 import { createPathResolver } from './shell_env.ts';
 import { env } from './env.ts';
 import { ActivityLog } from './activity_log.ts';
+import { RepositoryRegistry } from './repositories.ts';
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -80,15 +80,19 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
   const configDir = app.getPath('userData');
-  let config = await workspace.load(configDir);
+  // Moves pre-repository files into place on the first start of this version.
+  const repositories = await new RepositoryRegistry(configDir).load();
+  // Everything below belongs to the open repository (or the unassigned data).
+  const repoDir = repositories.dataDir();
+  let config = await repositories.loadConfig();
   let prefs = await preferences.load(configDir);
   // Generated packages must be known before the work package store loads, or
   // their saved progress would be dropped as unknown ids.
-  const requirements = await new RequirementStore(configDir).load();
+  const requirements = await new RequirementStore(repoDir).load();
   setGeneratedTasks(requirements.publishedPackages());
-  const store = await new WorkPackageStore(configDir).load(listTasks());
-  const activity = new ActivityLog(configDir, { timeZone: env.businessTimeZone });
-  const releases = await new ReleaseStore(configDir).load();
+  const store = await new WorkPackageStore(repoDir).load(listTasks());
+  const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
+  const releases = await new ReleaseStore(repoDir).load();
   // Expired day files go at startup; a failure only leaves old files behind.
   activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -99,6 +103,7 @@ app.whenReady().then(async () => {
   const ipc = registerIpcHandlers(ipcMain, {
     store,
     configDir,
+    repositories,
     getConfig: () => config,
     setConfig: (next) => {
       config = next;

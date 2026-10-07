@@ -49,6 +49,11 @@ export const CHANNELS = {
   releaseFinish: 'release:finish',
   releaseWriteNotes: 'release:write-notes',
   releaseCancel: 'release:cancel',
+  repositoriesList: 'repositories:list',
+  repositoriesAdd: 'repositories:add',
+  repositoriesSwitch: 'repositories:switch',
+  repositoriesRelocate: 'repositories:relocate',
+  repositoriesBusy: 'repositories:busy',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

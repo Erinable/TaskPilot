@@ -79,7 +79,7 @@ describe('MapView', () => {
     state.result = { ok: true, data: engineeringMap({ modules: [], conventions: [], gaps: [], files: [] }) };
     const open = vi.spyOn(useSettingsStore(), 'open').mockResolvedValue();
     const wrapper = await render();
-    expect(wrapper.get('[data-empty="workspace"]').text()).toContain('请先配置工作区仓库');
+    expect(wrapper.get('[data-empty="workspace"]').text()).toContain('请先添加仓库');
     await wrapper.get('[data-action="settings"]').trigger('click');
     expect(open).toHaveBeenCalledWith('repository');
   });
@@ -158,7 +158,7 @@ describe('MapView', () => {
   test('errors show the described message, and refresh reloads', async () => {
     state.result = { ok: false, error: { code: 'no_workspace', message: 'x' } };
     const wrapper = await render();
-    expect(wrapper.get('[data-error]').text()).toBe('尚未配置工作区，请先在设置里指定仓库路径。 重试');
+    expect(wrapper.get('[data-error]').text()).toBe('还没有仓库，请先在顶栏的仓库菜单里添加。 重试');
     expect(wrapper.get('[data-error] .empty-action').text()).toBe('重试');
     state.result = { ok: true, data: engineeringMap() };
     await wrapper.get('[data-action="refresh"]').trigger('click');

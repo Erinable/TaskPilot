@@ -22,7 +22,8 @@ import {
   throwIfCancelled,
   RELEASE_MAX_COMMITS,
 } from './agents/pipeline.ts';
-import { STATE_FILENAME, humanTransitions } from './work_package_store.ts';
+import { humanTransitions } from './work_package_store.ts';
+import { REGISTRY_FILENAME, REPO_FILES } from './repositories.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
@@ -37,6 +38,7 @@ import type { BaselineChecks, BaselineChecksStatus, DeviationInput, WorkPackageS
 import type { Requirement, RequirementStore } from './requirement_store.ts';
 import type { EnvFailure } from './agents/env_steward.ts';
 import type { ReleaseStore } from './release_store.ts';
+import type { RepositoryEntry, RepositoryRegistry } from './repositories.ts';
 import type { ReleasePackage } from './agents/pipeline.ts';
 import type { TaskDefinition } from './tasks.ts';
 
@@ -171,8 +173,10 @@ type RunAgent = claudeCli.RunAgent;
 
 export type IpcDeps = {
   store: WorkPackageStore;
-  // Where workspace.json lives.
+  // userData: preferences and the repository registry live here.
   configDir: string;
+  // Known repositories; each keeps its own data directory.
+  repositories: RepositoryRegistry;
   // In-memory accessors for the loaded config.
   getConfig: () => workspace.WorkspaceConfig;
   setConfig: (config: workspace.WorkspaceConfig) => void;
@@ -206,6 +210,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const {
     store,
     configDir,
+    repositories,
     getConfig,
     setConfig,
     pickDirectory,
@@ -233,25 +238,32 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // an existing directory inside a git repository; it is then normalized to
   // the repository's top level, because git reports diff paths relative to
   // that and file scopes would otherwise never match.
-  const validateForm = async (form: unknown) => {
-    const config = workspace.fromForm(form as workspace.WorkspaceFormInput, getConfig());
-    const info: { normalizedFrom: string | null; repo: ipc.RepoInfo | null } = { normalizedFrom: null, repo: null };
-    if (!config.root) return { config, info };
-
-    if (!path.isAbsolute(config.root)) failWith('Workspace root must be an absolute path', 'root_not_absolute', 'root');
+  const validateRoot = async (candidate: unknown) => {
+    const root = requireString(candidate, 'root').trim();
+    if (!path.isAbsolute(root)) failWith('Workspace root must be an absolute path', 'root_not_absolute', 'root');
     let stat;
     try {
-      stat = await fs.stat(config.root);
+      stat = await fs.stat(root);
     } catch {
-      return failWith(`Directory not found: ${config.root}`, 'root_not_found', 'root');
+      return failWith(`Directory not found: ${root}`, 'root_not_found', 'root');
     }
-    if (!stat.isDirectory()) failWith(`Not a directory: ${config.root}`, 'root_not_found', 'root');
-    if (!(await git.isRepo(config.root))) failWith('Workspace root is not a git repository', 'not_a_repo', 'root');
+    if (!stat.isDirectory()) failWith(`Not a directory: ${root}`, 'root_not_found', 'root');
+    if (!(await git.isRepo(root))) failWith('Workspace root is not a git repository', 'not_a_repo', 'root');
+    const top = await git.topLevel(root);
+    return { root: top, repo: await git.describe(top) };
+  };
 
-    const top = await git.topLevel(config.root);
-    if (path.resolve(top) !== path.resolve(config.root)) info.normalizedFrom = config.root;
-    config.root = top;
-    info.repo = await git.describe(top);
+  // Parses and checks a settings form. The root is the open repository's,
+  // whatever the form says: repositories are added and moved through
+  // repositories:add and repositories:relocate.
+  const validateForm = async (form: unknown) => {
+    const config = workspace.fromForm(form as workspace.WorkspaceFormInput, getConfig());
+    config.root = getConfig().root;
+    const info: { repo: ipc.RepoInfo | null } = { repo: null };
+    if (!config.root) return { config, info };
+    const checked = await validateRoot(config.root);
+    config.root = checked.root;
+    info.repo = checked.repo;
     return { config, info };
   };
 
@@ -398,6 +410,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // Without a workspace it still runs, on the package text alone.
   const startAdjudication = async (id: string) => {
     const task = requireTask(id);
+    // Fixed at the start: a repository switch cancels the run, but the code
+    // must never be read from the next repository meanwhile.
+    const { root } = getConfig();
     const entry = await store.beginAdjudication(id);
     const controller = new AbortController();
     adjudications.set(id, controller);
@@ -406,7 +421,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       try {
         const { path: envPath } = await commandPath();
         const result = await adjudicateDeviation(task, {
-          root: getConfig().root,
+          root,
           deviations: entry.deviations,
           // beginAdjudication() has just set it.
           mustReplan: entry.adjudication?.mustReplan === true,
@@ -622,7 +637,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.workspaceSet,
     wrap(async (_event, form): Promise<ipc.WorkspaceView> => {
       const { config } = await validateForm(form);
-      const saved = await workspace.save(configDir, config);
+      const saved = await repositories.saveConfig(config);
       setConfig(saved);
       return toFormView(saved);
     }),
@@ -643,7 +658,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             { configured: true, resolved: await workspace.resolveExecutable(entry.command, { cwd: config.root, envPath }) }
           : { configured: false, resolved: null };
       }
-      return { root: config.root, normalizedFrom: info.normalizedFrom, repo: info.repo, commands };
+      return { root: config.root, repo: info.repo, commands };
     }),
   );
 
@@ -692,11 +707,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   ipcMain.handle(
     CHANNELS.dataInfo,
-    wrap((): ipc.DataInfo => ({
-      configDir,
-      files: [workspace.CONFIG_FILENAME, preferences.PREFERENCES_FILENAME, STATE_FILENAME],
-      packages: store.summary(),
-    })),
+    wrap((): ipc.DataInfo => {
+      const repoDir = path.relative(configDir, repositories.dataDir());
+      return {
+        configDir,
+        files: [preferences.PREFERENCES_FILENAME, REGISTRY_FILENAME, ...REPO_FILES.map((name) => path.join(repoDir, name))],
+        packages: store.summary(),
+      };
+    }),
   );
 
   // Only resets execution progress; workspace config and preferences stay.
@@ -736,8 +754,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Repository paths Product Lead sees: tracked files only (gitignored and
   // untracked files are left out), capped, and never their contents.
-  const repositoryFiles = async (): Promise<string[]> => {
-    const root = getConfig().root;
+  const repositoryFiles = async (root: string | null): Promise<string[]> => {
     if (!root) return [];
     try {
       return await git.listFiles(root, { limit: 400 });
@@ -762,7 +779,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const item = await store.begin(id, step);
     const controller = new AbortController();
     runs.set(id, controller);
-    const files = await repositoryFiles();
+    // Fixed at the start, like the adjudication's root.
+    const { root } = getConfig();
+    const files = await repositoryFiles(root);
     const { path: envPath } = await commandPath();
     // Not awaited: the renderer polls requirements:get for the result.
     const settled = (async () => {
@@ -776,7 +795,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           await store.setPhase(id, 'architect');
           const result = await summarizeForRequirement(item, {
             runAgent,
-            root: getConfig().root,
+            root,
             files,
             envPath,
             signal: controller.signal,
@@ -1253,7 +1272,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         const kept = config.checks[kind];
         checks[kind] = { ...envSetup.scriptCommand(name), stage: kept?.stage, blocking: kept?.blocking };
       }
-      setConfig(await workspace.save(configDir, { ...config, checks }));
+      setConfig(await repositories.saveConfig(workspace.normalize({ ...config, checks })));
       return envView();
     }),
   );
@@ -1509,16 +1528,117 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
+  // Repositories
+
+  // What a switch would cancel, named for the confirmation dialog.
+  const busyRuns = (): ipc.BusyRun[] => {
+    const packageTitle = (id: string) => tasks.getTask(id)?.title ?? id;
+    return [
+      ...[...runs.keys()].map((id): ipc.BusyRun => ({ kind: 'requirement', label: requirements?.get(id).title || id })),
+      ...[...reviews.keys()].map((id): ipc.BusyRun => ({ kind: 'review', label: packageTitle(id) })),
+      ...[...adjudications.keys()].map((id): ipc.BusyRun => ({ kind: 'adjudication', label: packageTitle(id) })),
+      ...[...baselineRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'baseline', label: packageTitle(id) })),
+      ...(releaseController ? [{ kind: 'release', label: '发布说明' } as ipc.BusyRun] : []),
+      ...(envController ? [{ kind: 'environment', label: '环境初始化' } as ipc.BusyRun] : []),
+    ];
+  };
+
+  // Cancels every background run and waits for its final write, so nothing
+  // lands in the next repository's stores.
+  const cancelAll = async () => {
+    envController?.abort();
+    releaseController?.abort();
+    for (const controller of baselineRuns.values()) controller.abort();
+    for (const controller of runs.values()) controller.abort();
+    for (const controller of reviews.values()) controller.abort();
+    for (const controller of adjudications.values()) controller.abort();
+    await Promise.allSettled([...pendingRuns]);
+  };
+
+  const repositoryList = async (): Promise<ipc.RepositoryList> => {
+    const current = repositories.current?.id ?? null;
+    const entries = repositories.list();
+    const present = await Promise.all(entries.map((entry) => git.isRepo(entry.root).catch(() => false)));
+    return {
+      current,
+      repositories: entries.map((entry: RepositoryEntry, index) => ({
+        id: entry.id,
+        root: entry.root,
+        name: path.basename(entry.root),
+        lastOpenedAt: entry.lastOpenedAt,
+        current: entry.id === current,
+        missing: !present[index],
+      })),
+    };
+  };
+
+  // [人工决策-2026-10-07 14:31:37] 切换仓库时有后台任务：渲染层先弹窗列出、用户确认后，这里取消全部任务再切；内存里同时只有一个仓库的数据。
+  // Order matters: the generated package list must be in place before the
+  // work package store loads, or saved progress is dropped as unknown ids.
+  const openRepository = async (id: string) => {
+    await cancelAll();
+    await Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush()]);
+    await repositories.open(id);
+    const dir = repositories.dataDir();
+    setConfig(await repositories.loadConfig());
+    if (requirements) {
+      await requirements.open(dir);
+      tasks.setGeneratedTasks(requirements.publishedPackages());
+    }
+    await store.open(dir, tasks.listTasks());
+    await releases?.open(dir);
+    await activity?.open(dir);
+    activity?.prune().catch((error) => console.error('[activity] prune failed', error));
+    // The steward's plan described the previous repository's toolchain.
+    env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null };
+    console.debug(`[repositories] switched id=${id} packages=${tasks.listTasks().length}`);
+  };
+
+  ipcMain.handle(
+    CHANNELS.repositoriesList,
+    wrap(() => repositoryList()),
+  );
+
+  ipcMain.handle(
+    CHANNELS.repositoriesBusy,
+    wrap((): ipc.BusyRun[] => busyRuns()),
+  );
+
+  ipcMain.handle(
+    CHANNELS.repositoriesAdd,
+    wrap(async (_event, rawRoot, open): Promise<ipc.RepositoryList> => {
+      const { root } = await validateRoot(rawRoot);
+      const hadCurrent = repositories.current !== null;
+      const entry = await repositories.add(root);
+      // The first repository adopts the unassigned data, which is what is loaded.
+      if (!hadCurrent || open === true) await openRepository(entry.id);
+      return repositoryList();
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.repositoriesSwitch,
+    wrap(async (_event, rawId): Promise<ipc.RepositoryList> => {
+      const id = requireString(rawId, 'id');
+      if (!repositories.get(id)) return failWith(`Unknown repository: ${id}`, 'unknown_repository');
+      if (repositories.current?.id !== id) await openRepository(id);
+      return repositoryList();
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.repositoriesRelocate,
+    wrap(async (_event, rawId, rawRoot): Promise<ipc.RepositoryList> => {
+      const id = requireString(rawId, 'id');
+      const { root } = await validateRoot(rawRoot);
+      await repositories.relocate(id, root);
+      if (repositories.current?.id === id) setConfig({ ...getConfig(), root });
+      return repositoryList();
+    }),
+  );
+
   return {
     // Cancels running agents and waits for their final writes.
-    async shutdown() {
-      envController?.abort();
-      releaseController?.abort();
-      for (const controller of baselineRuns.values()) controller.abort();
-      for (const controller of runs.values()) controller.abort();
-      for (const controller of reviews.values()) controller.abort();
-      for (const controller of adjudications.values()) controller.abort();
-      await Promise.allSettled([...pendingRuns]);
-    },
+    shutdown: cancelAll,
   };
 };

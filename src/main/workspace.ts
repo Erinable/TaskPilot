@@ -380,7 +380,9 @@ export const save = async (configDir: string, raw: unknown): Promise<WorkspaceCo
   const config = normalize(raw);
   await fs.mkdir(configDir, { recursive: true });
   const file = path.join(configDir, CONFIG_FILENAME);
-  await fs.writeFile(file, `${JSON.stringify(serialize(config), null, 2)}\n`);
+  // Through a temp file, so a crash mid-write leaves the previous config.
+  await fs.writeFile(`${file}.tmp`, `${JSON.stringify(serialize(config), null, 2)}\n`);
+  await fs.rename(`${file}.tmp`, file);
   return config;
 };
 

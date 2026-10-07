@@ -190,11 +190,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const renderWorkspaceCheck = (result: ipc.WorkspaceCheck) => {
     clearWorkspaceStatus();
     if (!result.root) {
-      setStatus('root', 'warn', '未配置仓库，diff 和验证不可用。');
+      setStatus('root', 'warn', '还没有添加仓库，diff 和验证不可用。');
       repoFacts.value = null;
     } else {
-      setStatus('root', 'ok', result.normalizedFrom ? `所选目录在仓库内，已改用仓库根目录 ${result.root}` : '这是一个 git 仓库');
-      if (workspaceDraft.value) workspaceDraft.value.root = result.root;
+      setStatus('root', 'ok', '这是一个 git 仓库');
       const repo = result.repo;
       repoFacts.value = repo
         ? [
@@ -221,18 +220,6 @@ export const useSettingsStore = defineStore('settings', () => {
     } catch (error) {
       showFieldError(error);
       return false;
-    }
-  };
-
-  const pickRoot = async () => {
-    try {
-      const picked = await call(window.taskpilot.workspace.pickRoot());
-      if (!picked || !workspaceDraft.value) return;
-      workspaceDraft.value.root = picked;
-      await checkWorkspace();
-    } catch (error) {
-      console.error(error);
-      showToast(`无法打开目录选择器：${describeError(error)}`);
     }
   };
 
@@ -447,7 +434,6 @@ export const useSettingsStore = defineStore('settings', () => {
     checkNameLength,
     // Repository
     checkWorkspace,
-    pickRoot,
     // Environment
     environmentLoading,
     environmentError,

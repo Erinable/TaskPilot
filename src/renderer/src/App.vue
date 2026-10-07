@@ -16,6 +16,8 @@ import { useTasksStore } from './stores/tasks.ts';
 import { useRequirementsStore } from './stores/requirements.ts';
 import { useSettingsStore } from './stores/settings.ts';
 import { useExecutionStore } from './stores/execution.ts';
+import { useNotificationsStore } from './stores/notifications.ts';
+import { useRepositoriesStore } from './stores/repositories.ts';
 import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
 
@@ -24,6 +26,7 @@ const tasks = useTasksStore();
 const requirements = useRequirementsStore();
 const settings = useSettingsStore();
 const execution = useExecutionStore();
+const repositories = useRepositoriesStore();
 
 // Dialogs (Element Plus) handle their own Escape; these are the page shortcuts.
 const onKeydown = (event: KeyboardEvent) => {
@@ -48,6 +51,9 @@ const ACTIVITY_POLL_MS = 15_000;
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown);
   app.startActivityPolling(ACTIVITY_POLL_MS);
+  // Notification read state is per repository, so the list comes first.
+  await repositories.refresh();
+  useNotificationsStore().useRepository(repositories.currentId);
   requirements.init().catch((error) => console.error(error));
   try {
     await app.loadPreferences();
@@ -61,7 +67,7 @@ onMounted(async () => {
     showToast(`工作包加载失败：${describeError(error)}`);
   }
   const info = await app.refreshWorkspaceStatus();
-  if (info && !info.configured) showToast('尚未配置工作区，diff 和验证暂不可用。', 'info');
+  if (info && !info.configured) showToast('还没有添加仓库，点顶栏的仓库菜单添加一个。', 'info');
 });
 
 onBeforeUnmount(() => {
@@ -84,12 +90,15 @@ onBeforeUnmount(() => {
       <SideBar />
       <!-- Settings and the requirement center lay out their own columns edge to edge. -->
       <main class="main-content" :class="{ 'full-bleed': app.view === 'settings' || app.view === 'requirements' }">
-        <QueueView v-if="app.view === 'queue'" />
-        <ExecutionView v-else-if="app.view === 'execution'" />
-        <RequirementsView v-else-if="app.view === 'requirements'" />
-        <MapView v-else-if="app.view === 'map'" />
-        <ActivityView v-else-if="app.view === 'activity'" />
-        <ReleaseView v-else-if="app.view === 'release'" />
+        <!-- Keyed on the repository switch, so each view remounts and reloads its own state. -->
+        <div v-if="app.view !== 'settings'" :key="repositories.generation" class="view-host">
+          <QueueView v-if="app.view === 'queue'" />
+          <ExecutionView v-else-if="app.view === 'execution'" />
+          <RequirementsView v-else-if="app.view === 'requirements'" />
+          <MapView v-else-if="app.view === 'map'" />
+          <ActivityView v-else-if="app.view === 'activity'" />
+          <ReleaseView v-else-if="app.view === 'release'" />
+        </div>
         <!-- Settings stays mounted so unsaved drafts survive leaving and coming back. -->
         <SettingsView v-show="app.view === 'settings'" />
       </main>

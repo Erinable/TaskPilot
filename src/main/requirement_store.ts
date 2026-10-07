@@ -110,6 +110,15 @@ export class RequirementStore {
     this.#now = now;
   }
 
+  // Rebinds the store to another data directory (a repository switch) and
+  // loads it. Pending writes land in the old directory first.
+  async open(configDir: string): Promise<this> {
+    await this.flush();
+    this.#file = path.join(configDir, REQUIREMENTS_FILENAME);
+    this.#items = new Map();
+    return this.load();
+  }
+
   async load(): Promise<this> {
     try {
       const saved: unknown = JSON.parse(await fs.readFile(this.#file, 'utf8'));
@@ -146,6 +155,11 @@ export class RequirementStore {
     // Keep the chain alive after a failed write; the caller still sees the error.
     this.#writes = write.catch(() => {});
     return write;
+  }
+
+  // Resolves once every write so far has landed.
+  flush(): Promise<void> {
+    return this.#writes;
   }
 
   // Not named #require: electron-vite treats any "require" call text in the bundle as CommonJS and injects a shim at the wrong spot.

@@ -26,8 +26,25 @@ import { STATE_FILENAME } from '../../src/main/work_package_store.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import * as preferences from '../../src/main/preferences.ts';
 import { createPathResolver } from '../../src/main/shell_env.ts';
+import { RepositoryRegistry } from '../../src/main/repositories.ts';
+import * as git from '../../src/main/git.ts';
 
 const run = promisify(execFile);
+
+// A one-commit repository with src/auth/application/login-user.ts.
+const gitRepo = async () => {
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-repo-'));
+  onTestFinished(() => fs.rm(repo, { recursive: true, force: true }));
+  const g = (args: string[]) => run('git', args, { cwd: repo });
+  await g(['init', '-b', 'main', '-q']);
+  await g(['config', 'user.email', 'test@example.com']);
+  await g(['config', 'user.name', 'Test']);
+  await fs.mkdir(path.join(repo, 'src/auth/application'), { recursive: true });
+  await fs.writeFile(path.join(repo, 'src/auth/application/login-user.ts'), 'export {};\n');
+  await g(['add', '.']);
+  await g(['commit', '-qm', 'init']);
+  return repo;
+};
 
 const harness = async ({
   withRepo = true,
@@ -46,34 +63,28 @@ const harness = async ({
   setGeneratedTasks(SAMPLE_TASKS);
   onTestFinished(() => setGeneratedTasks([]));
 
-  let root: string | null = null;
-  if (withRepo) {
-    const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-repo-'));
-    root = repo;
-    onTestFinished(() => fs.rm(repo, { recursive: true, force: true }));
-    const g = (args: string[]) => run('git', args, { cwd: repo });
-    await g(['init', '-b', 'main', '-q']);
-    await g(['config', 'user.email', 'test@example.com']);
-    await g(['config', 'user.name', 'Test']);
-    await fs.mkdir(path.join(repo, 'src/auth/application'), { recursive: true });
-    await fs.writeFile(path.join(repo, 'src/auth/application/login-user.ts'), 'export {};\n');
-    await g(['add', '.']);
-    await g(['commit', '-qm', 'init']);
-  }
+  const root = withRepo ? await gitRepo() : null;
+
+  // As at startup: the test repository is added and open, and its data lives
+  // in its own directory under configDir.
+  const repositories = await new RepositoryRegistry(configDir).load();
+  if (root) await repositories.open((await repositories.add(root)).id);
+  const repoDir = repositories.dataDir();
+  await fs.mkdir(repoDir, { recursive: true });
 
   // Saved package state, as if from an earlier session.
-  if (seedState) await fs.writeFile(path.join(configDir, STATE_FILENAME), JSON.stringify(seedState));
+  if (seedState) await fs.writeFile(path.join(repoDir, STATE_FILENAME), JSON.stringify(seedState));
 
-  let config = workspace.normalize({ root });
+  let config = await repositories.loadConfig();
   const handlers = new Map<Channel, (event: unknown, ...args: unknown[]) => any>();
-  const store = await new WorkPackageStore(configDir).load(listTasks());
+  const store = await new WorkPackageStore(repoDir).load(listTasks());
   let prefs = preferences.defaults();
   const changes: { next: preferences.Preferences; previous: preferences.Preferences }[] = [];
   const revealed: string[] = [];
   let shellReads = 0;
-  const requirements = await new RequirementStore(configDir).load();
-  const activity = new ActivityLog(configDir, { timeZone: 'Asia/Shanghai' });
-  const releases = await new ReleaseStore(configDir).load();
+  const requirements = await new RequirementStore(repoDir).load();
+  const activity = new ActivityLog(repoDir, { timeZone: 'Asia/Shanghai' });
+  const releases = await new ReleaseStore(repoDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   const pathResolver = createPathResolver({
@@ -88,6 +99,7 @@ const harness = async ({
     {
       store,
       configDir,
+      repositories,
       getConfig: () => config,
       setConfig: (next) => {
         config = next;
@@ -127,6 +139,8 @@ const harness = async ({
     store,
     root: root!,
     configDir,
+    repoDir,
+    repositories,
     activity,
     setCommands,
     setRoot,
@@ -385,7 +399,7 @@ test('verify:run uses the login-shell PATH once that preference is saved', async
 });
 
 test('data:reset-progress clears execution state but keeps config and preferences', async () => {
-  const { call, configDir, root } = await harness();
+  const { call, configDir, repoDir, root } = await harness();
   await call(CHANNELS.workspaceSet, { root, commands: { test: 'npm test' } });
   await call(CHANNELS.preferencesSet, validPrefs());
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
@@ -394,7 +408,7 @@ test('data:reset-progress clears execution state but keeps config and preference
   const { data } = await call(CHANNELS.dataResetProgress);
   assert.equal(data.claimed, 0);
   assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
-  assert.equal((await workspace.load(configDir)).commands.test!.command, 'npm');
+  assert.equal((await workspace.load(repoDir)).commands.test!.command, 'npm');
   assert.equal((await preferences.load(configDir)).profile.displayName, 'Ada Lovelace');
 });
 
@@ -642,46 +656,48 @@ test('git-backed channels refuse to run without a configured workspace', async (
   assert.equal((await call(CHANNELS.workspaceInfo)).data.configured, false);
 });
 
-test('workspace:set rejects a root that is not a git repository', async () => {
+test('repositories:add rejects a root that is not a git repository', async () => {
   const { call } = await harness({ withRepo: false });
   const plain = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-plain-'));
   onTestFinished(() => fs.rm(plain, { recursive: true, force: true }));
-  const response = await call(CHANNELS.workspaceSet, { root: plain });
+  const response = await call(CHANNELS.repositoriesAdd, plain, true);
   assert.equal(response.error.code, 'not_a_repo');
   assert.equal(response.error.field, 'root');
 });
 
-test('workspace:set does not persist a rejected config', async () => {
-  // Regression: validation used to run after the file was written, so a bad
-  // root survived and was reloaded on the next launch.
-  const { call, configDir } = await harness({ withRepo: false });
-  const response = await call(CHANNELS.workspaceSet, { root: '/definitely/not/here' });
-  assert.equal(response.error.code, 'root_not_found');
-  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
-});
-
-test('workspace:set rejects a relative root', async () => {
+test('repositories:add registers nothing for a rejected root', async () => {
   const { call } = await harness({ withRepo: false });
-  assert.equal((await call(CHANNELS.workspaceSet, { root: 'projects/app' })).error.code, 'root_not_absolute');
+  assert.equal((await call(CHANNELS.repositoriesAdd, '/definitely/not/here', true)).error.code, 'root_not_found');
+  assert.equal((await call(CHANNELS.repositoriesAdd, 'projects/app', true)).error.code, 'root_not_absolute');
+  assert.deepEqual((await call(CHANNELS.repositoriesList)).data, { current: null, repositories: [] });
 });
 
-test('workspace:set normalizes a subdirectory to the repository root', async () => {
+test('repositories:add normalizes a subdirectory to the repository root', async () => {
   // git reports diff paths from the top level, so a subdirectory root would
   // make every file scope miss.
-  const { call, root } = await harness();
-  const response = await call(CHANNELS.workspaceSet, { root: path.join(root, 'src', 'auth') });
+  const { call } = await harness({ withRepo: false });
+  const root = await gitRepo();
+  const response = await call(CHANNELS.repositoriesAdd, path.join(root, 'src'), true);
   assert.equal(response.ok, true);
-  assert.equal(await fs.realpath(response.data.root), await fs.realpath(root));
+  assert.equal(response.data.repositories.length, 1);
+  assert.equal(await fs.realpath(response.data.repositories[0].root), await fs.realpath(root));
+});
+
+test('workspace:set keeps the open repository root whatever the form says', async () => {
+  const { call, root } = await harness();
+  const response = await call(CHANNELS.workspaceSet, { root: '/somewhere/else', commands: { test: 'npm test' } });
+  assert.equal(response.ok, true);
+  assert.equal(response.data.root, root);
 });
 
 test('workspace:set saves command lines and workspace:get returns them as text', async () => {
-  const { call, root, configDir } = await harness();
+  const { call, root, repoDir } = await harness();
   const saved = await call(CHANNELS.workspaceSet, {
     root,
     commands: { test: 'node --test "tests/a b.test.js"', lint: '', build: 'npm run build' },
   });
   assert.equal(saved.ok, true);
-  assert.deepEqual((await workspace.load(configDir)).commands.test, { command: 'node', args: ['--test', 'tests/a b.test.js'] });
+  assert.deepEqual((await workspace.load(repoDir)).commands.test, { command: 'node', args: ['--test', 'tests/a b.test.js'] });
 
   const { data } = await call(CHANNELS.workspaceGet);
   assert.equal(data.lines.test, "node --test 'tests/a b.test.js'");
@@ -690,15 +706,15 @@ test('workspace:set saves command lines and workspace:get returns them as text',
 });
 
 test('workspace:set reports shell syntax against the right field', async () => {
-  const { call, root, configDir } = await harness();
+  const { call, root, repoDir } = await harness();
   const response = await call(CHANNELS.workspaceSet, { root, commands: { lint: 'eslint . && prettier --check .' } });
   assert.equal(response.error.code, 'shell_syntax');
   assert.equal(response.error.field, 'lint');
-  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
+  assert.equal((await workspace.load(repoDir)).commands.lint, null);
 });
 
 test('workspace:check validates and resolves commands without saving', async () => {
-  const { call, root, configDir } = await harness();
+  const { call, root, repoDir } = await harness();
   const { data } = await call(CHANNELS.workspaceCheck, {
     root,
     commands: { test: 'git status', lint: 'taskpilot-no-such-tool', build: '' },
@@ -708,7 +724,7 @@ test('workspace:check validates and resolves commands without saving', async () 
   assert.equal(data.commands.lint.configured, true);
   assert.equal(data.commands.lint.resolved, null);
   assert.equal(data.commands.build.configured, false);
-  assert.deepEqual(await workspace.load(configDir), workspace.emptyConfig());
+  assert.equal((await workspace.load(repoDir)).commands.test, null);
 });
 
 test('workspace:pick-root returns the picker result or reports unsupported', async () => {
@@ -792,7 +808,7 @@ const settleEnv = async (call) => {
 };
 
 test('env: plan, confirm steps one by one, then apply the scripts', async () => {
-  const { call, configDir } = await envHarness();
+  const { call, repoDir } = await envHarness();
   const started = await call(CHANNELS.envPlan);
   assert.equal(started.data.status, 'planning');
   const view = await settleEnv(call);
@@ -822,7 +838,7 @@ test('env: plan, confirm steps one by one, then apply the scripts', async () => 
   const applied = await call(CHANNELS.envApply, ['test']);
   assert.equal(applied.data.configured.test, 'npm test');
   assert.equal(applied.data.configured.lint, '');
-  const saved = JSON.parse(await fs.readFile(path.join(configDir, 'workspace.json'), 'utf8'));
+  const saved = JSON.parse(await fs.readFile(path.join(repoDir, 'workspace.json'), 'utf8'));
   assert.equal(saved.version, 2);
   assert.deepEqual(saved.checks.test, { command: 'npm', args: ['test'], stage: 'submit', blocking: true, report: { format: 'stdout' }, env: {} });
 });
@@ -1123,7 +1139,7 @@ test('activity: QA finishing a review is recorded as an agent transition', async
 test('activity: a failed append never fails the action', async () => {
   const h = await harness();
   // A file where the events directory should be makes every append fail.
-  await fs.writeFile(path.join(h.configDir, 'events'), '');
+  await fs.writeFile(path.join(h.repoDir, 'events'), '');
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   onTestFinished(() => errors.mockRestore());
   const claimed = await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
@@ -1348,4 +1364,66 @@ test('release: without a workspace the page reports it unconfigured', async () =
   assert.equal(state.configured, false);
   assert.equal(state.startPoint, null);
   assert.equal((await call(CHANNELS.releaseGenerate)).error.code, 'no_workspace');
+});
+
+test('repositories: each repository keeps its own requirements, progress and commands', async () => {
+  const { call, root } = await harness({ agent: fakeAgent() });
+  await call(CHANNELS.workspaceSet, { root, commands: { test: 'npm test' } });
+  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  const { data: created } = await call(CHANNELS.requirementsCreate, { text: 'first repo' });
+  await settle(call, created.id);
+
+  const other = await gitRepo();
+  const added = (await call(CHANNELS.repositoriesAdd, other, true)).data;
+  assert.equal(added.repositories.length, 2);
+  assert.equal(added.repositories.find((repo) => repo.current).root, await git.topLevel(other));
+  assert.deepEqual((await call(CHANNELS.requirementsList)).data, []);
+  assert.deepEqual((await call(CHANNELS.listTasks)).data, []);
+  assert.equal((await call(CHANNELS.workspaceGet)).data.lines.test, '');
+  assert.equal((await call(CHANNELS.workspaceInfo)).data.root, await git.topLevel(other));
+
+  const first = added.repositories.find((repo) => !repo.current);
+  await call(CHANNELS.repositoriesSwitch, first.id);
+  assert.deepEqual(
+    (await call(CHANNELS.requirementsList)).data.map((item) => item.text),
+    ['first repo'],
+  );
+  assert.equal((await call(CHANNELS.workspaceGet)).data.lines.test, 'npm test');
+});
+
+test('repositories: switching cancels running work and waits for its writes', async () => {
+  const agent: FakeAgent = ({ signal }) =>
+    new Promise((_resolve, reject) => {
+      signal!.addEventListener('abort', () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' })));
+    });
+  const { call } = await harness({ agent });
+  const { data } = await call(CHANNELS.requirementsCreate, { title: '登录', text: 't' });
+  assert.deepEqual((await call(CHANNELS.repositoriesBusy)).data, [{ kind: 'requirement', label: '登录' }]);
+
+  const first = (await call(CHANNELS.repositoriesList)).data.current;
+  await call(CHANNELS.repositoriesAdd, await gitRepo(), true);
+  assert.deepEqual((await call(CHANNELS.repositoriesBusy)).data, []);
+  await call(CHANNELS.repositoriesSwitch, first);
+  const item = (await call(CHANNELS.requirementsGet, data.id)).data;
+  assert.equal(item.status, 'failed');
+  assert.equal(item.error.code, 'agent_cancelled');
+});
+
+test('repositories: a moved repository is flagged and can be pointed at its new place', async () => {
+  const { call, root } = await harness();
+  const { current } = (await call(CHANNELS.repositoriesList)).data;
+  const moved = `${root}-moved`;
+  await fs.rename(root, moved);
+  onTestFinished(() => fs.rm(moved, { recursive: true, force: true }));
+  assert.equal((await call(CHANNELS.repositoriesList)).data.repositories[0].missing, true);
+
+  const relocated = (await call(CHANNELS.repositoriesRelocate, current, moved)).data;
+  assert.equal(relocated.current, current, 'the id and its data stay');
+  assert.equal(relocated.repositories[0].missing, false);
+  assert.equal((await call(CHANNELS.workspaceInfo)).data.root, await git.topLevel(moved));
+});
+
+test('repositories: switching to an unknown id is refused', async () => {
+  const { call } = await harness();
+  assert.equal((await call(CHANNELS.repositoriesSwitch, 'nope')).error.code, 'unknown_repository');
 });

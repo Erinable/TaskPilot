@@ -3,7 +3,9 @@ import type { IpcError } from './ipc.ts';
 import type { ErrorInfo } from '@shared/ipc_types.ts';
 
 export const ERROR_HINTS: Record<string, string> = {
-  no_workspace: '尚未配置工作区，请先在设置里指定仓库路径。',
+  no_workspace: '还没有仓库，请先在顶栏的仓库菜单里添加。',
+  unknown_repository: '找不到这个仓库，它可能已被移除。',
+  repository_exists: '这个目录已经添加过了。',
   not_configured: '工作区没有配置这个命令。',
   command_missing: '找不到可执行文件，请检查命令配置。',
   no_baseline: '请先领取工作包。',

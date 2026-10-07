@@ -47,6 +47,18 @@ export class ActivityLog {
     return this.#timeZone;
   }
 
+  // Resolves once every append so far has landed.
+  flush(): Promise<void> {
+    return this.#writes;
+  }
+
+  // Rebinds the log to another data directory (a repository switch).
+  async open(configDir: string): Promise<this> {
+    await this.flush();
+    this.#dir = path.join(configDir, EVENTS_DIRNAME);
+    return this;
+  }
+
   // Records one event. Callers on the request path do not await it.
   append(event: ActivityEvent): Promise<void> {
     const at = this.#now();

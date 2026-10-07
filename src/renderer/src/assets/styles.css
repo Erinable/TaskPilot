@@ -284,6 +284,41 @@ code {
   height: 14px;
   color: var(--text-tertiary);
 }
+.workspace-picker:disabled {
+  cursor: progress;
+}
+/* The repository menu under the top-bar picker. */
+.repo-menu .el-dropdown-menu__item {
+  gap: 10px;
+  min-width: 280px;
+  max-width: 420px;
+  padding: 8px 14px;
+  line-height: 1.35;
+}
+.repo-menu .el-dropdown-menu__item .icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-tertiary);
+}
+.repo-menu .el-dropdown-menu__item.is-active .icon {
+  color: var(--accent);
+}
+.repo-menu .el-dropdown-menu__item.missing .icon,
+.repo-menu .el-dropdown-menu__item.missing small {
+  color: var(--warning);
+}
+.repo-menu-text {
+  display: grid;
+  min-width: 0;
+}
+.repo-menu-text small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: var(--text-xs) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .repo-dot {
   width: 7px;
   height: 7px;
@@ -2029,6 +2064,11 @@ button.avatar:hover {
 .avatar.empty .icon {
   width: 55%;
   height: 55%;
+}
+
+/* Wraps the routed view only so a repository switch can remount it. */
+.view-host {
+  display: contents;
 }
 
 /* Settings layout: a secondary nav column beside the page */

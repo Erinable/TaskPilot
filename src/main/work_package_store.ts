@@ -237,6 +237,15 @@ export class WorkPackageStore {
     this.#file = path.join(configDir, STATE_FILENAME);
   }
 
+  // Rebinds the store to another data directory (a repository switch) and
+  // loads it. Pending writes land in the old directory first.
+  async open(configDir: string, tasks: StoreTask[]): Promise<this> {
+    await this.flush();
+    this.#file = path.join(configDir, STATE_FILENAME);
+    this.#state = new Map();
+    return this.load(tasks);
+  }
+
   // Seeds from task definitions, then overlays anything already on disk.
   async load(tasks: StoreTask[]): Promise<this> {
     this.#tasks = [...tasks];
@@ -290,10 +299,25 @@ export class WorkPackageStore {
     }
   }
 
-  async #persist() {
-    await fs.mkdir(path.dirname(this.#file), { recursive: true });
-    const plain = Object.fromEntries(this.#state);
-    await fs.writeFile(this.#file, `${JSON.stringify(plain, null, 2)}\n`);
+  // Writes are chained and go through a temp file, so they never overlap and
+  // a crash mid-write leaves the previous file intact (see requirement_store.ts).
+  #writes: Promise<void> = Promise.resolve();
+
+  #persist(): Promise<void> {
+    const write = this.#writes.then(async () => {
+      await fs.mkdir(path.dirname(this.#file), { recursive: true });
+      const tmp = `${this.#file}.tmp`;
+      // Snapshot at write time, so the file always reflects the latest state.
+      await fs.writeFile(tmp, `${JSON.stringify(Object.fromEntries(this.#state), null, 2)}\n`);
+      await fs.rename(tmp, this.#file);
+    });
+    this.#writes = write.catch(() => {});
+    return write;
+  }
+
+  // Resolves once every write so far has landed.
+  flush(): Promise<void> {
+    return this.#writes;
   }
 
   get(id: string): WorkPackageState {

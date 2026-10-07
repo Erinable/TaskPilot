@@ -18,7 +18,7 @@ const execution = useExecutionStore();
 const configured = computed(() => app.workspaceInfo?.configured === true);
 const syncTitle = computed(() => {
   const info = app.workspaceInfo;
-  if (!info?.configured) return '未配置工作区';
+  if (!info?.configured) return '还没有仓库';
   return info.dirty ? `${info.changedFiles} 个文件有改动` : '工作区干净';
 });
 const syncDetail = computed(() => {

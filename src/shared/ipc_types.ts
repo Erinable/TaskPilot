@@ -356,8 +356,6 @@ export type RepoInfo = { commit: string; branch: string | null; dirty: boolean; 
 // workspace:check: validation plus a PATH lookup, nothing written.
 export type WorkspaceCheck = {
   root: string | null;
-  // The typed root when it was normalized to the repository top level.
-  normalizedFrom: string | null;
   repo: RepoInfo | null;
   commands: Record<CheckKind, { configured: boolean; resolved: string | null }>;
 };
@@ -690,3 +688,22 @@ export type ReleaseDraftInput = { notes?: string; checked?: number[] };
 export type ReleaseWriteInput = { path: string };
 
 export type ReleaseWriteResult = { path: string };
+
+// ========== repositories ==========
+
+export type Repository = {
+  id: string;
+  root: string;
+  // Directory name, for display.
+  name: string;
+  lastOpenedAt: string;
+  current: boolean;
+  // The root no longer holds a git repository (moved, renamed or deleted).
+  missing: boolean;
+};
+
+export type RepositoryList = { repositories: Repository[]; current: string | null };
+
+// Background work a switch would cancel.
+export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment';
+export type BusyRun = { kind: BusyKind; label: string };

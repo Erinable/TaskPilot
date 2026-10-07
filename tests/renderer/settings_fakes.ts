@@ -30,7 +30,6 @@ export const workspaceView = () => ({
 
 export const workspaceCheck = () => ({
   root: '/repo',
-  normalizedFrom: null,
   repo: { commit: 'abcdef1234567890', branch: 'main', dirty: false, changedFiles: 0 },
   commands: {
     test: { configured: true, resolved: '/usr/local/bin/npm' },

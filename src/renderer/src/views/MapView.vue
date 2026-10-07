@@ -90,7 +90,7 @@ onMounted(() => {
       <span class="req-empty-icon"><AppIcon name="map" /></span>
       <h2>还没有模块摘要</h2>
       <p>在需求澄清阶段，Architect 读过相关代码后，会把模块接口摘要汇总到这里。</p>
-      <p v-if="map.files.length === 0" data-empty="workspace">还没有可读取的仓库文件，请先配置工作区仓库。</p>
+      <p v-if="map.files.length === 0" data-empty="workspace">还没有可读取的仓库文件，请先添加仓库或检查它的位置。</p>
       <div class="map-empty-actions">
         <button class="primary-button" type="button" @click="requirements.open({ compose: true })">
           <AppIcon name="plus" />
@@ -114,7 +114,7 @@ onMounted(() => {
         <div v-if="map.files.length === 0" class="map-no-workspace" data-empty="workspace">
           <p class="empty-hint">
             <AppIcon name="info" />
-            还没有可读取的仓库文件，请先配置工作区仓库。
+            还没有可读取的仓库文件，请先添加仓库或检查它的位置。
           </p>
           <button class="secondary-button" type="button" data-action="settings" @click="openRepositorySettings">
             <AppIcon name="settings" />

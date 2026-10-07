@@ -17,6 +17,10 @@ export const useAppStore = defineStore('app', () => {
     leaveGuard = guard;
   };
 
+  // Settings with unsaved edits ask first; resolves false to stay. Also used
+  // before a repository switch, which leaves settings in place.
+  const confirmLeaveSettings = () => (view.value === 'settings' ? leaveGuard() : Promise.resolve(true));
+
   // Leaving settings with unsaved edits asks first; resolves false to stay.
   const navigate = async (next: ViewName) => {
     if (view.value === 'settings' && next !== 'settings' && !(await leaveGuard())) return false;
@@ -82,6 +86,7 @@ export const useAppStore = defineStore('app', () => {
     // Navigation
     view,
     setLeaveGuard,
+    confirmLeaveSettings,
     navigate,
     // Preferences
     preferences,

@@ -57,8 +57,8 @@ onBeforeUnmount(() => store.leave());
 
     <div v-if="store.state && !store.state.configured" class="panel glass req-empty no-workspace">
       <span class="req-empty-icon"><AppIcon name="folder" /></span>
-      <h2>尚未配置工作区</h2>
-      <p>发布需要读取仓库的提交记录，请先在设置里指定仓库路径。</p>
+      <h2>还没有仓库</h2>
+      <p>发布需要读取仓库的提交记录，请先添加一个仓库。</p>
       <button class="primary-button" type="button" @click="openRepositorySettings">
         <AppIcon name="settings" />
         前往仓库设置
