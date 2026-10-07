@@ -10,9 +10,6 @@ import { useSettingsStore } from '@/stores/settings.ts';
 const app = useAppStore();
 const settings = useSettingsStore();
 
-// Recent events reuse the overview the app already polls (newest 20).
-const RECENT_PER_MEMBER = 3;
-
 const costNote = computed(() => {
   const costs = app.activity?.costs;
   if (!costs?.since) return '还没有花费记录';
@@ -24,7 +21,6 @@ const costNote = computed(() => {
 const members = computed(() => {
   const overview = app.activity;
   const now = new Date();
-  const feed = (overview?.recent ?? []).map(activity.toFeedItem);
   return activity.TEAM.map(({ agent, actor }) => {
     const presence = activity.presenceOf(overview?.team ?? null, agent);
     return {
@@ -35,14 +31,13 @@ const members = computed(() => {
       role: activity.ROLES[agent],
       work: activity.workText(overview?.team ?? null, agent),
       cost: overview ? activity.formatCost(overview.costs.byAgent[agent]) : '–',
-      recent: feed
-        .filter((item) => item.actor === actor)
-        .slice(0, RECENT_PER_MEMBER)
-        .map((item) => ({
-          ...item,
-          text: item.detail ? `${item.what}：${item.detail}` : item.what,
-          time: activity.relativeTime(item.at, now, overview?.timeZone ?? 'UTC'),
-        })),
+      // Main picks each member's newest events from the whole retention
+      // window; the shared feed is mostly the human's own steps.
+      recent: (overview?.teamRecent[agent] ?? []).map(activity.toFeedItem).map((item) => ({
+        ...item,
+        text: item.detail ? `${item.what}：${item.detail}` : item.what,
+        time: activity.relativeTime(item.at, now, overview?.timeZone ?? 'UTC'),
+      })),
     };
   });
 });

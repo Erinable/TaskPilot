@@ -20,23 +20,24 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
 
 const MARKUP = '<img src=x onerror=alert(1)>';
 
+const REVIEW: ipc.ActivityRecord = {
+  kind: 'package_transition',
+  packageId: 'p1',
+  title: '登录接口',
+  transition: 'review_passed',
+  actor: 'agent',
+  from: 'in_review',
+  to: 'accepting',
+  at: new Date().toISOString(),
+};
+
 const overview = (overrides: Partial<ipc.ActivityOverview> = {}): ipc.ActivityOverview => ({
-  recent: [
-    {
-      kind: 'package_transition',
-      packageId: 'p1',
-      title: '登录接口',
-      transition: 'review_passed',
-      actor: 'agent',
-      from: 'in_review',
-      to: 'accepting',
-      at: new Date().toISOString(),
-    },
-    { kind: 'requirement_created', requirementId: 'r1', title: '邮箱登录', at: new Date().toISOString() },
-  ],
+  // The shared feed holds only the human's step; QA's review is older than its 20 newest.
+  recent: [{ kind: 'requirement_created', requirementId: 'r1', title: '邮箱登录', at: new Date().toISOString() }],
   metrics: { doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null },
   team: { available: true, busy: ['qa'], work: [{ agent: 'qa', kind: 'review', label: MARKUP }] },
   costs: { byAgent: { 'product-lead': 0.034, architect: 0, qa: 1.5, 'release-manager': 0 }, since: '2026-10-07T02:00:00.000Z', partial: true },
+  teamRecent: { 'product-lead': [], architect: [], qa: [REVIEW], 'release-manager': [] },
   timeZone: 'Asia/Shanghai',
   ...overrides,
 });
@@ -69,7 +70,6 @@ describe('TeamView', () => {
     const pm = card(wrapper, 'product-lead');
     expect(pm.find('.team-cost').text()).toBe('$0.034');
     expect(pm.find('.team-facts dd').text()).toBe('空闲，等待下一项任务');
-    // The human's own events are not anyone's on the team.
     expect(pm.find('.team-recent').text()).toContain('最近没有动态');
   });
 

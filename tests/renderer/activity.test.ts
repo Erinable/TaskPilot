@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as activity from '../../src/renderer/src/lib/activity.ts';
 import { TRANSITIONS } from '../../src/main/work_package_status.ts';
+import { agentOf } from '../../src/main/activity_log.ts';
 import type * as ipc from '../../src/shared/ipc_types.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
@@ -110,4 +111,42 @@ test('formatCost() keeps three decimals under a dollar', () => {
   assert.equal(activity.formatCost(0), '$0.00');
   assert.equal(activity.formatCost(0.0342), '$0.034');
   assert.equal(activity.formatCost(1.5), '$1.50');
+});
+
+test("main's agentOf() names the same member the feed shows for every event", () => {
+  const names = Object.fromEntries(activity.TEAM.map(({ agent, actor }) => [actor.name, agent]));
+  const at = '2026-10-01T00:00:00.000Z';
+  const records: ipc.ActivityRecord[] = [
+    ...[...new Set(TRANSITIONS.map((item) => item.name))].map((transition): ipc.ActivityRecord => ({
+      kind: 'package_transition',
+      packageId: 'p',
+      title: 't',
+      transition: transition as never,
+      actor: 'agent',
+      from: 'pending',
+      to: 'pending',
+      at,
+    })),
+    ...(['breakdown_done', 'review_accepted', 'review_passed', 'review_rejected', 'replanned', 'deviation_dismissed'] as const).map(
+      (transition): ipc.ActivityRecord => ({
+        kind: 'package_transition',
+        packageId: 'p',
+        title: 't',
+        transition,
+        actor: 'agent',
+        from: 'pending',
+        to: 'pending',
+        at,
+      }),
+    ),
+    { kind: 'requirement_created', requirementId: 'r', title: 't', at },
+    { kind: 'requirement_finished', requirementId: 'r', title: 't', step: 'planning', costUsd: null, at },
+    { kind: 'requirement_failed', requirementId: 'r', title: 't', step: 'clarifying', code: 'x', at },
+    { kind: 'requirement_published', requirementId: 'r', title: 't', packageCount: 1, at },
+    { kind: 'release_finished', version: '1.0.0', packageCount: 1, at },
+  ];
+  for (const record of records) {
+    const shown = names[activity.toFeedItem(record, 0).actor.name] ?? null;
+    assert.equal(agentOf(record), shown, `${record.kind} ${'transition' in record ? record.transition : ''}`);
+  }
 });

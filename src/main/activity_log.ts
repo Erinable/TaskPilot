@@ -9,7 +9,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, QueueMetrics } from '../shared/ipc_types.ts';
+import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, AgentTransition, QueueMetrics } from '../shared/ipc_types.ts';
 
 // One agent run's model spend. Stored beside the feed events so it expires
 // with them, but never shown in the feed: it is not something that happened.
@@ -204,4 +204,45 @@ export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: 
   }
   const weekStart = week.at(-1) as string;
   return { byAgent, since, partial: since === null || businessDay(new Date(since), timeZone) > weekStart };
+};
+
+// Which agent makes each agent transition; human transitions have none.
+const TRANSITION_AGENTS: Record<AgentTransition, ActivityAgent> = {
+  breakdown_done: 'product-lead',
+  review_accepted: 'qa',
+  review_passed: 'qa',
+  review_rejected: 'qa',
+  replanned: 'architect',
+  deviation_dismissed: 'architect',
+};
+
+// The team member a feed event belongs to, or null for the human's own.
+// Matches the actor the renderer's feed shows for the same event.
+export const agentOf = (record: ActivityRecord): ActivityAgent | null => {
+  switch (record.kind) {
+    case 'package_transition':
+      // A hand-edited line could name "toString"; only own keys count.
+      return Object.hasOwn(TRANSITION_AGENTS, record.transition) ? TRANSITION_AGENTS[record.transition as AgentTransition] : null;
+    case 'requirement_finished':
+    case 'requirement_failed':
+      return 'product-lead';
+    case 'release_finished':
+      return 'release-manager';
+    case 'requirement_created':
+    case 'requirement_published':
+      return null;
+  }
+};
+
+// Each agent's newest `count` feed events. The overview's shared feed is
+// mostly the human's own steps, so filtering it would leave agents empty.
+export const recentByAgent = (records: LoggedRecord[], count: number): Record<ActivityAgent, ActivityRecord[]> => {
+  const byAgent: Record<ActivityAgent, ActivityRecord[]> = { 'product-lead': [], architect: [], qa: [], 'release-manager': [] };
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    if (!isFeedRecord(record)) continue;
+    const agent = agentOf(record);
+    if (agent && byAgent[agent].length < count) byAgent[agent].push(record);
+  }
+  return byAgent;
 };

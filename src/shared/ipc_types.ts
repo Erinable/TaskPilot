@@ -501,7 +501,15 @@ export type TeamStatus = { available: boolean; busy: ActivityAgent[]; work: Agen
 // (null if none), so a week that starts before it is only partly counted.
 export type AgentCosts = { byAgent: Record<ActivityAgent, number>; since: string | null; partial: boolean };
 
-export type ActivityOverview = { recent: ActivityRecord[]; metrics: QueueMetrics; team: TeamStatus; costs: AgentCosts; timeZone: string };
+// `teamRecent`: each agent's newest few events over the retention window, newest first.
+export type ActivityOverview = {
+  recent: ActivityRecord[];
+  metrics: QueueMetrics;
+  team: TeamStatus;
+  costs: AgentCosts;
+  teamRecent: Record<ActivityAgent, ActivityRecord[]>;
+  timeZone: string;
+};
 
 // Business days newest first; pass `nextBefore` back for the next page, null at the end.
 export type ActivityPage = { days: { day: string; records: ActivityRecord[] }[]; nextBefore: string | null; timeZone: string; retentionDays: number };

@@ -30,7 +30,7 @@ import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
-import { businessDay, computeAgentCosts, computeMetrics, RETENTION_DAYS } from './activity_log.ts';
+import { businessDay, computeAgentCosts, computeMetrics, recentByAgent, RETENTION_DAYS } from './activity_log.ts';
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
@@ -950,8 +950,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
-  // The feed, the week's metrics and who on the team is busy. The metrics
-  // read the retention window once; the feed reads only the newest days.
+  // The feed, the week's metrics, each member's newest events and spend, and
+  // who on the team is busy. Metrics, spend and per-member events share one
+  // read of the retention window; the feed reads only the newest days.
+  const TEAM_RECENT_COUNT = 3;
   ipcMain.handle(
     CHANNELS.activityOverview,
     wrap(async (): Promise<ipc.ActivityOverview> => {
@@ -977,6 +979,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         metrics: computeMetrics(window, now, activity.timeZone),
         team: { available: Boolean(executable), busy: [...new Set(work.map((item) => item.agent))], work },
         costs: computeAgentCosts(window, now, activity.timeZone),
+        teamRecent: recentByAgent(window, TEAM_RECENT_COUNT),
         timeZone: activity.timeZone,
       };
     }),

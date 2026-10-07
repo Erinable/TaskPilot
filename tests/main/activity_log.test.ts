@@ -4,7 +4,17 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { ActivityLog, EVENTS_DIRNAME, RETENTION_DAYS, businessDay, computeAgentCosts, computeMetrics, recentDays } from '../../src/main/activity_log.ts';
+import {
+  ActivityLog,
+  EVENTS_DIRNAME,
+  RETENTION_DAYS,
+  agentOf,
+  businessDay,
+  computeAgentCosts,
+  computeMetrics,
+  recentByAgent,
+  recentDays,
+} from '../../src/main/activity_log.ts';
 import type { LoggedRecord } from '../../src/main/activity_log.ts';
 import type { ActivityRecord } from '../../src/shared/ipc_types.ts';
 
@@ -194,4 +204,35 @@ test('computeAgentCosts() counts only the week once spend has a full week of his
 test('computeAgentCosts() with no spend yet is empty and partial', () => {
   const costs = computeAgentCosts([], new Date(), SHANGHAI);
   assert.deepEqual(costs, { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 }, since: null, partial: true });
+});
+
+test("recentByAgent() takes each member's newest events from the whole window", () => {
+  const review = (packageId: string, at: string) => transition(packageId, 'review_passed', 'accepting', at);
+  const records: LoggedRecord[] = [
+    review('p1', '2026-09-20T00:00:00Z'),
+    { kind: 'release_finished', version: '1.0.0', packageCount: 1, at: '2026-09-21T00:00:00Z' },
+    review('p2', '2026-10-01T00:00:00Z'),
+    review('p3', '2026-10-02T00:00:00Z'),
+    cost('qa', 0.1, '2026-10-02T00:00:01Z'),
+    review('p4', '2026-10-03T00:00:00Z'),
+    // Many human steps after them, as in a real queue.
+    ...Array.from({ length: 30 }, (_unused, index) => transition(`h${index}`, 'claim', 'in_progress', `2026-10-06T00:${String(index).padStart(2, '0')}:00Z`)),
+  ];
+  const recent = recentByAgent(records, 3);
+  assert.deepEqual(
+    recent.qa.map((record) => record.kind === 'package_transition' && record.packageId),
+    ['p4', 'p3', 'p2'],
+  );
+  assert.deepEqual(
+    recent['release-manager'].map((record) => record.kind),
+    ['release_finished'],
+  );
+  assert.deepEqual(recent.architect, []);
+  assert.deepEqual(recent['product-lead'], []);
+});
+
+test('agentOf() ignores human transitions and unknown names', () => {
+  assert.equal(agentOf(transition('p', 'claim', 'in_progress', '2026-10-01T00:00:00Z')), null);
+  assert.equal(agentOf(transition('p', 'toString', 'in_progress', '2026-10-01T00:00:00Z')), null);
+  assert.equal(agentOf(transition('p', 'replanned', 'pending', '2026-10-01T00:00:00Z')), 'architect');
 });

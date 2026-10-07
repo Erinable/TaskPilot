@@ -80,6 +80,7 @@ describe('QueueView', () => {
       metrics: { doneThisWeek: 5, donePreviousWeek: 4, averageHours: 2.44, averageHoursPrevious: 2.4 },
       team: { available: true, busy: ['qa'], work: [{ agent: 'qa', kind: 'review', label: '登录接口' }] },
       costs: { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 }, since: null, partial: true },
+      teamRecent: { 'product-lead': [], architect: [], qa: [], 'release-manager': [] },
       timeZone: 'Asia/Shanghai',
     };
     const wrapper = render();
