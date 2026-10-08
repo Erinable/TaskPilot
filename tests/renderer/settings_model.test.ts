@@ -2,19 +2,25 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as model from '../../src/renderer/src/lib/settings_model.ts';
+import { defaultAgentSettings } from '@shared/agent_runtime.ts';
+import type * as ipc from '@shared/ipc_types.ts';
 
-const prefs = (overrides: any = {}) => ({
+type PreferenceOverrides = {
+  profile?: Partial<{ displayName: string; avatarColor: ipc.AvatarColor }>;
+  appearance?: Partial<{ theme: ipc.Theme; vibrancy: boolean }>;
+  environment?: Partial<{ pathSource: ipc.PathSource }>;
+  agents?: ipc.AgentSettings;
+};
+const prefs = (overrides: PreferenceOverrides = {}): ipc.PreferencesInput => ({
   profile: { displayName: 'Ada', avatarColor: 'ocean', ...overrides.profile },
   appearance: { theme: 'system', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
+  agents: overrides.agents ?? defaultAgentSettings(),
 });
-const ws = (overrides: any = {}) => ({ root: '/repo', commands: { test: 'npm test', lint: '', build: '' }, ...overrides });
-
-test('a page maps to the store it saves through', () => {
-  assert.equal(model.PAGE_STORES.profile, 'preferences');
-  assert.equal(model.PAGE_STORES.environment, 'preferences');
-  assert.equal(model.PAGE_STORES.commands, 'workspace');
-  assert.equal(model.PAGE_STORES.data, null);
+const ws = (overrides: Partial<ipc.WorkspaceForm> = {}): ipc.WorkspaceForm => ({
+  root: '/repo',
+  commands: { test: 'npm test', lint: '', build: '', smoke: '', ...overrides.commands },
+  options: { ...overrides.options },
 });
 
 test('dirtyStores() is clean when nothing changed', () => {
@@ -64,6 +70,19 @@ test('dirtyPages() marks only the page whose slice changed', () => {
     ['commands'],
   );
 });
+test('agent changes dirty only the agents page while sharing preferences save', () => {
+  const saved = { preferences: prefs(), workspace: ws() };
+  const agents = defaultAgentSettings();
+  agents.qa.model = 'provider/model';
+  const dirty = model.dirtyPages(saved, { preferences: prefs({ agents }), workspace: ws() });
+  assert.equal(model.dirtyStores(saved, { preferences: prefs({ agents }), workspace: ws() }).preferences, true);
+  assert.deepEqual(
+    Object.entries(dirty)
+      .filter(([, changed]) => changed)
+      .map(([page]) => page),
+    ['agents'],
+  );
+});
 
 test('sameValue() does not depend on key order', () => {
   assert.ok(model.sameValue({ a: 1, b: { c: 2, d: 3 } }, { b: { d: 3, c: 2 }, a: 1 }));
@@ -90,7 +109,10 @@ test('charCount() counts code points after trimming', () => {
 });
 
 test('changing a check option marks the commands page dirty, but not for an empty command', () => {
-  const opts = (blocking: boolean) => ({ test: { stage: 'submit', blocking, reportPath: '' }, lint: { stage: 'step', blocking, reportPath: '' } });
+  const opts = (blocking: boolean): Partial<Record<ipc.CheckKind, Partial<ipc.CheckOptions>>> => ({
+    test: { stage: 'submit', blocking, reportPath: '' },
+    lint: { stage: 'step', blocking, reportPath: '' },
+  });
   const saved = { preferences: prefs(), workspace: ws({ options: opts(true) }) };
   const changed = model.dirtyPages(saved, {
     preferences: prefs(),

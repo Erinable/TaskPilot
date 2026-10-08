@@ -57,6 +57,10 @@ const remeasure = () => {
         </div>
       </div>
     </div>
+    <div v-if="task.codingRun?.status === 'applied'" class="host-warning" role="alert">
+      <AppIcon name="alert" />
+      编码 Agent 改动已应用；验证命令会以当前主机用户权限执行，请确认命令和工作区范围。
+    </div>
     <div class="segmented" role="group" aria-label="验证命令">
       <button
         v-for="segment in SEGMENTS"
@@ -127,3 +131,17 @@ const remeasure = () => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.host-warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  color: var(--warning);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--fill);
+  font-size: var(--text-sm);
+}
+</style>

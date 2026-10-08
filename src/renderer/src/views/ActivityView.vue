@@ -76,6 +76,7 @@ const targetOf = (record: ipc.ActivityRecord) => {
   if (record.kind === 'package_transition') {
     return tasks.tasks.some((task) => task.id === record.packageId) ? { kind: 'package' as const, id: record.packageId } : null;
   }
+  if (record.kind === 'coding_run') return tasks.tasks.some((task) => task.id === record.packageId) ? { kind: 'package' as const, id: record.packageId } : null;
   if (record.kind === 'release_finished') return null;
   return requirements.items.some((item) => item.id === record.requirementId) ? { kind: 'requirement' as const, id: record.requirementId } : null;
 };

@@ -59,6 +59,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const item = items.value.find((candidate) => candidate.id === id);
     if (!item) return;
     composing.value = false;
+    contextGeneration += 1;
     selectedId.value = id;
     renderDetail(item);
   };
@@ -72,25 +73,19 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // Bumped when the form should take focus (opened, or rejected locally).
   const composeFocus = ref(0);
   const composeContext = ref<ComposeContext | null>(null);
-  let agentStatus: ipc.AgentStatus | null = null;
-
-  const loadAgentStatus = async () => {
-    if (agentStatus) return agentStatus;
-    try {
-      agentStatus = await call(window.taskpilot.agent.status());
-    } catch {
-      agentStatus = { available: false, command: null };
-    }
-    return agentStatus;
-  };
+  let contextGeneration = 0;
 
   const loadContext = async () => {
+    const generation = ++contextGeneration;
     composeContext.value = null;
     try {
-      const [workspace, agent] = await Promise.all([call(window.taskpilot.workspace.info()), loadAgentStatus()]);
-      composeContext.value = { workspace, agentAvailable: agent.available };
+      const [workspace, agent] = await Promise.all([
+        call(window.taskpilot.workspace.info()),
+        call(window.taskpilot.agent.status()).catch(() => ({ available: false, command: null })),
+      ]);
+      if (generation === contextGeneration && composing.value) composeContext.value = { workspace, agentAvailable: agent.available };
     } catch (error) {
-      console.error('Failed to read requirement context', error);
+      if (generation === contextGeneration) console.error('Failed to read requirement context', error);
     }
   };
 
@@ -128,6 +123,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
       composeTitle.value = '';
       composeText.value = '';
       composing.value = false;
+      contextGeneration += 1;
       selectedId.value = item.id;
       upsert(item);
       renderDetail(item);

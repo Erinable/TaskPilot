@@ -189,7 +189,7 @@ test('computeAgentCosts() sums the metrics week per agent and flags a partly rec
     cost('qa', Number.NaN, '2026-10-05T01:00:00Z'), // bad amount
   ];
   const costs = computeAgentCosts(records, now, SHANGHAI);
-  assert.deepEqual(costs.byAgent, { 'product-lead': 0, architect: 0.5, qa: 0.35, 'release-manager': 0 });
+  assert.deepEqual(costs.byAgent, { 'product-lead': 0, architect: 0.5, qa: 0.35, 'release-manager': 0, 'coding-agent': 0 });
   assert.equal(costs.since, '2026-10-05T01:00:00Z');
   assert.equal(costs.partial, true);
 });
@@ -203,7 +203,7 @@ test('computeAgentCosts() counts only the week once spend has a full week of his
 
 test('computeAgentCosts() with no spend yet is empty and partial', () => {
   const costs = computeAgentCosts([], new Date(), SHANGHAI);
-  assert.deepEqual(costs, { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 }, since: null, partial: true });
+  assert.deepEqual(costs, { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 }, since: null, partial: true });
 });
 
 test("recentByAgent() takes each member's newest events from the whole window", () => {

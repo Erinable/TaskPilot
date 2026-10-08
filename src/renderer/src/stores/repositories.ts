@@ -24,6 +24,7 @@ const BUSY_LABELS: Record<ipc.BusyKind, string> = {
   release: 'Release Manager',
   environment: '环境管家',
   tutor: '导师讲解',
+  coding: 'Coding Agent',
 };
 
 export const useRepositoriesStore = defineStore('repositories', () => {

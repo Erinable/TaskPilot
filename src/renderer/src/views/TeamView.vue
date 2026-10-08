@@ -6,6 +6,7 @@ import * as activity from '@/lib/activity.ts';
 import { businessDay } from '@/lib/time_zone.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
+import { CLI_OPTIONS } from '@shared/agent_runtime.ts';
 
 const app = useAppStore();
 const settings = useSettingsStore();
@@ -29,6 +30,8 @@ const members = computed(() => {
       presence,
       label: activity.PRESENCE_LABELS[presence],
       role: activity.ROLES[agent],
+      runtime: settings.savedPreferences?.agents[agent],
+      cli: CLI_OPTIONS.find((option) => option.id === settings.savedPreferences?.agents[agent]?.cli)?.label ?? '默认',
       work: activity.workText(overview?.team ?? null, agent),
       cost: overview ? activity.formatCost(overview.costs.byAgent[agent]) : '–',
       // Main picks each member's newest events from the whole retention
@@ -48,7 +51,7 @@ const members = computed(() => {
     <div class="page-heading">
       <div>
         <h1>AI 团队</h1>
-        <p>四位 AI 成员分工协作：问清需求、读代码、审查和准备发布。写代码的部分交给你。</p>
+        <p>AI 成员分工协作：需求分析、代码审查、环境和辅导；编码在独立 OS 用户下运行。</p>
       </div>
       <span class="team-presence-chip">{{ activity.presenceSummary(app.activity?.team ?? null) }}</span>
     </div>
@@ -74,13 +77,19 @@ const members = computed(() => {
         </header>
 
         <p class="team-role">{{ member.role }}</p>
+        <div class="team-runtime" aria-label="Agent 配置">
+          <span>{{ member.cli }}</span>
+          <span>{{ member.runtime?.model || 'CLI 默认模型' }}</span>
+          <span>思考：{{ member.runtime?.thinking ?? '默认' }}</span>
+          <button class="empty-action" type="button" @click="settings.open('agents').catch((caught) => console.error(caught))">配置</button>
+        </div>
 
         <dl class="team-facts">
           <div>
             <dt>现在</dt>
             <dd v-if="member.presence === 'offline'">
-              暂时联系不上。确认 Claude Code CLI 已安装后再试。
-              <button class="empty-action" type="button" @click="settings.open('environment').catch((caught) => console.error(caught))">检查运行环境</button>
+              暂时联系不上。检查所选 CLI 的安装和运行环境。
+              <button class="empty-action" type="button" @click="settings.open('agents').catch((caught) => console.error(caught))">配置 Agent</button>
             </dd>
             <dd v-else-if="member.work" class="team-work">{{ member.work }}</dd>
             <dd v-else class="muted">空闲，等待下一项任务</dd>
@@ -121,6 +130,14 @@ const members = computed(() => {
   background: var(--fill);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
+}
+.team-runtime {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 .team-grid {
   display: grid;

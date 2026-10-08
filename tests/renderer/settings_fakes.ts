@@ -1,6 +1,8 @@
 // Fake window.taskpilot for the settings and setup tests: every call resolves
 // {ok: true, data} unless a test overrides it.
 import { vi } from 'vitest';
+import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
+import type * as ipc from '@shared/ipc_types.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
 
@@ -9,10 +11,11 @@ export const ok = <T>(data: T): Promise<Result<T>> => Promise.resolve({ ok: true
 // Typed as any result, so it can replace a success in mockReturnValueOnce.
 export const fail = (code: string, message: string, field?: string): Promise<Result<never>> => Promise.resolve({ ok: false, error: { code, message, field } });
 
-export const preferences = () => ({
+export const preferences = (): ipc.Preferences => ({
   profile: { displayName: 'Ada', avatarColor: 'ocean', initials: 'A' },
   appearance: { theme: 'system', vibrancy: false },
   environment: { pathSource: 'inherit' },
+  agents: defaultAgentSettings(),
 });
 
 export const workspaceView = () => ({
@@ -74,6 +77,7 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
 });
 
 export const installApi = () => {
+  let savedPreferences: ipc.Preferences = preferences();
   const api = {
     listTasks: vi.fn(() => ok([])),
     workspace: {
@@ -86,8 +90,31 @@ export const installApi = () => {
       info: vi.fn(() => ok({ configured: false })),
     },
     preferences: {
-      get: vi.fn(() => ok(preferences())),
-      set: vi.fn((input: ReturnType<typeof preferences>) => ok({ ...input, profile: { ...input.profile, initials: 'X' } })),
+      get: vi.fn(() => ok(savedPreferences)),
+      set: vi.fn((input: ipc.PreferencesInput) => {
+        savedPreferences = { ...input, profile: { ...input.profile, initials: 'X' } };
+        return ok(savedPreferences);
+      }),
+    },
+    agent: {
+      runtimes: vi.fn(() =>
+        ok(AGENT_IDS.map((agent) => ({ agent, config: defaultAgentSettings()[agent], command: 'claude', available: true, version: '1.0', reason: null }))),
+      ),
+      models: vi.fn((request: ipc.CliModelsRequest) =>
+        ok<ipc.CliModelCatalog>({
+          cli: request.cli,
+          scope: request.scope,
+          models:
+            request.cli === 'pi'
+              ? [{ id: 'gateway/native-model', label: 'Native Pi model', provider: 'gateway', variants: ['high'], source: 'config' }]
+              : request.cli === 'opencode'
+                ? [{ id: 'gateway/opencode-model', label: 'Native OpenCode model', provider: 'gateway', variants: ['high', 'low'], source: 'config' }]
+                : [{ id: 'native-default', label: 'Native default model', provider: null, variants: [], source: 'config' }],
+          defaultModel: request.cli === 'pi' ? 'gateway/native-model' : 'native-default',
+          defaultThinking: null,
+          issues: [],
+        }),
+      ),
     },
     environment: {
       info: vi.fn(() =>

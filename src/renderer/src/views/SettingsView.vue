@@ -9,6 +9,7 @@ import CommandsPage from '@/components/settings/CommandsPage.vue';
 import SetupPage from '@/components/settings/SetupPage.vue';
 import EnvironmentPage from '@/components/settings/EnvironmentPage.vue';
 import DataPage from '@/components/settings/DataPage.vue';
+import AgentsPage from '@/components/settings/AgentsPage.vue';
 
 const settings = useSettingsStore();
 
@@ -121,6 +122,16 @@ const onSearch = (event: Event) => settings.search((event.target as HTMLInputEle
         <EnvironmentPage />
       </form>
       <section v-show="settings.activePage === 'data'" id="dataPage" class="settings-page" data-page="data"><DataPage /></section>
+      <form
+        v-show="settings.activePage === 'agents'"
+        id="agentsForm"
+        class="settings-page agents-page"
+        data-page="agents"
+        novalidate
+        @submit.prevent="onSubmit"
+      >
+        <AgentsPage v-if="settings.activePage === 'agents'" />
+      </form>
 
       <div v-show="settings.anyDirty" id="settingsSavebar" class="settings-savebar glass-strong">
         <span class="savebar-text">
@@ -149,3 +160,10 @@ const onSearch = (event: Event) => settings.search((event.target as HTMLInputEle
     </div>
   </div>
 </template>
+
+<style scoped>
+.agents-page {
+  max-width: 1080px;
+  container: agent-settings / inline-size;
+}
+</style>

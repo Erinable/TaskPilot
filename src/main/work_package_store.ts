@@ -12,6 +12,7 @@ import type { TaskDefinition, TaskRevisionDefinition } from './tasks.ts';
 import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from './evidence.ts';
 import type { CheckKind } from './workspace.ts';
 
+import type { CodingRun } from '../shared/coding_types.ts';
 export const STATE_FILENAME = 'work-packages.json';
 
 // Why an agent run failed.
@@ -151,6 +152,7 @@ export interface WorkPackageState {
   revision: PlanRevision | null;
   adjudication: Adjudication | null;
   replanUndo: ReplanUndo | null;
+  codingRun: CodingRun | null;
 }
 
 export interface StoreSummary {
@@ -187,17 +189,12 @@ const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState =>
   claimedAt: null,
   completedSteps: [], // indices into task.steps
   deviations: [],
-  review: null, // QA's latest review of the package; see beginReview()
-  // Submit-stage checks run on the claimed commit; see setBaselineChecks().
-  // {status: measuring|measured|unavailable|contaminated, reason, commit, checks: {kind: record}, startedAt, finishedAt}
+  review: null, // QA's latest review; see beginReview()
   baselineChecks: null,
-  // Architect's replan of the definition: {version, definition: {steps, fileScope, acceptance}, reason, changes, revisedAt}.
-  // Overlaid on the authored definition by effective().
   revision: null,
-  adjudication: null, // Architect's latest run on a deviation; see beginAdjudication()
-  // Execution state from before the last replan, so the human can revert it
-  // until they claim the new plan.
+  adjudication: null, // Architect's latest run on a deviation
   replanUndo: null,
+  codingRun: null,
 });
 
 const BASELINE_STATUSES: string[] = ['measuring', 'measured', 'unavailable', 'contaminated'];
@@ -277,6 +274,18 @@ export class WorkPackageStore {
             status: 'failed',
             finishedAt: null,
             error: { code: 'agent_interrupted', message: 'The adjudication was interrupted when the app closed' },
+          };
+        }
+        // Runs saved before per-role runtimes always used the Codex default.
+        if (merged.codingRun && !merged.codingRun.cli) {
+          merged.codingRun = { ...merged.codingRun, cli: 'codex', model: '', thinking: 'default' };
+        }
+        if (merged.codingRun && ['preparing', 'running', 'checking', 'applying'].includes(merged.codingRun.status)) {
+          merged.codingRun = {
+            ...merged.codingRun,
+            status: 'failed',
+            finishedAt: null,
+            error: { code: 'coding_interrupted', message: 'Coding Agent was interrupted when the app closed' },
           };
         }
         this.#state.set(id, merged);
@@ -608,7 +617,26 @@ export class WorkPackageStore {
     return structuredClone(entry);
   }
 
-  // Marks one instruction step done or not done.
+  async setCodingRun(id: string, run: CodingRun | null): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    entry.codingRun = run ? structuredClone(run) : null;
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  async updateCodingRun(id: string, patch: Partial<CodingRun>): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    if (!entry.codingRun) throw new StoreError('No coding run exists', 'invalid_state');
+    if (patch.id !== undefined || patch.packageId !== undefined || patch.baseline !== undefined || patch.runName !== undefined) {
+      throw new StoreError('Coding run identity cannot change', 'invalid_argument');
+    }
+    entry.codingRun = { ...entry.codingRun, ...structuredClone(patch) };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
   async setStepDone(id: string, stepIndex: number, done: boolean): Promise<WorkPackageState> {
     const entry = this.get(id);
     if (!Number.isInteger(stepIndex) || stepIndex < 0) {

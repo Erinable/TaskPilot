@@ -33,6 +33,12 @@ test('rejects a human performing an agent-only transition', () => {
   assert.throws(() => status.apply('deviation', 'replanned', 'human'), { code: 'wrong_actor' });
 });
 
+test('coding-agent cannot trigger human or analysis-agent transitions', () => {
+  assert.throws(() => status.apply('pending', 'claim', 'coding-agent'), { code: 'wrong_actor' });
+  assert.throws(() => status.apply('in_progress', 'submit_for_review', 'coding-agent'), { code: 'wrong_actor' });
+  assert.throws(() => status.apply('in_review', 'review_accepted', 'coding-agent'), { code: 'wrong_actor' });
+});
+
 test("acceptance with attention items is the human's call", () => {
   assert.equal(status.apply('accepting', 'accepted', 'human'), 'done');
   assert.equal(status.apply('accepting', 'acceptance_rejected', 'human'), 'in_progress');

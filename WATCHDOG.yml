@@ -1,0 +1,3 @@
+advisors:
+  - name: default
+    model: CPA/gpt-6-astra:medium

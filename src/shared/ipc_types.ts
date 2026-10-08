@@ -3,6 +3,22 @@
 // src/main, because the renderer typechecks without it; src/main/ipc.ts
 // annotates its handlers with these types so drift fails tsc.
 
+import type { CodingRun } from './coding_types.ts';
+import type { AgentSettings } from './agent_runtime.ts';
+export type { AgentId, AgentRuntimeConfig, AgentRuntimeStatus, AgentSettings, CliId, ThinkingLevel } from './agent_runtime.ts';
+export type { CliModelCatalog, CliModelOption, CliModelScope, CliModelsRequest } from './agent_runtime.ts';
+export type {
+  CodingApply,
+  CodingApplyResult,
+  CodingEvent,
+  CodingEventPage,
+  CodingPatchFile,
+  CodingPatchPreview,
+  CodingRun,
+  CodingRuntimeStatus,
+  CodingStart,
+  CodingUsage,
+} from './coding_types.ts';
 // ========== envelope ==========
 
 // Shaped like an Error but safe to send over IPC. `field` names the form
@@ -293,6 +309,7 @@ export type WorkPackageState = {
   revision: Revision | null;
   adjudication: Adjudication | null;
   replanUndo: ReplanUndo | null;
+  codingRun: CodingRun | null;
 };
 
 // The effective definition (Architect's replan laid over it) plus its state.
@@ -306,6 +323,7 @@ export type TaskView = TaskDefinition & {
   review: Review | null;
   baselineChecks: BaselineChecks | null;
   adjudication: Adjudication | null;
+  codingRun: CodingRun | null;
   // Null when never replanned; the definition itself is already applied.
   revision: Omit<Revision, 'definition'> | null;
   // Human transitions available now, after the state guards.
@@ -383,6 +401,7 @@ export type PreferencesInput = {
   profile: { displayName: string; avatarColor: AvatarColor };
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
+  agents: AgentSettings;
 };
 
 // Preferences as the renderer sees them, with derived display values.
@@ -479,7 +498,7 @@ export type AgentStatus = { available: boolean; command: string | null };
 
 // ========== activity ==========
 
-export type ActivityAgent = 'product-lead' | 'architect' | 'qa' | 'release-manager';
+export type ActivityAgent = 'product-lead' | 'architect' | 'qa' | 'release-manager' | 'coding-agent';
 
 export type ActivityEvent =
   | {
@@ -487,10 +506,11 @@ export type ActivityEvent =
       packageId: string;
       title: string;
       transition: HumanTransition | AgentTransition;
-      actor: 'human' | 'agent';
+      actor: 'human' | 'agent' | 'coding-agent';
       from: WorkPackageStatus;
       to: WorkPackageStatus;
     }
+  | { kind: 'coding_run'; packageId: string; title: string; status: 'started' | 'finished' | 'failed' | 'cancelled'; costUsd: number | null }
   | { kind: 'requirement_created'; requirementId: string; title: string }
   | { kind: 'requirement_finished'; requirementId: string; title: string; step: RequirementStep; costUsd: number | null }
   | { kind: 'requirement_failed'; requirementId: string; title: string; step: RequirementStep; code: string }
@@ -502,10 +522,10 @@ export type ActivityRecord = ActivityEvent & { at: string };
 export type QueueMetrics = { doneThisWeek: number; donePreviousWeek: number; averageHours: number | null; averageHoursPrevious: number | null };
 
 // What an agent is running right now. `label` is the requirement or package title.
-export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release'; label: string };
+export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release' | 'coding'; label: string };
 
-// Which agents are busy right now; availability comes from AgentStatus.
-export type TeamStatus = { available: boolean; busy: ActivityAgent[]; work: AgentWork[] };
+// Which agents are busy right now; availability is tracked per runtime.
+export type TeamStatus = { available: boolean; availableByAgent: Record<ActivityAgent, boolean>; busy: ActivityAgent[]; work: AgentWork[] };
 
 // Model spend per agent over the metrics week. Spend is recorded from
 // 2026-10-07; `since` is the earliest recorded run in the retention window
@@ -732,7 +752,7 @@ export type Repository = {
 export type RepositoryList = { repositories: Repository[]; current: string | null };
 
 // Background work a switch would cancel.
-export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor';
+export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor' | 'coding';
 export type BusyRun = { kind: BusyKind; label: string };
 
 // ========== commit ==========

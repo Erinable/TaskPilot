@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { beforeEach, expect, test, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 
@@ -22,16 +22,128 @@ beforeEach(() => {
   api = installApi();
 });
 
-const mountView = async (page: 'profile' | 'commands' | 'setup' = 'profile') => {
+const mountView = async (page: 'profile' | 'commands' | 'setup' | 'agents' = 'profile') => {
   const pinia = createPinia();
   setActivePinia(pinia);
   const wrapper = mount(SettingsView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+  onTestFinished(() => wrapper.unmount());
   await useSettingsStore().open(page);
   await flushPromises();
   return wrapper;
 };
 
+const chooseModel = async (wrapper: Awaited<ReturnType<typeof mountView>>, agent: string, value: string) => {
+  await wrapper.get(`[data-agent="${agent}"] .el-select`).trigger('click');
+  await wrapper.get(`#agent-${agent}-model`).setValue(value);
+  await flushPromises();
+  const options = Array.from(document.querySelectorAll<HTMLElement>(`.agent-model-options-${agent} .el-select-dropdown__item`));
+  const option = options.find((item) => item.style.display !== 'none' && item.textContent?.trim() === value);
+  expect(option).toBeDefined();
+  await new DOMWrapper(option!).trigger('click');
+  await flushPromises();
+};
+
 const isShown = (element: { attributes: (name: string) => string | undefined }) => !(element.attributes('style') ?? '').includes('display: none');
+test('agent configuration saves a custom model without changing other roles', async () => {
+  const wrapper = await mountView('agents');
+  const codex = wrapper.get('#agent-product-lead-cli').find('option[value="codex"]');
+  expect(codex.attributes('disabled')).toBeDefined();
+  await chooseModel(wrapper, 'product-lead', 'provider/model-x');
+  expect(isShown(wrapper.get('#settingsSavebar'))).toBe(true);
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  await useSettingsStore().load();
+  await flushPromises();
+  expect(wrapper.get('[data-agent="product-lead"] .el-select__placeholder').text()).toBe('provider/model-x');
+  expect(useSettingsStore().preferencesDraft!.agents.qa.model).toBe('');
+  expect(isShown(wrapper.get('#settingsSavebar'))).toBe(false);
+  wrapper.unmount();
+});
+
+test('native CLI catalog selection saves the exact provider/model ID and can return to the native default', async () => {
+  const wrapper = await mountView('agents');
+  await wrapper.get('#agent-product-lead-cli').setValue('pi');
+  await flushPromises();
+  await wrapper.get('[data-agent="product-lead"] .el-select').trigger('click');
+  await wrapper.get('#agent-product-lead-model').setValue('gateway/native');
+  await flushPromises();
+  expect(document.querySelector('.agent-model-options-product-lead .model-option-name')?.textContent).toBe('Native Pi model');
+  await wrapper.get('#agent-product-lead-model').setValue('Native Pi');
+  await flushPromises();
+  expect(document.querySelector('.agent-model-options-product-lead .model-option-id')?.textContent).toBe('gateway/native-model');
+  await wrapper.get('#agent-product-lead-model').setValue('gateway/native-model');
+  await flushPromises();
+  const option = document.querySelector<HTMLElement>('.agent-model-options-product-lead .model-option-name');
+  expect(option?.textContent).toBe('Native Pi model');
+  await new DOMWrapper(option!).trigger('click');
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  await useSettingsStore().load();
+  await flushPromises();
+  expect(useSettingsStore().preferencesDraft!.agents['product-lead'].model).toBe('gateway/native-model');
+  expect(useSettingsStore().preferencesDraft!.agents.architect.model).toBe('');
+  await wrapper.get('[data-agent="product-lead"] .el-select').trigger('click');
+  const defaultOption = Array.from(document.querySelectorAll<HTMLElement>('.agent-model-options-product-lead .el-select-dropdown__item')).find((item) =>
+    item.textContent?.includes('CLI 默认'),
+  );
+  expect(defaultOption).toBeDefined();
+  await new DOMWrapper(defaultOption!).trigger('click');
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  await useSettingsStore().load();
+  expect(useSettingsStore().preferencesDraft!.agents['product-lead'].model).toBe('');
+  wrapper.unmount();
+});
+
+test('filtering roles preserves unsaved edits and clears an empty search', async () => {
+  const wrapper = await mountView('agents');
+  await wrapper.get('#agentSearch').setValue('QA');
+  expect(wrapper.findAll('.agent-settings-card').map((row) => row.attributes('data-agent'))).toEqual(['qa']);
+  await chooseModel(wrapper, 'qa', 'review-model');
+  await wrapper.get('#agentSearch').setValue('review-model');
+  await chooseModel(wrapper, 'qa', 'review-model-new');
+  expect(wrapper.find('[data-agent="qa"]').exists()).toBe(true);
+  await wrapper.get('#agentSearch').setValue('no-such-role');
+  expect(wrapper.find('.agents-empty').exists()).toBe(true);
+  await wrapper.get('.agents-empty button').trigger('click');
+  expect(wrapper.findAll('.agent-settings-card')).toHaveLength(7);
+  expect(wrapper.get('[data-agent="qa"] .el-select__placeholder').text()).toBe('review-model-new');
+  await wrapper.get('#discardSettings').trigger('click');
+  expect(useSettingsStore().preferencesDraft!.agents.qa.model).toBe('');
+  wrapper.unmount();
+});
+
+test('restoring one role keeps another role pending', async () => {
+  const wrapper = await mountView('agents');
+  await wrapper.get('#agent-product-lead-cli').setValue('pi');
+  await chooseModel(wrapper, 'product-lead', 'planning-model');
+  await wrapper.get('#agent-qa-thinking').setValue('high');
+  await wrapper.get('[data-agent="product-lead"] .agent-details-button').trigger('click');
+  await wrapper.get('[data-agent="product-lead"] .agent-details button').trigger('click');
+  expect((wrapper.get('#agent-product-lead-cli').element as HTMLSelectElement).value).toBe('claude');
+  expect(useSettingsStore().preferencesDraft!.agents['product-lead'].model).toBe('');
+  expect((wrapper.get('#agent-qa-thinking').element as HTMLSelectElement).value).toBe('high');
+  expect(wrapper.get('[data-agent="product-lead"]').classes()).not.toContain('modified');
+  expect(wrapper.get('[data-agent="qa"]').classes()).toContain('modified');
+  expect(isShown(wrapper.get('#settingsSavebar'))).toBe(true);
+  wrapper.unmount();
+});
+
+test('an invalid hidden role becomes visible and focuses its model field', async () => {
+  const wrapper = await mountView('agents');
+  await chooseModel(wrapper, 'product-lead', '--bad');
+  await wrapper.get('#agentSearch').setValue('Tutor');
+  api.preferences.set.mockReturnValueOnce(fail('invalid_choice', 'Invalid model identifier', 'agents.product-lead.model'));
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  expect(wrapper.findAll('.agent-settings-card')).toHaveLength(7);
+  expect(wrapper.get('#agent-product-lead-model').attributes('aria-invalid')).toBe('true');
+  expect(document.activeElement?.id).toBe('agent-product-lead-model');
+  await chooseModel(wrapper, 'product-lead', 'planning-model');
+  expect(wrapper.find('[data-agent="product-lead"] .agent-row-message.error').exists()).toBe(false);
+  expect(wrapper.get('#agent-product-lead-model').attributes('aria-invalid')).toBe('false');
+  wrapper.unmount();
+});
 
 test('the save bar appears with an edit and names the dirty store', async () => {
   const wrapper = await mountView();

@@ -572,6 +572,9 @@ code {
 .rel {
   background: linear-gradient(135deg, #f5be6b, #d68a2e);
 }
+.code {
+  background: linear-gradient(135deg, #5bb7e8, #3178b8);
+}
 /* The human, in activity feeds. */
 .activity-avatar.you {
   background: linear-gradient(135deg, #7d8597, #5a6172);

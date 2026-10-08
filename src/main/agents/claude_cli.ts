@@ -21,6 +21,7 @@ import path from 'node:path';
 
 import { processEnv } from '../env.ts';
 
+import type { ThinkingLevel } from '../../shared/agent_runtime.ts';
 export type JsonSchema = Record<string, unknown>;
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
@@ -36,6 +37,8 @@ export interface RunStructuredOptions {
   model?: string | null;
   // PATH to launch with (see ../shell_env.ts).
   envPath?: string | null;
+  inferenceEnv?: NodeJS.ProcessEnv;
+  thinking?: ThinkingLevel;
   budgetUsd?: number;
   timeoutMs?: number;
   // Cancels the run.
@@ -95,11 +98,13 @@ export const cliArgs = ({
   systemPrompt,
   schema,
   model,
+  thinking = 'default',
   budgetUsd,
 }: {
   systemPrompt: string;
   schema: JsonSchema;
   model?: string | null;
+  thinking?: ThinkingLevel;
   budgetUsd: number;
 }): string[] => {
   const args = [
@@ -119,16 +124,18 @@ export const cliArgs = ({
     JSON.stringify(schema),
   ];
   if (model) args.push('--model', model);
+  if (thinking !== 'default') args.push('--effort', thinking);
   return args;
 };
 
+const redact = (text: string): string => text.replace(/(api[_ -]?key|token|password|secret)(\s*[:=]\s*)\S+/gi, '$1$2[redacted]');
 // Pulls the structured result out of the CLI's JSON envelope.
 export const parseEnvelope = (stdout: string): StructuredResult => {
   let envelope: Envelope;
   try {
     envelope = JSON.parse(stdout);
   } catch {
-    throw new AgentRunError('Agent returned output that is not JSON', 'agent_bad_output', stdout.slice(0, 500));
+    throw new AgentRunError('Agent returned output that is not JSON', 'agent_bad_output', redact(stdout.slice(0, 500)));
   }
   if (envelope.is_error || envelope.subtype !== 'success') {
     const reason =
@@ -138,14 +145,14 @@ export const parseEnvelope = (stdout: string): StructuredResult => {
           envelope.subtype === 'error_max_structured_output_retries'
           ? 'agent_schema_retry'
           : 'agent_failed';
-    throw new AgentRunError(String(envelope.result || `Agent run ended with ${envelope.subtype}`), reason);
+    throw new AgentRunError(redact(String(envelope.result || `Agent run ended with ${envelope.subtype}`)), reason);
   }
   let output = envelope.structured_output;
   if (output === undefined && typeof envelope.result === 'string') {
     try {
       output = JSON.parse(envelope.result);
     } catch {
-      throw new AgentRunError('Agent did not return structured output', 'agent_bad_output', envelope.result.slice(0, 500));
+      throw new AgentRunError('Agent did not return structured output', 'agent_bad_output', redact(envelope.result.slice(0, 500)));
     }
   }
   if (!output || typeof output !== 'object') throw new AgentRunError('Agent did not return structured output', 'agent_bad_output');
@@ -161,7 +168,9 @@ const runOnce = async ({
   schema,
   command = 'claude',
   model = null,
-  envPath = null,
+  envPath,
+  inferenceEnv,
+  thinking = 'default',
   budgetUsd = DEFAULT_BUDGET_USD,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   signal,
@@ -175,13 +184,14 @@ const runOnce = async ({
     return await new Promise<StructuredResult>((resolve, reject) => {
       let child: ChildProcessWithoutNullStreams;
       try {
-        child = spawnFn(command, cliArgs({ systemPrompt, schema, model, budgetUsd }), {
+        child = spawnFn(command, cliArgs({ systemPrompt, schema, model, thinking, budgetUsd }), {
           cwd,
-          env: childEnv(processEnv(), envPath),
+          env: { ...childEnv(processEnv(), envPath), ...inferenceEnv },
           stdio: ['pipe', 'pipe', 'pipe'],
+          detached: process.platform !== 'win32',
         });
-      } catch (error) {
-        reject(new AgentRunError(`Could not start ${command}: ${(error as Error).message}`, 'agent_unavailable'));
+      } catch {
+        reject(new AgentRunError(`Could not start ${command}`, 'agent_unavailable'));
         return;
       }
 
@@ -197,8 +207,24 @@ const runOnce = async ({
         fn(value);
       };
       const stop = (why: 'timeout' | 'cancelled' | 'too_large') => {
+        if (reason) return;
         reason = why;
-        child.kill('SIGTERM');
+        child.stdin.destroy();
+        try {
+          if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
+          else child.kill('SIGTERM');
+        } catch {
+          child.kill('SIGTERM');
+        }
+        const killTimer = setTimeout(() => {
+          try {
+            if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
+            else child.kill('SIGKILL');
+          } catch {
+            child.kill('SIGKILL');
+          }
+        }, 250);
+        killTimer.unref();
       };
       const timer = setTimeout(() => stop('timeout'), timeoutMs);
       const onAbort = () => stop('cancelled');
@@ -216,7 +242,7 @@ const runOnce = async ({
           reject,
           error.code === 'ENOENT'
             ? new AgentRunError(`Claude Code CLI not found: ${command}`, 'agent_unavailable')
-            : new AgentRunError(error.message, 'agent_failed'),
+            : new AgentRunError(redact(error.message), 'agent_failed'),
         );
       });
       child.on('close', (code: number | null) => {
@@ -229,7 +255,10 @@ const runOnce = async ({
           finish(resolve, parseEnvelope(stdout));
         } catch (error) {
           if (code !== 0 && !stdout.trim()) {
-            finish(reject, new AgentRunError(stderr.trim().split('\n').pop() || `Claude Code exited with ${code}`, 'agent_failed', stderr.slice(-2000)));
+            finish(
+              reject,
+              new AgentRunError(redact(stderr.trim().split('\n').pop() || `Claude Code exited with ${code}`), 'agent_failed', redact(stderr.slice(-2000))),
+            );
           } else {
             finish(reject, error);
           }

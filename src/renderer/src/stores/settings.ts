@@ -3,8 +3,7 @@
 import { defineStore } from 'pinia';
 import { computed, nextTick, ref } from 'vue';
 
-import { call } from '@/lib/ipc.ts';
-import type { IpcError } from '@/lib/ipc.ts';
+import { call, IpcError } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, confirmChoice, showToast } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
@@ -14,10 +13,12 @@ import { useSetupStore } from './setup.ts';
 import { useTasksStore } from './tasks.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
+import { AGENT_IDS, CLI_OPTIONS } from '@shared/agent_runtime.ts';
 export type SettingsPage = model.SettingsPage;
 
 export const CHECK_KINDS = ['test', 'lint', 'build', 'smoke'] as const satisfies readonly ipc.CheckKind[];
 export const MAX_NAME_LENGTH = 40;
+export type AgentFieldError = { field: 'cli' | 'model' | 'thinking'; message: string };
 
 export type NavItem = { page: SettingsPage; label: string; icon: IconName; keywords: string };
 export type NavGroup = { id: 'personal' | 'workspace' | 'device'; items: NavItem[] };
@@ -42,6 +43,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'device',
     items: [
       { page: 'environment', label: '运行环境', icon: 'cpu', keywords: '环境 PATH shell nvm homebrew 版本 electron node' },
+      { page: 'agents', label: '模型与智能体', icon: 'sliders', keywords: 'Agent CLI 模型 thinking 思考强度 claude pi grok codex opencode' },
       { page: 'data', label: '数据', icon: 'database', keywords: '数据 目录 重置 进度 清空 reset' },
     ],
   },
@@ -96,6 +98,7 @@ const preferencesForm = (prefs: ipc.Preferences): ipc.PreferencesInput => ({
   profile: { displayName: prefs.profile.displayName, avatarColor: prefs.profile.avatarColor },
   appearance: { ...prefs.appearance },
   environment: { ...prefs.environment },
+  agents: clone(prefs.agents),
 });
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -108,9 +111,102 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const fillPreferences = (prefs: ipc.PreferencesInput) => {
     preferencesDraft.value = clone(prefs);
+    agentFieldErrors.value = {};
+    agentConfigNotices.value = {};
   };
   const fillWorkspace = (form: WorkspaceDraft) => {
     workspaceDraft.value = clone(form);
+  };
+  const agentRuntimes = ref<ipc.AgentRuntimeStatus[]>([]);
+  const agentRuntimeLoading = ref(false);
+  const agentRuntimeError = ref<string | null>(null);
+  const agentConfigNotices = ref<Partial<Record<ipc.AgentId, string>>>({});
+  const agentFieldErrors = ref<Partial<Record<ipc.AgentId, AgentFieldError>>>({});
+  let agentRuntimeGeneration = 0;
+  const modelCatalogs = ref<Record<string, ipc.CliModelCatalog>>({});
+  const modelCatalogLoading = ref<Record<string, boolean>>({});
+  const modelCatalogRequests = new Map<string, Promise<void>>();
+  const modelCatalogGenerations = new Map<string, number>();
+  const modelScope = (agent: ipc.AgentId): ipc.CliModelScope => (agent === 'coding-agent' ? 'coding' : 'analysis');
+  const modelsForAgent = (agent: ipc.AgentId) => {
+    const cli = preferencesDraft.value?.agents[agent].cli;
+    return cli ? modelCatalogs.value[`${modelScope(agent)}:${cli}`] : undefined;
+  };
+  const modelsLoadingForAgent = (agent: ipc.AgentId) => {
+    const cli = preferencesDraft.value?.agents[agent].cli;
+    return cli ? modelCatalogLoading.value[`${modelScope(agent)}:${cli}`] === true : false;
+  };
+  const loadAgentModels = async (agent: ipc.AgentId, refresh = false) => {
+    const cli = preferencesDraft.value?.agents[agent].cli;
+    if (!cli) return;
+    const scope = modelScope(agent);
+    const key = `${scope}:${cli}`;
+    if (!refresh && modelCatalogs.value[key]) return;
+    const current = modelCatalogRequests.get(key);
+    if (!refresh && current) return current;
+    const generation = (modelCatalogGenerations.get(key) ?? 0) + 1;
+    modelCatalogGenerations.set(key, generation);
+    modelCatalogLoading.value[key] = true;
+    const reading = (async () => {
+      try {
+        const catalog = await call(window.taskpilot.agent.models({ cli, scope, refresh }));
+        if (modelCatalogGenerations.get(key) === generation) modelCatalogs.value[key] = catalog;
+      } catch (error) {
+        if (modelCatalogGenerations.get(key) === generation)
+          modelCatalogs.value[key] = {
+            ...(modelCatalogs.value[key] ?? { cli, scope, models: [], defaultModel: null, defaultThinking: null }),
+            issues: [`读取 CLI 模型目录失败：${describeError(error)}`],
+          };
+      } finally {
+        if (modelCatalogGenerations.get(key) === generation) {
+          modelCatalogLoading.value[key] = false;
+          modelCatalogRequests.delete(key);
+        }
+      }
+    })();
+    modelCatalogRequests.set(key, reading);
+    return reading;
+  };
+  const refreshAgentRuntimes = async () => {
+    const generation = ++agentRuntimeGeneration;
+    agentRuntimeLoading.value = true;
+    agentRuntimeError.value = null;
+    try {
+      const statuses = await call(window.taskpilot.agent.runtimes());
+      if (generation === agentRuntimeGeneration) agentRuntimes.value = statuses;
+    } catch (error) {
+      if (generation === agentRuntimeGeneration) agentRuntimeError.value = describeError(error);
+    } finally {
+      if (generation === agentRuntimeGeneration) agentRuntimeLoading.value = false;
+    }
+  };
+  const setAgentCli = (agent: ipc.AgentId, cli: ipc.CliId) => {
+    const current = preferencesDraft.value?.agents[agent];
+    const option = CLI_OPTIONS.find((entry) => entry.id === cli);
+    if (!current || !option || (agent !== 'coding-agent' && !option.analysis)) return;
+    const thinking = option.thinking.includes(current.thinking) ? current.thinking : 'default';
+    delete agentFieldErrors.value[agent];
+    preferencesDraft.value!.agents[agent] = { ...current, cli, thinking };
+    agentConfigNotices.value[agent] = thinking === current.thinking ? '' : `切换到 ${option.label} 后不支持原思考强度，已重置为默认。`;
+    loadAgentModels(agent).catch((error) => console.error(error));
+  };
+  const setAgentModel = (agent: ipc.AgentId, modelName: string) => {
+    if (!preferencesDraft.value) return;
+    preferencesDraft.value.agents[agent].model = modelName;
+    delete agentFieldErrors.value[agent];
+  };
+  const setAgentThinking = (agent: ipc.AgentId, thinking: ipc.ThinkingLevel) => {
+    const current = preferencesDraft.value?.agents[agent];
+    const option = current && CLI_OPTIONS.find((entry) => entry.id === current.cli);
+    if (!current || !option?.thinking.includes(thinking)) return;
+    delete agentFieldErrors.value[agent];
+    preferencesDraft.value!.agents[agent] = { ...current, thinking };
+    agentConfigNotices.value[agent] = '';
+  };
+  const agentStatus = (agent: ipc.AgentId) => {
+    const status = agentRuntimes.value.find((entry) => entry.agent === agent);
+    const draft = preferencesDraft.value?.agents[agent];
+    return status && draft && model.sameValue(status.config, draft) ? status : undefined;
   };
 
   // ========== Unsaved changes ==========
@@ -134,7 +230,9 @@ export const useSettingsStore = defineStore('settings', () => {
   const anyDirty = computed(() => dirty.value.preferences || dirty.value.workspace);
   const savebarText = computed(() => {
     const labels: string[] = [];
-    if (dirty.value.preferences) labels.push('个人与偏好');
+    if (dirtyPages.value.agents) labels.push('智能体配置');
+    if (dirty.value.preferences && (!dirtyPages.value.agents || dirtyPages.value.profile || dirtyPages.value.preferences || dirtyPages.value.environment))
+      labels.push('个人与偏好');
     if (dirty.value.workspace) labels.push('工作区');
     return anyDirty.value ? `${labels.join('、')}有未保存的修改` : '';
   });
@@ -174,6 +272,19 @@ export const useSettingsStore = defineStore('settings', () => {
   const showFieldError = (error: unknown) => {
     console.error(error);
     const field = (error as IpcError).field;
+    if (field === 'agents' || field?.startsWith('agents.')) {
+      openPage('agents');
+      const modelProblem = field.endsWith('.model') && error instanceof IpcError && error.code === 'invalid_choice';
+      const message = modelProblem ? '模型 ID 格式无效，请使用 sonnet 或 provider/model 这类名称（最多 200 字符）。' : describeError(error);
+      showToast(`智能体配置无效：${message}`);
+      const [, agent, key = 'cli'] = field.split('.');
+      if (AGENT_IDS.includes(agent as ipc.AgentId)) {
+        const input = key === 'model' || key === 'thinking' ? key : 'cli';
+        agentFieldErrors.value = { ...agentFieldErrors.value, [agent]: { field: input, message } };
+        focusById(`agent-${agent}-${input}`).catch((focusError) => console.error(focusError));
+      }
+      return;
+    }
     const page = field ? FIELD_PAGES[field] : undefined;
     if (!field || !page) {
       showToast(`设置无效：${describeError(error)}`);
@@ -329,6 +440,7 @@ export const useSettingsStore = defineStore('settings', () => {
         fillPreferences(savedPreferences.value);
         checkNameLength();
         app.applyPreferences(prefs);
+        refreshAgentRuntimes().catch((error) => console.error(error));
         if (activePage.value === 'environment') await renderEnvironment();
       }
       showToast('设置已保存。');
@@ -344,6 +456,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const discardAll = () => {
     if (savedPreferences.value) fillPreferences(savedPreferences.value);
     if (savedWorkspace.value) fillWorkspace(savedWorkspace.value);
+    agentConfigNotices.value = {};
     checkNameLength();
     clearWorkspaceStatus();
     repoFacts.value = null;
@@ -378,6 +491,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const openPage = (page: string) => {
     if (!model.isSettingsPage(page)) return;
     activePage.value = page;
+    if (page === 'agents') refreshAgentRuntimes().catch((error) => console.error(error));
     if (page === 'environment') renderEnvironment().catch((error) => console.error(error));
     if (page === 'data') renderData().catch((error) => console.error(error));
     if (page === 'setup')
@@ -421,6 +535,21 @@ export const useSettingsStore = defineStore('settings', () => {
     savedWorkspace,
     preferencesDraft,
     workspaceDraft,
+    agentRuntimes,
+    agentRuntimeLoading,
+    agentRuntimeError,
+    agentConfigNotices,
+    agentFieldErrors,
+    refreshAgentRuntimes,
+    modelCatalogs,
+    modelCatalogLoading,
+    modelsForAgent,
+    modelsLoadingForAgent,
+    loadAgentModels,
+    setAgentCli,
+    setAgentModel,
+    setAgentThinking,
+    agentStatus,
     // Unsaved changes
     dirty,
     dirtyPages,

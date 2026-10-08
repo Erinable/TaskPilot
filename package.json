@@ -8,8 +8,10 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "vue-tsc --build && vue-tsc -p tsconfig.test.json --noEmit",
+    "typecheck": "vue-tsc --build --noEmit && vue-tsc -p tsconfig.test.json --noEmit",
+    "pretest": "bash tests/scripts/coding_wrapper.test.sh",
     "test": "vitest run",
+    "test:bootstrap": "bash tests/scripts/coding_wrapper.test.sh",
     "eval:product-lead": "node evals/product-lead/run.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -38,7 +40,9 @@
   },
   "dependencies": {
     "element-plus": "2.14.7",
+    "jsonc-parser": "3.3.1",
     "pinia": "4.0.3",
+    "smol-toml": "1.9.0",
     "vue": "3.5.43"
   }
 }

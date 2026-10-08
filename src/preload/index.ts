@@ -81,6 +81,17 @@ const api = {
 
   agent: {
     status: () => invoke<ipc.AgentStatus>(CHANNELS.agentStatus),
+    runtimes: () => invoke<ipc.AgentRuntimeStatus[]>(CHANNELS.agentRuntimes),
+    models: (request: ipc.CliModelsRequest) => invoke<ipc.CliModelCatalog>(CHANNELS.agentModels, request),
+  },
+  coding: {
+    status: () => invoke<ipc.CodingRuntimeStatus>(CHANNELS.codingStatus),
+    start: (id: string, input: ipc.CodingStart) => invoke<ipc.TaskView>(CHANNELS.codingStart, id, input),
+    get: (id: string) => invoke<ipc.TaskView>(CHANNELS.codingGet, id),
+    events: (id: string, after: number) => invoke<ipc.CodingEventPage>(CHANNELS.codingEvents, id, after),
+    cancel: (id: string) => invoke<boolean>(CHANNELS.codingCancel, id),
+    patch: (id: string) => invoke<ipc.CodingPatchPreview>(CHANNELS.codingPatch, id),
+    apply: (id: string, input: ipc.CodingApply) => invoke<ipc.CodingApplyResult>(CHANNELS.codingApply, id, input),
   },
 
   activity: {

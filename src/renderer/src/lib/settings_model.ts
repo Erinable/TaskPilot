@@ -9,6 +9,7 @@ export const PAGE_STORES = {
   profile: 'preferences',
   preferences: 'preferences',
   environment: 'preferences',
+  agents: 'preferences',
   repository: 'workspace',
   commands: 'workspace',
   setup: null, // runs steps and writes commands through its own IPC
@@ -60,6 +61,7 @@ export const preferencesDraft = (prefs: Partial<PreferencesDraft>) => ({
   profile: { displayName: (prefs.profile?.displayName ?? '').trim(), avatarColor: prefs.profile?.avatarColor },
   appearance: { theme: prefs.appearance?.theme, vibrancy: prefs.appearance?.vibrancy === true },
   environment: { pathSource: prefs.environment?.pathSource },
+  agents: prefs.agents,
 });
 
 // Which stores have unsaved edits.
@@ -79,6 +81,7 @@ export const dirtyPages = (saved: DraftPair, draft: DraftPair): Partial<Record<S
     profile: !sameValue(savedPrefs.profile, draftPrefs.profile),
     preferences: !sameValue(savedPrefs.appearance, draftPrefs.appearance),
     environment: !sameValue(savedPrefs.environment, draftPrefs.environment),
+    agents: !sameValue(savedPrefs.agents, draftPrefs.agents),
     repository: savedWorkspace.root !== draftWorkspace.root,
     commands: !sameValue(savedWorkspace.commands, draftWorkspace.commands) || !sameValue(savedWorkspace.options, draftWorkspace.options),
     data: false,

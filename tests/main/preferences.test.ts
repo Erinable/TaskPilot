@@ -15,6 +15,7 @@ const valid = (overrides: any = {}) => ({
   profile: { displayName: 'Ada Lovelace', avatarColor: 'ocean', ...overrides.profile },
   appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'login-shell', ...overrides.environment },
+  agents: preferences.defaults().agents,
 });
 
 test('load() returns defaults when the file is missing or corrupt', async () => {
@@ -82,4 +83,42 @@ test('toView() adds initials without changing the stored shape', () => {
   const view = preferences.toView(valid());
   assert.equal(view.profile.initials, 'AL');
   assert.equal(view.profile.displayName, 'Ada Lovelace');
+});
+
+test('per-agent runtime choices survive disk reload without changing other roles', async () => {
+  const dir = await tempDir();
+  const input = valid();
+  input.agents.architect = { cli: 'pi', model: 'openai/gpt-5', thinking: 'high' };
+  input.agents['coding-agent'] = { cli: 'grok', model: 'grok-code', thinking: 'medium' };
+  await preferences.save(dir, input);
+  const loaded = await preferences.load(dir);
+  assert.deepEqual(loaded.agents.architect, input.agents.architect);
+  assert.deepEqual(loaded.agents['coding-agent'], input.agents['coding-agent']);
+  assert.deepEqual(loaded.agents.qa, { cli: 'claude', model: '', thinking: 'default' });
+});
+
+test('legacy preferences gain independent default role configurations', async () => {
+  const dir = await tempDir();
+  const { agents: _agents, ...legacy } = valid();
+  await fs.writeFile(path.join(dir, preferences.PREFERENCES_FILENAME), JSON.stringify(legacy));
+  const loaded = await preferences.load(dir);
+  loaded.agents.architect.model = 'changed';
+  assert.equal(loaded.agents.qa.model, '');
+  assert.equal(loaded.agents['coding-agent'].cli, 'codex');
+});
+
+test('saving rejects unsafe role capability and malformed model or thinking', async () => {
+  const dir = await tempDir();
+  const cases = [
+    { cli: 'codex', model: '', thinking: 'default' },
+    { cli: 'claude', model: '', thinking: 'off' },
+    { cli: 'pi', model: '--tools=bash', thinking: 'high' },
+    { cli: 'pi', model: 'model\n--flag', thinking: 'high' },
+    { cli: 'pi', model: '', thinking: 'maximum' },
+  ];
+  for (const config of cases) {
+    const input = { ...valid(), agents: { ...preferences.defaults().agents, qa: config } };
+    await assert.rejects(preferences.save(dir, input), { code: 'invalid_choice' });
+  }
+  await assert.rejects(fs.access(path.join(dir, preferences.PREFERENCES_FILENAME)));
 });

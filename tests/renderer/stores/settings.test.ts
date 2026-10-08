@@ -6,7 +6,9 @@ import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useSetupStore } from '@/stores/setup.ts';
-import { fail, installApi } from '../settings_fakes.ts';
+import { fail, installApi, ok } from '../settings_fakes.ts';
+import { defaultAgentSettings } from '@shared/agent_runtime.ts';
+import type { CliModelCatalog, IpcResult } from '@shared/ipc_types.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -57,6 +59,66 @@ test('edits mark exactly their page dirty and label the save bar', async () => {
   expect(settings.anyDirty).toBe(false);
   expect(settings.savebarText).toBe('');
 });
+test('agent configs save independently, reload, and expose runtime status without model calls', async () => {
+  const settings = await loaded();
+  await settings.openPage('agents');
+  await Promise.resolve();
+  expect(api.agent.runtimes).toHaveBeenCalledTimes(1);
+  settings.setAgentModel('qa', 'provider/test-model');
+  expect(settings.preferencesDraft!.agents.architect.model).toBe('');
+  expect(settings.dirtyPages.agents).toBe(true);
+  expect(settings.dirtyPages.profile).toBe(false);
+  expect(await settings.saveAll()).toBe(true);
+  expect(api.preferences.set).toHaveBeenCalledWith({
+    profile: { displayName: 'Ada', avatarColor: 'ocean' },
+    appearance: { theme: 'system', vibrancy: false },
+    environment: { pathSource: 'inherit' },
+    agents: { ...defaultAgentSettings(), qa: { cli: 'claude', model: 'provider/test-model', thinking: 'default' } },
+  });
+  await settings.open('agents');
+  expect(settings.preferencesDraft!.agents.qa.model).toBe('provider/test-model');
+  expect(settings.hasUnsavedChanges()).toBe(false);
+});
+
+test('changing CLI explicitly resets unsupported thinking and explains the reset', async () => {
+  const settings = await loaded();
+  settings.preferencesDraft!.agents.qa.thinking = 'max';
+  settings.setAgentCli('qa', 'grok');
+  expect(settings.preferencesDraft!.agents.qa).toEqual({ cli: 'grok', model: '', thinking: 'default' });
+  expect(settings.agentConfigNotices.qa).toContain('已重置为默认');
+});
+
+test('a refreshed native catalog wins over an older in-flight read', async () => {
+  const settings = await loaded();
+  const oldRead = Promise.withResolvers<IpcResult<CliModelCatalog>>();
+  api.agent.models.mockReturnValueOnce(oldRead.promise);
+  const first = settings.loadAgentModels('qa');
+  const refreshed: CliModelCatalog = {
+    cli: 'claude',
+    scope: 'analysis',
+    models: [{ id: 'new-native', label: 'New native', provider: null, variants: [], source: 'config' }],
+    defaultModel: 'new-native',
+    defaultThinking: null,
+    issues: [],
+  };
+  api.agent.models.mockReturnValueOnce(ok(refreshed));
+  await settings.loadAgentModels('qa', true);
+  oldRead.resolve({ ok: true, data: { ...refreshed, models: [], defaultModel: 'old-native' } });
+  await first;
+  expect(settings.modelsForAgent('qa')?.defaultModel).toBe('new-native');
+  expect(settings.modelsForAgent('qa')?.models.map((option) => option.id)).toEqual(['new-native']);
+});
+
+test('coding and analysis roles do not share catalog credentials or defaults', async () => {
+  const settings = await loaded();
+  settings.setAgentCli('coding-agent', 'claude');
+  await settings.loadAgentModels('coding-agent');
+  const analysis: CliModelCatalog = { cli: 'claude', scope: 'analysis', models: [], defaultModel: 'main-user-native', defaultThinking: null, issues: [] };
+  api.agent.models.mockReturnValueOnce(ok(analysis));
+  await settings.loadAgentModels('qa');
+  expect(settings.modelsForAgent('qa')?.defaultModel).toBe('main-user-native');
+  expect(settings.modelsForAgent('coding-agent')?.defaultModel).not.toBe('main-user-native');
+});
 
 test('search filters pages, hides empty groups, and moves off a hidden page', async () => {
   const settings = await loaded();
@@ -85,6 +147,7 @@ test('save checks the workspace, then sends each dirty store in form shape', asy
     profile: { displayName: 'Ada', avatarColor: 'ocean' },
     appearance: { theme: 'dark', vibrancy: false },
     environment: { pathSource: 'inherit' },
+    agents: defaultAgentSettings(),
   });
   expect(api.workspace.info).toHaveBeenCalled();
   expect(useAppStore().preferences?.appearance.theme).toBe('dark');

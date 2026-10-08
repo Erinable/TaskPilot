@@ -78,9 +78,14 @@ describe('QueueView', () => {
         { kind: 'requirement_created', requirementId: 'r1', title: '<img src=x onerror=alert(1)>', at: new Date(Date.now() - 5 * 60_000).toISOString() },
       ],
       metrics: { doneThisWeek: 5, donePreviousWeek: 4, averageHours: 2.44, averageHoursPrevious: 2.4 },
-      team: { available: true, busy: ['qa'], work: [{ agent: 'qa', kind: 'review', label: '登录接口' }] },
-      costs: { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 }, since: null, partial: true },
-      teamRecent: { 'product-lead': [], architect: [], qa: [], 'release-manager': [] },
+      team: {
+        available: true,
+        availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+        busy: ['qa'],
+        work: [{ agent: 'qa', kind: 'review', label: '登录接口' }],
+      },
+      costs: { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 }, since: null, partial: true },
+      teamRecent: { 'product-lead': [], architect: [], qa: [], 'release-manager': [], 'coding-agent': [] },
       timeZone: 'Asia/Shanghai',
     };
     const wrapper = render();

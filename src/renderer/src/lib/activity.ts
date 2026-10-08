@@ -2,7 +2,7 @@
 import type * as ipc from '@shared/ipc_types.ts';
 import { businessDay, previousDay } from './time_zone.ts';
 
-export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'you'; initials: string; name: string };
+export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'code' | 'you'; initials: string; name: string };
 
 export type FeedItem = { key: string; actor: FeedActor; what: string; detail: string; at: string };
 
@@ -11,13 +11,16 @@ const AGENTS: Record<ipc.ActivityAgent, FeedActor> = {
   architect: { avatar: 'arch', initials: 'AR', name: 'Architect' },
   qa: { avatar: 'qa', initials: 'QA', name: 'QA Partner' },
   'release-manager': { avatar: 'rel', initials: 'RM', name: 'Release Manager' },
+  'coding-agent': { avatar: 'code', initials: 'CA', name: 'Coding Agent' },
 };
 const YOU: FeedActor = { avatar: 'you', initials: '你', name: '你' };
 
-export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager'] as const).map((agent) => ({
-  agent,
-  actor: AGENTS[agent],
-}));
+export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const).map(
+  (agent) => ({
+    agent,
+    actor: AGENTS[agent],
+  }),
+);
 
 // What a transition reads as, and who did it.
 const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition, { by: FeedActor; what: string }> = {
@@ -48,6 +51,14 @@ export const toFeedItem = (record: ipc.ActivityRecord, index: number): FeedItem 
       const text = TRANSITION_TEXT[record.transition];
       return { key, actor: text.by, what: text.what, detail: record.title, at: record.at };
     }
+    case 'coding_run':
+      return {
+        key,
+        actor: AGENTS['coding-agent'],
+        what: record.status === 'started' ? '开始编码' : record.status === 'finished' ? '完成编码' : record.status === 'cancelled' ? '取消编码' : '编码失败',
+        detail: record.title,
+        at: record.at,
+      };
     case 'requirement_created':
       return { key, actor: YOU, what: '提交了需求', detail: record.title, at: record.at };
     case 'requirement_finished':
@@ -104,16 +115,18 @@ export const durationTrend = ({ averageHours, averageHoursPrevious }: ipc.QueueM
 export type Presence = 'online' | 'busy' | 'offline';
 
 export const presenceOf = (team: ipc.TeamStatus | null, agent: ipc.ActivityAgent): Presence => {
-  if (!team?.available) return 'offline';
+  if (!team || !team.available || !team.availableByAgent[agent]) return 'offline';
   return team.busy.includes(agent) ? 'busy' : 'online';
 };
 
-export const PRESENCE_LABELS: Record<Presence, string> = { online: '在线', busy: '工作中', offline: '离线：找不到 Claude Code CLI' };
+export const PRESENCE_LABELS: Record<Presence, string> = { online: '在线', busy: '工作中', offline: '暂时离线' };
 
 export const presenceSummary = (team: ipc.TeamStatus | null) => {
   if (!team) return '';
   if (!team.available) return 'AI 团队离线';
-  return team.busy.length ? `${team.busy.length} 个 AI 成员正在工作` : `${TEAM.length} 个 AI 成员在线`;
+  const availableCount = Object.values(team.availableByAgent).filter(Boolean).length;
+  if (availableCount === 0) return 'AI 团队离线';
+  return team.busy.length ? `${team.busy.length} 个 AI 成员正在工作` : `${availableCount} 个 AI 成员在线`;
 };
 
 // What each member does, in plain words for people new to the workflow.
@@ -122,13 +135,14 @@ export const ROLES: Record<ipc.ActivityAgent, string> = {
   architect: '先读相关代码，告诉团队接口长什么样；你发现计划和代码对不上时，由它决定怎么改。',
   qa: '你提交工作包后检查代码和测试，确认验收条件都做到了。',
   'release-manager': '根据最近的提交和完成的工作包，起草版本号、更新说明和发布清单。',
+  'coding-agent': '在隔离运行目录里执行编码工作，产出变更供你审查和应用。',
 };
-
 const WORK_TEXT: Record<ipc.AgentWork['kind'], string> = {
   requirement: '正在处理需求',
   review: '正在审查工作包',
   adjudication: '正在裁决偏差',
   release: '正在起草',
+  coding: '正在编码工作包',
 };
 
 // "正在审查工作包「登录接口」"; null when the member is not running anything.

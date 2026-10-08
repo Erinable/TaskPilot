@@ -15,8 +15,9 @@ export const STATUSES = {
 // A work package's lifecycle status.
 export type WorkPackageStatus = keyof typeof STATUSES;
 
-// Who triggers a transition.
-export type Actor = 'human' | 'agent';
+// Who triggers a transition. Coding Agent runs never own a business transition;
+// the distinct actor prevents accidental reuse of human or analysis-agent authority.
+export type Actor = 'human' | 'agent' | 'coding-agent';
 
 export type TransitionName =
   | 'breakdown_done'
@@ -90,10 +91,14 @@ const findTransition = (from: WorkPackageStatus, name: string) => TRANSITIONS.fi
 export const available = (status: string, actor?: Actor | null): Transition[] => TRANSITIONS.filter((t) => t.from === status && (!actor || t.actor === actor));
 
 // Validates a transition and returns the resulting status.
+// Coding Agent execution is a separate workflow and never owns a business transition.
 // Throws TransitionError with a machine-readable `code` on rejection.
 export const apply = (status: string, name: string, actor?: Actor | null): WorkPackageStatus => {
   if (!isStatus(status)) {
     throw new TransitionError(`Unknown status: ${status}`, 'unknown_status');
+  }
+  if (actor === 'coding-agent') {
+    throw new TransitionError('Coding Agent cannot trigger package transitions', 'wrong_actor');
   }
   const transition = findTransition(status, name);
   if (!transition) {

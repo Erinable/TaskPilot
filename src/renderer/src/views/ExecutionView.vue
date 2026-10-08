@@ -11,6 +11,7 @@ import ReviewPanel from '@/components/execution/ReviewPanel.vue';
 import ScopePanel from '@/components/execution/ScopePanel.vue';
 import StepsPanel from '@/components/execution/StepsPanel.vue';
 import VerifyPanel from '@/components/execution/VerifyPanel.vue';
+import CodingPanel from '@/components/execution/CodingPanel.vue';
 import DifficultyChip from '@/components/DifficultyChip.vue';
 import TermHint from '@/components/TermHint.vue';
 import { nextStep } from '@/lib/next_step.ts';
@@ -140,6 +141,7 @@ onBeforeUnmount(() => execution.close());
         </div>
         <div class="exec-column">
           <ScopePanel :task="task" />
+          <CodingPanel v-if="task.status === 'in_progress' || task.codingRun" :task="task" />
           <VerifyPanel :task="task" />
           <DiffPanel :task="task" />
         </div>

@@ -9,12 +9,20 @@ import * as workspace from './workspace.ts';
 import * as verification from './verification.ts';
 import * as preferences from './preferences.ts';
 import { createPathResolver } from './shell_env.ts';
-import * as claudeCli from './agents/claude_cli.ts';
+import type * as claudeCli from './agents/claude_cli.ts';
+import * as cliRunner from './agents/cli_runner.ts';
+import type { CliProbeResult } from './agents/cli_runner.ts';
+import { AGENT_IDS, CLI_IDS, supportsAgentConfig } from '../shared/agent_runtime.ts';
+import type { AgentId } from '../shared/agent_runtime.ts';
+import { readModelCatalog } from './agent_model_catalog.ts';
 import * as productLead from './agents/product_lead.ts';
 import * as envSetup from './env_setup.ts';
 import * as evidence from './evidence.ts';
 import * as gitCommit from './git_commit.ts';
 import * as tutorAgent from './agents/tutor.ts';
+import * as codingExec from './coding_exec.ts';
+import * as codingWorkspace from './coding_workspace.ts';
+import type { CodingEventPage, CodingRun } from '../shared/coding_types.ts';
 import {
   summarizeForRequirement,
   reviewWorkPackage,
@@ -154,6 +162,7 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState):
     review: state.review ?? null,
     baselineChecks: state.baselineChecks ?? null,
     adjudication: state.adjudication ?? null,
+    codingRun: state.codingRun ?? null,
     revision: state.revision && {
       version: state.revision.version,
       reason: state.revision.reason,
@@ -204,6 +213,8 @@ export type IpcDeps = {
   requirements?: RequirementStore | null;
   // Replaces claude-cli.runStructured (tests).
   runAgent?: RunAgent;
+  probeAgent?: typeof cliRunner.probeCli;
+  modelCatalog?: typeof readModelCatalog;
   // Called after generated packages are added to the queue.
   onPackagesPublished?: (definitions: TaskDefinition[]) => void;
   // Records state changes for metrics and the activity feed.
@@ -212,9 +223,22 @@ export type IpcDeps = {
   releases?: ReleaseStore | null;
   // Enables Tutor.
   tutor?: TutorStore | null;
+  codingProbe?: typeof codingExec.probeRuntime;
+  codingPrepare?: typeof codingWorkspace.prepare;
+  codingRun?: typeof codingExec.runCoding;
+  codingReadPatch?: typeof codingWorkspace.readPatch;
+  codingApplyPatch?: typeof codingWorkspace.applyPatch;
+  codingClean?: typeof codingWorkspace.clean;
 };
 
 export type IpcHandle = { shutdown: () => Promise<void> };
+
+type CodingRuntime = {
+  run: ipc.CodingRun;
+  controller: AbortController;
+  events: ipc.CodingEvent[];
+  workspace: codingWorkspace.PreparedCodingWorkspace;
+};
 
 export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHandle => {
   const {
@@ -233,15 +257,35 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     launchEditor,
     appVersion,
     requirements = null,
-    runAgent = claudeCli.runStructured,
+    runAgent,
+    probeAgent = cliRunner.probeCli,
+    modelCatalog = readModelCatalog,
     onPackagesPublished,
     activity = null,
     releases = null,
     tutor = null,
+    codingProbe = codingExec.probeRuntime,
+    codingPrepare = codingWorkspace.prepare,
+    codingRun = codingExec.runCoding,
+    codingReadPatch = codingWorkspace.readPatch,
+    codingApplyPatch = codingWorkspace.applyPatch,
+    codingClean = codingWorkspace.clean,
   } = deps;
 
   // The PATH verification commands run with, per the user's preference.
   const commandPath = () => pathResolver.resolve(getPreferences().environment.pathSource);
+
+  // Freeze a role's runtime at the start of its background action. Saving the
+  // next settings must not change an Architect step halfway through a run.
+  const runnerFor = (agent: Exclude<AgentId, 'coding-agent'>): RunAgent => {
+    const config = { ...getPreferences().agents[agent] };
+    return (options) => {
+      if (!supportsAgentConfig(agent, config)) throw codedError('The selected CLI cannot safely run this analysis agent', 'agent_unavailable');
+      return runAgent
+        ? runAgent({ ...options, command: config.cli, model: config.model || null, thinking: config.thinking })
+        : cliRunner.runStructured(options, config);
+    };
+  };
 
   const failWith: (message: string, code: string, field?: string) => never = (message, code, field) => {
     throw codedError(message, code, field);
@@ -358,6 +402,227 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     promise.finally(() => pendingRuns.delete(promise));
   };
 
+  const codingRuns = new Map<string, CodingRuntime>();
+  const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
+  const MAX_CODING_EVENTS = 200;
+  const codingStatus = () => codingProbe({ config: { ...getPreferences().agents['coding-agent'] } });
+  const codingRunOf = (id: string) => {
+    const task = requireTask(id);
+    const run = store.get(id).codingRun ?? codingRuns.get(id)?.run;
+    if (!run) throw codedError('No coding run exists', 'coding_not_running');
+    return { task, run };
+  };
+  const codingWorkspaceOf = (id: string, run: CodingRun) => codingRuns.get(id)?.workspace ?? { runName: run.runName, directory: run.runName };
+  const codingPrompt = (task: TaskDefinition, instruction: string) =>
+    [
+      'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
+      'Do not commit, push, change git remotes, or modify files outside the requested scope.',
+      `Requested files: ${task.fileScope.join(', ') || '(none)'}`,
+      `Work package: ${task.title}`,
+      `Steps: ${task.steps.join(' | ')}`,
+      `Acceptance: ${task.acceptance.map((item) => item.text).join(' | ')}`,
+      `Developer instruction: ${instruction}`,
+    ].join('\n');
+  const updateCoding = async (id: string, patch: Partial<CodingRun>) => {
+    const state = await store.updateCodingRun(id, patch);
+    const runtime = codingRuns.get(id);
+    if (runtime?.run) runtime.run = state.codingRun as CodingRun;
+    return state;
+  };
+  const codingFailure = (error: unknown): ipc.ErrorInfo => ({
+    code: errorCode(error) ?? 'coding_failed',
+    message: error instanceof Error ? error.message : String(error),
+  });
+  const startCoding = async (id: string, rawInput: unknown): Promise<ipc.TaskView> => {
+    const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
+    const task = requireTask(id);
+    const state = store.get(id);
+    if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
+    if (codingRuns.has(id)) failWith('A Coding Agent run is already active', 'coding_running');
+    if (state.codingRun && !['failed', 'cancelled', 'discarded'].includes(state.codingRun.status)) {
+      failWith('This package already has a Coding Agent result', 'coding_result_exists');
+    }
+    const input = rawInput as { instruction?: unknown } | null | undefined;
+    const instruction = requireString(input?.instruction, 'instruction').trim();
+    if (instruction.length > 20_000) failWith('Instruction is too long', 'invalid_argument', 'instruction');
+    const root = requireRoot();
+    const baseline = requireBaseline(id);
+    const runId = codingExec.codingRunId();
+    const initial: CodingRun = {
+      id: runId,
+      packageId: id,
+      runName: path.join(codingWorkspace.DEFAULT_RUN_ROOT, runId),
+      baseline,
+      status: 'preparing',
+      user: codingExec.CODING_USER,
+      model: runtimeConfig.model,
+      cli: runtimeConfig.cli,
+      thinking: runtimeConfig.thinking,
+      runtimeVersion: null,
+      sessionId: null,
+      instruction,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+      output: '',
+      usage: { inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+      files: [],
+      blocked: [],
+      checks: {},
+      patchDigest: null,
+    };
+    await store.setCodingRun(id, initial);
+    record({ kind: 'coding_run', packageId: id, title: task.title, status: 'started', costUsd: null });
+    const controller = new AbortController();
+    const runtime: CodingRuntime = {
+      run: initial,
+      controller,
+      events: [],
+      workspace: { runName: initial.runName, directory: initial.runName },
+    };
+    codingRuns.set(id, runtime);
+    codingEventHistory.set(id, []);
+    const settled = (async () => {
+      let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
+      try {
+        prepared = await codingPrepare(root, baseline, { runName: initial.runName, signal: controller.signal });
+        if (controller.signal.aborted) throw Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
+        runtime.workspace = prepared;
+        await updateCoding(id, { status: 'running' });
+        const result = await codingRun({
+          runName: prepared.runName,
+          config: runtimeConfig,
+          prompt: codingPrompt(task, instruction),
+          timeoutMs: 30 * 60 * 1000,
+          signal: controller.signal,
+          onEvent: (event) => {
+            runtime.events.push(event);
+            if (runtime.events.length > MAX_CODING_EVENTS) runtime.events = runtime.events.slice(-MAX_CODING_EVENTS);
+          },
+        });
+        runtime.events = result.events.map((event, sequence) => ({ ...event, sequence })).slice(-MAX_CODING_EVENTS);
+        codingEventHistory.set(id, [...runtime.events]);
+        await updateCoding(id, { status: 'checking', output: result.output, usage: result.usage, sessionId: result.sessionId });
+        const preview = await codingReadPatch(prepared.runName, task.fileScope, { signal: controller.signal });
+        await updateCoding(id, {
+          status: 'ready',
+          finishedAt: new Date().toISOString(),
+          files: preview.files,
+          blocked: preview.blocked,
+          patchDigest: preview.digest,
+        });
+        record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: result.usage.costUsd });
+        if (result.usage.costUsd !== null) recordCost('coding-agent', result.usage.costUsd);
+      } catch (error) {
+        const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        await updateCoding(id, {
+          status: cancelled ? 'cancelled' : 'failed',
+          finishedAt: new Date().toISOString(),
+          error: codingFailure(error),
+        }).catch(() => {});
+        record({ kind: 'coding_run', packageId: id, title: task.title, status: cancelled ? 'cancelled' : 'failed', costUsd: null });
+      } finally {
+        codingEventHistory.set(id, [...runtime.events]);
+        const current = store.get(id).codingRun;
+        if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await codingClean(prepared.runName).catch(() => {});
+        codingRuns.delete(id);
+      }
+    })();
+    track(settled);
+    return buildTaskView(task, store.get(id));
+  };
+
+  ipcMain.handle(
+    CHANNELS.codingStatus,
+    wrap(() => codingStatus()),
+  );
+  ipcMain.handle(
+    CHANNELS.codingStart,
+    wrap((_event, rawId, input): Promise<ipc.TaskView> => startCoding(requireString(rawId, 'id'), input)),
+  );
+  ipcMain.handle(
+    CHANNELS.codingGet,
+    wrap((_event, rawId): ipc.TaskView => {
+      const id = requireString(rawId, 'id');
+      return buildTaskView(requireTask(id), store.get(id));
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.codingEvents,
+    wrap((_event, rawId, rawAfter): CodingEventPage => {
+      const id = requireString(rawId, 'id');
+      codingRunOf(id);
+      if (!Number.isInteger(rawAfter) || (rawAfter as number) < -1) failWith('after must be a non-negative sequence or -1', 'invalid_argument', 'after');
+      const all = codingRuns.get(id)?.events ?? codingEventHistory.get(id) ?? [];
+      const after = rawAfter as number;
+      const events = all.filter((event) => event.sequence > after).slice(0, 200);
+      const next = events.at(-1)?.sequence ?? after;
+      return { events, next, truncated: events.length > 0 && all.some((event) => event.sequence > next) };
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.codingCancel,
+    wrap(async (_event, rawId): Promise<boolean> => {
+      const id = requireString(rawId, 'id');
+      const runtime = codingRuns.get(id);
+      if (!runtime) {
+        const run = store.get(id).codingRun;
+        if (!run || run.status !== 'ready') return false;
+        await codingClean(run.runName).catch(() => {});
+        await updateCoding(id, { status: 'discarded', finishedAt: new Date().toISOString() });
+        return true;
+      }
+      runtime.controller.abort();
+      return true;
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.codingPatch,
+    wrap(async (_event, rawId): Promise<ipc.CodingPatchPreview> => {
+      const id = requireString(rawId, 'id');
+      const { task, run } = codingRunOf(id);
+      if (!['ready', 'applied'].includes(run.status)) failWith('Coding patch is not ready', 'coding_not_ready');
+      const preview = await codingReadPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
+      await updateCoding(id, { files: preview.files, blocked: preview.blocked, patchDigest: preview.digest });
+      return preview;
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.codingApply,
+    wrap(async (_event, rawId, rawInput): Promise<ipc.CodingApplyResult> => {
+      const id = requireString(rawId, 'id');
+      const { task, run } = codingRunOf(id);
+      if (run.status !== 'ready') failWith('Coding patch is not ready to apply', 'coding_not_ready');
+      const input = rawInput as { digest?: unknown; allowHighRisk?: unknown } | null | undefined;
+      const digest = requireString(input?.digest, 'digest');
+      if (input?.allowHighRisk !== true && input?.allowHighRisk !== false) failWith('allowHighRisk must be boolean', 'invalid_argument', 'allowHighRisk');
+      const prepared = codingWorkspaceOf(id, run);
+      const preview = await codingReadPatch(prepared.runName, task.fileScope);
+      if (preview.digest !== digest) failWith('Patch changed since preview', 'coding_digest_mismatch');
+      const blocked = input.allowHighRisk ? preview.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : preview.blocked;
+      await updateCoding(id, { status: 'applying', error: null });
+      try {
+        const files = await codingApplyPatch(requireRoot(), preview.patch, digest, blocked);
+        await updateCoding(id, {
+          status: 'applied',
+          finishedAt: new Date().toISOString(),
+          files: preview.files,
+          blocked: preview.blocked,
+          patchDigest: digest,
+        });
+        record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
+        await codingClean(prepared.runName).catch(() => {});
+        codingRuns.delete(id);
+        return { files };
+      } catch (error) {
+        await updateCoding(id, { status: 'ready', error: codingFailure(error) });
+        throw error;
+      }
+    }),
+  );
+
+  // QA: reviews a package once it is submitted.
+
   // QA: reviews a package once it is submitted.
 
   // One in-flight review per work package, so it can be cancelled.
@@ -379,6 +644,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const task = requireTask(id);
     const root = requireRoot();
     const baseline = requireBaseline(id);
+    const reviewRunner = runnerFor('qa');
     const entry = await store.beginReview(id);
     const controller = new AbortController();
     reviews.set(id, controller);
@@ -390,7 +656,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         const result = await reviewWorkPackage(task, {
           root,
           baseline,
-          runAgent,
+          runAgent: reviewRunner,
           checks: submitChecks(config),
           runCheck: (kind: string, signal?: AbortSignal) => verification.runCheck(config, kind, { signal, envPath }),
           baselines: store.get(id).baselineChecks?.checks ?? {},
@@ -433,6 +699,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     // Fixed at the start: a repository switch cancels the run, but the code
     // must never be read from the next repository meanwhile.
     const { root } = getConfig();
+    const architectRunner = runnerFor('architect');
     const entry = await store.beginAdjudication(id);
     const controller = new AbortController();
     adjudications.set(id, controller);
@@ -445,7 +712,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           deviations: entry.deviations,
           // beginAdjudication() has just set it.
           mustReplan: entry.adjudication?.mustReplan === true,
-          runAgent,
+          runAgent: architectRunner,
           interfaces: interfacesFor(task),
           envPath,
           signal: controller.signal,
@@ -797,10 +1064,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     finish: (id: string, output: Output, costUsd: number) => Promise<unknown>,
   ) => {
     const store = requireRequirements();
+    const architectRunner = runnerFor('architect');
+    const productRunner = runnerFor('product-lead');
     const item = await store.begin(id, step);
     const controller = new AbortController();
     runs.set(id, controller);
-    // Fixed at the start, like the adjudication's root.
     const { root } = getConfig();
     const files = await repositoryFiles(root);
     const { path: envPath } = await commandPath();
@@ -815,7 +1083,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         if (step === 'clarifying') {
           await store.setPhase(id, 'architect');
           const result = await summarizeForRequirement(item, {
-            runAgent,
+            runAgent: architectRunner,
             root,
             files,
             envPath,
@@ -833,7 +1101,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           await store.setPhase(id, 'product-lead');
         }
         throwIfCancelled(controller.signal);
-        const { output, costUsd } = await runAgent({
+        const { output, costUsd } = await productRunner({
           prompt: buildPrompt({ ...item, files, interfaces }),
           systemPrompt: productLead.SYSTEM_PROMPT,
           schema,
@@ -965,12 +1233,20 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.activityOverview,
     wrap(async (): Promise<ipc.ActivityOverview> => {
       if (!activity) return failWith('Activity is unavailable', 'unsupported');
+      const settings = getPreferences().agents;
       const { path: envPath } = await commandPath();
-      const [recent, window, executable] = await Promise.all([
+      const [recent, window, coding, analysis] = await Promise.all([
         activity.recent({ days: RETENTION_DAYS, limit: 20 }),
         activity.window(RETENTION_DAYS),
-        workspace.resolveExecutable('claude', { envPath }),
+        codingStatus(),
+        Promise.all(
+          ['product-lead', 'architect', 'qa', 'release-manager'].map(async (agent) => {
+            const config = settings[agent as keyof typeof settings];
+            return [agent, supportsAgentConfig(agent as AgentId, config) && Boolean(await workspace.resolveExecutable(config.cli, { envPath }))] as const;
+          }),
+        ),
       ]);
+      const availableByAgent = { ...Object.fromEntries(analysis), 'coding-agent': coding.available } as ipc.TeamStatus['availableByAgent'];
       const work: ipc.AgentWork[] = [
         ...[...runs.keys()].map((id): ipc.AgentWork => {
           const item = requirements?.get(id);
@@ -979,12 +1255,18 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         ...[...reviews.keys()].map((id): ipc.AgentWork => ({ agent: 'qa', kind: 'review', label: tasks.getTask(id)?.title ?? id })),
         ...[...adjudications.keys()].map((id): ipc.AgentWork => ({ agent: 'architect', kind: 'adjudication', label: tasks.getTask(id)?.title ?? id })),
         ...(releaseController ? [{ agent: 'release-manager', kind: 'release', label: '发布说明' } satisfies ipc.AgentWork] : []),
+        ...[...codingRuns.keys()].map((id): ipc.AgentWork => ({ agent: 'coding-agent', kind: 'coding', label: tasks.getTask(id)?.title ?? id })),
       ];
       const now = new Date();
       return {
         recent,
         metrics: computeMetrics(window, now, activity.timeZone),
-        team: { available: Boolean(executable), busy: [...new Set(work.map((item) => item.agent))], work },
+        team: {
+          available: Object.values(availableByAgent).some(Boolean),
+          availableByAgent,
+          busy: [...new Set(work.map((item) => item.agent))],
+          work,
+        },
         costs: computeAgentCosts(window, now, activity.timeZone),
         teamRecent: recentByAgent(window, TEAM_RECENT_COUNT),
         timeZone: activity.timeZone,
@@ -1015,13 +1297,63 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
-  // Whether the Claude Code CLI can be found on the command PATH.
+  // Requirements need both configured planning runtimes, never an unrelated
+  // hard-coded executable. The settings page probes every role separately.
   ipcMain.handle(
     CHANNELS.agentStatus,
     wrap(async (): Promise<ipc.AgentStatus> => {
+      const settings = getPreferences().agents;
       const { path: envPath } = await commandPath();
-      const resolved = await workspace.resolveExecutable('claude', { envPath });
-      return { available: Boolean(resolved), command: resolved };
+      const [product, architect] = await Promise.all([probeAgent(settings['product-lead'], envPath), probeAgent(settings.architect, envPath)]);
+      return { available: product.available && architect.available, command: product.available ? product.command : null };
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.agentRuntimes,
+    wrap(async (): Promise<ipc.AgentRuntimeStatus[]> => {
+      const settings = getPreferences().agents;
+      const { path: envPath } = await commandPath();
+      const probes = new Map<string, Promise<CliProbeResult>>();
+      return Promise.all(
+        AGENT_IDS.map(async (agent) => {
+          const config = { ...settings[agent] };
+          if (agent === 'coding-agent') {
+            const status = await codingProbe({ config });
+            return { agent, config, command: config.cli, available: status.available, version: status.version, reason: status.reason };
+          }
+          const key = JSON.stringify(config);
+          let probing = probes.get(key);
+          if (!probing) {
+            probing = probeAgent(config, envPath);
+            probes.set(key, probing);
+          }
+          return { agent, config, ...(await probing) };
+        }),
+      );
+    }),
+  );
+
+  // Opening settings reads local CLI config only. Refresh invalidates this
+  // metadata cache; it never runs inference, auth helpers or remote catalogs.
+  const modelCatalogs = new Map<string, Promise<ipc.CliModelCatalog>>();
+  ipcMain.handle(
+    CHANNELS.agentModels,
+    wrap(async (_event, request): Promise<ipc.CliModelCatalog> => {
+      if (!request || typeof request !== 'object' || Array.isArray(request)) failWith('Model request must be an object', 'invalid_argument');
+      const raw = request as Record<string, unknown>;
+      if (!CLI_IDS.includes(raw.cli as ipc.CliId)) failWith('Unknown CLI', 'invalid_argument', 'cli');
+      if (raw.scope !== 'analysis' && raw.scope !== 'coding') failWith('Unknown model scope', 'invalid_argument', 'scope');
+      if (raw.refresh !== undefined && typeof raw.refresh !== 'boolean') failWith('refresh must be boolean', 'invalid_argument', 'refresh');
+      const cli = raw.cli as ipc.CliId;
+      const scope = raw.scope as ipc.CliModelScope;
+      const key = `${scope}:${cli}`;
+      if (raw.refresh === true) modelCatalogs.delete(key);
+      let reading = modelCatalogs.get(key);
+      if (!reading) {
+        reading = modelCatalog(cli, scope);
+        modelCatalogs.set(key, reading);
+      }
+      return reading;
     }),
   );
 
@@ -1183,6 +1515,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.envPlan,
     wrap(async (_event, options): Promise<ipc.EnvState> => {
       const root = requireRoot();
+      const stewardRunner = runnerFor('env-steward');
       if (env.status === 'planning' || env.running) failWith('The Environment Steward is busy', 'env_busy');
       // Re-planning after a failure hands the steward that step's output.
       let failure: EnvFailure | null = null;
@@ -1219,7 +1552,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       track(
         (async () => {
           try {
-            const outcome = await planEnvironment({ root, runAgent, envPath, signal: controller.signal, failure });
+            const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure });
             Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
             // Results only carry over for steps the new plan still runs unchanged.
             const lines = new Map(envSteps().map((step) => [step.id, workspace.formatCommandLine(step)]));
@@ -1427,6 +1760,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawStart): Promise<ipc.ReleaseState> => {
       const store = requireReleases();
       const root = requireRoot();
+      const releaseRunner = runnerFor('release-manager');
       if (releaseController) failWith('Release Manager is already running', 'release_busy');
       const endCommit = await git.resolveCommit(root, 'HEAD');
       if (!endCommit) return failWith('The repository has no commits', 'release_no_changes');
@@ -1462,7 +1796,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
               startLabel: fixedLabel,
               endCommit,
               packages,
-              runAgent,
+              runAgent: releaseRunner,
               envPath,
               signal: controller.signal,
             });
@@ -1657,6 +1991,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawId, rawIndex): Promise<ipc.TutorState> => {
       const store = requireTutor();
       const { task, stepIndex, step } = requireStep(rawId, rawIndex);
+      const tutorRunner = runnerFor('tutor');
       const key = tutorKey(task.id, stepIndex);
       const current = tutorState(task.id, stepIndex, step);
       if (current.status === 'running' || current.status === 'done') return current;
@@ -1674,7 +2009,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             const read = root ? await readTracked(root, task.fileScope.slice(0, tutorAgent.MAX_TUTOR_FILES)) : { files: [], skipped: [] };
             const missing = read.skipped.filter((item) => item.reason === 'not_tracked').map((item) => item.path);
             throwIfCancelled(controller.signal);
-            const { output, costUsd } = await runAgent({
+            const { output, costUsd } = await tutorRunner({
               prompt: tutorAgent.tutorPrompt({ task, stepIndex, sources: read.files, missing }),
               systemPrompt: tutorAgent.SYSTEM_PROMPT,
               schema: tutorAgent.TUTOR_SCHEMA,
@@ -1724,6 +2059,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       ...(releaseController ? [{ kind: 'release', label: '发布说明' } as ipc.BusyRun] : []),
       ...(envController ? [{ kind: 'environment', label: '环境初始化' } as ipc.BusyRun] : []),
       ...[...tutorRuns.keys()].map((key): ipc.BusyRun => ({ kind: 'tutor', label: packageTitle(key.split('#')[0]) })),
+      ...[...codingRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
     ];
   };
 
@@ -1736,7 +2072,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of runs.values()) controller.abort();
     for (const controller of reviews.values()) controller.abort();
     for (const controller of adjudications.values()) controller.abort();
-    for (const controller of tutorRuns.values()) controller.abort();
+    for (const runtime of codingRuns.values()) runtime.controller.abort();
     await Promise.allSettled([...pendingRuns]);
     tutorFailures.clear();
   };

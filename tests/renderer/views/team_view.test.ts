@@ -9,6 +9,7 @@ import SideBar from '../../../src/renderer/src/components/SideBar.vue';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
 import { installApi } from '../requirements_fakes.ts';
+import { installApi as installSettingsApi } from '../settings_fakes.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
@@ -35,9 +36,18 @@ const overview = (overrides: Partial<ipc.ActivityOverview> = {}): ipc.ActivityOv
   // The shared feed holds only the human's step; QA's review is older than its 20 newest.
   recent: [{ kind: 'requirement_created', requirementId: 'r1', title: '邮箱登录', at: new Date().toISOString() }],
   metrics: { doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null },
-  team: { available: true, busy: ['qa'], work: [{ agent: 'qa', kind: 'review', label: MARKUP }] },
-  costs: { byAgent: { 'product-lead': 0.034, architect: 0, qa: 1.5, 'release-manager': 0 }, since: '2026-10-07T02:00:00.000Z', partial: true },
-  teamRecent: { 'product-lead': [], architect: [], qa: [REVIEW], 'release-manager': [] },
+  team: {
+    available: true,
+    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+    busy: ['qa'],
+    work: [{ agent: 'qa', kind: 'review', label: MARKUP }],
+  },
+  costs: {
+    byAgent: { 'product-lead': 0.034, architect: 0, qa: 1.5, 'release-manager': 0, 'coding-agent': 0 },
+    since: '2026-10-07T02:00:00.000Z',
+    partial: true,
+  },
+  teamRecent: { 'product-lead': [], architect: [], qa: [REVIEW], 'release-manager': [], 'coding-agent': [] },
   timeZone: 'Asia/Shanghai',
   ...overrides,
 });
@@ -54,7 +64,7 @@ describe('TeamView', () => {
   test('one card per member with role, current work, weekly spend and recent events', () => {
     useAppStore().activity = overview();
     const wrapper = mount(TeamView);
-    expect(wrapper.findAll('.team-card')).toHaveLength(4);
+    expect(wrapper.findAll('.team-card')).toHaveLength(5);
 
     const qa = card(wrapper, 'qa');
     expect(qa.find('h2').text()).toBe('QA Partner');
@@ -79,13 +89,23 @@ describe('TeamView', () => {
   });
 
   test('offline members explain why and link to the runtime settings', async () => {
-    useAppStore().activity = overview({ team: { available: false, busy: [], work: [] } });
-    const open = vi.spyOn(useSettingsStore(), 'open').mockResolvedValue(undefined as never);
+    useAppStore().activity = overview({
+      team: {
+        available: false,
+        availableByAgent: { 'product-lead': false, architect: false, qa: false, 'release-manager': false, 'coding-agent': false },
+        busy: [],
+        work: [],
+      },
+    });
+    installSettingsApi();
+    const settings = useSettingsStore();
     const wrapper = mount(TeamView);
     const architect = card(wrapper, 'architect');
-    expect(architect.find('.presence-text').text()).toBe('离线：找不到 Claude Code CLI');
     await architect.find('.team-facts button').trigger('click');
-    expect(open).toHaveBeenCalledWith('environment');
+    await flushPromises();
+    expect(useAppStore().view).toBe('settings');
+    expect(settings.activePage).toBe('agents');
+    expect(settings.preferencesDraft?.agents.architect.cli).toBe('claude');
   });
 
   test('before the first overview the spend shows a placeholder', () => {
@@ -103,7 +123,7 @@ describe('TeamView', () => {
     const page = mount(TeamView, { attachTo: document.body });
 
     const members = sidebar.findAll('button.team-member');
-    expect(members).toHaveLength(4);
+    expect(members).toHaveLength(5);
     await members[1].trigger('click');
     await flushPromises();
 

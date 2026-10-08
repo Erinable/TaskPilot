@@ -105,6 +105,17 @@ export const useExecutionStore = defineStore('execution', () => {
     deviationOpen.value = false;
   };
 
+  // Replace the open task after a coding or other background IPC action. The
+  // queue entry is updated in place so the sidebar never lags behind the view.
+  const adoptTask = (task: ipc.TaskView) => {
+    if (current.value?.id !== task.id) return false;
+    current.value = task;
+    useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === task.id ? task : entry));
+    watchReview();
+    watchBaseline();
+    return true;
+  };
+
   // ========== Steps ==========
   const setStepDone = async (stepIndex: number, done: boolean) => {
     if (!current.value) return false;
@@ -347,6 +358,14 @@ export const useExecutionStore = defineStore('execution', () => {
     const confirm = TRANSITION_CONFIRMS[name];
     if (confirm && !(await confirmAction(confirm))) return;
     if (name === 'claim' && !(await confirmDirtyClaim())) return;
+    if (name === 'submit_for_review' && current.value.codingRun?.status === 'applied') {
+      const proceed = await confirmAction({
+        title: '确认提交审查？',
+        body: '编码 Agent 的改动已写入工作区。验证和 QA 将以当前主机用户权限执行，请先确认文件范围和命令风险。',
+        accept: '仍然提交审查',
+      });
+      if (!proceed) return;
+    }
     transitioning.value = name;
     try {
       await call(window.taskpilot.transition(current.value.id, name));
@@ -399,6 +418,7 @@ export const useExecutionStore = defineStore('execution', () => {
     current,
     acceptanceOverride,
     open,
+    adoptTask,
     close,
     reloadCurrent,
     // Steps

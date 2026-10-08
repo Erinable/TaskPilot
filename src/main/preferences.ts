@@ -4,6 +4,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { LooseJson } from './loose_json.ts';
+import * as agentRuntime from '../shared/agent_runtime.ts';
 
 export const PREFERENCES_FILENAME = 'preferences.json';
 export const THEMES = ['system', 'light', 'dark'] as const;
@@ -25,6 +26,7 @@ export interface Preferences {
   profile: { displayName: string; avatarColor: AvatarColor };
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
+  agents: agentRuntime.AgentSettings;
 }
 
 // Preferences as the renderer sees them, with derived display values.
@@ -49,12 +51,46 @@ export const defaults = (): Preferences => ({
   profile: { displayName: '', avatarColor: 'sunset' },
   appearance: { theme: 'system', vibrancy: false },
   environment: { pathSource: 'inherit' },
+  agents: agentRuntime.defaultAgentSettings(),
 });
 
 const codePoints = (text: string) => [...text].length;
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback);
 
 const isValidName = (name: string) => codePoints(name) <= MAX_NAME_LENGTH && !DISALLOWED_NAME_CHARS.test(name);
+
+const agentConfig = (agent: agentRuntime.AgentId, value: unknown): agentRuntime.AgentRuntimeConfig => {
+  const field = `agents.${agent}`;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PreferencesError('Agent settings must be an object', 'invalid_preferences', field);
+  if (!('cli' in value) || !agentRuntime.CLI_IDS.includes(value.cli as agentRuntime.CliId))
+    throw new PreferencesError('Unknown CLI', 'invalid_choice', `${field}.cli`);
+  if (!('model' in value) || typeof value.model !== 'string') throw new PreferencesError('Model must be text', 'invalid_choice', `${field}.model`);
+  const model = value.model.trim();
+  if (model && !/^[A-Za-z0-9][A-Za-z0-9._:/@+*-]{0,199}$/.test(model))
+    throw new PreferencesError('Model must be a model ID or provider/model (200 characters maximum)', 'invalid_choice', `${field}.model`);
+  if (!('thinking' in value) || !agentRuntime.THINKING_LEVELS.includes(value.thinking as agentRuntime.ThinkingLevel))
+    throw new PreferencesError('Unknown thinking level', 'invalid_choice', `${field}.thinking`);
+  const config: agentRuntime.AgentRuntimeConfig = { cli: value.cli as agentRuntime.CliId, model, thinking: value.thinking as agentRuntime.ThinkingLevel };
+  if (!agentRuntime.supportsAgentConfig(agent, config))
+    throw new PreferencesError('This CLI or thinking level is not supported for this agent', 'invalid_choice', field);
+  return config;
+};
+
+const agentSettings = (input: unknown, strict: boolean): agentRuntime.AgentSettings => {
+  const settings = agentRuntime.defaultAgentSettings();
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    if (strict) throw new PreferencesError('Agent settings are required', 'invalid_preferences', 'agents');
+    return settings;
+  }
+  for (const agent of agentRuntime.AGENT_IDS) {
+    try {
+      settings[agent] = agentConfig(agent, Reflect.get(input, agent));
+    } catch (error) {
+      if (strict) throw error;
+    }
+  }
+  return settings;
+};
 
 // Lenient: a hand-edited or older file falls back to defaults field by field.
 export const normalize = (input: unknown): Preferences => {
@@ -74,6 +110,7 @@ export const normalize = (input: unknown): Preferences => {
     environment: {
       pathSource: pick(raw.environment?.pathSource, PATH_SOURCES, base.environment.pathSource),
     },
+    agents: agentSettings(raw.agents, false),
   };
 };
 
@@ -103,6 +140,7 @@ export const validate = (input: unknown): Preferences => {
     profile: { displayName: trimmed, avatarColor: oneOf(raw.profile?.avatarColor, AVATAR_COLORS, 'avatarColor') },
     appearance: { theme: oneOf(raw.appearance?.theme, THEMES, 'theme'), vibrancy: raw.appearance.vibrancy },
     environment: { pathSource: oneOf(raw.environment?.pathSource, PATH_SOURCES, 'pathSource') },
+    agents: agentSettings(raw.agents, true),
   };
 };
 

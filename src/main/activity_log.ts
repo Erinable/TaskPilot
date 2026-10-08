@@ -194,7 +194,7 @@ export const computeMetrics = (records: LoggedRecord[], now: Date, timeZone: str
 export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: string): AgentCosts => {
   const week = recentDays(now, timeZone, METRIC_DAYS);
   const thisWeek = new Set(week);
-  const byAgent: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0 };
+  const byAgent: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 };
   let since: string | null = null;
   for (const record of records) {
     // A hand-edited or future line with an unknown agent or bad amount is skipped.
@@ -223,6 +223,8 @@ export const agentOf = (record: ActivityRecord): ActivityAgent | null => {
     case 'package_transition':
       // A hand-edited line could name "toString"; only own keys count.
       return Object.hasOwn(TRANSITION_AGENTS, record.transition) ? TRANSITION_AGENTS[record.transition as AgentTransition] : null;
+    case 'coding_run':
+      return 'coding-agent';
     case 'requirement_finished':
     case 'requirement_failed':
       return 'product-lead';
@@ -237,7 +239,7 @@ export const agentOf = (record: ActivityRecord): ActivityAgent | null => {
 // Each agent's newest `count` feed events. The overview's shared feed is
 // mostly the human's own steps, so filtering it would leave agents empty.
 export const recentByAgent = (records: LoggedRecord[], count: number): Record<ActivityAgent, ActivityRecord[]> => {
-  const byAgent: Record<ActivityAgent, ActivityRecord[]> = { 'product-lead': [], architect: [], qa: [], 'release-manager': [] };
+  const byAgent: Record<ActivityAgent, ActivityRecord[]> = { 'product-lead': [], architect: [], qa: [], 'release-manager': [], 'coding-agent': [] };
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index];
     if (!isFeedRecord(record)) continue;

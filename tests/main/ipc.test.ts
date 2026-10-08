@@ -6,7 +6,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { registerIpcHandlers } from '../../src/main/ipc.ts';
-import type { IpcHandle } from '../../src/main/ipc.ts';
+import type { IpcDeps, IpcHandle } from '../../src/main/ipc.ts';
+import type { IpcResult, TaskView, CliModelCatalog } from '../../src/shared/ipc_types.ts';
+import type { CodingPatchPreview, CodingRuntimeStatus } from '../../src/shared/coding_types.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
@@ -15,6 +17,7 @@ vi.setConfig({ testTimeout: 20_000 });
 
 // A stand-in agent; tests answer with plain objects or reject.
 type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
+type CodingOverrides = Partial<Pick<IpcDeps, 'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean'>>;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
 import { listTasks, setGeneratedTasks } from '../../src/main/tasks.ts';
@@ -51,7 +54,15 @@ const harness = async ({
   withRepo = true,
   agent = null,
   seedState = null,
-}: { withRepo?: boolean; agent?: FakeAgent | null; seedState?: Record<string, unknown> | null } = {}) => {
+  coding = {},
+  modelCatalog,
+}: {
+  withRepo?: boolean;
+  agent?: FakeAgent | null;
+  seedState?: Record<string, unknown> | null;
+  coding?: CodingOverrides;
+  modelCatalog?: IpcDeps['modelCatalog'];
+} = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
   let ipc: IpcHandle | null = null;
@@ -122,12 +133,14 @@ const harness = async ({
       requirements,
       activity,
       releases,
+      modelCatalog,
       tutor,
       runAgent: async (options) => {
         agentCalls.push(options);
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
         return (await agent(options)) as StructuredResult;
       },
+      ...coding,
     },
   );
 
@@ -157,6 +170,7 @@ const harness = async ({
     requirements,
     agentCalls,
     shellReads: () => shellReads,
+    shutdown: () => ipc?.shutdown(),
   };
 };
 
@@ -169,6 +183,157 @@ const settle = async (call, id) => {
   }
   throw new Error('requirement never settled');
 };
+
+const codingRuntime = (overrides: Partial<CodingRuntimeStatus> = {}): CodingRuntimeStatus => ({
+  backend: 'codex',
+  protocol: 'codex-exec',
+  boundary: 'separate-user',
+  available: true,
+  version: 'test',
+  reason: null,
+  config: { user: 'taskpilot-coder', cli: 'codex', model: '', thinking: 'default', timeoutMinutes: 30 },
+  ...overrides,
+});
+
+const codingPatch = (patch = ''): CodingPatchPreview => ({ digest: 'digest-1', files: [], patch, blocked: [] });
+
+type TestCall = (channel: Channel, ...args: unknown[]) => Promise<IpcResult<unknown>>;
+const settleCoding = async (call: TestCall, id: string): Promise<TaskView> => {
+  let last = 'no response';
+  for (let index = 0; index < 200; index += 1) {
+    const response = await call(CHANNELS.codingGet, id);
+    if (response.ok) {
+      const task = response.data as TaskView;
+      last = JSON.stringify(task.codingRun);
+      if (task.codingRun && ['ready', 'failed', 'cancelled', 'discarded'].includes(task.codingRun.status)) return task;
+    } else last = JSON.stringify(response.error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`coding run never settled: ${last}`);
+};
+
+test('agent model IPC isolates scopes, caches local catalogs, and refreshes only the requested catalog', async () => {
+  const reads: string[] = [];
+  const modelCatalog: NonNullable<IpcDeps['modelCatalog']> = async (cli, scope): Promise<CliModelCatalog> => {
+    reads.push(`${scope}:${cli}`);
+    return { cli, scope, models: [], defaultModel: `${scope}-${cli}-${reads.length}`, defaultThinking: null, issues: [] };
+  };
+  const { call } = await harness({ withRepo: false, modelCatalog });
+  const analysis = { ok: true, data: { cli: 'pi', scope: 'analysis', models: [], defaultModel: 'analysis-pi-1', defaultThinking: null, issues: [] } };
+  assert.deepEqual(await call(CHANNELS.agentModels, { cli: 'pi', scope: 'analysis' }), analysis);
+  assert.deepEqual(await call(CHANNELS.agentModels, { cli: 'pi', scope: 'analysis' }), analysis);
+  assert.deepEqual(await call(CHANNELS.agentModels, { cli: 'pi', scope: 'coding' }), {
+    ok: true,
+    data: { cli: 'pi', scope: 'coding', models: [], defaultModel: 'coding-pi-2', defaultThinking: null, issues: [] },
+  });
+  assert.deepEqual(await call(CHANNELS.agentModels, { cli: 'pi', scope: 'analysis', refresh: true }), {
+    ok: true,
+    data: { cli: 'pi', scope: 'analysis', models: [], defaultModel: 'analysis-pi-3', defaultThinking: null, issues: [] },
+  });
+  const invalid = await call(CHANNELS.agentModels, { cli: 'not-a-cli', scope: 'analysis' });
+  assert.equal(invalid.ok, false);
+  assert.deepEqual(reads, ['analysis:pi', 'coding:pi', 'analysis:pi']);
+});
+
+test('coding IPC registers all seven channels and preserves terminal events', async () => {
+  let probeCalls = 0;
+  let prepareCalls = 0;
+  let runCalls = 0;
+  const events = [{ sequence: 0, at: new Date().toISOString(), type: 'text' as const, text: 'done' }];
+  const prepare: IpcDeps['codingPrepare'] = async (_root, _baseline, options) => {
+    prepareCalls += 1;
+    assert.equal(options?.runName?.startsWith('/Users/taskpilot-coder/TaskPilotRuns/'), true);
+    assert.ok(options?.signal);
+    return { runName: options!.runName!, directory: options!.runName! };
+  };
+  const runCoding: IpcDeps['codingRun'] = async (options) => {
+    runCalls += 1;
+    assert.ok(options.signal);
+    options.onEvent?.(events[0]);
+    return {
+      output: 'done',
+      usage: { inputTokens: 1, outputTokens: 2, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+      events,
+      sessionId: null,
+    };
+  };
+  const h = await harness({
+    seedState: {
+      'auth-edge-tests': { status: 'in_progress', baseline: 'HEAD', claimedAt: new Date().toISOString(), completedSteps: [], deviations: [], review: null },
+    },
+    coding: {
+      codingProbe: async () => {
+        probeCalls += 1;
+        return codingRuntime();
+      },
+      codingPrepare: prepare,
+      codingRun: runCoding,
+      codingReadPatch: async () => codingPatch(),
+      codingApplyPatch: async () => ['src/auth/application/login-user.ts'],
+      codingClean: async () => {},
+    },
+  });
+  const status = await h.call(CHANNELS.codingStatus);
+  assert.equal(status.ok, true);
+  const started = await h.call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '实现边界测试' });
+  assert.equal(started.ok, true);
+  assert.equal((await h.call(CHANNELS.codingGet, 'auth-edge-tests')).ok, true);
+  const ready = await settleCoding(h.call, 'auth-edge-tests');
+  assert.equal(ready.codingRun?.status, 'ready');
+  const fresh = await h.call(CHANNELS.codingGet, 'auth-edge-tests');
+  assert.equal(fresh.ok, true);
+  if (!fresh.ok) throw new Error(fresh.error.message);
+  assert.equal((fresh.data as TaskView).codingRun?.status, 'ready', JSON.stringify(fresh.data));
+  const page = await h.call(CHANNELS.codingEvents, 'auth-edge-tests', -1);
+  assert.equal(page.ok, true);
+  if (!page.ok) throw new Error(page.error.message);
+  const eventPage = page.data as { events: { text: string }[] };
+  assert.equal(eventPage.events[0]?.text, 'done');
+  const patchResponse = await h.call(CHANNELS.codingPatch, 'auth-edge-tests');
+  assert.equal(patchResponse.ok, true, JSON.stringify(patchResponse));
+  const applied = await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: 'digest-1', allowHighRisk: false });
+  assert.equal(applied.ok, true);
+  assert.equal((await h.call(CHANNELS.codingCancel, 'auth-edge-tests')).data, false);
+  assert.equal(probeCalls, 1);
+  assert.equal(prepareCalls, 1);
+  assert.equal(runCalls, 1);
+  await h.shutdown();
+});
+
+test('coding shutdown aborts an active run and waits for its settled write', async () => {
+  let aborted = false;
+  let finish: (() => void) | null = null;
+  let markStarted: (() => void) | null = null;
+  const runStarted = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const h = await harness({
+    seedState: {
+      'auth-edge-tests': { status: 'in_progress', baseline: 'HEAD', claimedAt: new Date().toISOString(), completedSteps: [], deviations: [], review: null },
+    },
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async (options) => {
+        markStarted?.();
+        options.signal!.addEventListener('abort', () => {
+          aborted = true;
+          finish?.();
+        });
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        throw Object.assign(new Error('cancelled'), { code: 'coding_aborted' });
+      },
+      codingClean: async () => {},
+    },
+  });
+  await h.call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '等待取消' });
+  await runStarted;
+  await h.shutdown();
+  assert.equal(aborted, true);
+  assert.equal((await h.call(CHANNELS.codingGet, 'auth-edge-tests')).data.codingRun?.status, 'cancelled');
+});
 
 const CLARIFY_OUTPUT = { title: '邮箱登录', summary: '用户用邮箱和密码登录', questions: ['连续失败几次锁定？'] };
 const PLAN_OUTPUT = {
@@ -361,6 +526,7 @@ const validPrefs = (overrides: Record<string, object> = {}) => ({
   profile: { displayName: 'Ada Lovelace', avatarColor: 'ocean', ...overrides.profile },
   appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
+  agents: preferences.defaults().agents,
 });
 
 test('preferences:set saves, returns initials, and notifies the main process', async () => {
@@ -1594,4 +1760,55 @@ test('tutor: a running answer can be cancelled; an out-of-range step is refused'
   const state = await settleTutor(call, 'auth-edge-tests', 0);
   assert.equal(state.error.code, 'agent_cancelled');
   assert.equal((await call(CHANNELS.tutorAsk, 'auth-edge-tests', 9)).error.code, 'invalid_step');
+});
+
+test('role settings are independent and frozen across an in-flight requirement', async () => {
+  const selected = Promise.withResolvers<void>();
+  const continueSelection = Promise.withResolvers<void>();
+  let firstSelection = true;
+  const agent: FakeAgent = async (options) => {
+    const step = stepOf(options.schema);
+    if (step === 'select' && firstSelection) {
+      firstSelection = false;
+      selected.resolve();
+      await continueSelection.promise;
+    }
+    if (step === 'summarize') {
+      return { output: { ...SUMMARY_OUTPUT, conventions: [options.model === 'architecture-old' ? 'old convention' : 'new convention'] }, costUsd: null };
+    }
+    if (step === 'clarify') {
+      return { output: { ...CLARIFY_OUTPUT, title: options.model === 'product-old' ? '旧产品配置' : '新产品配置' }, costUsd: null };
+    }
+    return fakeAgent()(options);
+  };
+  const h = await harness({ agent });
+  const firstProfiles = validPrefs();
+  firstProfiles.agents.architect = { cli: 'pi', model: 'architecture-old', thinking: 'high' };
+  firstProfiles.agents['product-lead'] = { cli: 'grok', model: 'product-old', thinking: 'low' };
+  assert.equal((await h.call(CHANNELS.preferencesSet, firstProfiles)).ok, true);
+  const originalFinish = h.requirements.finishClarify.bind(h.requirements);
+  let completed = Promise.withResolvers<void>();
+  vi.spyOn(h.requirements, 'finishClarify').mockImplementation(async (...args) => {
+    const result = await originalFinish(...args);
+    completed.resolve();
+    return result;
+  });
+  const first = await h.call(CHANNELS.requirementsCreate, { text: '需求一' });
+  await selected.promise;
+  const nextProfiles = validPrefs();
+  nextProfiles.agents.architect = { cli: 'claude', model: 'architecture-new', thinking: 'medium' };
+  nextProfiles.agents['product-lead'] = { cli: 'pi', model: 'product-new', thinking: 'xhigh' };
+  assert.equal((await h.call(CHANNELS.preferencesSet, nextProfiles)).ok, true);
+  continueSelection.resolve();
+  await completed.promise;
+  const firstResult = (await h.call(CHANNELS.requirementsGet, first.data.id)).data;
+  assert.equal(firstResult.title, '旧产品配置');
+  assert.match(firstResult.interfaces.text, /old convention/);
+  completed = Promise.withResolvers<void>();
+  const second = await h.call(CHANNELS.requirementsCreate, { text: '需求二' });
+  await completed.promise;
+  const secondResult = (await h.call(CHANNELS.requirementsGet, second.data.id)).data;
+  assert.equal(secondResult.title, '新产品配置');
+  assert.match(secondResult.interfaces.text, /new convention/);
+  assert.equal((await h.call(CHANNELS.preferencesGet)).data.agents.qa.cli, 'claude');
 });

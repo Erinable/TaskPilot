@@ -84,17 +84,20 @@ test('durationTrend() treats shorter as better and small changes as stable', () 
 
 test('presence follows CLI availability and running agents', () => {
   assert.equal(activity.presenceOf(null, 'qa'), 'offline');
-  assert.equal(activity.presenceOf({ available: false, busy: [], work: [] }, 'qa'), 'offline');
-  assert.equal(activity.presenceOf({ available: true, busy: ['qa'], work: [] }, 'qa'), 'busy');
-  assert.equal(activity.presenceOf({ available: true, busy: ['qa'], work: [] }, 'architect'), 'online');
-  assert.equal(activity.presenceSummary({ available: true, busy: [], work: [] }), '4 个 AI 成员在线');
-  assert.equal(activity.presenceSummary({ available: true, busy: ['qa', 'architect'], work: [] }), '2 个 AI 成员正在工作');
-  assert.equal(activity.presenceSummary({ available: false, busy: [], work: [] }), 'AI 团队离线');
+  const availableByAgent = { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false } as const;
+  assert.equal(activity.presenceOf({ available: false, availableByAgent, busy: [], work: [] }, 'qa'), 'offline');
+  assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: ['qa'], work: [] }, 'qa'), 'busy');
+  assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: ['qa'], work: [] }, 'architect'), 'online');
+  assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: [], work: [] }, 'coding-agent'), 'offline');
+  assert.equal(activity.presenceSummary({ available: true, availableByAgent, busy: [], work: [] }), '4 个 AI 成员在线');
+  assert.equal(activity.presenceSummary({ available: true, availableByAgent, busy: ['qa', 'architect'], work: [] }), '2 个 AI 成员正在工作');
+  assert.equal(activity.presenceSummary({ available: false, availableByAgent, busy: [], work: [] }), 'AI 团队离线');
 });
 
 test('workText() names what a member is running, by kind', () => {
   const status: ipc.TeamStatus = {
     available: true,
+    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
     busy: ['architect', 'release-manager'],
     work: [
       { agent: 'architect', kind: 'adjudication', label: '登录接口' },

@@ -24,6 +24,7 @@ export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView =>
   completedSteps: [],
   deviations: [],
   review: null,
+  codingRun: null,
   baselineChecks: { status: 'measured', reason: null, commit: 'abcdef12', checks: {}, startedAt: '', finishedAt: null },
   adjudication: null,
   revision: null,
@@ -42,6 +43,7 @@ export const state = (task: ipc.TaskView): ipc.WorkPackageState => ({
   revision: null,
   adjudication: task.adjudication,
   replanUndo: null,
+  codingRun: task.codingRun,
 });
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
@@ -61,6 +63,25 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       file: vi.fn(() => ok('')),
     },
     verify: { run: vi.fn() },
+    coding: {
+      status: vi.fn(() =>
+        ok<ipc.CodingRuntimeStatus>({
+          backend: 'codex',
+          protocol: 'codex-exec',
+          boundary: 'separate-user',
+          available: true,
+          version: 'test',
+          reason: null,
+          config: { user: 'coding-agent', cli: 'codex', model: 'test-model', thinking: 'default', timeoutMinutes: 30 },
+        }),
+      ),
+      start: vi.fn((_id: string, _input: ipc.CodingStart) => ok(current.task)),
+      get: vi.fn(() => ok(current.task)),
+      events: vi.fn((_id: string, _after: number) => ok<ipc.CodingEventPage>({ events: [], next: -1, truncated: false })),
+      cancel: vi.fn(() => ok(true)),
+      patch: vi.fn(() => ok<ipc.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
+      apply: vi.fn((_id: string, _input: ipc.CodingApply) => ok<ipc.CodingApplyResult>({ files: [] })),
+    },
     workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<ipc.OpenedWith>('vscode')) },
     commit: {
       preview: vi.fn(() =>
