@@ -6,7 +6,7 @@
 //   --strict-mcp-config   no MCP servers
 //   --no-session-persistence  nothing written to ~/.claude/projects
 //   --json-schema         structured output, validated again by the caller
-//   --max-budget-usd      a hard per-call spending cap
+// [人工决策-2026-10-12 14:37:24] 成本只做统计、不做硬性限制：不传 --max-budget-usd，花费从 total_cost_usd 记入活动日志。
 // It runs in an empty temporary directory, and Claude Code's own session
 // variables are removed from its environment so it never attaches to, or
 // inherits identity from, a parent Claude Code session.
@@ -39,7 +39,6 @@ export interface RunStructuredOptions {
   envPath?: string | null;
   inferenceEnv?: NodeJS.ProcessEnv;
   thinking?: ThinkingLevel;
-  budgetUsd?: number;
   timeoutMs?: number;
   // Cancels the run.
   signal?: AbortSignal;
@@ -55,8 +54,7 @@ export interface StructuredResult {
 
 export type RunAgent = (options: RunStructuredOptions) => Promise<StructuredResult>;
 
-export type AgentErrorCode =
-  'agent_bad_output' | 'agent_budget' | 'agent_schema_retry' | 'agent_failed' | 'agent_cancelled' | 'agent_unavailable' | 'agent_timeout';
+export type AgentErrorCode = 'agent_bad_output' | 'agent_schema_retry' | 'agent_failed' | 'agent_cancelled' | 'agent_unavailable' | 'agent_timeout';
 
 interface Envelope {
   is_error?: boolean;
@@ -67,7 +65,6 @@ interface Envelope {
 }
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
-export const DEFAULT_BUDGET_USD = 1;
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 export class AgentRunError extends Error {
@@ -99,13 +96,11 @@ export const cliArgs = ({
   schema,
   model,
   thinking = 'default',
-  budgetUsd,
 }: {
   systemPrompt: string;
   schema: JsonSchema;
   model?: string | null;
   thinking?: ThinkingLevel;
-  budgetUsd: number;
 }): string[] => {
   const args = [
     '-p',
@@ -116,8 +111,6 @@ export const cliArgs = ({
     '--restricted',
     '--strict-mcp-config',
     '--no-session-persistence',
-    '--max-budget-usd',
-    String(budgetUsd),
     '--system-prompt',
     systemPrompt,
     '--json-schema',
@@ -138,13 +131,8 @@ export const parseEnvelope = (stdout: string): StructuredResult => {
     throw new AgentRunError('Agent returned output that is not JSON', 'agent_bad_output', redact(stdout.slice(0, 500)));
   }
   if (envelope.is_error || envelope.subtype !== 'success') {
-    const reason =
-      envelope.subtype === 'error_max_budget_usd'
-        ? 'agent_budget'
-        : // The CLI gave up after its own schema-repair attempts; worth one fresh try.
-          envelope.subtype === 'error_max_structured_output_retries'
-          ? 'agent_schema_retry'
-          : 'agent_failed';
+    // The CLI gave up after its own schema-repair attempts; worth one fresh try.
+    const reason = envelope.subtype === 'error_max_structured_output_retries' ? 'agent_schema_retry' : 'agent_failed';
     throw new AgentRunError(redact(String(envelope.result || `Agent run ended with ${envelope.subtype}`)), reason);
   }
   let output = envelope.structured_output;
@@ -171,7 +159,6 @@ const runOnce = async ({
   envPath,
   inferenceEnv,
   thinking = 'default',
-  budgetUsd = DEFAULT_BUDGET_USD,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   signal,
   spawnFn = spawn,
@@ -184,7 +171,7 @@ const runOnce = async ({
     return await new Promise<StructuredResult>((resolve, reject) => {
       let child: ChildProcessWithoutNullStreams;
       try {
-        child = spawnFn(command, cliArgs({ systemPrompt, schema, model, thinking, budgetUsd }), {
+        child = spawnFn(command, cliArgs({ systemPrompt, schema, model, thinking }), {
           cwd,
           env: { ...childEnv(processEnv(), envPath), ...inferenceEnv },
           stdio: ['pipe', 'pipe', 'pipe'],

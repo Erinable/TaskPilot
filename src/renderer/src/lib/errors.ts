@@ -27,7 +27,6 @@ export const ERROR_HINTS: Record<string, string> = {
   agent_unavailable: '找不到 Claude Code CLI。请确认已安装 `claude`，或在「设置 → 运行环境」里改为从登录 shell 读取 PATH。',
   agent_timeout: '智能体超过 3 分钟没有完成，已停止。',
   agent_cancelled: '已取消。',
-  agent_budget: '本次调用超出了 1 美元的费用上限，已停止。',
   agent_bad_output: '智能体返回的内容不符合格式要求，已丢弃。可以重试。',
   agent_interrupted: 'TaskPilot 在智能体运行时退出了。',
   agent_failed: '智能体运行失败。',

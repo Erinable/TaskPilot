@@ -77,7 +77,7 @@ const prompt = (testCase: EvalCase, run: EvalRun): string => {
 };
 
 export const judge = async (testCase: EvalCase, run: EvalRun, { model }: { model?: string } = {}) => {
-  const { output, costUsd } = await cli.runStructured({ prompt: prompt(testCase, run), systemPrompt: SYSTEM, schema: SCHEMA, model, budgetUsd: 1 });
+  const { output, costUsd } = await cli.runStructured({ prompt: prompt(testCase, run), systemPrompt: SYSTEM, schema: SCHEMA, model });
   // Shape enforced by SCHEMA through the CLI.
   return { scores: output as Scores, costUsd };
 };

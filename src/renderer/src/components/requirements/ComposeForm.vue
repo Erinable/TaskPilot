@@ -86,7 +86,7 @@ const onSubmit = () => {
           </li>
           <li>
             <AppIcon name="terminal" />
-            通过本机的 Claude Code CLI 运行，不启用任何工具，单次费用上限 1 美元。
+            通过本机的 Claude Code CLI 运行，不启用任何工具，花费计入 AI 团队页的本周统计。
           </li>
         </ul>
         <p v-if="!store.composeContext.agentAvailable" class="req-warning">

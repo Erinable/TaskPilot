@@ -43,13 +43,14 @@ const envelope = (fields) => JSON.stringify({ is_error: false, subtype: 'success
 const base = { prompt: 'p', systemPrompt: 's', schema: { type: 'object' } };
 
 test('cliArgs() isolates the run: no tools, settings, MCP, or session files', () => {
-  const args = cli.cliArgs({ systemPrompt: 's', schema: { type: 'object' }, budgetUsd: 1 });
+  const args = cli.cliArgs({ systemPrompt: 's', schema: { type: 'object' } });
   const flag = (name) => args[args.indexOf(name) + 1];
   assert.equal(flag('--tools'), '');
   assert.ok(args.includes('--restricted'));
   assert.ok(args.includes('--strict-mcp-config'));
   assert.ok(args.includes('--no-session-persistence'));
-  assert.equal(flag('--max-budget-usd'), '1');
+  // Cost is recorded, never capped.
+  assert.ok(!args.includes('--max-budget-usd'));
   assert.equal(flag('--output-format'), 'json');
   assert.equal(flag('--json-schema'), '{"type":"object"}');
 });
@@ -86,7 +87,6 @@ test('runStructured() maps failures to stable codes', async () => {
     [{ error: Object.assign(new Error('nope'), { code: 'ENOENT' }) }, 'agent_unavailable'],
     [{ stdout: 'not json' }, 'agent_bad_output'],
     [{ stdout: envelope({ result: 'plain text' }) }, 'agent_bad_output'],
-    [{ stdout: envelope({ is_error: true, subtype: 'error_max_budget_usd' }) }, 'agent_budget'],
     [{ stdout: envelope({ is_error: true, subtype: 'error_during_execution', result: 'boom' }) }, 'agent_failed'],
     [{ stdout: '', stderr: 'Invalid API key\n', code: 1 }, 'agent_failed'],
   ];
@@ -97,8 +97,8 @@ test('runStructured() maps failures to stable codes', async () => {
 });
 
 test('runStructured() reads the error envelope even when the CLI exits non-zero', async () => {
-  const { spawnFn } = fakeSpawn({ stdout: envelope({ is_error: true, subtype: 'error_max_budget_usd' }), code: 1 });
-  await assert.rejects(() => cli.runStructured({ ...base, spawnFn }), { code: 'agent_budget' });
+  const { spawnFn } = fakeSpawn({ stdout: envelope({ is_error: true, subtype: 'error_during_execution', result: 'boom' }), code: 1 });
+  await assert.rejects(() => cli.runStructured({ ...base, spawnFn }), { code: 'agent_failed', message: 'boom' });
 });
 
 test('runStructured() retries once when the CLI exhausts its schema retries', async () => {
