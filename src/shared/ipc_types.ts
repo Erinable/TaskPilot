@@ -4,7 +4,7 @@
 // annotates its handlers with these types so drift fails tsc.
 
 import type { CodingRun } from './coding_types.ts';
-import type { AgentSettings } from './agent_runtime.ts';
+import type { AgentSettings, CliId } from './agent_runtime.ts';
 export type { AgentId, AgentRuntimeConfig, AgentRuntimeStatus, AgentSettings, CliId, ThinkingLevel } from './agent_runtime.ts';
 export type { CliModelCatalog, CliModelOption, CliModelScope, CliModelsRequest } from './agent_runtime.ts';
 export type {
@@ -538,6 +538,16 @@ export type TeamStatus = { available: boolean; availableByAgent: Record<Activity
 // 2026-10-07; `since` is the earliest recorded run in the retention window
 // (null if none), so a week that starts before it is only partly counted.
 export type AgentCosts = { byAgent: Record<ActivityAgent, number>; since: string | null; partial: boolean };
+
+// ========== model usage ==========
+
+// Token counts one model call reported, normalized across CLIs. `input`
+// excludes cache reads and writes; reasoning is already inside `output`.
+export type TokenUsage = { input: number; output: number; cacheRead: number; cacheWrite: number };
+// What one call ran on, as far as the CLI said. Unknown parts are null.
+export type ModelCall = { cli: CliId; provider: string | null; model: string | null; costUsd: number | null; tokens: TokenUsage | null };
+// The work a call was for.
+export type CostSubject = { kind: 'package' | 'requirement'; id: string } | null;
 
 // `teamRecent`: each agent's newest few events over the retention window, newest first.
 export type ActivityOverview = {

@@ -15,6 +15,7 @@ import {
   recentByAgent,
   recentDays,
 } from '../../src/main/activity_log.ts';
+import { ROLLUP_FILENAME } from '../../src/main/cost_rollup.ts';
 import type { LoggedRecord } from '../../src/main/activity_log.ts';
 import type { ActivityRecord } from '../../src/shared/ipc_types.ts';
 
@@ -96,7 +97,72 @@ test('prune() deletes day files past the retention window and keeps the rest', a
   await fs.writeFile(path.join(events, 'notes.txt'), '');
   const removed = await new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now }).prune();
   assert.deepEqual(removed, ['2026-09-01.jsonl']);
-  assert.deepEqual((await fs.readdir(events)).sort(), [`${kept.at(-1)}.jsonl`, 'notes.txt']);
+  assert.deepEqual((await fs.readdir(events)).sort(), [`${kept.at(-1)}.jsonl`, ROLLUP_FILENAME, 'notes.txt']);
+});
+
+test('prune() folds expired costs into the rollup once, even when run again', async () => {
+  const dir = await tempDir();
+  const events = path.join(dir, EVENTS_DIRNAME);
+  await fs.mkdir(events);
+  const now = new Date('2026-10-13T02:00:00Z');
+  const tokens = { input: 100, output: 10, cacheRead: 5, cacheWrite: 0 };
+  const lines = [
+    { kind: 'agent_cost', agent: 'qa', costUsd: 0.2, at: '2026-09-01T03:00:00Z' },
+    {
+      kind: 'agent_cost',
+      agent: 'qa',
+      costUsd: null,
+      call: { cli: 'pi', provider: 'deepseek', model: 'deepseek-v4', costUsd: null, tokens },
+      at: '2026-09-01T04:00:00Z',
+    },
+    {
+      kind: 'agent_cost',
+      agent: 'tutor',
+      costUsd: null,
+      call: { cli: 'grok', provider: 'xai', model: null, costUsd: null, tokens: null },
+      at: '2026-09-01T05:00:00Z',
+    },
+  ];
+  await fs.writeFile(path.join(events, '2026-09-01.jsonl'), lines.map((line) => JSON.stringify(line)).join('\n'));
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  await log.prune();
+  // A prune that stopped before deleting folds the same day again.
+  await fs.writeFile(path.join(events, '2026-09-01.jsonl'), lines.map((line) => JSON.stringify(line)).join('\n'));
+  await log.prune();
+  const rows = await log.rollup();
+  assert.equal(rows.length, 3);
+  const legacy = rows.find((row) => row.cli === null);
+  assert.deepEqual([legacy?.actualCalls, legacy?.actualUsd], [1, 0.2]);
+  const estimated = rows.find((row) => row.cli === 'pi');
+  assert.deepEqual([estimated?.tokenCalls, estimated?.tokens], [1, tokens]);
+  assert.equal(rows.find((row) => row.agent === 'tutor')?.unknownCalls, 1);
+  assert.deepEqual(await fs.readdir(events), [ROLLUP_FILENAME]);
+});
+
+test('prune() drops rollup rows older than a year', async () => {
+  const dir = await tempDir();
+  const events = path.join(dir, EVENTS_DIRNAME);
+  await fs.mkdir(events);
+  const row = (day: string) => ({
+    day,
+    agent: 'qa',
+    cli: null,
+    provider: null,
+    model: null,
+    actualCalls: 1,
+    actualUsd: 1,
+    tokenCalls: 0,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    unknownCalls: 0,
+  });
+  await fs.writeFile(path.join(events, ROLLUP_FILENAME), JSON.stringify({ version: 1, rows: [row('2025-09-01'), row('2026-01-01')] }));
+  await fs.writeFile(path.join(events, '2026-09-01.jsonl'), '');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => new Date('2026-10-13T02:00:00Z') });
+  await log.prune();
+  assert.deepEqual(
+    (await log.rollup()).map((kept) => kept.day),
+    ['2026-01-01'],
+  );
 });
 
 test('prune() is a no-op before anything was recorded', async () => {

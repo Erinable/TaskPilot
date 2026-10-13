@@ -9,11 +9,25 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, AgentTransition, CodingTransition, QueueMetrics } from '../shared/ipc_types.ts';
+import type {
+  ActivityAgent,
+  ActivityEvent,
+  ActivityRecord,
+  AgentCosts,
+  AgentId,
+  AgentTransition,
+  CodingTransition,
+  CostSubject,
+  ModelCall,
+  QueueMetrics,
+} from '../shared/ipc_types.ts';
+import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME } from './cost_rollup.ts';
+import type { CostRow } from './cost_rollup.ts';
 
-// One agent run's model spend. Stored beside the feed events so it expires
-// with them, but never shown in the feed: it is not something that happened.
-export type AgentCostEvent = { kind: 'agent_cost'; agent: ActivityAgent; costUsd: number };
+// One model call's spend. Stored beside the feed events so it expires with
+// them, but never shown in the feed: it is not something that happened.
+// Lines from before 2026-10-13 have only agent and costUsd.
+export type AgentCostEvent = { kind: 'agent_cost'; agent: AgentId; costUsd: number | null; call?: ModelCall; subject?: CostSubject };
 export type LoggedEvent = ActivityEvent | AgentCostEvent;
 export type LoggedRecord = LoggedEvent & { at: string };
 
@@ -121,7 +135,8 @@ export class ActivityLog {
     return perDay.reverse().flat();
   }
 
-  // Deletes day files older than the retention window.
+  // Deletes day files older than the retention window, after folding their
+  // costs into the rollup (see cost_rollup.ts).
   async prune(): Promise<string[]> {
     const keep = new Set(recentDays(this.#now(), this.#timeZone, RETENTION_DAYS));
     const oldest = [...keep].at(-1) as string;
@@ -136,8 +151,27 @@ export class ActivityLog {
       const day = DAY_FILE.exec(name)?.[1];
       return day !== undefined && day < oldest;
     });
+    if (!expired.length) return [];
+    const days = expired.map((name) => (DAY_FILE.exec(name) as RegExpExecArray)[1]);
+    const records = (await Promise.all(days.map((day) => this.#readDay(day)))).flat();
+    const folded = foldCosts(records, (record) => businessDay(new Date(record.at), this.#timeZone));
+    const rollupOldest = recentDays(this.#now(), this.#timeZone, ROLLUP_DAYS).at(-1) as string;
+    // Written before the day files go: a crash in between folds them again,
+    // and the merge replaces those days rather than adding to them.
+    const rollup = mergeRollup(await this.rollup(), folded, days, rollupOldest);
+    await fs.writeFile(path.join(this.#dir, ROLLUP_FILENAME), `${JSON.stringify({ version: 1, rows: rollup })}\n`);
     await Promise.all(expired.map((name) => fs.rm(path.join(this.#dir, name), { force: true })));
     return expired;
+  }
+
+  // Daily cost rows of days already pruned, oldest first.
+  async rollup(): Promise<CostRow[]> {
+    try {
+      return parseRollup(JSON.parse(await fs.readFile(path.join(this.#dir, ROLLUP_FILENAME), 'utf8')));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return [];
+      throw error;
+    }
   }
 
   async #readDay(day: string): Promise<LoggedRecord[]> {
@@ -197,10 +231,11 @@ export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: 
   const byAgent: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 };
   let since: string | null = null;
   for (const record of records) {
-    // A hand-edited or future line with an unknown agent or bad amount is skipped.
+    // A hand-edited or future line with an unknown agent or bad amount is
+    // skipped, as are agents outside the team page (Tutor, Environment Steward).
     if (record.kind !== 'agent_cost' || !Object.hasOwn(byAgent, record.agent) || !Number.isFinite(record.costUsd)) continue;
     if (since === null || record.at < since) since = record.at;
-    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) byAgent[record.agent] += record.costUsd;
+    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) byAgent[record.agent as ActivityAgent] += record.costUsd as number;
   }
   const weekStart = week.at(-1) as string;
   return { byAgent, since, partial: since === null || businessDay(new Date(since), timeZone) > weekStart };

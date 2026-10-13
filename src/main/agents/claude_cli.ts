@@ -20,8 +20,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { processEnv } from '../env.ts';
+import { claudeCall } from './model_usage.ts';
 
 import type { ThinkingLevel } from '../../shared/agent_runtime.ts';
+import type { ModelCall } from '../../shared/ipc_types.ts';
 export type JsonSchema = Record<string, unknown>;
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
@@ -47,9 +49,12 @@ export interface RunStructuredOptions {
 }
 
 // Structured output is validated by each agent, so it stays untyped here.
+// `call` is what the CLI reported about the run, when it reported anything;
+// the IPC layer records it for the cost page.
 export interface StructuredResult {
   output: unknown;
   costUsd: number | null;
+  call?: ModelCall;
 }
 
 export type RunAgent = (options: RunStructuredOptions) => Promise<StructuredResult>;
@@ -62,6 +67,8 @@ interface Envelope {
   result?: unknown;
   structured_output?: unknown;
   total_cost_usd?: unknown;
+  usage?: unknown;
+  modelUsage?: unknown;
 }
 
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000;
@@ -144,7 +151,11 @@ export const parseEnvelope = (stdout: string): StructuredResult => {
     }
   }
   if (!output || typeof output !== 'object') throw new AgentRunError('Agent did not return structured output', 'agent_bad_output');
-  return { output, costUsd: typeof envelope.total_cost_usd === 'number' ? envelope.total_cost_usd : null };
+  return {
+    output,
+    costUsd: typeof envelope.total_cost_usd === 'number' ? envelope.total_cost_usd : null,
+    call: claudeCall(envelope),
+  };
 };
 
 const codeOf = (error: unknown): unknown => (error as { code?: unknown } | null)?.code;

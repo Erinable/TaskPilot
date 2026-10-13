@@ -11,6 +11,7 @@ import { processEnv } from '../env.ts';
 import { AgentRunError, runStructured as runClaude } from './claude_cli.ts';
 import type { RunStructuredOptions, SpawnFn, StructuredResult } from './claude_cli.ts';
 import { isObject } from './product_lead.ts';
+import { streamCall } from './model_usage.ts';
 
 import { loadNativeModelProfile, nativeClaudeInferenceEnv, nativeInferenceDefaults } from './native_model_profile.ts';
 export type CliProbeResult = { command: string; available: boolean; version: string | null; reason: string | null };
@@ -358,7 +359,10 @@ const runProcess = async (options: RunStructuredOptions, config: AgentRuntimeCon
       if (cause === 'large') return settle(new AgentRunError('Agent output was too large', 'agent_bad_output'));
       if (code !== 0) return settle(new AgentRunError(`Agent CLI exited with ${code}`, 'agent_failed', redact(stderr.slice(-2000))));
       try {
-        settle(null, { output: parseStructuredOutput(stdout), costUsd: null });
+        const output = parseStructuredOutput(stdout);
+        // Claude goes through claude_cli.ts; Codex has no analysis mode.
+        const call = config.cli === 'claude' || config.cli === 'codex' ? undefined : streamCall(config.cli, stdout);
+        settle(null, { output, costUsd: call?.costUsd ?? null, call });
       } catch (error) {
         settle(error instanceof AgentRunError ? error : new AgentRunError('Could not parse CLI output', 'agent_bad_output'));
       }

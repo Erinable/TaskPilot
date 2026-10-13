@@ -62,9 +62,19 @@ test('childEnv() drops Claude Code session variables and applies PATH', () => {
 });
 
 test('runStructured() sends the prompt on stdin, not argv, and returns structured output', async () => {
-  const { spawnFn, calls } = fakeSpawn({ stdout: envelope({ structured_output: { ok: true } }) });
+  const { spawnFn, calls } = fakeSpawn({
+    stdout: envelope({
+      structured_output: { ok: true },
+      usage: { input_tokens: 10, output_tokens: 4, cache_read_input_tokens: 2, cache_creation_input_tokens: 1 },
+      modelUsage: { 'claude-haiku-5-5': { outputTokens: 1 }, 'claude-sonnet-5-5': { outputTokens: 3 } },
+    }),
+  });
   const result = await cli.runStructured({ ...base, prompt: 'secret requirement', spawnFn });
-  assert.deepEqual(result, { output: { ok: true }, costUsd: 0.05 });
+  assert.deepEqual(result, {
+    output: { ok: true },
+    costUsd: 0.05,
+    call: { cli: 'claude', provider: 'anthropic', model: 'claude-sonnet-5-5', costUsd: 0.05, tokens: { input: 10, output: 4, cacheRead: 2, cacheWrite: 1 } },
+  });
   assert.equal(calls[0].input(), 'secret requirement');
   assert.ok(!calls[0].args.some((arg) => arg.includes('secret requirement')));
 });

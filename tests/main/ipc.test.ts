@@ -1957,3 +1957,30 @@ test('coding loop: an automatic round that touches a high-risk file stops for th
   assert.equal(task.codingRun?.attempt, 2);
   assert.equal(h.prompts.length, 2);
 });
+
+test('costs: every analysis call is recorded with its CLI, model and work package, priced or not', async () => {
+  const h = await harness({
+    agent: async (options) => {
+      const result = (await fakeAgent()(options)) as StructuredResult;
+      return {
+        ...result,
+        costUsd: null,
+        call: { cli: 'pi', provider: 'deepseek', model: 'v4', costUsd: null, tokens: { input: 9, output: 1, cacheRead: 0, cacheWrite: 0 } },
+      };
+    },
+  });
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  await submitEdgeTests(h);
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.activity.flush();
+  const costs = (await h.activity.window(1)).filter((record) => record.kind === 'agent_cost');
+  assert.equal(costs.length, 1);
+  assert.deepEqual(costs[0], {
+    kind: 'agent_cost',
+    agent: 'qa',
+    costUsd: null,
+    call: { cli: 'pi', provider: 'deepseek', model: 'v4', costUsd: null, tokens: { input: 9, output: 1, cacheRead: 0, cacheWrite: 0 } },
+    subject: { kind: 'package', id: 'auth-edge-tests' },
+    at: costs[0].at,
+  });
+});

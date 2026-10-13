@@ -23,6 +23,7 @@ import * as tutorAgent from './agents/tutor.ts';
 import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
 import * as codingLoop from './coding_loop.ts';
+import { codingCall } from './agents/model_usage.ts';
 import type { CodingEventPage, CodingRun } from '../shared/coding_types.ts';
 import {
   summarizeForRequirement,
@@ -283,13 +284,16 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Freeze a role's runtime at the start of its background action. Saving the
   // next settings must not change an Architect step halfway through a run.
-  const runnerFor = (agent: Exclude<AgentId, 'coding-agent'>): RunAgent => {
+  // Each model call is recorded here, so agents never handle cost themselves.
+  const runnerFor = (agent: Exclude<AgentId, 'coding-agent'>, subject: ipc.CostSubject = null): RunAgent => {
     const config = { ...getPreferences().agents[agent] };
-    return (options) => {
+    return async (options) => {
       if (!supportsAgentConfig(agent, config)) throw codedError('The selected CLI cannot safely run this analysis agent', 'agent_unavailable');
-      return runAgent
-        ? runAgent({ ...options, command: config.cli, model: config.model || null, thinking: config.thinking })
-        : cliRunner.runStructured(options, config);
+      const result = runAgent
+        ? await runAgent({ ...options, command: config.cli, model: config.model || null, thinking: config.thinking })
+        : await cliRunner.runStructured(options, config);
+      recordCall(agent, result.call ?? { cli: config.cli, provider: null, model: config.model || null, costUsd: result.costUsd, tokens: null }, subject);
+      return result;
     };
   };
 
@@ -361,11 +365,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     activity?.append(event).catch((error) => console.error('[activity] append failed', error));
   };
 
-  // One agent run's spend, for the team page's weekly total. Free runs (the
-  // outcome was certain without the model) record nothing.
-  const recordCost = (agent: ipc.ActivityAgent, costUsd: number) => {
-    if (costUsd > 0) record({ kind: 'agent_cost', agent, costUsd });
-  };
+  // One model call's spend and usage, for the cost page and the team page's
+  // weekly total. Every call is kept, priced or not, so unknown spend is
+  // counted rather than silently missing.
+  const recordCall = (agent: AgentId, call: ipc.ModelCall, subject: ipc.CostSubject) =>
+    record({ kind: 'agent_cost', agent, costUsd: call.costUsd, call, subject });
 
   // Records a package moving between statuses.
   const recordTransition = (
@@ -541,7 +545,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           patchDigest: preview.digest,
         });
         record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: result.usage.costUsd });
-        if (result.usage.costUsd !== null) recordCost('coding-agent', result.usage.costUsd);
+        recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, result.usage), { kind: 'package', id });
       } catch (error) {
         const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
         await updateCoding(id, {
@@ -778,7 +782,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const task = requireTask(id);
     const root = requireRoot();
     const baseline = requireBaseline(id);
-    const reviewRunner = runnerFor('qa');
+    const reviewRunner = runnerFor('qa', { kind: 'package', id });
     const entry = await store.beginReview(id);
     const controller = new AbortController();
     reviews.set(id, controller);
@@ -810,7 +814,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if ('error' in outcome) await store.failReview(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
-        recordCost('qa', outcome.result.costUsd);
         await store
           .completeReview(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
@@ -836,7 +839,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     // Fixed at the start: a repository switch cancels the run, but the code
     // must never be read from the next repository meanwhile.
     const { root } = getConfig();
-    const architectRunner = runnerFor('architect');
+    const architectRunner = runnerFor('architect', { kind: 'package', id });
     const entry = await store.beginAdjudication(id);
     const controller = new AbortController();
     adjudications.set(id, controller);
@@ -863,7 +866,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if ('error' in outcome) await store.failAdjudication(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
-        recordCost('architect', outcome.result.costUsd);
         await store
           .completeAdjudication(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
@@ -1201,8 +1203,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     finish: (id: string, output: Output, costUsd: number) => Promise<unknown>,
   ) => {
     const store = requireRequirements();
-    const architectRunner = runnerFor('architect');
-    const productRunner = runnerFor('product-lead');
+    const architectRunner = runnerFor('architect', { kind: 'requirement', id });
+    const productRunner = runnerFor('product-lead', { kind: 'requirement', id });
     const item = await store.begin(id, step);
     const controller = new AbortController();
     runs.set(id, controller);
@@ -1227,7 +1229,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             signal: controller.signal,
           });
           architectCost = result.costUsd;
-          recordCost('architect', architectCost);
           await store.setInterfaces(
             id,
             result.summary
@@ -1245,7 +1246,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           envPath,
           signal: controller.signal,
         });
-        recordCost('product-lead', costUsd ?? 0);
         outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost };
       } catch (error) {
         outcome = { error };
@@ -1949,7 +1949,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             return;
           }
           const { input, plan, costUsd } = outcome.result;
-          recordCost('release-manager', costUsd);
           const summary: ipc.ReleaseInputSummary = {
             commitCount: input.commits.length,
             commitsTruncated: input.commitsTruncated,
@@ -2128,7 +2127,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawId, rawIndex): Promise<ipc.TutorState> => {
       const store = requireTutor();
       const { task, stepIndex, step } = requireStep(rawId, rawIndex);
-      const tutorRunner = runnerFor('tutor');
+      const tutorRunner = runnerFor('tutor', { kind: 'package', id: task.id });
       const key = tutorKey(task.id, stepIndex);
       const current = tutorState(task.id, stepIndex, step);
       if (current.status === 'running' || current.status === 'done') return current;

@@ -102,7 +102,8 @@ test('private analysis text never appears in the process arguments', async () =>
     return child;
   }) as unknown as SpawnFn;
   const result = await runStructured({ ...options, spawnFn }, piConfig);
-  assert.deepEqual(result, { output: { ready: true }, costUsd: null });
+  assert.deepEqual(result.output, { ready: true });
+  assert.equal(result.costUsd, null);
   assert.ok(input.includes('private prompt'));
   assert.ok(!observedArgs.some((arg) => arg.includes('private prompt')));
 });

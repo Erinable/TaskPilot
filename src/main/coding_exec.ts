@@ -222,6 +222,17 @@ const parseRecord = (
       usage.cachedInputTokens;
     usage.reasoningTokens = usageNumber(usageValue, 'reasoning_tokens') ?? usageNumber(usageValue, 'reasoning_output_tokens') ?? usage.reasoningTokens;
     usage.costUsd = usageNumber(value, 'total_cost_usd') ?? usageNumber(usageValue, 'cost_usd') ?? usage.costUsd;
+    // OpenCode reports each step's tokens and cost on step_finish; a run is their sum.
+    if (cli === 'opencode' && type === 'step_finish' && part.tokens && typeof part.tokens === 'object') {
+      const tokens = part.tokens as Record<string, unknown>;
+      const cache = (tokens.cache && typeof tokens.cache === 'object' ? tokens.cache : {}) as Record<string, unknown>;
+      const add = (current: number | null, next: number | null) => (next === null ? current : (current ?? 0) + next);
+      usage.inputTokens = add(usage.inputTokens, usageNumber(tokens, 'input'));
+      usage.outputTokens = add(usage.outputTokens, usageNumber(tokens, 'output'));
+      usage.cachedInputTokens = add(usage.cachedInputTokens, usageNumber(cache, 'read'));
+      usage.reasoningTokens = add(usage.reasoningTokens, usageNumber(tokens, 'reasoning'));
+      usage.costUsd = add(usage.costUsd, usageNumber(part, 'cost'));
+    }
     return {};
   }
   const item = value.item && typeof value.item === 'object' ? (value.item as Record<string, unknown>) : {};
