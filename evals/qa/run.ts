@@ -11,10 +11,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import * as cli from '../../src/main/agents/claude_cli.ts';
 import { reviewWorkPackage } from '../../src/main/agents/pipeline.ts';
 import { TS_API } from '../product-lead/sources.ts';
-import { fixtureRepo, judgeWith, runSuite } from '../shared/harness.ts';
+import { fixtureRepo, judgeWith, runAgent, runSuite } from '../shared/harness.ts';
 import { cases } from './cases.ts';
 import { check } from './checks.ts';
 import type { QaCase } from './cases.ts';
@@ -60,7 +59,7 @@ const runCase = async (testCase: QaCase, { judge }: { judge: boolean }) => {
     review = await reviewWorkPackage(testCase.task, {
       root: repo.root,
       baseline: repo.head,
-      runAgent: cli.runStructured,
+      runAgent,
       checks: [{ kind: 'test', stage: 'submit', blocking: true, line: 'npm test' }],
       runCheck: async () => testRun(testCase.passingTests),
     });

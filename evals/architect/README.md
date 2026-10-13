@@ -15,6 +15,17 @@ npm run eval:architect                                # all cases
 npm run eval:architect -- --case replan-missing-method
 npm run eval:architect -- --label my-change
 npm run eval:architect -- --no-judge
+npm run eval:architect -- --timeout-minutes 15  # per-call limit, default 10
 ```
 
-Reports go to `reports/` (gitignored). No baseline has been recorded yet.
+Reports go to `reports/` (gitignored).
+
+## Results
+
+First baseline (2026-10-13, Claude Opus through a gateway), pieced together from four runs because single calls often took over 3 minutes; `--timeout-minutes` exists for that.
+
+| | checks | judge mean |
+|---|---|---|
+| all 9 cases | 100% (decision 5/5, revisedScope 2/2, selection 4/4, codeGrounding 4/4) | 3.67 → 4.33 |
+
+The judge mean moved because the first run showed the judge every fixture file while Architect saw only what it read, so it was marked down for "missing" files it was never shown. From the second run the judge sees what Architect read plus the full path list. Scores before that change are not comparable.

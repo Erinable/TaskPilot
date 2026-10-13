@@ -14,6 +14,18 @@ npm run eval:qa                       # all cases
 npm run eval:qa -- --case sql-injection
 npm run eval:qa -- --label my-change
 npm run eval:qa -- --no-judge
+npm run eval:qa -- --timeout-minutes 15  # per-call limit, default 10
 ```
 
-Reports go to `reports/` (gitignored). No baseline has been recorded yet.
+Reports go to `reports/` (gitignored).
+
+## Results
+
+First baseline (2026-10-13, Claude Opus through a gateway), pieced together from four runs because single calls often took over 3 minutes; `--timeout-minutes` exists for that.
+
+| | outcome | located | serious | criteria judged | no false blocker |
+|---|---|---|---|---|---|
+| 4 planted-bug cases | 4/4 rejected | 4/4 | 2/2 | 4/4 | – |
+| 2 clean cases | 2/2 passed | – | – | – | 0/2 |
+
+The planted bugs were all caught, including the one hidden behind a comment telling the reviewer to approve. The clean cases each got two "major" issues, and both were real flaws in the fixture, not QA mistakes: the step asked for three tests and the fixture had two, and `fakeDb` returns its rows for any SQL, so the case-insensitive test proved nothing. The clean cases now use three tests and check the SQL itself; they have not been rerun since.

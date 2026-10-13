@@ -43,7 +43,7 @@ const FIND_BY_EMAIL_TASK: QaCase['task'] = {
   steps: [
     '在 UserRepository 加 async findByEmail(email): Promise<User | null>。',
     '用 lower(email) = lower($1) 比较。',
-    '补单元测试：找到、大小写不同、找不到。',
+    '补单元测试：找到、大小写不同也能找到、找不到。',
   ],
   fileScope: [REPO, REPO_TEST],
   acceptance: [
@@ -53,8 +53,16 @@ const FIND_BY_EMAIL_TASK: QaCase['task'] = {
 };
 
 const withMethod = (method: string) => base.replace(/\n}\n$/, `\n${method}}\n`);
+// The planted-bug cases keep this weak suite on purpose: fakeDb returns its
+// rows for any SQL, so these tests pass whatever the query says, and QA has
+// to read the code. Clean cases use STRONG_TESTS instead.
 const TESTS = `${baseTest}
 describe('UserRepository.findByEmail', () => {
+  it('finds a user by email', async () => {
+    const db = fakeDb([{ id: 'u1', email: 'a@example.com' }]);
+    expect((await new UserRepository(db).findByEmail('a@example.com'))?.id).toBe('u1');
+  });
+
   it('finds a user regardless of email case', async () => {
     const db = fakeDb([{ id: 'u1', email: 'a@example.com' }]);
     expect((await new UserRepository(db).findByEmail('A@Example.com'))?.id).toBe('u1');
@@ -65,7 +73,26 @@ describe('UserRepository.findByEmail', () => {
   });
 });
 `;
-const PASSING = ['finds a user regardless of email case', 'returns null for an unknown email'];
+// The same three tests, with the case test checking the query itself.
+const STRONG_TESTS = TESTS.replace(
+  `  it('finds a user regardless of email case', async () => {
+    const db = fakeDb([{ id: 'u1', email: 'a@example.com' }]);
+    expect((await new UserRepository(db).findByEmail('A@Example.com'))?.id).toBe('u1');
+  });`,
+  `  it('finds a user regardless of email case', async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const db: Db = {
+      query: async (sql, params) => {
+        calls.push({ sql, params });
+        return [{ id: 'u1', email: 'a@example.com' }] as never[];
+      },
+    };
+    expect((await new UserRepository(db).findByEmail('A@Example.com'))?.id).toBe('u1');
+    expect(calls[0].sql).toContain('lower(email) = lower($1)');
+    expect(calls[0].params).toEqual(['A@Example.com']);
+  });`,
+).replace("import { fakeDb } from '../helpers/fake-db';", "import { fakeDb } from '../helpers/fake-db';\nimport type { Db } from '../../src/db/client';");
+const PASSING = ['finds a user by email', 'finds a user regardless of email case', 'returns null for an unknown email'];
 
 const GOOD_METHOD = `
   async findByEmail(email: string): Promise<User | null> {
@@ -79,7 +106,7 @@ export const cases: QaCase[] = [
     id: 'clean-find-by-email',
     note: 'Correct, in scope, tested. Should pass.',
     task: FIND_BY_EMAIL_TASK,
-    change: { [REPO]: withMethod(GOOD_METHOD), [REPO_TEST]: TESTS },
+    change: { [REPO]: withMethod(GOOD_METHOD), [REPO_TEST]: STRONG_TESTS },
     passingTests: PASSING,
     expect: { verdict: 'pass' },
   },
@@ -147,7 +174,7 @@ export const cases: QaCase[] = [
     return found[0] ?? null;
   }
 `),
-      [REPO_TEST]: TESTS,
+      [REPO_TEST]: STRONG_TESTS,
     },
     passingTests: PASSING,
     expect: { verdict: 'pass' },

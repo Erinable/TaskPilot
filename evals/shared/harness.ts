@@ -7,8 +7,16 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import * as cli from '../../src/main/agents/claude_cli.ts';
-import type { JsonSchema } from '../../src/main/agents/claude_cli.ts';
+import * as cliRunner from '../../src/main/agents/cli_runner.ts';
+import type { JsonSchema, RunAgent } from '../../src/main/agents/claude_cli.ts';
+
+// The model calls go through cli_runner, as the app's do, so the native
+// Claude configuration (settings.json env such as a gateway token) applies.
+// Calling claude_cli directly skips it and fails with "Not logged in".
+// Per-call time limit for eval runs; set from --timeout-minutes by runSuite.
+// The app keeps its own 3-minute limit; a slow gateway needs more here.
+let timeoutMs = 10 * 60 * 1000;
+export const runAgent: RunAgent = (options) => cliRunner.runStructured({ timeoutMs, ...options }, { cli: 'claude', model: '', thinking: 'default' });
 
 export interface CheckResult {
   pass: boolean;
@@ -20,15 +28,17 @@ export interface SuiteArgs {
   label: string;
   judge: boolean;
   concurrency: number;
+  timeoutMinutes: number;
 }
 
 export const parseArgs = (argv: string[]): SuiteArgs => {
-  const args: SuiteArgs = { case: null, label: 'run', judge: true, concurrency: 3 };
+  const args: SuiteArgs = { case: null, label: 'run', judge: true, concurrency: 3, timeoutMinutes: 10 };
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--case') args.case = argv[++index];
     else if (argv[index] === '--label') args.label = argv[++index];
     else if (argv[index] === '--no-judge') args.judge = false;
     else if (argv[index] === '--concurrency') args.concurrency = Number(argv[++index]);
+    else if (argv[index] === '--timeout-minutes') args.timeoutMinutes = Number(argv[++index]);
   }
   return args;
 };
@@ -92,7 +102,7 @@ export const judgeWith = async <Criterion extends string>(
     ),
   };
   const fullPrompt = ['<criteria>', ...Object.entries(criteria).map(([key, text]) => `${key}: ${text}`), '</criteria>', '', prompt].join('\n');
-  const { output, costUsd } = await cli.runStructured({ prompt: fullPrompt, systemPrompt: system, schema });
+  const { output, costUsd } = await runAgent({ prompt: fullPrompt, systemPrompt: system, schema });
   // Shape enforced by the schema through the CLI.
   return { scores: output as Scores<Criterion>, costUsd: costUsd ?? 0 };
 };
@@ -189,7 +199,10 @@ export const runSuite = async <Case extends { id: string }, Run, Criterion exten
   runCase: (testCase: Case, args: SuiteArgs) => Promise<CaseOutcome<Run, Criterion>>;
 }) => {
   const args = parseArgs(process.argv.slice(2));
-  const selected = args.case ? cases.filter((testCase) => testCase.id === args.case) : cases;
+  timeoutMs = args.timeoutMinutes * 60 * 1000;
+  // --case takes one id or a comma-separated list.
+  const wanted = args.case?.split(',') ?? null;
+  const selected = wanted ? cases.filter((testCase) => wanted.includes(testCase.id)) : cases;
   if (!selected.length) throw new Error(`No case named ${args.case}`);
   const results = await pool(selected, args.concurrency, async (testCase): Promise<CaseOutcome<Run, Criterion> | CaseFailure> => {
     process.stderr.write(`· ${testCase.id}\n`);
@@ -201,4 +214,6 @@ export const runSuite = async <Case extends { id: string }, Run, Criterion exten
     }
   });
   await report(suiteDir, args.label, results, criteria);
+  // A run where every case errored produced no result; say so in the exit code.
+  if (results.every((result) => 'error' in result)) process.exitCode = 1;
 };

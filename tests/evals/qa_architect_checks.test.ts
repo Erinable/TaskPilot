@@ -158,3 +158,12 @@ test('QA cases reach the model with their diff when run through the real pipelin
     }
   }
 });
+
+test('QA clean cases check the query itself; planted-bug cases keep the weak suite', () => {
+  const testFile = 'tests/auth/user-repository.test.ts';
+  for (const testCase of qaCases) {
+    const strong = testCase.change[testFile].includes("expect(calls[0].sql).toContain('lower(email) = lower($1)')");
+    assert.equal(strong, testCase.expect.verdict === 'pass', testCase.id);
+    assert.equal(testCase.passingTests.length, 3, testCase.id);
+  }
+});

@@ -9,9 +9,8 @@
 //
 // Costs real money, so it is not part of `npm test`. Reports go to
 // evals/architect/reports/ (gitignored).
-import * as cli from '../../src/main/agents/claude_cli.ts';
 import { adjudicateDeviation, summarizeForRequirement } from '../../src/main/agents/pipeline.ts';
-import { fixtureRepo, judgeWith, runSuite } from '../shared/harness.ts';
+import { fixtureRepo, judgeWith, runAgent, runSuite } from '../shared/harness.ts';
 import { cases } from './cases.ts';
 import { checkAdjudication, checkSummary } from './checks.ts';
 import type { ArchitectCase } from './cases.ts';
@@ -30,26 +29,34 @@ const SYSTEM = [
   'Give a one-sentence reason naming the specific flaw or strength. Write reasons in English.',
 ].join('\n');
 
-const sourceBlock = (sources: Record<string, string>) =>
-  Object.entries(sources)
-    .map(([file, content]) => `<file path="${file}">\n${content}\n</file>`)
-    .join('\n\n');
+// The judge sees what Architect saw: the files it read, and the repository's
+// path list. Without this it marks the agent down for not knowing files it
+// was never shown, or for "inventing" files that exist as empty stubs.
+const sourceBlock = (sources: Record<string, string>, read: string[], paths: string[]) =>
+  [
+    '<repository_paths note="every path exists; paths without contents in the fixture are empty files">',
+    paths.join('\n'),
+    '</repository_paths>',
+    '',
+    '<files_architect_read>',
+    read.map((file) => `<file path="${file}">\n${sources[file] ?? ''}\n</file>`).join('\n\n') || '(none)',
+    '</files_architect_read>',
+  ].join('\n');
 
 const runCase = async (testCase: ArchitectCase, { judge }: { judge: boolean }) => {
   const started = Date.now();
-  const repo = await fixtureRepo(testCase.id, {
-    ...Object.fromEntries((testCase.kind === 'summary' ? testCase.files : []).map((file) => [file, ''])),
-    ...testCase.sources,
-  });
+  const files = { ...Object.fromEntries((testCase.kind === 'summary' ? testCase.files : []).map((file) => [file, ''])), ...testCase.sources };
+  const repo = await fixtureRepo(testCase.id, files);
   try {
+    let read: string[];
     let run: unknown;
     let checks;
     let agentCostUsd: number;
     let judgeTask: string;
     if (testCase.kind === 'summary') {
-      const result = await summarizeForRequirement(testCase.requirement, { runAgent: cli.runStructured, root: repo.root, files: testCase.files });
+      const result = await summarizeForRequirement(testCase.requirement, { runAgent, root: repo.root, files: testCase.files });
       if (result.error) throw Object.assign(new Error(result.error.message), { code: result.error.code });
-      const read = result.read.map((entry) => entry.path);
+      read = result.read.map((entry) => entry.path);
       run = { read, summary: result.summary, skipped: result.skipped };
       checks = checkSummary(testCase, { read, summary: result.summary, text: result.text });
       agentCostUsd = result.costUsd;
@@ -59,9 +66,10 @@ const runCase = async (testCase: ArchitectCase, { judge }: { judge: boolean }) =
         root: repo.root,
         deviations: testCase.deviations,
         mustReplan: testCase.mustReplan ?? false,
-        runAgent: cli.runStructured,
+        runAgent,
       });
       run = result;
+      read = result.read;
       checks = checkAdjudication(testCase, result);
       agentCostUsd = result.costUsd;
       judgeTask = [
@@ -81,7 +89,7 @@ const runCase = async (testCase: ArchitectCase, { judge }: { judge: boolean }) =
     let scores = null;
     let judgeCostUsd = 0;
     if (judge) {
-      const judged = await judgeWith<Criterion>(CRITERIA, SYSTEM, ['<source_code>', sourceBlock(testCase.sources), '</source_code>', '', judgeTask].join('\n'));
+      const judged = await judgeWith<Criterion>(CRITERIA, SYSTEM, [sourceBlock(testCase.sources, read, Object.keys(files)), '', judgeTask].join('\n'));
       scores = judged.scores;
       judgeCostUsd = judged.costUsd;
     }
