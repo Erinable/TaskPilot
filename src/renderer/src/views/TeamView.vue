@@ -97,7 +97,14 @@ const members = computed(() => {
           <div>
             <dt>本周花费</dt>
             <dd>
-              <strong class="team-cost">{{ member.cost }}</strong>
+              <button
+                class="team-cost link-button"
+                type="button"
+                :aria-label="`${member.actor.name} 本周花费 ${member.cost}，查看成本页`"
+                @click="app.navigate('costs')"
+              >
+                {{ member.cost }}
+              </button>
               <small>{{ costNote }}</small>
             </dd>
           </div>

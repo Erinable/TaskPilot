@@ -99,6 +99,12 @@ const api = {
     page: (before: string | null) => invoke<ipc.ActivityPage>(CHANNELS.activityPage, before),
   },
 
+  costs: {
+    report: (days: ipc.CostRange) => invoke<ipc.CostReport>(CHANNELS.costsReport, days),
+    // The one outbound request: downloads the models.dev price list.
+    syncPrices: () => invoke<{ syncedAt: string }>(CHANNELS.costsSyncPrices),
+  },
+
   engineeringMap: {
     get: () => invoke<ipc.EngineeringMap>(CHANNELS.engineeringMap),
   },

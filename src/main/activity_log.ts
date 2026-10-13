@@ -21,7 +21,7 @@ import type {
   ModelCall,
   QueueMetrics,
 } from '../shared/ipc_types.ts';
-import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME } from './cost_rollup.ts';
+import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME, toMicros } from './cost_rollup.ts';
 import type { CostRow } from './cost_rollup.ts';
 
 // One model call's spend. Stored beside the feed events so it expires with
@@ -223,20 +223,31 @@ export const computeMetrics = (records: LoggedRecord[], now: Date, timeZone: str
   return { doneThisWeek, donePreviousWeek, averageHours: mean(durations.current), averageHoursPrevious: mean(durations.previous) };
 };
 
-// Each agent's spend over the metrics week. Spend was not recorded before
-// 2026-10-07, so a week starting before the earliest recorded run is partial.
-export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: string): AgentCosts => {
+// Each agent's spend over the metrics week, reported or estimated (the same
+// numbers as the cost page). Spend was not recorded before 2026-10-07, so a
+// week starting before the earliest recorded run is partial.
+// `estimate` prices a call without a reported cost, in micro-dollars, or null.
+export const computeAgentCosts = (
+  records: LoggedRecord[],
+  now: Date,
+  timeZone: string,
+  estimate: (call: NonNullable<AgentCostEvent['call']>) => number | null = () => null,
+): AgentCosts => {
   const week = recentDays(now, timeZone, METRIC_DAYS);
   const thisWeek = new Set(week);
-  const byAgent: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 };
+  const micros: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 };
   let since: string | null = null;
   for (const record of records) {
-    // A hand-edited or future line with an unknown agent or bad amount is
-    // skipped, as are agents outside the team page (Tutor, Environment Steward).
-    if (record.kind !== 'agent_cost' || !Object.hasOwn(byAgent, record.agent) || !Number.isFinite(record.costUsd)) continue;
+    // A hand-edited or future line with an unknown agent is skipped, as are
+    // agents outside the team page (Tutor, Environment Steward).
+    if (record.kind !== 'agent_cost' || !Object.hasOwn(micros, record.agent)) continue;
+    const reported = typeof record.costUsd === 'number' && Number.isFinite(record.costUsd) && record.costUsd > 0 ? toMicros(record.costUsd) : null;
+    const amount = reported ?? (record.call ? estimate(record.call) : null);
+    if (amount === null) continue;
     if (since === null || record.at < since) since = record.at;
-    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) byAgent[record.agent as ActivityAgent] += record.costUsd as number;
+    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) micros[record.agent as ActivityAgent] += amount;
   }
+  const byAgent = Object.fromEntries(Object.entries(micros).map(([agent, value]) => [agent, value / 1_000_000])) as Record<ActivityAgent, number>;
   const weekStart = week.at(-1) as string;
   return { byAgent, since, partial: since === null || businessDay(new Date(since), timeZone) > weekStart };
 };

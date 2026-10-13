@@ -33,7 +33,7 @@ const showQueue = async () => {
   if (await app.navigate('queue')) execution.close();
 };
 
-const openView = async (view: 'map' | 'activity' | 'release' | 'team') => {
+const openView = async (view: 'map' | 'activity' | 'release' | 'team' | 'costs') => {
   if (await app.navigate(view)) execution.close();
 };
 
@@ -101,6 +101,10 @@ const team = computed(() =>
       <button class="nav-item" :class="{ active: app.view === 'team' }" :title="app.sidebarCollapsed ? 'AI 团队' : undefined" @click="openView('team')">
         <AppIcon name="bot" class="nav-icon" />
         <span class="nav-label">团队概览</span>
+      </button>
+      <button class="nav-item" :class="{ active: app.view === 'costs' }" :title="app.sidebarCollapsed ? '成本' : undefined" @click="openView('costs')">
+        <AppIcon name="coins" class="nav-icon" />
+        <span class="nav-label">成本</span>
       </button>
       <button
         v-for="member in team"

@@ -70,6 +70,10 @@ declare const api: {
     overview: () => Promise<ipc.IpcResult<ipc.ActivityOverview>>;
     page: (before: string | null) => Promise<ipc.IpcResult<ipc.ActivityPage>>;
   };
+  costs: {
+    report: (days: ipc.CostRange) => Promise<ipc.IpcResult<ipc.CostReport>>;
+    syncPrices: () => Promise<ipc.IpcResult<{ syncedAt: string }>>;
+  };
   engineeringMap: {
     get: () => Promise<ipc.IpcResult<ipc.EngineeringMap>>;
   };

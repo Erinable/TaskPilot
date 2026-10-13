@@ -1984,3 +1984,20 @@ test('costs: every analysis call is recorded with its CLI, model and work packag
     at: costs[0].at,
   });
 });
+
+test('costs: the report rejects other ranges and counts recorded calls', async () => {
+  const h = await harness({ agent: fakeAgent() });
+  assert.equal((await h.call(CHANNELS.costsReport, 14)).ok, false);
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  await submitEdgeTests(h);
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.activity.flush();
+  const response = await h.call(CHANNELS.costsReport, 7);
+  assert.equal(response.ok, true, JSON.stringify(response));
+  const report = response.data as { total: { calls: number; actualUsd: number }; bySubject: { title: string }[]; prices: unknown };
+  // fakeAgent reports $0.02 per call.
+  assert.equal(report.total.calls, 1);
+  assert.equal(report.total.actualUsd, 0.02);
+  assert.equal(report.bySubject[0].title, SAMPLE_TASKS.find((task) => task.id === 'auth-edge-tests')?.title);
+  assert.equal(report.prices, null);
+});

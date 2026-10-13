@@ -132,7 +132,7 @@ test('prune() folds expired costs into the rollup once, even when run again', as
   const rows = await log.rollup();
   assert.equal(rows.length, 3);
   const legacy = rows.find((row) => row.cli === null);
-  assert.deepEqual([legacy?.actualCalls, legacy?.actualUsd], [1, 0.2]);
+  assert.deepEqual([legacy?.actualCalls, legacy?.actualMicros], [1, 200_000]);
   const estimated = rows.find((row) => row.cli === 'pi');
   assert.deepEqual([estimated?.tokenCalls, estimated?.tokens], [1, tokens]);
   assert.equal(rows.find((row) => row.agent === 'tutor')?.unknownCalls, 1);
@@ -150,7 +150,7 @@ test('prune() drops rollup rows older than a year', async () => {
     provider: null,
     model: null,
     actualCalls: 1,
-    actualUsd: 1,
+    actualMicros: 1_000_000,
     tokenCalls: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     unknownCalls: 0,

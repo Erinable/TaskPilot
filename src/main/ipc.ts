@@ -24,6 +24,9 @@ import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
 import * as codingLoop from './coding_loop.ts';
 import { codingCall } from './agents/model_usage.ts';
+import { buildCostReport } from './cost_report.ts';
+import { estimateMicros, loadPrices, priceFor, syncPrices } from './model_prices.ts';
+import type { PriceTable } from './model_prices.ts';
 import type { CodingEventPage, CodingRun } from '../shared/coding_types.ts';
 import {
   summarizeForRequirement,
@@ -1404,10 +1407,68 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           busy: [...new Set(work.map((item) => item.agent))],
           work,
         },
-        costs: computeAgentCosts(window, now, activity.timeZone),
+        costs: computeAgentCosts(window, now, activity.timeZone, estimateCall(await currentPrices())),
         teamRecent: recentByAgent(window, TEAM_RECENT_COUNT),
         timeZone: activity.timeZone,
       };
+    }),
+  );
+
+  // The cost page. Prices stay in memory once read; only a sync replaces them.
+  let prices: Promise<PriceTable | null> | null = null;
+  const currentPrices = () =>
+    (prices ??= loadPrices(configDir).catch((error) => {
+      // A read failure is retried on the next request instead of sticking.
+      prices = null;
+      throw error;
+    }));
+  // A requirement deleted since the call keeps its id as the title.
+  const requirementTitle = (id: string) => {
+    try {
+      return requirements?.get(id).title || id;
+    } catch {
+      return id;
+    }
+  };
+  const estimateCall = (table: PriceTable | null) => (call: ipc.ModelCall) => {
+    const price = call.tokens ? priceFor(table, call.provider, call.model) : null;
+    return price && call.tokens ? estimateMicros(price, call.tokens) : null;
+  };
+  ipcMain.handle(
+    CHANNELS.costsReport,
+    wrap(async (_event, rawDays): Promise<ipc.CostReport> => {
+      if (!activity) return failWith('Activity is unavailable', 'unsupported');
+      if (rawDays !== 7 && rawDays !== 30 && rawDays !== 90) failWith('days must be 7, 30 or 90', 'invalid_argument', 'days');
+      const [records, rollup, table] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup(), currentPrices()]);
+      return buildCostReport({
+        days: rawDays as ipc.CostRange,
+        records,
+        rollup,
+        prices: table,
+        now: new Date(),
+        timeZone: activity.timeZone,
+        titleOf: (kind, id) => (kind === 'package' ? (tasks.getTask(id)?.title ?? id) : requirementTitle(id)),
+      });
+    }),
+  );
+  // [人工决策-2026-10-13 16:52:32] 只在用户点「同步价格」时联网，只下载，不上传任何数据。
+  ipcMain.handle(
+    CHANNELS.costsSyncPrices,
+    wrap(async (): Promise<{ syncedAt: string }> => {
+      if (!activity) return failWith('Activity is unavailable', 'unsupported');
+      const [records, rollup] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup()]);
+      // Exact prices are kept only for providers TaskPilot has actually used.
+      const providers = new Set(
+        [
+          ...records.flatMap((record) => (record.kind === 'agent_cost' && record.call?.provider ? [record.call.provider] : [])),
+          ...rollup.map((row) => row.provider),
+        ]
+          .filter((provider): provider is string => Boolean(provider))
+          .map((provider) => provider.toLowerCase()),
+      );
+      const table = await syncPrices(configDir, providers);
+      prices = Promise.resolve(table);
+      return { syncedAt: table.syncedAt };
     }),
   );
 

@@ -4,7 +4,7 @@
 // annotates its handlers with these types so drift fails tsc.
 
 import type { CodingRun } from './coding_types.ts';
-import type { AgentSettings, CliId } from './agent_runtime.ts';
+import type { AgentId, AgentSettings, CliId } from './agent_runtime.ts';
 export type { AgentId, AgentRuntimeConfig, AgentRuntimeStatus, AgentSettings, CliId, ThinkingLevel } from './agent_runtime.ts';
 export type { CliModelCatalog, CliModelOption, CliModelScope, CliModelsRequest } from './agent_runtime.ts';
 export type {
@@ -548,6 +548,32 @@ export type TokenUsage = { input: number; output: number; cacheRead: number; cac
 export type ModelCall = { cli: CliId; provider: string | null; model: string | null; costUsd: number | null; tokens: TokenUsage | null };
 // The work a call was for.
 export type CostSubject = { kind: 'package' | 'requirement'; id: string } | null;
+
+// Spend of a group of calls. `actualUsd` the CLIs reported; `estimatedUsd`
+// is tokens × models.dev price; `unknownCalls` have neither. Of those,
+// `unpricedCalls` have tokens, so a price sync may estimate them.
+export type CostBucket = {
+  calls: number;
+  actualUsd: number;
+  estimatedUsd: number;
+  unknownCalls: number;
+  unpricedCalls: number;
+  tokens: TokenUsage;
+};
+export type CostRange = 7 | 30 | 90;
+// Subjects exist only for days still within the 30-day raw window.
+export type CostReport = {
+  days: CostRange;
+  timeZone: string;
+  total: CostBucket;
+  byAgent: (CostBucket & { agent: AgentId })[];
+  byDay: (CostBucket & { day: string })[];
+  byModel: (CostBucket & { cli: CliId | null; provider: string | null; model: string | null })[];
+  bySubject: (CostBucket & { kind: 'package' | 'requirement'; id: string; title: string })[];
+  // Days before this come from the yearly rollup (no subjects); null if none.
+  rollupBefore: string | null;
+  prices: { syncedAt: string } | null;
+};
 
 // `teamRecent`: each agent's newest few events over the retention window, newest first.
 export type ActivityOverview = {

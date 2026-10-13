@@ -20,11 +20,15 @@ export type CostRow = {
   provider: string | null;
   model: string | null;
   actualCalls: number;
-  actualUsd: number;
+  // Integer millionths of a dollar: sums of floats drift, sums of integers do not.
+  actualMicros: number;
   tokenCalls: number;
   tokens: TokenUsage;
   unknownCalls: number;
 };
+
+// Dollars to integer micro-dollars, the unit every cost sum uses.
+export const toMicros = (usd: number): number => Math.round(usd * 1_000_000);
 
 const emptyTokens = (): TokenUsage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 const keyOf = (row: Pick<CostRow, 'day' | 'agent' | 'cli' | 'provider' | 'model'>) =>
@@ -46,13 +50,13 @@ export const foldCosts = <Extra extends Record<string, string | null> = Record<n
     const key = [keyOf(identity), ...Object.values(extra).map((value) => value ?? '')].join('\u0000');
     let row = rows.get(key);
     if (!row) {
-      row = { ...identity, actualCalls: 0, actualUsd: 0, tokenCalls: 0, tokens: emptyTokens(), unknownCalls: 0, ...extra };
+      row = { ...identity, actualCalls: 0, actualMicros: 0, tokenCalls: 0, tokens: emptyTokens(), unknownCalls: 0, ...extra };
       rows.set(key, row);
     }
     const cost = record.costUsd;
     if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) {
       row.actualCalls += 1;
-      row.actualUsd += cost;
+      row.actualMicros += toMicros(cost);
     } else if (call?.tokens) {
       row.tokenCalls += 1;
       row.tokens.input += call.tokens.input;
@@ -84,7 +88,7 @@ export const parseRollup = (raw: unknown): CostRow[] => {
       row !== null &&
       typeof row.day === 'string' &&
       typeof row.agent === 'string' &&
-      Number.isFinite(row.actualUsd) &&
+      Number.isInteger(row.actualMicros) &&
       Number.isFinite(row.actualCalls) &&
       Number.isFinite(row.tokenCalls) &&
       Number.isFinite(row.unknownCalls) &&

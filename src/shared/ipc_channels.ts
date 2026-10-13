@@ -52,6 +52,8 @@ export const CHANNELS = {
   activityOverview: 'activity:overview',
   engineeringMap: 'map:get',
   activityPage: 'activity:page',
+  costsReport: 'costs:report',
+  costsSyncPrices: 'costs:sync-prices',
   releaseGet: 'release:get',
   releaseRecentCommits: 'release:recent-commits',
   releaseGenerate: 'release:generate',
