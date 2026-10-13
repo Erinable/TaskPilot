@@ -6,7 +6,7 @@ node_modules/
 dist/
 out/
 *.tsbuildinfo
-evals/product-lead/reports/
+evals/*/reports/
 
 # TaskPilot check reports written into the workspace
 .taskpilot/

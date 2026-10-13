@@ -1,5 +1,5 @@
 out/
 node_modules/
 package-lock.json
-evals/product-lead/reports/
+evals/*/reports/
 *.md

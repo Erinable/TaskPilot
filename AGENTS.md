@@ -23,7 +23,7 @@ TaskPilot is an Electron app built with electron-vite: TypeScript in the main pr
   - `release_manager.ts` (Release Manager) drafts a version bump, release notes and a pre-release checklist from the commit subjects, changed paths (no contents) and finished packages since the last release. Release Manager never tags, commits, pushes or runs release commands; its one repository write is inserting the notes into a `.md` file the user names (`release:write-notes`, path-checked). Releases and the draft live in the repository's `releases.json` (`src/main/release_store.ts`);
   - `pipeline.ts` runs Architect's steps, QA's review, the steward's plan and the release draft; `claude_cli.ts` runs the isolated, tool-less CLI.
 
-  All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect` (see `evals/product-lead/README.md`).
+  All model output is validated before use. Agent prompt changes should be checked with `npm run eval:product-lead -- --architect`, `npm run eval:qa` or `npm run eval:architect` (see the README in each `evals/` directory).
 - `src/main/repo_reader.ts` — the only source of file contents for agents. It reads from git blobs, only tracked files, and refuses secret-looking paths. Any agent that needs code goes through it.
 - `src/main/review_diff.ts` — the only source of working-tree diffs for QA. It reads only paths git reports as changed since the baseline (untracked included), refuses secret-looking paths with the same patterns as `repo_reader.ts`, skips binaries, caps sizes, and reports every skipped file.
 - `src/main/env_setup.ts` — Node/npm environment setup. It probes tracked manifests, lockfiles, version pins and CI workflows, and builds every setup command from fixed npm options plus validated script names (`--ignore-scripts` unless the user allows lifecycle scripts). The renderer only sends a step id; `ipc.ts` rebuilds the command from the stored plan and runs it after the user's click.
@@ -48,7 +48,7 @@ Keep automated tests under `tests/`, static files under `assets/`, and scripts u
 - `npm run typecheck` — vue-tsc over main, preload, renderer and tests.
 - `npm run lint` — ESLint (`eslint.config.ts`): checks the conventions below that a tool can (const arrow functions, // comments, inline exports, no `v-html`/`innerHTML`, `process.env` only in `src/main/env.ts`, no explicit `any`).
 - `npm run format` / `npm run format:check` — Prettier (`.prettierrc.json`). The one-time formatting commit is listed in `.git-blame-ignore-revs`.
-- `npm run eval:product-lead` — Product Lead eval harness; Node runs the `.ts` files directly.
+- `npm run eval:product-lead` / `eval:qa` / `eval:architect` — eval harnesses for Product Lead, QA and Architect (real model calls, cost money); Node runs the `.ts` files directly.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, test and build on Ubuntu and macOS. Do not introduce duplicate commands that bypass these scripts.
 

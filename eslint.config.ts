@@ -8,7 +8,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['out/**', 'node_modules/**', 'evals/product-lead/reports/**', '**/*.d.ts'] },
+  { ignores: ['out/**', 'node_modules/**', 'evals/*/reports/**', '**/*.d.ts'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],
