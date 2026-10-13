@@ -8,6 +8,8 @@ export type CodingRuntimeStatus = {
   backend: CliId;
   protocol: string;
   boundary: 'separate-user';
+  // Set by the IPC layer: where the user finds the setup script.
+  setupScript?: string;
   available: boolean;
   version: string | null;
   reason: string | null;

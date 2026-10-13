@@ -317,6 +317,6 @@ export const useCodingStore = defineStore('coding', () => {
     start,
     cancel,
     apply,
-    setupScript: CODING_SETUP_SCRIPT,
+    setupScript: computed(() => runtime.value?.setupScript ?? CODING_SETUP_SCRIPT),
   };
 });

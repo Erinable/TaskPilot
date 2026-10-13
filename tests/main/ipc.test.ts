@@ -296,6 +296,8 @@ test('coding IPC registers all seven channels and preserves terminal events', as
   });
   const status = await h.call(CHANNELS.codingStatus);
   assert.equal(status.ok, true);
+  // Development shows the repository copy of the setup script.
+  assert.equal((status.data as CodingRuntimeStatus).setupScript, 'scripts/setup-coding-agent-user.sh');
   const started = await h.call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '实现边界测试' });
   assert.equal(started.ok, true);
   assert.equal((await h.call(CHANNELS.codingGet, 'auth-edge-tests')).ok, true);

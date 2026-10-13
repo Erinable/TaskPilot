@@ -3,6 +3,8 @@ import { computed } from 'vue';
 
 import AppIcon from './AppIcon.vue';
 import NotificationCenter from './NotificationCenter.vue';
+// The app icon's small-size variant, so the window and the Dock match.
+import appIcon from '../../../../assets/icon/icon_small.svg';
 import UserAvatar from './UserAvatar.vue';
 import { useAppStore } from '@/stores/app.ts';
 import { usePaletteStore } from '@/stores/palette.ts';
@@ -43,7 +45,7 @@ const workspaceName = computed(() => {
 <template>
   <header class="topbar glass">
     <div class="brand-area">
-      <div class="brand-mark"><AppIcon name="logo" /></div>
+      <img class="brand-mark" :src="appIcon" alt="" />
       <div>
         <div class="brand-name">TaskPilot</div>
         <div class="brand-caption">AI 团队工作台</div>

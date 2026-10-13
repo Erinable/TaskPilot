@@ -8,12 +8,6 @@ export type IconDefinition = { filled?: boolean; shapes: [ShapeTag, Record<strin
 // of stroke, for shapes that read poorly as outlines at small sizes.
 export const ICONS = {
   // Navigation and chrome
-  logo: {
-    shapes: [
-      ['path', { d: 'M20.5 3.5 10 14' }],
-      ['path', { d: 'M20.5 3.5 14 20.5l-4-6.5-6.5-4z' }],
-    ],
-  },
   search: {
     shapes: [
       ['circle', { cx: 11, cy: 11, r: 6.5 }],

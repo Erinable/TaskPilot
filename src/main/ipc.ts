@@ -210,6 +210,8 @@ export type IpcDeps = {
   launchEditor?: (file: string, args: string[]) => Promise<void>;
   // Shown on the environment page.
   appVersion?: string;
+  // Where the user finds the coding user setup script: the bundled copy, or scripts/ in development.
+  codingSetupScript?: string;
   // Enables the requirement flow.
   requirements?: RequirementStore | null;
   // Replaces claude-cli.runStructured (tests).
@@ -258,6 +260,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     revealFile,
     launchEditor,
     appVersion,
+    codingSetupScript = 'scripts/setup-coding-agent-user.sh',
     requirements = null,
     runAgent,
     probeAgent = cliRunner.probeCli,
@@ -410,7 +413,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const codingVerifications = new Map<string, AbortController>();
   const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
   const MAX_CODING_EVENTS = 200;
-  const codingStatus = () => codingProbe({ config: { ...getPreferences().agents['coding-agent'] } });
+  const codingStatus = async (): Promise<ipc.CodingRuntimeStatus> => ({
+    ...(await codingProbe({ config: { ...getPreferences().agents['coding-agent'] } })),
+    setupScript: codingSetupScript,
+  });
   const codingRunOf = (id: string) => {
     const task = requireTask(id);
     const run = store.get(id).codingRun ?? codingRuns.get(id)?.run;

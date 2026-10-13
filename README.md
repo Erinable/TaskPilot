@@ -39,6 +39,18 @@ npm run lint
 npm run format:check
 ```
 
+## 打包（macOS）
+
+```bash
+npm run dist
+```
+
+在 `dist/` 里生成 Apple Silicon（`-arm64`）和 Intel 两个架构的 dmg 和 zip。配置在 `electron-builder.yml`。安装包目前没有签名、没有公证，也没有自动更新：第一次打开时，在「访达」里右键应用选「打开」，或者到「系统设置 → 隐私与安全性」里点「仍要打开」。
+
+打包后的应用和开发模式用同一个数据目录 `~/Library/Application Support/taskpilot`。Coding Agent 的初始化脚本在应用包里的 `Contents/Resources/scripts/`，执行页会显示它的完整路径。
+
+应用图标的源文件是 `assets/icon/icon.svg`（128 px 及以上）和 `icon_small.svg`（64 px 及以下）。修改后运行 `scripts/build_icon.sh` 重新生成 `icon.icns`，需要先 `brew install librsvg`。
+
 ## 智能体 CLI、模型与思考强度
 
 配置保存在本机 `userData/preferences.json` 的 `agents` 中，不写入仓库；各角色互不覆盖。保存后新任务使用新配置，在途任务保留启动时的 CLI、模型和思考强度。模型留空表示使用 CLI 的默认模型。

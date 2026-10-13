@@ -28,6 +28,10 @@ const vibrantWindows = new WeakSet<BrowserWindow>();
 // Set once the IPC handlers are registered, so quitting can shut them down.
 let ipcHandle: IpcHandle | null = null;
 
+// The packaged app is named TaskPilot, development runs as taskpilot; on a
+// case-sensitive volume those are two directories. Both use this one.
+app.setPath('userData', path.join(app.getPath('appData'), 'taskpilot'));
+
 // Native vibrancy (macOS only) lets the desktop show through the window. The
 // page's own backdrop is made transparent at the same time (see the
 // `vibrancy` class in styles.css), otherwise it would cover the effect.
@@ -116,6 +120,8 @@ app.whenReady().then(async () => {
     },
     pathResolver: createPathResolver(),
     appVersion: app.getVersion(),
+    // electron-builder copies scripts/ into the bundle (extraResources).
+    codingSetupScript: app.isPackaged ? path.join(process.resourcesPath, 'scripts', 'setup-coding-agent-user.sh') : 'scripts/setup-coding-agent-user.sh',
     requirements,
     activity,
     releases,

@@ -91,7 +91,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         <strong>编码运行时不可用</strong>
         <p>{{ coding.runtime.reason || '请先完成独立用户配置。' }}</p>
         <p>
-          离线设置说明：在项目根目录人工运行
+          离线设置说明：在终端里人工运行
           <code>{{ coding.setupScript }}</code>
           ，TaskPilot 不会自动执行脚本。
         </p>
