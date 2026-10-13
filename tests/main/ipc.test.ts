@@ -9,6 +9,7 @@ import { registerIpcHandlers } from '../../src/main/ipc.ts';
 import type { IpcDeps, IpcHandle } from '../../src/main/ipc.ts';
 import type { IpcResult, TaskView, CliModelCatalog } from '../../src/shared/ipc_types.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../src/shared/coding_types.ts';
+import { parsePatchPreview } from '../../src/main/coding_workspace.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
@@ -17,7 +18,9 @@ vi.setConfig({ testTimeout: 20_000 });
 
 // A stand-in agent; tests answer with plain objects or reject.
 type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
-type CodingOverrides = Partial<Pick<IpcDeps, 'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean'>>;
+type CodingOverrides = Partial<
+  Pick<IpcDeps, 'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot'>
+>;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
 import { listTasks, setGeneratedTasks } from '../../src/main/tasks.ts';
@@ -195,7 +198,9 @@ const codingRuntime = (overrides: Partial<CodingRuntimeStatus> = {}): CodingRunt
   ...overrides,
 });
 
-const codingPatch = (patch = ''): CodingPatchPreview => ({ digest: 'digest-1', files: [], patch, blocked: [] });
+// A one-line patch to `file`, previewed as the main process would.
+const filePatch = (file: string, line: string, scope?: readonly string[]): CodingPatchPreview =>
+  parsePatchPreview(`diff --git a/${file} b/${file}\nindex 1111111..2222222 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-export {};\n+${line}\n`, scope);
 
 type TestCall = (channel: Channel, ...args: unknown[]) => Promise<IpcResult<unknown>>;
 const settleCoding = async (call: TestCall, id: string): Promise<TaskView> => {
@@ -210,6 +215,20 @@ const settleCoding = async (call: TestCall, id: string): Promise<TaskView> => {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   throw new Error(`coding run never settled: ${last}`);
+};
+// Polls until the automatic loop reaches `done`.
+const settleLoop = async (call: TestCall, id: string, done: (task: TaskView) => boolean): Promise<TaskView> => {
+  let last = 'no response';
+  for (let index = 0; index < 800; index += 1) {
+    const response = await call(CHANNELS.codingGet, id);
+    if (response.ok) {
+      const task = response.data as TaskView;
+      last = JSON.stringify({ status: task.status, run: task.codingRun });
+      if (done(task)) return task;
+    } else last = JSON.stringify(response.error);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`coding loop never settled: ${last}`);
 };
 
 test('agent model IPC isolates scopes, caches local catalogs, and refreshes only the requested catalog', async () => {
@@ -236,6 +255,7 @@ test('agent model IPC isolates scopes, caches local catalogs, and refreshes only
 });
 
 test('coding IPC registers all seven channels and preserves terminal events', async () => {
+  const preview = filePatch('tests/auth/login-user.test.ts', 'test("x", () => {});');
   let probeCalls = 0;
   let prepareCalls = 0;
   let runCalls = 0;
@@ -268,9 +288,10 @@ test('coding IPC registers all seven channels and preserves terminal events', as
       },
       codingPrepare: prepare,
       codingRun: runCoding,
-      codingReadPatch: async () => codingPatch(),
-      codingApplyPatch: async () => ['src/auth/application/login-user.ts'],
+      codingReadPatch: async () => preview,
+      codingApplyPatch: async () => ['tests/auth/login-user.test.ts'],
       codingClean: async () => {},
+      codingSnapshot: async (_root, baseline) => baseline,
     },
   });
   const status = await h.call(CHANNELS.codingStatus);
@@ -291,8 +312,17 @@ test('coding IPC registers all seven channels and preserves terminal events', as
   assert.equal(eventPage.events[0]?.text, 'done');
   const patchResponse = await h.call(CHANNELS.codingPatch, 'auth-edge-tests');
   assert.equal(patchResponse.ok, true, JSON.stringify(patchResponse));
-  const applied = await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: 'digest-1', allowHighRisk: false });
-  assert.equal(applied.ok, true);
+  const missingFiles = await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: preview.digest, allowHighRisk: true });
+  assert.equal(missingFiles.ok, false);
+  const applied = await h.call(CHANNELS.codingApply, 'auth-edge-tests', {
+    digest: preview.digest,
+    allowHighRisk: true,
+    files: ['tests/auth/login-user.test.ts'],
+  });
+  assert.equal(applied.ok, true, JSON.stringify(applied));
+  // No submit checks are configured, so the patch goes straight to QA.
+  const submitted = await settleLoop(h.call, 'auth-edge-tests', (task) => task.status !== 'in_progress');
+  assert.equal(submitted.codingRun?.status, 'submitted');
   assert.equal((await h.call(CHANNELS.codingCancel, 'auth-edge-tests')).data, false);
   assert.equal(probeCalls, 1);
   assert.equal(prepareCalls, 1);
@@ -1811,4 +1841,117 @@ test('role settings are independent and frozen across an in-flight requirement',
   assert.equal(secondResult.title, '新产品配置');
   assert.match(secondResult.interfaces.text, /new convention/);
   assert.equal((await h.call(CHANNELS.preferencesGet)).data.agents.qa.cli, 'claude');
+});
+
+// A coding harness for auth-email-login, in progress at the repository's
+// HEAD. Each round's fake agent edits login-user.ts; applying writes it.
+const loopHarness = async ({ agent = null, highRisk = false }: { agent?: FakeAgent | null; highRisk?: boolean } = {}) => {
+  const prompts: string[] = [];
+  const file = highRisk ? 'tests/auth/login-user.test.ts' : 'src/auth/application/login-user.ts';
+  const preview = () => filePatch(file, `export const round = ${prompts.length};`, SAMPLE_TASKS[0].fileScope);
+  let root = '';
+  const h = await harness({
+    agent,
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async (options) => {
+        prompts.push(options.prompt);
+        return {
+          output: '',
+          usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.1 },
+          events: [],
+          sessionId: null,
+        };
+      },
+      codingReadPatch: async () => preview(),
+      codingApplyPatch: async (_root, patch) => {
+        await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+        await fs.writeFile(
+          path.join(root, file),
+          `${patch
+            .split('\n')
+            .find((line) => line.startsWith('+export'))!
+            .slice(1)}\n`,
+        );
+        return [file];
+      },
+      codingClean: async () => {},
+      codingSnapshot: async (_root, baseline) => baseline,
+    },
+  });
+  root = h.root;
+  const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
+  await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
+  return { ...h, prompts, preview, file };
+};
+const applyFirstRound = async (h: Awaited<ReturnType<typeof loopHarness>>, allowHighRisk = false) => {
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  const ready = await settleCoding(h.call, 'auth-email-login');
+  assert.equal(ready.codingRun?.status, 'ready');
+  const preview = h.preview();
+  return h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk, files: [h.file] });
+};
+const LOGIN_TESTS_FAIL = { command: process.execPath, args: ['-e', "console.log('not ok 1 - login succeeds with valid credentials'); process.exit(1)"] };
+const LOGIN_TESTS_PASS = {
+  command: process.execPath,
+  args: ['-e', "console.log('ok 1 - login succeeds with valid credentials\\nok 2 - login failures are indistinguishable')"],
+};
+
+test('coding loop: failing checks go back to the agent until three automatic rounds are used', async () => {
+  const h = await loopHarness();
+  h.setCommands({ test: LOGIN_TESTS_FAIL });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  const task = await settleLoop(h.call, 'auth-email-login', (view) => view.codingRun?.halt === 'attempts_exhausted');
+  assert.equal(task.status, 'in_progress');
+  assert.equal(task.codingRun?.status, 'applied');
+  assert.equal(task.codingRun?.attempt, 4);
+  assert.deepEqual(
+    task.codingRun?.rounds.map((round) => [round.attempt, round.trigger]),
+    [
+      [1, 'human'],
+      [2, 'checks_failed'],
+      [3, 'checks_failed'],
+    ],
+  );
+  assert.equal(h.prompts.length, 4);
+  assert.doesNotMatch(h.prompts[0], /submit checks failed/);
+  assert.match(h.prompts[1], /submit checks failed[\s\S]*login succeeds with valid credentials/);
+  // The last automatic round's patch is in the working tree.
+  assert.equal(await fs.readFile(path.join(h.root, h.file), 'utf8'), 'export const round = 4;\n');
+});
+
+test('coding loop: passing checks submit to QA, and a rejection starts the next round', async () => {
+  let reviews = 0;
+  const h = await loopHarness({
+    agent: async (options) => {
+      if (stepOf(options.schema) !== 'review') return fakeAgent()(options);
+      reviews += 1;
+      const review =
+        reviews === 1
+          ? { ...QA_PASS, verdict: 'reject', issues: [{ severity: 'major', text: '没有处理空密码', file: 'src/auth/application/login-user.ts', line: 1 }] }
+          : QA_PASS;
+      return fakeAgent({ review })(options);
+    },
+  });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  const task = await settleLoop(h.call, 'auth-email-login', (view) => view.status !== 'in_progress' && view.status !== 'in_review');
+  assert.equal(reviews, 2);
+  assert.equal(task.codingRun?.status, 'submitted');
+  assert.equal(task.codingRun?.attempt, 2);
+  assert.equal(task.codingRun?.trigger, 'qa_rejected');
+  assert.match(h.prompts[1], /QA rejected[\s\S]*\[major\] src\/auth\/application\/login-user\.ts:1 没有处理空密码/);
+  const events = await h.activity.recent({ days: 1, limit: 100 });
+  assert.equal(events.filter((event) => event.kind === 'package_transition' && event.transition === 'coding_submitted').length, 2);
+});
+
+test('coding loop: an automatic round that touches a high-risk file stops for the developer', async () => {
+  const h = await loopHarness({ highRisk: true });
+  h.setCommands({ test: LOGIN_TESTS_FAIL });
+  assert.equal((await applyFirstRound(h, true)).ok, true);
+  const task = await settleLoop(h.call, 'auth-email-login', (view) => view.codingRun?.halt === 'high_risk');
+  assert.equal(task.codingRun?.status, 'ready');
+  assert.equal(task.codingRun?.attempt, 2);
+  assert.equal(h.prompts.length, 2);
 });

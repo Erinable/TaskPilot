@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { useCodingStore } from '@/stores/coding.ts';
+import { splitPatch } from '@/lib/coding_patch.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ task: ipc.TaskView }>();
@@ -15,16 +16,38 @@ const STATUS_LABELS: Record<ipc.CodingRun['status'], string> = {
   checking: '检查中',
   ready: '待人工应用',
   applying: '应用中',
+  verifying: '提交前检查中',
   applied: '已应用',
+  submitted: '已提交审查',
   failed: '失败',
   cancelled: '已取消',
   discarded: '已丢弃',
 };
 const CHECK_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: 'Lint', build: 'Build', smoke: '冒烟测试' };
+const TRIGGER_LABELS: Record<ipc.CodingTrigger, string> = { human: '你发起', checks_failed: '检查失败后重试', qa_rejected: 'QA 驳回后重试' };
+const HALT_TEXT: Record<ipc.CodingHalt, string> = {
+  attempts_exhausted: '已自动重试 3 轮仍未通过，交给你处理：可以自己修改，或补充说明后重新开始。',
+  high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
+  no_changes: '这一轮 AI 没有产生可以应用的改动，自动流程已停止。',
+  stopped: '自动流程已停止。',
+};
+// Rounds the loop can restart from: a finished chain or a stopped one.
+const RESTARTABLE: ipc.CodingRun['status'][] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
 
 const canStart = computed(() => !!coding.runtime?.available && !coding.active && !!coding.instruction.trim() && !coding.operation);
 const runError = computed(() => coding.run?.error);
-const applyDisabled = computed(() => !coding.patch || coding.hasBlocked || (coding.highRisk && !highRiskConsent.value) || coding.operation !== null);
+const restartable = computed(() => !!coding.run && RESTARTABLE.includes(coding.run.status) && !coding.loopActive);
+const applyDisabled = computed(() => !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.operation !== null);
+const fileDiffs = computed(() => {
+  const segments = coding.patch ? splitPatch(coding.patch.patch) : [];
+  return (coding.patch?.files ?? []).map((file, index) => ({
+    file,
+    diff: segments[index] ?? '',
+    applicable: coding.applicable(file),
+    reasons: (coding.patch?.blocked ?? []).filter((entry) => entry.path === file.path).map((entry) => entry.reason),
+  }));
+});
+const toggle = (filePath: string, event: Event) => coding.toggleFile(filePath, (event.target as HTMLInputElement).checked);
 const cost = computed(() =>
   coding.run?.usage.costUsd === null || coding.run?.usage.costUsd === undefined ? '未知' : `$${coding.run.usage.costUsd.toFixed(4)}`,
 );
@@ -35,7 +58,6 @@ const tokenText = computed(() => {
   const output = usage.outputTokens === null ? '未知' : usage.outputTokens;
   return `${input} 输入 / ${output} 输出`;
 });
-const fileNames = computed(() => coding.patch?.files.map((file) => file.path).join('、') || coding.run?.files.map((file) => file.path).join('、') || '暂无');
 
 const checks = computed(() => Object.entries(coding.run?.checks ?? {}).flatMap(([kind, check]) => (check ? [{ kind: kind as ipc.CheckKind, check }] : [])));
 const select = (id: string) => {
@@ -90,7 +112,25 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <span>协议：{{ coding.runtime.protocol }}</span>
     </div>
 
-    <div v-if="!coding.run || coding.run.status === 'failed'" class="coding-start">
+    <div v-if="coding.run && (coding.run.rounds.length || coding.run.attempt > 1)" class="coding-rounds" aria-label="编码轮次">
+      <strong>第 {{ coding.run.attempt }} 轮（自动重试最多 {{ coding.maxAutoAttempts }} 轮）</strong>
+      <ol>
+        <li v-for="round in coding.run.rounds" :key="round.attempt">
+          第 {{ round.attempt }} 轮 · {{ TRIGGER_LABELS[round.trigger] }} · {{ STATUS_LABELS[round.status] }} · {{ round.files }} 个文件
+        </li>
+        <li class="current">第 {{ coding.run.attempt }} 轮 · {{ TRIGGER_LABELS[coding.run.trigger] }} · {{ STATUS_LABELS[coding.run.status] }}</li>
+      </ol>
+      <details v-if="coding.run.feedback">
+        <summary>这一轮交给 AI 的问题</summary>
+        <pre class="coding-diff">{{ coding.run.feedback }}</pre>
+      </details>
+    </div>
+    <p v-if="coding.run?.halt" class="coding-halt" role="status">
+      <AppIcon name="info" />
+      {{ HALT_TEXT[coding.run.halt] }}
+    </p>
+
+    <div v-if="!coding.run || restartable" class="coding-start">
       <label for="codingInstruction">开发者指令</label>
       <textarea
         id="codingInstruction"
@@ -100,15 +140,18 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         placeholder="描述要实现的代码变更、边界和验证方式"
         :disabled="!coding.runtime?.available || coding.operation !== null"
       ></textarea>
-      <p class="coding-hint">启动是明确的人类操作；不会自动领取、提交、提交 QA、创建 commit 或 push。</p>
+      <p class="coding-hint">
+        第一轮的补丁由你按文件确认。应用后自动跑提交前检查，通过就提交 QA；检查失败或 QA 驳回会自动交回 AI，最多 {{ coding.maxAutoAttempts }} 轮。不会创建
+        commit 或 push。
+      </p>
       <p v-if="runError" class="coding-error">
         <AppIcon name="alert" />
         {{ runError.code }}：{{ runError.message }}
       </p>
       <div class="coding-actions">
-        <button v-if="coding.run?.status === 'failed'" class="secondary-button" type="button" :disabled="!canStart" @click="retry">
+        <button v-if="coding.run" class="secondary-button" type="button" :disabled="!canStart" @click="retry">
           <AppIcon name="refresh" />
-          重试编码
+          重新开始编码
         </button>
         <button v-else class="primary-button" type="button" :disabled="!canStart" @click="start">
           <AppIcon name="play" />
@@ -117,7 +160,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       </div>
     </div>
 
-    <template v-else>
+    <template v-if="coding.run">
       <div class="coding-meta">
         <span>用户：{{ coding.run.user }}</span>
         <span>CLI：{{ coding.run.cli }}</span>
@@ -135,7 +178,9 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
           @click="cancel"
         >
           <AppIcon name="ban" />
-          {{ coding.run.status === 'ready' ? '取消并丢弃结果' : '取消编码' }}
+          {{
+            coding.run.status === 'ready' ? '取消并丢弃结果' : coding.run.status === 'verifying' || coding.run.trigger !== 'human' ? '停止自动重试' : '取消编码'
+          }}
         </button>
       </div>
 
@@ -148,40 +193,57 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         </div>
       </div>
 
-      <div v-if="coding.run.status === 'ready'" class="coding-result">
+      <div v-if="coding.run.status === 'ready' && (coding.run.trigger === 'human' || coding.run.halt)" class="coding-result">
         <div class="coding-result-heading">
-          <strong>补丁待人工应用</strong>
+          <strong>按文件确认补丁</strong>
           <span v-if="coding.patchLoading">正在读取补丁…</span>
+          <span v-else-if="coding.patch">已勾选 {{ coding.selectedFiles.length }} / {{ coding.patch.files.length }} 个文件</span>
         </div>
-        <p>文件范围：{{ fileNames }}</p>
-        <ul v-if="coding.patch?.files.length" class="coding-files">
-          <li v-for="file in coding.patch.files" :key="file.path">
-            <code>{{ file.path }}</code>
-            <span>{{ file.added }} 行新增 · {{ file.removed }} 行删除</span>
-            <strong v-if="file.highRisk" class="risk-label">高风险</strong>
+        <ul v-if="fileDiffs.length" class="coding-files">
+          <li v-for="entry in fileDiffs" :key="entry.file.path">
+            <details>
+              <summary>
+                <input
+                  type="checkbox"
+                  :aria-label="`应用 ${entry.file.path}`"
+                  :checked="coding.selectedFiles.includes(entry.file.path)"
+                  :disabled="!entry.applicable || coding.operation !== null"
+                  @click.stop
+                  @change="toggle(entry.file.path, $event)"
+                />
+                <code>{{ entry.file.path }}</code>
+                <span>+{{ entry.file.added }} −{{ entry.file.removed }}</span>
+                <strong v-if="entry.file.highRisk" class="risk-label">高风险</strong>
+                <span v-if="!entry.applicable" class="blocked-label">不能应用：{{ entry.reasons.join('；') }}</span>
+              </summary>
+              <pre class="coding-diff">{{ entry.diff }}</pre>
+            </details>
           </li>
         </ul>
-        <div v-if="coding.patch?.blocked.length" class="coding-blocked">
-          <strong>阻止应用的条目</strong>
-          <div v-for="entry in coding.patch.blocked" :key="`${entry.path}:${entry.reason}`">
-            <code>{{ entry.path }}</code>
-            ：{{ entry.reason }}
-          </div>
-        </div>
         <label v-if="coding.highRisk" class="risk-consent">
           <input v-model="highRiskConsent" type="checkbox" />
-          我已检查原始 diff，并明确同意应用高风险文件
+          我已检查勾选的高风险文件的 diff，同意应用
         </label>
         <button class="primary-button" type="button" :disabled="applyDisabled" @click="apply">
           <AppIcon name="check" />
-          应用补丁
+          应用勾选的文件并自动检查
         </button>
-        <p v-if="coding.patch" class="coding-diff-label">原始 diff（安全文本显示）</p>
-        <pre v-if="coding.patch" class="coding-diff">{{ coding.patch.patch }}</pre>
+      </div>
+      <div v-if="coding.run.status === 'ready' && coding.run.trigger !== 'human' && !coding.run.halt" class="empty-hint">
+        <AppIcon name="spinner" class="spin" />
+        正在自动应用这一轮的补丁…
+      </div>
+      <div v-if="coding.run.status === 'verifying'" class="empty-hint">
+        <AppIcon name="spinner" class="spin" />
+        补丁已写入工作区，正在用你的账号权限跑提交前检查…
       </div>
       <div v-if="coding.run.status === 'applied'" class="coding-applied" role="alert">
         <AppIcon name="alert" />
-        已应用编码改动。运行验证或提交审查前，请确认命令会以当前主机用户权限执行，并再次人工检查文件范围。
+        改动已写入工作区，自动流程停在这里。你可以自己修改后提交审查，或补充说明后重新开始编码。
+      </div>
+      <div v-if="coding.run.status === 'submitted'" class="coding-applied" role="status">
+        <AppIcon name="send" />
+        检查通过，Coding Agent 已提交 QA 审查。
       </div>
       <div v-if="checks.length" class="coding-checks" aria-label="编码前置检查">
         <strong>前置检查</strong>
@@ -294,32 +356,58 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
   justify-content: space-between;
   gap: 10px;
 }
-.coding-files,
-.coding-blocked {
+.coding-files {
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  list-style: none;
   font-size: var(--text-sm);
 }
 .coding-files li {
   margin: 4px 0;
 }
+.coding-files summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+.coding-files summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.coding-files .coding-diff {
+  margin-top: 6px;
+}
 .risk-label {
-  margin-left: 8px;
   color: var(--danger);
 }
-.coding-blocked {
+.blocked-label {
   color: var(--danger);
+}
+.coding-rounds,
+.coding-halt {
+  font-size: var(--text-sm);
+}
+.coding-rounds ol {
+  margin: 4px 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+.coding-rounds .current {
+  color: var(--text);
+}
+.coding-halt {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+  color: var(--warning);
 }
 .risk-consent {
   display: flex;
   gap: 8px;
   align-items: center;
   color: var(--warning);
-  font-size: var(--text-sm);
-}
-.coding-diff-label {
-  margin: 8px 0 0;
-  color: var(--text-secondary);
   font-size: var(--text-sm);
 }
 .coding-diff {

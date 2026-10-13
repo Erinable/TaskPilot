@@ -6,7 +6,7 @@ test('every transition references known statuses', () => {
   for (const transition of status.TRANSITIONS) {
     assert.ok(status.isStatus(transition.from), `unknown from: ${transition.from}`);
     assert.ok(status.isStatus(transition.to), `unknown to: ${transition.to}`);
-    assert.ok(['human', 'agent'].includes(transition.actor), `bad actor: ${transition.actor}`);
+    assert.ok(['human', 'agent', 'coding-agent'].includes(transition.actor), `bad actor: ${transition.actor}`);
   }
 });
 
@@ -37,6 +37,13 @@ test('coding-agent cannot trigger human or analysis-agent transitions', () => {
   assert.throws(() => status.apply('pending', 'claim', 'coding-agent'), { code: 'wrong_actor' });
   assert.throws(() => status.apply('in_progress', 'submit_for_review', 'coding-agent'), { code: 'wrong_actor' });
   assert.throws(() => status.apply('in_review', 'review_accepted', 'coding-agent'), { code: 'wrong_actor' });
+});
+
+test('coding-agent submits for review only through coding_submitted', () => {
+  assert.equal(status.apply('in_progress', 'coding_submitted', 'coding-agent'), 'in_review');
+  assert.throws(() => status.apply('in_progress', 'coding_submitted', 'human'), { code: 'wrong_actor' });
+  assert.throws(() => status.apply('in_progress', 'coding_submitted', 'agent'), { code: 'wrong_actor' });
+  assert.throws(() => status.apply('pending', 'coding_submitted', 'coding-agent'), { code: 'not_allowed' });
 });
 
 test("acceptance with attention items is the human's call", () => {

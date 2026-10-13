@@ -280,6 +280,19 @@ export class WorkPackageStore {
         if (merged.codingRun && !merged.codingRun.cli) {
           merged.codingRun = { ...merged.codingRun, cli: 'codex', model: '', thinking: 'default' };
         }
+        // Runs saved before the automatic loop were a single developer round.
+        if (merged.codingRun && merged.codingRun.attempt === undefined) {
+          merged.codingRun = { ...merged.codingRun, attempt: 1, trigger: 'human', feedback: null, halt: null, rounds: [] };
+        }
+        // The patch is already in the working tree; only the checks were cut short.
+        if (merged.codingRun?.status === 'verifying') {
+          merged.codingRun = {
+            ...merged.codingRun,
+            status: 'applied',
+            halt: 'stopped',
+            error: { code: 'coding_interrupted', message: 'Checks were interrupted when the app closed' },
+          };
+        }
         if (merged.codingRun && ['preparing', 'running', 'checking', 'applying'].includes(merged.codingRun.status)) {
           merged.codingRun = {
             ...merged.codingRun,

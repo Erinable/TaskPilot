@@ -9,7 +9,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, AgentTransition, QueueMetrics } from '../shared/ipc_types.ts';
+import type { ActivityAgent, ActivityEvent, ActivityRecord, AgentCosts, AgentTransition, CodingTransition, QueueMetrics } from '../shared/ipc_types.ts';
 
 // One agent run's model spend. Stored beside the feed events so it expires
 // with them, but never shown in the feed: it is not something that happened.
@@ -207,13 +207,14 @@ export const computeAgentCosts = (records: LoggedRecord[], now: Date, timeZone: 
 };
 
 // Which agent makes each agent transition; human transitions have none.
-const TRANSITION_AGENTS: Record<AgentTransition, ActivityAgent> = {
+const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, ActivityAgent> = {
   breakdown_done: 'product-lead',
   review_accepted: 'qa',
   review_passed: 'qa',
   review_rejected: 'qa',
   replanned: 'architect',
   deviation_dismissed: 'architect',
+  coding_submitted: 'coding-agent',
 };
 
 // The team member a feed event belongs to, or null for the human's own.
@@ -222,7 +223,7 @@ export const agentOf = (record: ActivityRecord): ActivityAgent | null => {
   switch (record.kind) {
     case 'package_transition':
       // A hand-edited line could name "toString"; only own keys count.
-      return Object.hasOwn(TRANSITION_AGENTS, record.transition) ? TRANSITION_AGENTS[record.transition as AgentTransition] : null;
+      return Object.hasOwn(TRANSITION_AGENTS, record.transition) ? TRANSITION_AGENTS[record.transition as AgentTransition | CodingTransition] : null;
     case 'coding_run':
       return 'coding-agent';
     case 'requirement_finished':

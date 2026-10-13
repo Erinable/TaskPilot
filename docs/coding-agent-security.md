@@ -129,26 +129,34 @@ stdout/stderr 规则：
 现有 `WorkPackageStatus` 继续表达业务流程；Coding run 使用独立状态：
 
 ```text
-preparing → running → checking → ready → applying → applied
-                         ├→ failed
+preparing → running → checking → ready → applying → verifying → submitted
+                         ├→ failed                       └→ applied（自动流程停止）
                          └→ cancelled
 ```
 
-`ready` 表示补丁等待人工应用，不会自动触发 QA、commit 或 push。
-
-Coding Agent 不得触发人类 `claim`、`submit_for_review`、`accepted`，也不得触发
-QA 的 `review_accepted`。活动记录使用独立的 `coding-agent` 成员标识；它不参与
-业务状态转换。
+Coding Agent 只能触发一个业务流转：`coding_submitted`（`in_progress → in_review`），
+条件是补丁已应用、提交前检查没有新的阻塞失败。它仍不得触发 `claim`、
+`submit_for_review`、`accepted` 或 QA 的 `review_accepted`。活动记录使用独立的
+`coding-agent` 成员标识。
 
 ## 审查闭环
 
-1. Coding Agent 产出 patch。
-2. 人类 Apply 或拒绝 patch。
-3. 人类继续编辑。
-4. 在最终 checkout 上生成 baseline diff。
-5. QA 继续 tool-less 审查 diff 和检查证据。
-6. 人类验收。
-7. 现有 `git_commit.ts` 负责最终本地 commit；从不 push。
+1. Coding Agent 产出 patch（第 1 轮由人发起）。
+2. 第 1 轮由人按文件勾选并 Apply；被拦截的文件不能勾选，高风险文件需要单独同意。
+3. Apply 后以主账号权限运行提交前检查，按 baseline 判定新失败。
+4. 检查通过：Coding Agent 提交审查，QA 继续 tool-less 审查 diff 和检查证据。
+5. 检查失败或 QA 驳回：把失败输出 / QA 问题交回 Coding Agent 开下一轮，
+   起点是领取时的 commit 加上工作区里文件范围内的当前内容（私有 index +
+   `commit-tree`，不动 refs、stash 和工作区）。检查失败和 QA 驳回共用 3 轮。
+6. 自动轮的补丁不含高风险路径时直接应用；含高风险路径则停下等人。
+7. 3 轮用完、人停止或补丁为空时，停在执行页交给人。
+8. 人类验收；现有 `git_commit.ts` 负责最终本地 commit，从不 push。
+
+### 已接受的风险
+
+[人工决策-2026-10-12 15:08:39] 自动轮不经人工查看就应用并以主账号权限运行检查。
+高风险路径拦截挡住改 scripts、构建配置和 hooks 这类手段，但测试会执行被 import
+的普通源码，其中的逻辑会以主账号权限运行。需要强隔离时，应把检查放进容器或 VM。
 
 未来可记录人类和 Coding Agent 的操作序列、tool calls、diff、检查结果、QA
 意见和人类修改，供离线评估和路由学习使用；本阶段不做在线自修改。

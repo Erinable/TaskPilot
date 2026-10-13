@@ -4,14 +4,28 @@ import { defineStore } from 'pinia';
 import { call } from '@/lib/ipc.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { describeError } from '@/lib/errors.ts';
+import { MAX_AUTO_ATTEMPTS } from '@shared/coding_types.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 import { useExecutionStore } from './execution.ts';
 
 export const CODING_POLL_MS = 1000;
 export const CODING_SETUP_SCRIPT = 'scripts/setup-coding-agent-user.sh';
 
-const ACTIVE_STATUSES: ipc.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying'];
-const TERMINAL_STATUSES: ipc.CodingRun['status'][] = ['ready', 'applied', 'failed', 'cancelled', 'discarded'];
+const ACTIVE_STATUSES: ipc.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying', 'verifying'];
+const TERMINAL_STATUSES: ipc.CodingRun['status'][] = ['ready', 'applied', 'submitted', 'failed', 'cancelled', 'discarded'];
+
+// The loop is still moving on its own: a round is working, an automatic
+// round's patch is about to be applied, or QA is reviewing its submission.
+const looping = (task: ipc.TaskView) => {
+  const codingRun = task.codingRun;
+  if (!codingRun || codingRun.halt) return false;
+  if (ACTIVE_STATUSES.includes(codingRun.status)) return true;
+  if (codingRun.status === 'ready') return codingRun.trigger !== 'human';
+  if (codingRun.status !== 'submitted') return false;
+  // A rejection with attempts left is about to start the next round.
+  const retrying = task.review?.status === 'rejected' && codingRun.attempt - 1 < MAX_AUTO_ATTEMPTS;
+  return task.status === 'in_review' || task.review?.status === 'running' || retrying;
+};
 
 export const useCodingStore = defineStore('coding', () => {
   const execution = useExecutionStore();
@@ -30,6 +44,10 @@ export const useCodingStore = defineStore('coding', () => {
   let generation = 0;
   let runtimeGeneration = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // The round whose events and patch are shown.
+  let roundId: string | null = null;
+  // Patch paths the developer accepts; all applicable files by default.
+  const selectedFiles = ref<string[]>([]);
 
   const run = computed(() => execution.current?.codingRun ?? null);
   const eligible = computed(() => execution.current?.status === 'in_progress' || !!run.value);
@@ -54,8 +72,13 @@ export const useCodingStore = defineStore('coding', () => {
     const codingRun = run.value;
     return codingRun ? TERMINAL_STATUSES.includes(codingRun.status) : false;
   });
-  const highRisk = computed(() => patch.value?.files.some((file) => file.highRisk) ?? run.value?.files.some((file) => file.highRisk) ?? false);
-  const hasBlocked = computed(() => (patch.value?.blocked.length ?? run.value?.blocked.length ?? 0) > 0);
+  const loopActive = computed(() => (execution.current ? looping(execution.current) : false));
+  const blockedPaths = computed(() => new Set((patch.value?.blocked ?? run.value?.blocked ?? []).map((entry) => entry.path)));
+  // High-risk files are applicable with consent; other blocked files never are.
+  const applicable = (file: ipc.CodingPatchFile) =>
+    !(patch.value?.blocked ?? []).some((entry) => entry.path === file.path && entry.reason !== 'high-risk project control or test path');
+  const highRisk = computed(() => (patch.value?.files ?? []).some((file) => file.highRisk && selectedFiles.value.includes(file.path)));
+  const hasBlocked = computed(() => blockedPaths.value.size > 0);
 
   const stopPolling = () => {
     if (timer) clearTimeout(timer);
@@ -74,7 +97,11 @@ export const useCodingStore = defineStore('coding', () => {
     patchLoading.value = true;
     try {
       const value = await call(window.taskpilot.coding.patch(id));
-      if (sameSelection(id, token)) patch.value = value;
+      if (sameSelection(id, token)) {
+        patch.value = value;
+        // High-risk files start unticked: applying them is an explicit choice.
+        selectedFiles.value = value.files.filter((file) => applicable(file) && !file.highRisk).map((file) => file.path);
+      }
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `读取补丁失败：${describeError(cause)}`;
     } finally {
@@ -94,8 +121,15 @@ export const useCodingStore = defineStore('coding', () => {
       }
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return;
+      // A new automatic round restarts its event sequence and patch.
+      if (task.codingRun && task.codingRun.id !== roundId) {
+        roundId = task.codingRun.id;
+        events.value = [];
+        eventCursor.value = -1;
+        patch.value = null;
+      }
       if (task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
-      if (task.codingRun && ACTIVE_STATUSES.includes(task.codingRun.status)) {
+      if (looping(task)) {
         timer = setTimeout(() => poll(id, token).catch(() => undefined), CODING_POLL_MS);
       }
     } catch (cause) {
@@ -123,6 +157,7 @@ export const useCodingStore = defineStore('coding', () => {
     eventCursor.value = -1;
     eventsLoading.value = false;
     patch.value = null;
+    selectedFiles.value = [];
     patchLoading.value = false;
     error.value = null;
     operation.value = null;
@@ -133,7 +168,8 @@ export const useCodingStore = defineStore('coding', () => {
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return;
       instruction.value = task.codingRun?.instruction ?? '';
-      if (task.codingRun && ACTIVE_STATUSES.includes(task.codingRun.status)) startPolling(id, token);
+      roundId = task.codingRun?.id ?? null;
+      if (looping(task)) startPolling(id, token);
       else if (task.codingRun?.status === 'ready') await loadPatch(id, token);
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `读取编码任务失败：${describeError(cause)}`;
@@ -162,6 +198,7 @@ export const useCodingStore = defineStore('coding', () => {
       const task = await call(window.taskpilot.coding.start(id, { instruction: text.trim() }));
       if (!adopt(task, id, token)) return false;
       instruction.value = text.trim();
+      roundId = task.codingRun?.id ?? null;
       events.value = [];
       eventCursor.value = -1;
       patch.value = null;
@@ -195,7 +232,9 @@ export const useCodingStore = defineStore('coding', () => {
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return false;
       patch.value = null;
-      stopPolling();
+      // A stopped check run still writes its final state.
+      if (looping(task) || task.codingRun?.status === 'verifying') startPolling(id, token);
+      else stopPolling();
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `取消编码失败：${describeError(cause)}`;
@@ -205,31 +244,42 @@ export const useCodingStore = defineStore('coding', () => {
     }
   };
 
+  const toggleFile = (filePath: string, accepted: boolean) => {
+    const others = selectedFiles.value.filter((selected) => selected !== filePath);
+    selectedFiles.value = accepted ? [...others, filePath] : others;
+  };
+
   const apply = async (allowHighRisk: boolean) => {
     const id = selectedId.value;
     const digest = patch.value?.digest ?? run.value?.patchDigest;
-    if (!id || !digest || operation.value || run.value?.status !== 'ready' || hasBlocked.value) return false;
+    const files = [...selectedFiles.value];
+    if (!id || !digest || operation.value || run.value?.status !== 'ready' || !files.length) return false;
     if (highRisk.value && !allowHighRisk) return false;
+    const skipped = (patch.value?.files.length ?? files.length) - files.length;
     const confirmed = await confirmAction({
-      title: highRisk.value ? '应用编码改动？（含高风险文件）' : '应用编码改动？',
-      body: highRisk.value
-        ? '这会把编码 Agent 的补丁写入工作区。你已明确同意应用标记为高风险的项目控制或测试文件；请先检查原始 diff。'
-        : '这会把编码 Agent 的补丁写入工作区。应用不会自动提交 QA，请确认你已检查文件范围和原始 diff。',
-      accept: highRisk.value ? '同意高风险并应用' : '应用改动',
+      title: highRisk.value ? `应用 ${files.length} 个文件？（含高风险文件）` : `应用 ${files.length} 个文件？`,
+      body: [
+        '应用后会用你的账号权限自动跑提交前检查。检查通过就由 Coding Agent 提交 QA 审查；没通过或 QA 驳回时，会把问题交回 AI 自动重试，最多 3 轮。',
+        skipped > 0 ? `没勾选的 ${skipped} 个文件不会写入。` : '',
+        highRisk.value ? '你勾选了高风险的项目控制或测试文件，请先检查它们的 diff。' : '',
+      ]
+        .filter(Boolean)
+        .join(''),
+      accept: highRisk.value ? '同意高风险并应用' : '应用并自动检查',
       danger: highRisk.value,
     });
     if (!confirmed) return false;
     operation.value = 'apply';
     const token = generation;
     try {
-      const result = await call(window.taskpilot.coding.apply(id, { digest, allowHighRisk }));
+      const result = await call(window.taskpilot.coding.apply(id, { digest, allowHighRisk, files }));
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return false;
       await execution.refreshDiff();
       if (!sameSelection(id, token)) return false;
       patch.value = null;
-      stopPolling();
-      showToast(`已应用 ${result.files.length} 个文件；请人工验证并提交审查。`);
+      startPolling(id, token);
+      showToast(`已应用 ${result.files.length} 个文件，正在跑提交前检查。`);
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `应用编码改动失败：${describeError(cause)}`;
@@ -254,8 +304,13 @@ export const useCodingStore = defineStore('coding', () => {
     eligible,
     active,
     terminal,
+    loopActive,
     highRisk,
     hasBlocked,
+    selectedFiles,
+    applicable,
+    toggleFile,
+    maxAutoAttempts: MAX_AUTO_ATTEMPTS,
     select,
     leave,
     refreshRuntime,

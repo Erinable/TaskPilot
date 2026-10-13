@@ -13,7 +13,17 @@ export type CodingRuntimeStatus = {
   reason: string | null;
   config: CodingConfig;
 };
-export type CodingRunStatus = 'preparing' | 'running' | 'checking' | 'ready' | 'applying' | 'applied' | 'failed' | 'cancelled' | 'discarded';
+// ready → (applying → verifying) → submitted, or a new round on failure.
+// applied: the patch is in the working tree and the loop stopped there.
+export type CodingRunStatus =
+  'preparing' | 'running' | 'checking' | 'ready' | 'applying' | 'verifying' | 'applied' | 'submitted' | 'failed' | 'cancelled' | 'discarded';
+// What started a round: the developer, failing submit checks, or a QA rejection.
+export type CodingTrigger = 'human' | 'checks_failed' | 'qa_rejected';
+// Why the automatic loop stopped and handed back to the developer.
+export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped';
+export type CodingRound = { attempt: number; trigger: CodingTrigger; status: CodingRunStatus; costUsd: number | null; files: number };
+// Automatic rounds a chain gets after the developer's, shared by failed checks and QA rejections.
+export const MAX_AUTO_ATTEMPTS = 3;
 export type CodingUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
@@ -57,7 +67,16 @@ export type CodingRun = {
   blocked: { path: string; reason: string }[];
   checks: Partial<Record<CheckKind, CheckRun>>;
   patchDigest: string | null;
+  // 1 for the developer's round; each automatic retry adds one.
+  attempt: number;
+  trigger: CodingTrigger;
+  // Failing checks or QA issues handed to this round, as sent to the agent.
+  feedback: string | null;
+  halt: CodingHalt | null;
+  // Earlier rounds of the same chain, oldest first.
+  rounds: CodingRound[];
 };
 export type CodingStart = { instruction: string; resume?: boolean };
-export type CodingApply = { digest: string; allowHighRisk: boolean };
+// files: the patch paths the developer accepted; the rest are left out.
+export type CodingApply = { digest: string; allowHighRisk: boolean; files: string[] };
 export type CodingApplyResult = { files: string[] };

@@ -22,6 +22,7 @@ import * as gitCommit from './git_commit.ts';
 import * as tutorAgent from './agents/tutor.ts';
 import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
+import * as codingLoop from './coding_loop.ts';
 import type { CodingEventPage, CodingRun } from '../shared/coding_types.ts';
 import {
   summarizeForRequirement,
@@ -229,6 +230,7 @@ export type IpcDeps = {
   codingReadPatch?: typeof codingWorkspace.readPatch;
   codingApplyPatch?: typeof codingWorkspace.applyPatch;
   codingClean?: typeof codingWorkspace.clean;
+  codingSnapshot?: typeof codingWorkspace.snapshotBaseline;
 };
 
 export type IpcHandle = { shutdown: () => Promise<void> };
@@ -270,6 +272,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     codingReadPatch = codingWorkspace.readPatch,
     codingApplyPatch = codingWorkspace.applyPatch,
     codingClean = codingWorkspace.clean,
+    codingSnapshot = codingWorkspace.snapshotBaseline,
   } = deps;
 
   // The PATH verification commands run with, per the user's preference.
@@ -366,8 +369,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     id: string,
     before: ipc.WorkPackageStatus,
     after: { status: ipc.WorkPackageStatus },
-    transition: ipc.HumanTransition | ipc.AgentTransition,
-    actor: 'human' | 'agent',
+    transition: ipc.HumanTransition | ipc.AgentTransition | ipc.CodingTransition,
+    actor: 'human' | 'agent' | 'coding-agent',
   ) => {
     if (before === after.status) return;
     record({ kind: 'package_transition', packageId: id, title: tasks.getTask(id)?.title ?? id, transition, actor, from: before, to: after.status });
@@ -403,6 +406,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   };
 
   const codingRuns = new Map<string, CodingRuntime>();
+  // Submit checks running on an applied patch, per package.
+  const codingVerifications = new Map<string, AbortController>();
   const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
   const MAX_CODING_EVENTS = 200;
   const codingStatus = () => codingProbe({ config: { ...getPreferences().agents['coding-agent'] } });
@@ -413,7 +418,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     return { task, run };
   };
   const codingWorkspaceOf = (id: string, run: CodingRun) => codingRuns.get(id)?.workspace ?? { runName: run.runName, directory: run.runName };
-  const codingPrompt = (task: TaskDefinition, instruction: string) =>
+  const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null) =>
     [
       'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
       'Do not commit, push, change git remotes, or modify files outside the requested scope.',
@@ -422,6 +427,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       `Steps: ${task.steps.join(' | ')}`,
       `Acceptance: ${task.acceptance.map((item) => item.text).join(' | ')}`,
       `Developer instruction: ${instruction}`,
+      ...(feedback ? ['', 'The repository already contains your previous attempt.', feedback] : []),
     ].join('\n');
   const updateCoding = async (id: string, patch: Partial<CodingRun>) => {
     const state = await store.updateCodingRun(id, patch);
@@ -433,20 +439,32 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     code: errorCode(error) ?? 'coding_failed',
     message: error instanceof Error ? error.message : String(error),
   });
+  // A new round may start once the previous one has finished or handed its
+  // patch over; ready (unapplied) and in-flight rounds block it.
+  const CODING_STARTABLE: ipc.CodingRunStatus[] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
   const startCoding = async (id: string, rawInput: unknown): Promise<ipc.TaskView> => {
+    const input = rawInput as { instruction?: unknown } | null | undefined;
+    const instruction = requireString(input?.instruction, 'instruction').trim();
+    if (instruction.length > 20_000) failWith('Instruction is too long', 'invalid_argument', 'instruction');
+    return startRound(id, { instruction, trigger: 'human', feedback: null });
+  };
+  // One coding round. The developer's round starts a chain at attempt 1;
+  // automatic rounds continue it with feedback, from the current working tree.
+  const startRound = async (
+    id: string,
+    { instruction, trigger, feedback }: { instruction: string; trigger: ipc.CodingTrigger; feedback: string | null },
+  ): Promise<ipc.TaskView> => {
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const task = requireTask(id);
     const state = store.get(id);
     if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
-    if (codingRuns.has(id)) failWith('A Coding Agent run is already active', 'coding_running');
-    if (state.codingRun && !['failed', 'cancelled', 'discarded'].includes(state.codingRun.status)) {
-      failWith('This package already has a Coding Agent result', 'coding_result_exists');
-    }
-    const input = rawInput as { instruction?: unknown } | null | undefined;
-    const instruction = requireString(input?.instruction, 'instruction').trim();
-    if (instruction.length > 20_000) failWith('Instruction is too long', 'invalid_argument', 'instruction');
+    if (codingRuns.has(id) || codingVerifications.has(id)) failWith('A Coding Agent run is already active', 'coding_running');
+    const previous = state.codingRun;
+    if (previous && !CODING_STARTABLE.includes(previous.status)) failWith('This package already has a Coding Agent result', 'coding_result_exists');
     const root = requireRoot();
-    const baseline = requireBaseline(id);
+    // The developer's own edits and earlier applied rounds are part of the start.
+    const baseline = await codingSnapshot(root, requireBaseline(id), task.fileScope);
+    const chained = trigger !== 'human' && previous;
     const runId = codingExec.codingRunId();
     const initial: CodingRun = {
       id: runId,
@@ -470,6 +488,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       blocked: [],
       checks: {},
       patchDigest: null,
+      attempt: chained ? previous.attempt + 1 : 1,
+      trigger,
+      feedback,
+      halt: null,
+      rounds: chained ? [...previous.rounds, codingLoop.roundOf(previous)] : [],
     };
     await store.setCodingRun(id, initial);
     record({ kind: 'coding_run', packageId: id, title: task.title, status: 'started', costUsd: null });
@@ -492,7 +515,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         const result = await codingRun({
           runName: prepared.runName,
           config: runtimeConfig,
-          prompt: codingPrompt(task, instruction),
+          prompt: codingPrompt(task, instruction, feedback),
           timeoutMs: 30 * 60 * 1000,
           signal: controller.signal,
           onEvent: (event) => {
@@ -527,9 +550,120 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await codingClean(prepared.runName).catch(() => {});
         codingRuns.delete(id);
       }
+      // Automatic rounds go on by themselves; the developer's round waits for
+      // a per-file review.
+      if (trigger !== 'human' && store.get(id).codingRun?.status === 'ready') continueLoop(id, () => autoApplyRound(id));
     })();
     track(settled);
     return buildTaskView(task, store.get(id));
+  };
+
+  // An automatic round's patch: applied whole unless it touches a high-risk
+  // path, which stops the loop for the developer.
+  const autoApplyRound = async (id: string) => {
+    const { task, run } = codingRunOf(id);
+    const preview = await codingReadPatch(run.runName, task.fileScope);
+    const decision = codingLoop.autoApply(preview);
+    if (decision.highRisk) return void (await updateCoding(id, { halt: 'high_risk' }));
+    if (!decision.files.length) {
+      await codingClean(run.runName).catch((error) => console.error(error));
+      return void (await updateCoding(id, { status: 'discarded', halt: 'no_changes' }));
+    }
+    await applyRound(id, preview, decision.files, false);
+    await verifyApplied(id);
+  };
+
+  // Applies the chosen files of a ready patch to the working tree.
+  const applyRound = async (id: string, preview: ipc.CodingPatchPreview, files: string[], allowHighRisk: boolean): Promise<string[]> => {
+    const { task, run } = codingRunOf(id);
+    const selected = codingWorkspace.parsePatchPreview(codingWorkspace.selectPatch(preview.patch, files), task.fileScope);
+    const blocked = allowHighRisk ? selected.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : selected.blocked;
+    await updateCoding(id, { status: 'applying', error: null });
+    try {
+      const applied = await codingApplyPatch(requireRoot(), selected.patch, selected.digest, blocked);
+      await updateCoding(id, {
+        status: 'verifying',
+        finishedAt: new Date().toISOString(),
+        files: selected.files,
+        blocked: preview.blocked,
+        patchDigest: selected.digest,
+        halt: null,
+      });
+      await codingClean(run.runName).catch((error) => console.error(error));
+      return applied;
+    } catch (error) {
+      await updateCoding(id, { status: 'ready', error: codingFailure(error) });
+      throw error;
+    }
+  };
+
+  // Runs the submit checks on the applied patch with the developer's
+  // permissions. A clean run hands the package to QA; a blocking failure
+  // starts the next round while attempts remain.
+  const verifyApplied = async (id: string) => {
+    const controller = new AbortController();
+    codingVerifications.set(id, controller);
+    const config = getConfig();
+    const baselines = store.get(id).baselineChecks?.checks ?? {};
+    const failures: Parameters<typeof codingLoop.checksFeedback>[0] = [];
+    const runs: ipc.CodingRun['checks'] = {};
+    try {
+      const { path: envPath } = await commandPath();
+      for (const check of submitChecks(config)) {
+        if (controller.signal.aborted) break;
+        let outcome: Parameters<typeof evidence.evaluate>[1];
+        try {
+          const run = await verification.runCheck(config, check.kind, { signal: controller.signal, envPath });
+          // runCheck() echoes the kind it ran, which is a CheckKind here.
+          runs[check.kind] = { ...run, kind: check.kind };
+          outcome = run;
+        } catch (error) {
+          outcome = { error: { code: errorCode(error) ?? 'not_run', message: error instanceof Error ? error.message : String(error) } };
+        }
+        const item = evidence.evaluate(check, outcome, evidence.usableBaseline(baselines[check.kind], check.line));
+        if (item.status === 'fail' && check.blocking) failures.push({ evidence: item, run: runs[check.kind] ?? null });
+      }
+    } finally {
+      codingVerifications.delete(id);
+    }
+    if (controller.signal.aborted) return void (await updateCoding(id, { status: 'applied', checks: runs, halt: 'stopped' }));
+    const run = (await updateCoding(id, { checks: runs })).codingRun as CodingRun;
+    if (failures.length) {
+      if (!codingLoop.canRetry(run)) return void (await updateCoding(id, { status: 'applied', halt: 'attempts_exhausted' }));
+      await updateCoding(id, { status: 'applied' });
+      await startRound(id, { instruction: run.instruction, trigger: 'checks_failed', feedback: codingLoop.checksFeedback(failures) });
+      return;
+    }
+    await updateCoding(id, { status: 'submitted' });
+    const before = store.get(id).status;
+    const entry = await store.transition(id, 'coding_submitted', 'coding-agent');
+    recordTransition(id, before, entry, 'coding_submitted', 'coding-agent');
+    await startReview(id).catch(async (error) => {
+      console.error(error);
+      await store.failReview(id, asAgentError(error)).catch((failure) => console.error(failure));
+    });
+  };
+
+  // Runs one automatic step of the loop in the background. A failure stops
+  // the loop with the error on the run, never silently.
+  const continueLoop = (id: string, step: () => Promise<void>) =>
+    track(
+      step().catch(async (error) => {
+        console.error(error);
+        if (store.get(id).codingRun) await updateCoding(id, { halt: 'stopped', error: codingFailure(error) }).catch((failure) => console.error(failure));
+      }),
+    );
+
+  // After QA sends a Coding Agent submission back, the next round takes its
+  // issues while attempts remain.
+  const continueAfterReview = async (id: string) => {
+    const state = store.get(id);
+    const run = state.codingRun;
+    if (state.status !== 'in_progress' || run?.status !== 'submitted' || state.review?.status !== 'rejected') return;
+    if (!codingLoop.canRetry(run)) return void (await updateCoding(id, { halt: 'attempts_exhausted' }));
+    const { reasons = [], report = null, checks = [] } = state.review;
+    const feedback = codingLoop.reviewFeedback({ reasons, report: report as ipc.QaReport | null, checks });
+    await startRound(id, { instruction: run.instruction, trigger: 'qa_rejected', feedback });
   };
 
   ipcMain.handle(
@@ -565,14 +699,20 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawId): Promise<boolean> => {
       const id = requireString(rawId, 'id');
       const runtime = codingRuns.get(id);
+      const verifying = codingVerifications.get(id);
+      if (verifying) {
+        verifying.abort();
+        return true;
+      }
       if (!runtime) {
         const run = store.get(id).codingRun;
         if (!run || run.status !== 'ready') return false;
         await codingClean(run.runName).catch(() => {});
-        await updateCoding(id, { status: 'discarded', finishedAt: new Date().toISOString() });
+        await updateCoding(id, { status: 'discarded', finishedAt: new Date().toISOString(), halt: run.trigger === 'human' ? null : 'stopped' });
         return true;
       }
       runtime.controller.abort();
+      if (runtime.run.trigger !== 'human') await updateCoding(id, { halt: 'stopped' }).catch((error) => console.error(error));
       return true;
     }),
   );
@@ -593,31 +733,19 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const id = requireString(rawId, 'id');
       const { task, run } = codingRunOf(id);
       if (run.status !== 'ready') failWith('Coding patch is not ready to apply', 'coding_not_ready');
-      const input = rawInput as { digest?: unknown; allowHighRisk?: unknown } | null | undefined;
+      const input = rawInput as { digest?: unknown; allowHighRisk?: unknown; files?: unknown } | null | undefined;
       const digest = requireString(input?.digest, 'digest');
       if (input?.allowHighRisk !== true && input?.allowHighRisk !== false) failWith('allowHighRisk must be boolean', 'invalid_argument', 'allowHighRisk');
-      const prepared = codingWorkspaceOf(id, run);
-      const preview = await codingReadPatch(prepared.runName, task.fileScope);
+      const files = input.files;
+      if (!Array.isArray(files) || !files.length || files.some((file) => typeof file !== 'string'))
+        failWith('files must be a non-empty list of paths', 'invalid_argument', 'files');
+      const preview = await codingReadPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
       if (preview.digest !== digest) failWith('Patch changed since preview', 'coding_digest_mismatch');
-      const blocked = input.allowHighRisk ? preview.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : preview.blocked;
-      await updateCoding(id, { status: 'applying', error: null });
-      try {
-        const files = await codingApplyPatch(requireRoot(), preview.patch, digest, blocked);
-        await updateCoding(id, {
-          status: 'applied',
-          finishedAt: new Date().toISOString(),
-          files: preview.files,
-          blocked: preview.blocked,
-          patchDigest: digest,
-        });
-        record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
-        await codingClean(prepared.runName).catch(() => {});
-        codingRuns.delete(id);
-        return { files };
-      } catch (error) {
-        await updateCoding(id, { status: 'ready', error: codingFailure(error) });
-        throw error;
-      }
+      const applied = await applyRound(id, preview, files as string[], input.allowHighRisk);
+      record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
+      codingRuns.delete(id);
+      continueLoop(id, () => verifyApplied(id));
+      return { files: applied };
     }),
   );
 
@@ -680,7 +808,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         await store
           .completeReview(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
-          .catch((error) => store.failReview(id, error).catch(() => {}));
+          .then(
+            () => continueLoop(id, () => continueAfterReview(id)),
+            (error) => store.failReview(id, error).catch(() => {}),
+          );
       }
     })();
     track(settled);
@@ -2060,6 +2191,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       ...(envController ? [{ kind: 'environment', label: '环境初始化' } as ipc.BusyRun] : []),
       ...[...tutorRuns.keys()].map((key): ipc.BusyRun => ({ kind: 'tutor', label: packageTitle(key.split('#')[0]) })),
       ...[...codingRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
+      ...[...codingVerifications.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
     ];
   };
 
@@ -2073,6 +2205,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of reviews.values()) controller.abort();
     for (const controller of adjudications.values()) controller.abort();
     for (const runtime of codingRuns.values()) runtime.controller.abort();
+    for (const controller of codingVerifications.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
     tutorFailures.clear();
   };

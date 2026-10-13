@@ -16,7 +16,11 @@ export type {
   CodingPatchPreview,
   CodingRun,
   CodingRuntimeStatus,
+  CodingHalt,
+  CodingRound,
+  CodingRunStatus,
   CodingStart,
+  CodingTrigger,
   CodingUsage,
 } from './coding_types.ts';
 // ========== envelope ==========
@@ -48,6 +52,9 @@ export type HumanTransition =
   | 'unblock';
 
 export type AgentTransition = 'breakdown_done' | 'review_accepted' | 'review_passed' | 'review_rejected' | 'replanned' | 'deviation_dismissed';
+
+// The one transition Coding Agent triggers: its applied patch passed the submit checks.
+export type CodingTransition = 'coding_submitted';
 
 export type Priority = 'high' | 'medium' | 'low';
 
@@ -505,7 +512,7 @@ export type ActivityEvent =
       kind: 'package_transition';
       packageId: string;
       title: string;
-      transition: HumanTransition | AgentTransition;
+      transition: HumanTransition | AgentTransition | CodingTransition;
       actor: 'human' | 'agent' | 'coding-agent';
       from: WorkPackageStatus;
       to: WorkPackageStatus;

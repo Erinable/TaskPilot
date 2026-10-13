@@ -23,7 +23,7 @@ export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product
 );
 
 // What a transition reads as, and who did it.
-const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition, { by: FeedActor; what: string }> = {
+const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition | ipc.CodingTransition, { by: FeedActor; what: string }> = {
   breakdown_done: { by: AGENTS['product-lead'], what: '拆解完成了工作包' },
   claim: { by: YOU, what: '开始执行' },
   release: { by: YOU, what: '把工作包放回了队列' },
@@ -38,6 +38,7 @@ const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition, { by: F
   review_accepted: { by: AGENTS.qa, what: '审查通过，工作包已完成' },
   review_passed: { by: AGENTS.qa, what: '审查通过，等你验收' },
   review_rejected: { by: AGENTS.qa, what: '审查未通过，退回修改' },
+  coding_submitted: { by: AGENTS['coding-agent'], what: '检查通过，提交了审查' },
   replanned: { by: AGENTS.architect, what: '重新规划了工作包' },
   deviation_dismissed: { by: AGENTS.architect, what: '驳回了偏差，按原计划继续' },
 };

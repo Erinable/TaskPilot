@@ -1,8 +1,20 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
-import { CodingWorkspaceError, parsePatchPreview, prepare, readPatch, type WorkspaceSpawnFn } from '../../src/main/coding_workspace.ts';
+import {
+  CodingWorkspaceError,
+  parsePatchPreview,
+  prepare,
+  readPatch,
+  selectPatch,
+  snapshotBaseline,
+  type WorkspaceSpawnFn,
+} from '../../src/main/coding_workspace.ts';
 
 const patch = (file: string): string =>
   `diff --git a/${file} b/${file}\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+safe\n`;
@@ -83,4 +95,47 @@ test('prepare sends git archive output only to wrapper extract', async () => {
 test('invalid digest is represented by the stable workspace error', () => {
   const error = new CodingWorkspaceError('bad digest', 'workspace_digest_mismatch');
   assert.equal(error.code, 'workspace_digest_mismatch');
+});
+
+test('selectPatch keeps only the chosen files and rejects unknown ones', () => {
+  const full = patch('src/a.ts') + patch('src/b.ts');
+  const selected = selectPatch(full, ['src/b.ts']);
+  assert.equal(selected, patch('src/b.ts'));
+  assert.deepEqual(
+    parsePatchPreview(selected).files.map((file) => file.path),
+    ['src/b.ts'],
+  );
+  assert.throws(() => selectPatch(full, ['src/c.ts']), { code: 'workspace_invalid_patch' });
+});
+
+test('snapshotBaseline commits scoped working-tree files without touching the checkout', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-snapshot-'));
+  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+  try {
+    git('init', '-q');
+    await fs.writeFile(path.join(root, 'a.txt'), 'a\n');
+    await fs.writeFile(path.join(root, 'b.txt'), 'b\n');
+    await fs.writeFile(path.join(root, 'other.txt'), 'o\n');
+    git('add', '.');
+    git('commit', '-qm', 'base');
+    const baseline = git('rev-parse', 'HEAD');
+    await fs.writeFile(path.join(root, 'a.txt'), 'changed\n');
+    await fs.rm(path.join(root, 'b.txt'));
+    await fs.writeFile(path.join(root, 'c.txt'), 'new\n');
+    await fs.writeFile(path.join(root, 'other.txt'), 'out of scope\n');
+    await fs.writeFile(path.join(root, '.env'), 'SECRET=1\n');
+    const statusBefore = git('status', '--porcelain');
+
+    const commit = await snapshotBaseline(root, baseline, ['a.txt', 'b.txt', 'c.txt', 'missing.txt', '.env']);
+
+    assert.equal(git('rev-parse', `${commit}^`), baseline);
+    assert.deepEqual(git('ls-tree', '--name-only', commit).split('\n'), ['a.txt', 'c.txt', 'other.txt']);
+    assert.equal(git('show', `${commit}:a.txt`), 'changed');
+    assert.equal(git('show', `${commit}:other.txt`), 'o');
+    assert.equal(git('rev-parse', 'HEAD'), baseline);
+    assert.equal(git('status', '--porcelain'), statusBefore);
+    assert.equal(git('stash', 'list'), '');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

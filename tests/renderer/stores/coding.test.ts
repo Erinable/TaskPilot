@@ -37,7 +37,23 @@ const readyRun = (status: ipc.CodingRun['status']): ipc.CodingRun => ({
   blocked: [],
   checks: {},
   patchDigest: status === 'ready' ? 'digest' : null,
+  attempt: 1,
+  trigger: 'human',
+  feedback: null,
+  halt: null,
+  rounds: [],
 });
+
+const file = (path: string, highRisk = false): ipc.CodingPatchFile => ({ path, added: 1, removed: 0, binary: false, highRisk });
+const twoFilePatch: ipc.CodingPatchPreview = {
+  digest: 'test-digest',
+  files: [file('src/a.ts'), file('package.json', true), file('.env')],
+  patch: '',
+  blocked: [
+    { path: 'package.json', reason: 'high-risk project control or test path' },
+    { path: '.env', reason: 'secret path' },
+  ],
+};
 
 let current: { task: ipc.TaskView };
 let api: ReturnType<typeof installApi>;
@@ -84,10 +100,29 @@ describe('coding store', () => {
     expect(api.coding.cancel).not.toHaveBeenCalled();
   });
 
+  test('applies only the ticked files; high-risk and blocked files start unticked', async () => {
+    current.task = taskView({ codingRun: readyRun('ready') });
+    const execution = useExecutionStore();
+    execution.current = current.task;
+    api.coding.patch.mockResolvedValueOnce({ ok: true, data: twoFilePatch });
+    const coding = useCodingStore();
+    await coding.select('t1');
+    expect(coding.selectedFiles).toEqual(['src/a.ts']);
+    expect(coding.applicable(twoFilePatch.files[2])).toBe(false);
+    coding.toggleFile('src/a.ts', false);
+    expect(await coding.apply(false)).toBe(false);
+    coding.toggleFile('package.json', true);
+    expect(coding.highRisk).toBe(true);
+    expect(await coding.apply(false)).toBe(false);
+    expect(await coding.apply(true)).toBe(true);
+    expect(api.coding.apply).toHaveBeenCalledWith('t1', { digest: 'test-digest', allowHighRisk: true, files: ['package.json'] });
+  });
+
   test('failed apply retains the patch and reports an error', async () => {
     current.task = taskView({ codingRun: readyRun('ready') });
     const execution = useExecutionStore();
     execution.current = current.task;
+    api.coding.patch.mockResolvedValueOnce({ ok: true, data: twoFilePatch });
     const coding = useCodingStore();
     await coding.select('t1');
     api.coding.apply.mockResolvedValueOnce({ ok: false, error: { code: 'apply_failed', message: '拒绝写入' } } as never);

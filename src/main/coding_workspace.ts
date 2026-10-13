@@ -1,8 +1,12 @@
-import { spawn as nodeSpawn } from 'node:child_process';
+import { execFile, spawn as nodeSpawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
 import type { CodingPatchFile, CodingPatchPreview } from '../shared/coding_types.ts';
+import { looksSecret } from './repo_reader.ts';
 import type { CheckKind, Check } from './workspace.ts';
 import * as verification from './verification.ts';
 import * as testReport from './test_report.ts';
@@ -68,6 +72,7 @@ export interface PreparedCodingWorkspace {
 export type FileScope = readonly string[] | ReadonlySet<string> | ((filePath: string) => boolean) | undefined;
 export type BlockedPatch = CodingPatchPreview['blocked'][number];
 
+const execFileAsync = promisify(execFile);
 const defaultSpawn: WorkspaceSpawnFn = (command, args, options) => nodeSpawn(command, [...args], options as never) as unknown as Child;
 const safeName = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const highRiskName =
@@ -472,6 +477,53 @@ export const applyPatch = async (
   await applyGitPatch(root, patch, true, spawnFn, options.signal);
   await applyGitPatch(root, patch, false, spawnFn, options.signal);
   return parsed.files.map((file) => file.path);
+};
+
+// The part of a patch that touches `selected` paths, cut at `diff --git`
+// headers. Throws when a selected path is not in the patch.
+export const selectPatch = (patch: string, selected: readonly string[]): string => {
+  const wanted = new Set(selected);
+  const segments: { path: string; text: string }[] = [];
+  for (const segment of patch.split(/(?=^diff --git )/m)) {
+    if (!segment.startsWith('diff --git ')) continue;
+    segments.push({ path: parsePatchFiles(segment, undefined).files[0].path, text: segment });
+  }
+  const found = new Set(segments.map((segment) => segment.path));
+  const missing = selected.find((filePath) => !found.has(filePath));
+  if (missing) throw new CodingWorkspaceError(`Selected file is not in the patch: ${missing}`, 'workspace_invalid_patch');
+  return segments
+    .filter((segment) => wanted.has(segment.path))
+    .map((segment) => segment.text)
+    .join('');
+};
+
+// A commit of `baseline` plus the working-tree contents of `paths` (deleted
+// files removed), so the next round starts from what the developer has now.
+// It goes through a private index: the real index, refs, stash and working
+// tree are untouched, and the unreferenced commit is left for git gc.
+// Secret-looking paths keep their baseline content.
+export const snapshotBaseline = async (root: string, baseline: string, paths: readonly string[]): Promise<string> => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-snapshot-'));
+  const env = {
+    ...safeChildEnv(),
+    GIT_INDEX_FILE: path.join(directory, 'index'),
+    GIT_AUTHOR_NAME: 'TaskPilot',
+    GIT_AUTHOR_EMAIL: 'taskpilot@localhost',
+    GIT_COMMITTER_NAME: 'TaskPilot',
+    GIT_COMMITTER_EMAIL: 'taskpilot@localhost',
+  };
+  const git = async (args: string[]) => (await execFileAsync(GIT_PATH, ['-C', root, ...args], { env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+  try {
+    await git(['read-tree', baseline]);
+    const included = paths.filter((filePath) => !pathReason(filePath) && !looksSecret(filePath));
+    if (included.length) await git(['update-index', '--add', '--remove', '--', ...included]);
+    const tree = await git(['write-tree']);
+    return await git(['commit-tree', tree, '-p', baseline, '-m', 'TaskPilot coding round baseline']);
+  } catch (error) {
+    throw new CodingWorkspaceError('Could not snapshot the working tree', 'workspace_process_failed', String((error as { stderr?: unknown }).stderr ?? ''));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 };
 
 export const clean = async (runName: string, options: WorkspaceOptions = {}): Promise<void> => {
