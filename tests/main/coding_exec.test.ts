@@ -8,7 +8,8 @@ class FakeProcess extends EventEmitter {
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  readonly pid = 456;
+  // No pid: a fake one could name a real process group on the host, and
+  // killProcessTree would signal it instead of calling kill() below.
   killed: string | undefined;
 
   kill(signal?: NodeJS.Signals): boolean {

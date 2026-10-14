@@ -75,7 +75,10 @@ describe('release store', () => {
 
     // A start commit the main process refuses shows under the picker, not as a toast.
     api.generate.mockReturnValueOnce(fakes.fail('invalid_argument', '请选择最近的提交', 'startCommit') as never);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await store.generate();
+    expect(log).toHaveBeenCalledWith('[release] generate failed', expect.objectContaining({ code: 'invalid_argument' }));
+    log.mockRestore();
     expect(store.startError).toBe('请选择最近的提交');
     expect(feedback.showToast).not.toHaveBeenCalled();
     store.leave();
@@ -132,7 +135,10 @@ describe('release store', () => {
     expect(api.writeNotes).not.toHaveBeenCalled();
 
     api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await store.writeNotes('../x.md')).toBe(false);
+    expect(log).toHaveBeenCalledWith('[release] write notes failed', expect.objectContaining({ code: 'outside_workspace' }));
+    log.mockRestore();
     expect(store.writeError).toBe('路径不在工作区内');
     expect(feedback.showToast).not.toHaveBeenCalled();
 
@@ -154,7 +160,10 @@ describe('release store', () => {
     expect(feedback.showToast).toHaveBeenLastCalledWith('已复制更新说明');
 
     writeText.mockRejectedValueOnce(new Error('denied'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await store.copyNotes();
+    expect(log).toHaveBeenCalledWith('[release] clipboard failed', expect.any(Error));
+    log.mockRestore();
     expect(feedback.showToast).toHaveBeenLastCalledWith('复制失败：系统剪贴板不可用', 'error');
     store.leave();
   });

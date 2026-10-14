@@ -43,7 +43,10 @@ describe('execution store', () => {
   test('open() reports a failed load and stays put', async () => {
     api.getTask.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: '没有这个工作包' } } as never);
     const execution = useExecutionStore();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await execution.open('missing');
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ code: 'x' }));
+    log.mockRestore();
     expect(useAppStore().view).toBe('queue');
     expect(feedback.showToast).toHaveBeenCalledWith('打开工作包失败：没有这个工作包');
   });
@@ -192,7 +195,10 @@ describe('execution store', () => {
     const execution = useExecutionStore();
     await execution.open('t1');
     api.setStepDone.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_state', message: 'x' } } as never);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await execution.setStepDone(0, true)).toBe(false);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ code: 'invalid_state' }));
+    log.mockRestore();
     expect(execution.current?.completedSteps).toEqual([]);
     expect(feedback.showToast).toHaveBeenCalledWith('保存进度失败：当前状态下不能执行这个操作。');
     expect(await execution.setStepDone(1, true)).toBe(true);

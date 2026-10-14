@@ -55,6 +55,10 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
       remove: vi.fn(() => ok(true as const)),
       cancel: vi.fn(() => ok(true)),
     },
+    // MilestonePicker loads the release state when a requirement detail mounts.
+    release: {
+      get: vi.fn(() => ok<ipc.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false })),
+    },
     agent: { status: vi.fn(() => ok<ipc.AgentStatus>({ available: true, command: 'claude' })) },
     workspace: {
       info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)),

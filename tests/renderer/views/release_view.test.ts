@@ -157,8 +157,11 @@ describe('ReleaseView', () => {
     expect(dialog()).not.toBeNull();
 
     api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     (dialog().querySelector('.write-confirm') as HTMLElement).click();
     await flushPromises();
+    expect(log).toHaveBeenCalledWith('[release] write notes failed', expect.objectContaining({ code: 'outside_workspace' }));
+    log.mockRestore();
     expect(api.writeNotes).toHaveBeenLastCalledWith({ path: 'CHANGELOG.md' });
     expect(dialog().querySelector('#release-notes-path-error')!.textContent).toBe('路径不在工作区内');
 
