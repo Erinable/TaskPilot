@@ -250,6 +250,41 @@ export const useReleaseStore = defineStore('release', () => {
     }
   };
 
+  // ========== Milestones ==========
+  const milestoneBusy = ref(false);
+  const milestoneError = ref<string | null>(null);
+  // Runs one milestone call; the reply is the whole release state.
+  const milestoneCall = async (request: () => Promise<ipc.IpcResult<ipc.ReleaseState>>, done?: string) => {
+    if (milestoneBusy.value) return false;
+    milestoneBusy.value = true;
+    milestoneError.value = null;
+    try {
+      apply(await call(request()));
+      if (done) showToast(done);
+      return true;
+    } catch (error) {
+      milestoneError.value = describeError(error);
+      return false;
+    } finally {
+      milestoneBusy.value = false;
+    }
+  };
+  const createMilestone = (input: ipc.MilestoneInput) =>
+    milestoneCall(() => window.taskpilot.release.createMilestone(input), `已创建 ${input.version} 的版本计划。`);
+  const updateMilestone = (id: string, input: ipc.MilestoneInput) =>
+    milestoneCall(() => window.taskpilot.release.updateMilestone(id, input), '版本计划已更新。');
+  const deleteMilestone = async (milestone: ipc.MilestoneView) => {
+    const confirmed = await confirmAction({
+      title: `删除 ${milestone.version} 的版本计划？`,
+      body: '只删除这个计划，里面的需求和工作包都不受影响。',
+      accept: '删除计划',
+      danger: true,
+    });
+    return confirmed && milestoneCall(() => window.taskpilot.release.deleteMilestone(milestone.id), '版本计划已删除。');
+  };
+  const assignMilestone = (requirementId: string, milestoneId: string | null) =>
+    milestoneCall(() => window.taskpilot.release.assignMilestone(requirementId, milestoneId), milestoneId ? '已放进版本计划。' : '已移出版本计划。');
+
   return {
     // State
     state,
@@ -258,6 +293,13 @@ export const useReleaseStore = defineStore('release', () => {
     generating,
     notesText,
     load,
+    // Milestones
+    milestoneBusy,
+    milestoneError,
+    createMilestone,
+    updateMilestone,
+    deleteMilestone,
+    assignMilestone,
     // Polling
     enter,
     leave,

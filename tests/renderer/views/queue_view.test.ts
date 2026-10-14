@@ -24,6 +24,8 @@ describe('QueueView', () => {
     pinia = createPinia();
     setActivePinia(pinia);
     installApi({ list: [] });
+    // These tests cover the list layout; the board has its own tests.
+    localStorage.setItem('taskpilot.queueLayout', 'list');
   });
 
   const render = () => mount(QueueView, { global: { plugins: [pinia, ElementPlus] } });
@@ -91,8 +93,9 @@ describe('QueueView', () => {
     const wrapper = render();
     await flushPromises();
     const metrics = wrapper.findAll('.metric-card strong').map((node) => node.text());
-    expect(metrics.slice(1)).toEqual(['5', '2.4h']);
-    expect(wrapper.findAll('.metric-trend').map((node) => node.text())).toEqual(['+25%', '较上周稳定']);
+    // Pending count, done this week, estimate accuracy (no finished package), average time.
+    expect(metrics.slice(1)).toEqual(['5', '–', '2.4h']);
+    expect(wrapper.findAll('.metric-trend').map((node) => node.text())).toEqual(['+25%', '完成第一个工作包后统计', '较上周稳定']);
     expect(wrapper.find('.team-presence').text()).toBe('1 个 AI 成员正在工作');
     const items = wrapper.findAll('.activity-item');
     expect(items[0].find('p').text()).toBe('QA Partner 审查通过，等你验收');
@@ -109,7 +112,7 @@ describe('QueueView', () => {
         .findAll('.metric-card strong')
         .map((node) => node.text())
         .slice(1),
-    ).toEqual(['–', '–']);
+    ).toEqual(['–', '–', '–']);
     expect(wrapper.find('.team-presence').exists()).toBe(false);
     expect(wrapper.find('.activity-list .empty-hint').exists()).toBe(false);
   });
@@ -177,5 +180,71 @@ describe('QueueView', () => {
     const wrapper = render();
     await flushPromises();
     expect(wrapper.find('[data-onboarding]').exists()).toBe(false);
+  });
+});
+
+describe('QueueView board', () => {
+  let pinia: ReturnType<typeof createPinia>;
+  const pkg = (overrides: Partial<ipc.TaskView>) =>
+    ({
+      title: '包',
+      description: 'd',
+      statusLabel: 's',
+      priority: 'medium',
+      tags: [],
+      estimate: '预计 1 小时',
+      icon: 'key',
+      steps: ['a'],
+      completedSteps: [],
+      dependencies: [],
+      humanTransitions: [],
+      claimedAt: null,
+      completedAt: null,
+      review: null,
+      codingRun: null,
+      ...overrides,
+    }) as ipc.TaskView;
+
+  beforeEach(() => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    installApi({ list: [] });
+    localStorage.removeItem('taskpilot.queueLayout');
+  });
+
+  const render = () => mount(QueueView, { global: { plugins: [pinia, ElementPlus] } });
+
+  test('shows the board by default with a card per package in its stage, and remembers the list choice', async () => {
+    useTasksStore().tasks = [
+      pkg({ id: 'a', title: '实现用例', status: 'in_progress' }),
+      pkg({
+        id: 'b',
+        title: '接入路由',
+        status: 'pending',
+        dependencies: [{ id: 'a', title: '实现用例', status: 'in_progress', waived: false, blocking: true }],
+      }),
+      pkg({ id: 'c', title: '写文档', status: 'pending', humanTransitions: ['claim'] }),
+    ];
+    const wrapper = render();
+    await flushPromises();
+    const column = (label: string) => wrapper.findAll('.board-column').find((node) => node.find('h3').text() === label);
+    expect(column('待执行')?.findAll('.board-card')).toHaveLength(2);
+    expect(column('执行中')?.find('.board-card').text()).toContain('继续');
+    const waiting = wrapper.find('[data-package="b"]');
+    expect(waiting.text()).toContain('等待：实现用例');
+    expect(waiting.find('.board-card-action button').exists()).toBe(false);
+    expect(wrapper.find('[data-package="c"] .board-card-action button').text()).toBe('开始执行');
+
+    await wrapper.findAll('.layout-toggle button')[1].trigger('click');
+    expect(wrapper.find('.board').exists()).toBe(false);
+    expect(wrapper.findAll('.task-item')).toHaveLength(3);
+    expect(localStorage.getItem('taskpilot.queueLayout')).toBe('list');
+  });
+
+  test('suggests one package at a time when several are in progress', async () => {
+    useTasksStore().tasks = [pkg({ id: 'a', status: 'in_progress' }), pkg({ id: 'b', status: 'in_progress' })];
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.find('.board-hint').text()).toContain('同时在做 2 个');
   });
 });

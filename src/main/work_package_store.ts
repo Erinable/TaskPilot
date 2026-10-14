@@ -153,6 +153,10 @@ export interface WorkPackageState {
   adjudication: Adjudication | null;
   replanUndo: ReplanUndo | null;
   codingRun: CodingRun | null;
+  // When the package reached done, for estimate-vs-actual; null before.
+  completedAt: string | null;
+  // Dependencies the developer chose to skip; they no longer block claiming.
+  waivedDependencies: string[];
 }
 
 export interface StoreSummary {
@@ -195,6 +199,8 @@ const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState =>
   adjudication: null, // Architect's latest run on a deviation
   replanUndo: null,
   codingRun: null,
+  completedAt: null,
+  waivedDependencies: [],
 });
 
 const BASELINE_STATUSES: string[] = ['measuring', 'measured', 'unavailable', 'contaminated'];
@@ -422,6 +428,7 @@ export class WorkPackageStore {
       entry.review = { ...(entry.review as Review), humanVerdict: name, humanAt: new Date().toISOString() };
     }
 
+    if (next === 'done') entry.completedAt = new Date().toISOString();
     entry.status = next;
     this.#state.set(id, entry);
     await this.#persist();
@@ -507,6 +514,7 @@ export class WorkPackageStore {
       diff: result.diff,
       costUsd: result.costUsd,
     };
+    if (next === 'done') entry.completedAt = new Date().toISOString();
     entry.status = next;
     this.#state.set(id, entry);
     await this.#persist();
@@ -625,6 +633,17 @@ export class WorkPackageStore {
       finishedAt: new Date().toISOString(),
       error: { code: error.code ?? 'agent_failed', message: error.message },
     };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  // Lets the developer start a package before `dependency` is done. Only
+  // meaningful while the package has not been claimed yet.
+  async waiveDependency(id: string, dependency: string): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    if (entry.status !== 'pending') throw new StoreError('Dependencies only block a pending package', 'invalid_state');
+    if (!entry.waivedDependencies.includes(dependency)) entry.waivedDependencies = [...entry.waivedDependencies, dependency];
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);

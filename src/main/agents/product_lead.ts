@@ -59,6 +59,9 @@ export interface PlanPackage {
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
   difficulty: PackageDifficulty;
+  // 1-based numbers of earlier packages in the same plan; absent on plans
+  // saved before dependencies existed.
+  dependsOn?: number[];
 }
 
 export interface Plan {
@@ -144,6 +147,7 @@ export const planPrompt = ({ title, text, questions, files, interfaces }: Requir
     `- Each package takes roughly 0.5 to 4 hours. Use at most ${MAX_PACKAGES} packages.`,
     '- Put the tests for a change in the same package as the change. No separate packages for tests, docs, or cleanup unless the requirement asks for them.',
     '- Order packages so earlier ones unblock later ones.',
+    '- dependsOn lists the 1-based numbers of earlier packages this one cannot start without (it calls their code, or its tests need it). Leave it empty when the package stands alone; do not chain packages that could be done in any order.',
     '',
     'Grounding:',
     '- Build on files that already exist. New files go in directories the repository already uses, following its naming.',
@@ -239,6 +243,12 @@ export const PLAN_SCHEMA = {
               reason: str(120, 'Why, in one plain sentence a beginner understands'),
             },
           },
+          dependsOn: {
+            type: 'array',
+            maxItems: MAX_PACKAGES,
+            items: { type: 'integer', minimum: 1, maximum: MAX_PACKAGES },
+            description: '1-based numbers of earlier packages this one needs done first; empty when independent',
+          },
         },
       },
     },
@@ -328,10 +338,25 @@ export const validatePlan = (raw: unknown): Plan => {
         return criterion;
       }),
       difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
+      dependsOn: dependencies(pkg.dependsOn, i, `${at}.dependsOn`),
     };
   });
   return { summary: text(raw.summary, 'summary', 800), packages };
 };
+
+// A package may depend only on packages before it, so a plan never has a
+// cycle. Missing means none, for CLIs that drop empty optional arrays.
+const dependencies = (value: unknown, index: number, path: string): number[] => {
+  if (value === undefined || value === null) return [];
+  const numbers = list(value, path, { max: MAX_PACKAGES }).map((n, j) => {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > index) fail(`${path}[${j}]`, `must be the number of an earlier package (1 to ${index})`);
+    return n;
+  });
+  return [...new Set(numbers)].sort((a, b) => a - b);
+};
+
+// Reads what formatEstimate() writes; shared with the renderer.
+export { parseEstimate } from '../../shared/estimate.ts';
 
 // "预计 2 小时" / "预计 30 分钟", matching the sample data.
 export const formatEstimate = (hours: number): string => {
@@ -354,6 +379,9 @@ export const toTaskDefinitions = (requirement: { id: string; title: string }, pa
     tags: pkg.tags,
     priority: pkg.priority,
     estimate: formatEstimate(pkg.estimateHours),
+    estimateHours: pkg.estimateHours,
+    // Plans saved before dependencies existed have none.
+    dependsOn: (pkg.dependsOn ?? []).map((number) => `${requirement.id}-wp${number}`),
     icon: pkg.icon,
     steps: pkg.steps,
     fileScope: pkg.fileScope,

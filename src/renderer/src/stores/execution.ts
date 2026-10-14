@@ -349,6 +349,17 @@ export const useExecutionStore = defineStore('execution', () => {
   // The transition in flight; its button spins and the others wait.
   const transitioning = ref<ipc.HumanTransition | null>(null);
 
+  // [人工决策-2026-10-14] 同时只做 1 个是软提示：已有执行中的包时，确认后仍可领取。
+  const confirmBusyClaim = async (id: string) => {
+    const others = useTasksStore().tasks.filter((task) => task.status === 'in_progress' && task.id !== id);
+    if (!others.length) return true;
+    return confirmAction({
+      title: `已经有 ${others.length} 个工作包在执行中`,
+      body: `「${others[0].title}」${others.length > 1 ? ` 等 ${others.length} 个` : ''}还没做完。同时做几个包时，改动容易混在一起，QA 也分不清哪些属于哪个包。建议先做完或放回队列，再开始新的。`,
+      accept: '仍然开始',
+    });
+  };
+
   const runTransition = async (name: ipc.HumanTransition) => {
     if (!current.value || transitioning.value) return;
     if (name === 'report_deviation') {
@@ -357,6 +368,7 @@ export const useExecutionStore = defineStore('execution', () => {
     }
     const confirm = TRANSITION_CONFIRMS[name];
     if (confirm && !(await confirmAction(confirm))) return;
+    if (name === 'claim' && !(await confirmBusyClaim(current.value.id))) return;
     if (name === 'claim' && !(await confirmDirtyClaim())) return;
     if (name === 'submit_for_review' && current.value.codingRun?.status === 'applied') {
       const proceed = await confirmAction({
@@ -413,6 +425,34 @@ export const useExecutionStore = defineStore('execution', () => {
     return true;
   };
 
+  // From a board card: open the package, then claim it there, so the same
+  // confirmations apply as on the execution page.
+  const claimFromQueue = async (id: string) => {
+    await open(id);
+    if (current.value?.id === id) await runTransition('claim');
+  };
+
+  // Lets a pending package start before one of its dependencies is done.
+  const waiveDependency = async (task: ipc.TaskView, dependency: ipc.PackageDependency) => {
+    const confirmed = await confirmAction({
+      title: '不等前置，直接开始？',
+      body: `「${task.title}」原计划等「${dependency.title ?? dependency.id}」完成后再做，因为它可能要用到前置包写的代码。不等的话，你可能要自己补上缺的部分。`,
+      accept: '解除这条依赖',
+    });
+    if (!confirmed) return false;
+    try {
+      const updated = await call(window.taskpilot.waiveDependency(task.id, dependency.id));
+      useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === updated.id ? updated : entry));
+      if (current.value?.id === updated.id) current.value = updated;
+      showToast('已解除这条依赖，可以开始执行了。');
+      return true;
+    } catch (error) {
+      console.error(error);
+      showToast(`解除依赖失败：${describeError(error)}`);
+      return false;
+    }
+  };
+
   return {
     // Current package
     current,
@@ -421,6 +461,9 @@ export const useExecutionStore = defineStore('execution', () => {
     adoptTask,
     close,
     reloadCurrent,
+    // Queue actions
+    claimFromQueue,
+    waiveDependency,
     // Steps
     setStepDone,
     // Baseline

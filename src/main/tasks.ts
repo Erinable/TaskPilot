@@ -34,6 +34,11 @@ export interface TaskDefinition {
   acceptance: AcceptanceCriterion[];
   // Absent on packages planned before difficulty existed.
   difficulty?: PackageDifficulty;
+  // Ids of packages from the same requirement that must be done first.
+  // Absent on packages planned before dependencies existed.
+  dependsOn?: string[];
+  // The plan's estimate as a number; older packages only have `estimate`.
+  estimateHours?: number;
 }
 
 // The part of a definition Architect can replan.

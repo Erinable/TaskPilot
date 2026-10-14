@@ -12,7 +12,8 @@ import crypto from 'node:crypto';
 
 import { formatNotes } from './agents/release_manager.ts';
 import type { ReleasePlan } from './agents/release_manager.ts';
-import type { ReleaseInputSummary } from '../shared/ipc_types.ts';
+import type { Milestone, ReleaseInputSummary } from '../shared/ipc_types.ts';
+import { MAX_MILESTONES, MilestoneError, assignRequirement, parseMilestoneInput } from './milestones.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
 
 export const RELEASES_FILENAME = 'releases.json';
@@ -52,6 +53,7 @@ interface SavedState {
   draft: ReleaseDraft | null;
   history: Release[];
   releasedPackageIds: string[];
+  milestones: Milestone[];
 }
 
 export type ReleaseErrorCode = 'invalid_argument' | 'invalid_state' | 'too_long' | 'invalid_text' | 'release_unchecked';
@@ -79,7 +81,7 @@ const isDraft = (value: unknown): value is ReleaseDraft => {
 
 export class ReleaseStore {
   #file: string;
-  #state: SavedState = { draft: null, history: [], releasedPackageIds: [] };
+  #state: SavedState = { draft: null, history: [], releasedPackageIds: [], milestones: [] };
   #newId: () => string;
   #now: () => Date;
 
@@ -97,7 +99,7 @@ export class ReleaseStore {
   async open(configDir: string): Promise<this> {
     await this.flush();
     this.#file = path.join(configDir, RELEASES_FILENAME);
-    this.#state = { draft: null, history: [], releasedPackageIds: [] };
+    this.#state = { draft: null, history: [], releasedPackageIds: [], milestones: [] };
     return this.load();
   }
 
@@ -114,6 +116,9 @@ export class ReleaseStore {
         draft,
         history: (Array.isArray(saved?.history) ? saved.history : []).filter((item) => typeof item?.id === 'string').slice(0, MAX_HISTORY),
         releasedPackageIds: (Array.isArray(saved?.releasedPackageIds) ? saved.releasedPackageIds : []).filter((id) => typeof id === 'string'),
+        milestones: (Array.isArray(saved?.milestones) ? saved.milestones : []).filter(
+          (item) => typeof item?.id === 'string' && typeof item.version === 'string' && Array.isArray(item.requirementIds),
+        ),
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
@@ -257,7 +262,74 @@ export class ReleaseStore {
     };
     this.#state.history = [release, ...this.#state.history].slice(0, MAX_HISTORY);
     this.#state.releasedPackageIds = [...new Set([...this.#state.releasedPackageIds, ...packageIds])];
+    // Releasing a version closes its plan.
+    this.#state.milestones = this.#state.milestones.map((milestone) =>
+      milestone.version === release.version && !milestone.releasedAt ? { ...milestone, releasedAt: release.finishedAt } : milestone,
+    );
     await this.#setDraft(null);
     return structuredClone(release);
+  }
+
+  // ========== Milestones ==========
+
+  milestones(): Milestone[] {
+    return structuredClone(this.#state.milestones);
+  }
+
+  // `known`: existing requirement ids. A new milestone takes its requirements
+  // out of any other open milestone.
+  async createMilestone(raw: unknown, known: ReadonlySet<string>): Promise<Milestone> {
+    const open = this.#state.milestones.filter((milestone) => !milestone.releasedAt);
+    if (open.length >= MAX_MILESTONES) throw new MilestoneError(`At most ${MAX_MILESTONES} open milestones`, 'invalid_state');
+    const input = parseMilestoneInput(raw, known);
+    if (open.some((milestone) => milestone.version === input.version))
+      throw new MilestoneError('This version already has a plan', 'invalid_argument', 'version');
+    const milestone: Milestone = {
+      id: `ms-${this.#newId().replace(/^rel-/, '')}`,
+      ...input,
+      requirementIds: [],
+      createdAt: this.#now().toISOString(),
+      releasedAt: null,
+    };
+    let milestones = [...this.#state.milestones, milestone];
+    for (const id of input.requirementIds) milestones = assignRequirement(milestones, id, milestone.id);
+    this.#state.milestones = milestones;
+    await this.#persist();
+    return structuredClone(milestones.find((item) => item.id === milestone.id) as Milestone);
+  }
+
+  async updateMilestone(id: string, raw: unknown, known: ReadonlySet<string>): Promise<Milestone> {
+    const current = this.#openMilestone(id);
+    const input = parseMilestoneInput(raw, known);
+    if (this.#state.milestones.some((milestone) => !milestone.releasedAt && milestone.id !== id && milestone.version === input.version)) {
+      throw new MilestoneError('This version already has a plan', 'invalid_argument', 'version');
+    }
+    let milestones = this.#state.milestones.map((milestone) =>
+      milestone.id === id ? { ...current, version: input.version, targetDate: input.targetDate, requirementIds: [] } : milestone,
+    );
+    for (const requirementId of input.requirementIds) milestones = assignRequirement(milestones, requirementId, id);
+    this.#state.milestones = milestones;
+    await this.#persist();
+    return structuredClone(milestones.find((item) => item.id === id) as Milestone);
+  }
+
+  async deleteMilestone(id: string): Promise<void> {
+    this.#openMilestone(id);
+    this.#state.milestones = this.#state.milestones.filter((milestone) => milestone.id !== id);
+    await this.#persist();
+  }
+
+  // Plans one requirement into a milestone, or out of every one when null.
+  async assignRequirement(requirementId: string, milestoneId: string | null): Promise<Milestone[]> {
+    this.#state.milestones = assignRequirement(this.#state.milestones, requirementId, milestoneId);
+    await this.#persist();
+    return this.milestones();
+  }
+
+  #openMilestone(id: string): Milestone {
+    const found = this.#state.milestones.find((milestone) => milestone.id === id);
+    if (!found) throw new MilestoneError('No such milestone', 'not_found');
+    if (found.releasedAt) throw new MilestoneError('A released milestone cannot change', 'invalid_state');
+    return found;
   }
 }

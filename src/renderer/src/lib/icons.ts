@@ -286,6 +286,28 @@ export const ICONS = {
       ['path', { d: 'M17 13.5v7M13.5 17h7' }],
     ],
   },
+  board: {
+    shapes: [
+      ['rect', { x: 3.5, y: 4, width: 4.5, height: 16, rx: 1.5 }],
+      ['rect', { x: 9.75, y: 4, width: 4.5, height: 11, rx: 1.5 }],
+      ['rect', { x: 16, y: 4, width: 4.5, height: 7, rx: 1.5 }],
+    ],
+  },
+  list: {
+    shapes: [
+      ['path', { d: 'M9 6.5h11M9 12h11M9 17.5h11' }],
+      ['circle', { cx: 4.75, cy: 6.5, r: 1 }],
+      ['circle', { cx: 4.75, cy: 12, r: 1 }],
+      ['circle', { cx: 4.75, cy: 17.5, r: 1 }],
+    ],
+  },
+  target: {
+    shapes: [
+      ['circle', { cx: 12, cy: 12, r: 8 }],
+      ['circle', { cx: 12, cy: 12, r: 4.5 }],
+      ['circle', { cx: 12, cy: 12, r: 1 }],
+    ],
+  },
   coins: {
     shapes: [
       ['circle', { cx: 9, cy: 9, r: 5.5 }],

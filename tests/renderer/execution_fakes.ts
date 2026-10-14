@@ -29,6 +29,8 @@ export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView =>
   adjudication: null,
   revision: null,
   humanTransitions: [],
+  dependencies: [],
+  completedAt: null,
   ...overrides,
 });
 
@@ -54,6 +56,12 @@ export const installApi = (current: { task: ipc.TaskView }) => {
     listTasks: vi.fn(() => ok([current.task])),
     getTask: vi.fn(() => ok(current.task)),
     transition: vi.fn((_id: string, _name: ipc.HumanTransition, _options?: ipc.TransitionOptions) => ok(state(current.task))),
+    waiveDependency: vi.fn((_id: string, dependency: string) =>
+      ok({
+        ...current.task,
+        dependencies: current.task.dependencies.map((entry) => (entry.id === dependency ? { ...entry, waived: true, blocking: false } : entry)),
+      }),
+    ),
     measureBaseline: vi.fn(() => ok(current.task)),
     setStepDone: vi.fn((_id: string, stepIndex: number) => ok(state({ ...current.task, completedSteps: [stepIndex] }))),
     review: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },

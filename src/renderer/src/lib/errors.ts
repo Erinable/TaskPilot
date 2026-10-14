@@ -32,6 +32,7 @@ export const ERROR_HINTS: Record<string, string> = {
   agent_failed: '智能体运行失败。',
   review_running: 'QA 正在审查。',
   invalid_state: '当前状态下不能执行这个操作。',
+  dependencies_pending: '前置工作包还没完成。可以等它完成，或在卡片上解除这条依赖。',
   required: '请填写这一项。',
   too_long: '内容太长了。',
   invalid_text: '内容包含控制字符。',

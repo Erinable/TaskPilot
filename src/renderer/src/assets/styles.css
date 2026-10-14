@@ -2775,6 +2775,12 @@ button.avatar:hover {
   width: 13px;
   height: 13px;
 }
+.primary-button.small {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
 
 /* Avatar picker */
 .avatar-control {

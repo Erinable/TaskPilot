@@ -4,6 +4,7 @@ declare const api: {
   listTasks: () => Promise<ipc.IpcResult<ipc.TaskView[]>>;
   getTask: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
   transition: (id: string, name: ipc.HumanTransition, options?: ipc.TransitionOptions) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
+  waiveDependency: (id: string, dependency: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
   measureBaseline: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
   setStepDone: (id: string, stepIndex: number, done: boolean) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
   review: {
@@ -93,6 +94,10 @@ declare const api: {
     finish: () => Promise<ipc.IpcResult<ipc.Release>>;
     writeNotes: (input: ipc.ReleaseWriteInput) => Promise<ipc.IpcResult<ipc.ReleaseWriteResult>>;
     cancel: () => Promise<ipc.IpcResult<boolean>>;
+    createMilestone: (input: ipc.MilestoneInput) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
+    updateMilestone: (id: string, input: ipc.MilestoneInput) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
+    deleteMilestone: (id: string) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
+    assignMilestone: (requirementId: string, milestoneId: string | null) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
   };
   repositories: {
     list: () => Promise<ipc.IpcResult<ipc.RepositoryList>>;

@@ -21,6 +21,7 @@ const api = {
   getTask: (id: string) => invoke<ipc.TaskView>(CHANNELS.getTask, id),
 
   transition: (id: string, name: ipc.HumanTransition, options?: ipc.TransitionOptions) => invoke<ipc.WorkPackageState>(CHANNELS.transition, id, name, options),
+  waiveDependency: (id: string, dependency: string) => invoke<ipc.TaskView>(CHANNELS.waiveDependency, id, dependency),
   measureBaseline: (id: string) => invoke<ipc.TaskView>(CHANNELS.baselineMeasure, id),
   setStepDone: (id: string, stepIndex: number, done: boolean) => invoke<ipc.WorkPackageState>(CHANNELS.setStepDone, id, stepIndex, done),
 
@@ -126,6 +127,10 @@ const api = {
     finish: () => invoke<ipc.Release>(CHANNELS.releaseFinish),
     writeNotes: (input: ipc.ReleaseWriteInput) => invoke<ipc.ReleaseWriteResult>(CHANNELS.releaseWriteNotes, input),
     cancel: () => invoke<boolean>(CHANNELS.releaseCancel),
+    createMilestone: (input: ipc.MilestoneInput) => invoke<ipc.ReleaseState>(CHANNELS.milestoneCreate, input),
+    updateMilestone: (id: string, input: ipc.MilestoneInput) => invoke<ipc.ReleaseState>(CHANNELS.milestoneUpdate, id, input),
+    deleteMilestone: (id: string) => invoke<ipc.ReleaseState>(CHANNELS.milestoneDelete, id),
+    assignMilestone: (requirementId: string, milestoneId: string | null) => invoke<ipc.ReleaseState>(CHANNELS.milestoneAssign, requirementId, milestoneId),
   },
 
   repositories: {

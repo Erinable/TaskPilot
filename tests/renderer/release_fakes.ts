@@ -47,6 +47,7 @@ export const release = (overrides: Partial<ipc.Release> = {}): ipc.Release => ({
 export const releaseState = (overrides: Partial<ipc.ReleaseState> = {}): ipc.ReleaseState => ({
   configured: true,
   draft: null,
+  milestones: [],
   history: [],
   startPoint: { kind: 'release', commit: 'aaaaaaa1', label: '0.1.0' },
   running: false,
@@ -78,8 +79,30 @@ export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
     finish: vi.fn(() => ok(finishedRelease(state))),
     writeNotes: vi.fn((input: ipc.ReleaseWriteInput) => ok<ipc.ReleaseWriteResult>({ path: input.path })),
     cancel: vi.fn(() => ok(true)),
+    createMilestone: vi.fn((input: ipc.MilestoneInput) => {
+      const milestone: ipc.MilestoneView = {
+        id: `ms${state.current.milestones.length + 1}`,
+        ...input,
+        createdAt: '',
+        releasedAt: null,
+        requirements: [],
+        done: 0,
+        total: 0,
+        complete: false,
+      };
+      state.current = { ...state.current, milestones: [...state.current.milestones, milestone] };
+      return ok(state.current);
+    }),
+    updateMilestone: vi.fn((_id: string, _input: ipc.MilestoneInput) => ok(state.current)),
+    deleteMilestone: vi.fn((id: string) => {
+      state.current = { ...state.current, milestones: state.current.milestones.filter((item) => item.id !== id) };
+      return ok(state.current);
+    }),
+    assignMilestone: vi.fn((_requirementId: string, _milestoneId: string | null) => ok(state.current)),
   };
-  (window as unknown as { taskpilot: unknown }).taskpilot = { release };
+  // The milestone form lists published requirements.
+  const requirements = { list: vi.fn(() => ok<ipc.Requirement[]>([])) };
+  (window as unknown as { taskpilot: unknown }).taskpilot = { release, requirements };
   return release;
 };
 

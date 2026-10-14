@@ -85,6 +85,11 @@ export type TaskDefinition = {
   // Set on packages generated from a requirement.
   requirementId?: string;
   difficulty?: PackageDifficulty;
+  // Ids of packages from the same requirement that must be done first.
+  // Absent on packages planned before dependencies existed.
+  dependsOn?: string[];
+  // The plan's estimate as a number; older packages only have `estimate`.
+  estimateHours?: number;
 };
 
 // The parts of a definition Architect's replan replaces.
@@ -335,6 +340,21 @@ export type TaskView = TaskDefinition & {
   revision: Omit<Revision, 'definition'> | null;
   // Human transitions available now, after the state guards.
   humanTransitions: HumanTransition[];
+  // Every declared dependency with where it stands. `blocking` ones keep a
+  // pending package from being claimed.
+  dependencies: PackageDependency[];
+  // When the package reached done; null before.
+  completedAt: string | null;
+};
+
+// One dependency of a package, as the queue shows it.
+export type PackageDependency = {
+  id: string;
+  // Null when the package no longer exists (its requirement was removed).
+  title: string | null;
+  status: WorkPackageStatus | null;
+  waived: boolean;
+  blocking: boolean;
 };
 
 // ========== diff ==========
@@ -462,6 +482,8 @@ export type PlanPackage = {
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
   difficulty?: PackageDifficulty;
+  // 1-based numbers of earlier packages; absent on plans saved before it existed.
+  dependsOn?: number[];
 };
 
 export type RequirementPlan = { summary: string; packages: PlanPackage[] };
@@ -759,9 +781,35 @@ export type Release = {
   finishedAt: string;
 };
 
+// A version plan: the requirements a version is meant to ship.
+export type Milestone = {
+  id: string;
+  version: string;
+  // YYYY-MM-DD, optional.
+  targetDate: string | null;
+  requirementIds: string[];
+  createdAt: string;
+  // Set when a release of this version is finished.
+  releasedAt: string | null;
+};
+
+// What the release page sends to create or edit a milestone.
+export type MilestoneInput = { version: string; targetDate: string | null; requirementIds: string[] };
+
+// A milestone with its requirements' progress, for the release page.
+export type MilestoneView = Milestone & {
+  requirements: { id: string; title: string; done: number; total: number }[];
+  done: number;
+  total: number;
+  // Every package of every requirement is done.
+  complete: boolean;
+};
+
 export type ReleaseState = {
   configured: boolean;
   draft: ReleaseDraft | null;
+  // Open milestones first (by target date), then released ones.
+  milestones: MilestoneView[];
   // Newest first, at most 50.
   history: Release[];
   // Null without a workspace.

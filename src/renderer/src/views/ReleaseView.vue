@@ -6,6 +6,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import ReleaseDraftPanel from '@/components/release/ReleaseDraftPanel.vue';
 import ReleaseHistory from '@/components/release/ReleaseHistory.vue';
+import MilestonePanel from '@/components/release/MilestonePanel.vue';
+import { useRequirementsStore } from '@/stores/requirements.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import * as model from '@/lib/release_model.ts';
 import { useReleaseStore } from '@/stores/release.ts';
@@ -14,6 +16,7 @@ import type * as ipc from '@shared/ipc_types.ts';
 
 const store = useReleaseStore();
 const settings = useSettingsStore();
+const requirements = useRequirementsStore();
 
 const startPoint = computed(() => store.state?.startPoint ?? null);
 const draft = computed(() => store.draft);
@@ -34,7 +37,18 @@ const generate = () => {
     .finally(() => (starting.value = false));
 };
 
-onMounted(() => run(store.enter));
+// A finished version plan starts the draft and scrolls to it.
+const startPanel = ref<HTMLElement | null>(null);
+const draftFromMilestone = () => {
+  startPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!store.generating && !draft.value) generate();
+};
+
+onMounted(() => {
+  run(store.enter);
+  // The plan form lists requirements by title.
+  run(requirements.refreshList);
+});
 onBeforeUnmount(() => store.leave());
 </script>
 
@@ -66,7 +80,8 @@ onBeforeUnmount(() => store.leave());
     </div>
 
     <template v-else-if="store.state && startPoint">
-      <section class="panel glass release-start" aria-label="起点">
+      <MilestonePanel @draft="draftFromMilestone" />
+      <section ref="startPanel" class="panel glass release-start" aria-label="起点">
         <div class="start-row">
           <span class="panel-icon"><AppIcon name="git-branch" /></span>
           <p v-if="startPoint.kind !== 'none'" class="start-line">{{ model.startPointLine(startPoint, draft?.input ?? null) }}</p>

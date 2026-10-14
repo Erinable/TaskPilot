@@ -154,10 +154,13 @@ const toWireState = (state: PackageState) => state as ipc.WorkPackageState;
 const toWireRequirement = (item: Requirement) => item as ipc.Requirement;
 
 // `task` is the effective definition (WorkPackageStore.effective()).
-export const buildTaskView = (task: TaskDefinition, packageState: PackageState): ipc.TaskView => {
+// `dependencies` comes from the caller, which can see the other packages.
+export const buildTaskView = (task: TaskDefinition, packageState: PackageState, dependencies: ipc.PackageDependency[] = []): ipc.TaskView => {
   const state = toWireState(packageState);
   return {
     ...task,
+    dependencies,
+    completedAt: packageState.completedAt ?? null,
     status: state.status,
     statusLabel: label(state.status),
     baseline: state.baseline,
@@ -392,11 +395,42 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     return task;
   };
 
+  // Where each of a package's dependencies stands. One blocks claiming
+  // until it is done, unless the developer waived it; a dependency whose
+  // package no longer exists cannot be finished, so it never blocks.
+  const dependenciesOf = (task: TaskDefinition, state: PackageState): ipc.PackageDependency[] =>
+    (task.dependsOn ?? []).map((id) => {
+      const dependency = tasks.getTask(id);
+      const status = dependency ? store.get(id).status : null;
+      const waived = state.waivedDependencies.includes(id);
+      return { id, title: dependency?.title ?? null, status, waived, blocking: Boolean(dependency) && status !== 'done' && !waived };
+    });
+  // A blocked package does not offer `claim`, so no screen shows a button the guard would refuse.
+  const viewOf = (task: TaskDefinition, state: PackageState) => {
+    const dependencies = dependenciesOf(task, state);
+    const view = buildTaskView(task, state, dependencies);
+    return dependencies.some((dependency) => dependency.blocking)
+      ? { ...view, humanTransitions: view.humanTransitions.filter((name) => name !== 'claim') }
+      : view;
+  };
+
+  // The developer starts a package before one of its dependencies is done.
+  ipcMain.handle(
+    CHANNELS.waiveDependency,
+    wrap(async (_event, rawId, rawDependency): Promise<ipc.TaskView> => {
+      const id = requireString(rawId, 'id');
+      const dependency = requireString(rawDependency, 'dependency');
+      const task = requireTask(id);
+      if (!(task.dependsOn ?? []).includes(dependency)) failWith('Not a dependency of this package', 'invalid_argument', 'dependency');
+      return viewOf(task, await store.waiveDependency(id, dependency));
+    }),
+  );
+
   ipcMain.handle(
     CHANNELS.listTasks,
     wrap((): ipc.TaskView[] => {
       const state = store.all();
-      return tasks.listTasks().map((task) => buildTaskView(store.effective(task), state[task.id]));
+      return tasks.listTasks().map((task) => viewOf(store.effective(task), state[task.id]));
     }),
   );
 
@@ -404,7 +438,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.getTask,
     wrap((_event, id): ipc.TaskView => {
       const checked = requireString(id, 'id');
-      return buildTaskView(requireTask(checked), store.get(checked));
+      return viewOf(requireTask(checked), store.get(checked));
     }),
   );
 
@@ -568,7 +602,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (trigger !== 'human' && store.get(id).codingRun?.status === 'ready') continueLoop(id, () => autoApplyRound(id));
     })();
     track(settled);
-    return buildTaskView(task, store.get(id));
+    return viewOf(task, store.get(id));
   };
 
   // An automatic round's patch: applied whole unless it touches a high-risk
@@ -691,7 +725,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.codingGet,
     wrap((_event, rawId): ipc.TaskView => {
       const id = requireString(rawId, 'id');
-      return buildTaskView(requireTask(id), store.get(id));
+      return viewOf(requireTask(id), store.get(id));
     }),
   );
   ipcMain.handle(
@@ -967,7 +1001,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (state.status !== 'in_progress') failWith('Baselines can only be measured while the package is in progress', 'invalid_state');
       if (baselineRuns.has(id)) failWith('The baseline is already being measured', 'baseline_running');
       measureBaseline(id);
-      return buildTaskView(requireTask(id), store.get(id));
+      return viewOf(requireTask(id), store.get(id));
     }),
   );
 
@@ -979,7 +1013,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const id = requireString(rawId, 'id');
       const name = requireString(rawName, 'name');
       const extra: { baseline?: string; deviation?: DeviationInput } = {};
-      if (name === 'claim') extra.baseline = await git.head(requireRoot());
+      if (name === 'claim') {
+        // [人工决策-2026-10-14] 前置包没完成就不能领取；解除依赖要人明确操作。
+        const blocking = dependenciesOf(requireTask(id), store.get(id)).filter((dependency) => dependency.blocking);
+        if (blocking.length) failWith(`Waiting for ${blocking.map((dependency) => dependency.title ?? dependency.id).join(', ')}`, 'dependencies_pending');
+        extra.baseline = await git.head(requireRoot());
+      }
       // The store validates the deviation it is given.
       if (name === 'report_deviation') extra.deviation = (options as { deviation?: DeviationInput } | null | undefined)?.deviation;
       if (name === 'release') baselineRuns.get(id)?.abort();
@@ -1905,17 +1944,73 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     };
   };
 
+  // Each milestone with how far its requirements' packages are. Open plans
+  // first, nearest target date first; released ones after, newest first.
+  const milestoneViews = (store: ReleaseStore): ipc.MilestoneView[] => {
+    const state = workPackages.all();
+    const packagesOf = (requirementId: string) => tasks.listTasks().filter((task) => (task as { requirementId?: string }).requirementId === requirementId);
+    const views = store.milestones().map((milestone): ipc.MilestoneView => {
+      const items = milestone.requirementIds.map((id) => {
+        const packages = packagesOf(id);
+        return { id, title: requirementTitle(id), done: packages.filter((task) => state[task.id]?.status === 'done').length, total: packages.length };
+      });
+      const done = items.reduce((sum, item) => sum + item.done, 0);
+      const total = items.reduce((sum, item) => sum + item.total, 0);
+      return { ...milestone, requirements: items, done, total, complete: items.length > 0 && total > 0 && done === total };
+    });
+    const open = views
+      .filter((view) => !view.releasedAt)
+      .sort((a, b) => (a.targetDate ?? '9999').localeCompare(b.targetDate ?? '9999') || a.createdAt.localeCompare(b.createdAt));
+    const released = views.filter((view) => view.releasedAt).sort((a, b) => (b.releasedAt as string).localeCompare(a.releasedAt as string));
+    return [...open, ...released];
+  };
+  const knownRequirements = () => new Set((requirements?.list() ?? []).map((item) => item.id));
+
   const releaseState = async (): Promise<ipc.ReleaseState> => {
     const store = requireReleases();
     const root = getConfig().root;
     return {
       configured: Boolean(root),
       draft: store.draft(),
+      milestones: milestoneViews(store),
       history: store.history(),
       startPoint: root ? await releaseStartPoint(root, store) : null,
       running: releaseController !== null,
     };
   };
+
+  ipcMain.handle(
+    CHANNELS.milestoneCreate,
+    wrap(async (_event, raw): Promise<ipc.ReleaseState> => {
+      await requireReleases().createMilestone(raw, knownRequirements());
+      return releaseState();
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.milestoneUpdate,
+    wrap(async (_event, rawId, raw): Promise<ipc.ReleaseState> => {
+      await requireReleases().updateMilestone(requireString(rawId, 'id'), raw, knownRequirements());
+      return releaseState();
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.milestoneDelete,
+    wrap(async (_event, rawId): Promise<ipc.ReleaseState> => {
+      await requireReleases().deleteMilestone(requireString(rawId, 'id'));
+      return releaseState();
+    }),
+  );
+  // From a requirement's detail page: plan it into a version, or out of all.
+  ipcMain.handle(
+    CHANNELS.milestoneAssign,
+    wrap(async (_event, rawRequirementId, rawMilestoneId): Promise<ipc.ReleaseState> => {
+      const requirementId = requireString(rawRequirementId, 'requirementId');
+      if (!knownRequirements().has(requirementId)) failWith('Unknown requirement', 'invalid_argument', 'requirementId');
+      const milestoneId = rawMilestoneId === null ? null : requireString(rawMilestoneId, 'milestoneId');
+      await requireReleases().assignRequirement(requirementId, milestoneId);
+      return releaseState();
+    }),
+  );
 
   // Done packages no earlier release included, with the text the notes are
   // written from. Recorded per release, so this does not depend on the

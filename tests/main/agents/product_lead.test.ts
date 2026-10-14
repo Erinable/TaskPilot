@@ -124,3 +124,35 @@ test('the plan schema asks for a difficulty level from the allowlist', () => {
   assert.deepEqual(item.properties.difficulty.properties.level.enum, productLead.DIFFICULTIES);
   assert.match(productLead.planPrompt({ text: '登录' }), /Difficulty, for a developer who may be new to programming/);
 });
+
+test('validatePlan() keeps dependencies on earlier packages only, deduplicated and sorted', () => {
+  const plan = productLead.validatePlan(validPlan([validPackage(), validPackage(), validPackage({ dependsOn: [2, 1, 2] })]));
+  assert.deepEqual(
+    plan.packages.map((pkg) => pkg.dependsOn),
+    [[], [], [1, 2]],
+  );
+  // validPackage() has no dependsOn: a CLI that drops an empty optional array still means none.
+  assert.deepEqual(productLead.validatePlan(validPlan([validPackage()])).packages[0].dependsOn, []);
+  for (const bad of [[1], [0], [3], [1.5], ['1']]) {
+    assert.throws(() => productLead.validatePlan(validPlan([validPackage(), validPackage({ dependsOn: bad.map((n) => (n === 1 ? 2 : n)) })])), {
+      code: 'agent_bad_output',
+    });
+  }
+});
+
+test('toTaskDefinitions() turns dependency numbers into package ids and keeps the hours', () => {
+  const plan = productLead.validatePlan(validPlan([validPackage({ estimateHours: 1.5 }), validPackage({ dependsOn: [1] })]));
+  const [first, second] = productLead.toTaskDefinitions({ id: 'req-9', title: '登录' }, plan.packages);
+  assert.deepEqual([first.dependsOn, second.dependsOn], [[], ['req-9-wp1']]);
+  assert.equal(first.estimateHours, 1.5);
+  // Plans saved before dependencies existed publish without any.
+  const { dependsOn: _omitted, ...legacy } = plan.packages[0];
+  assert.deepEqual(productLead.toTaskDefinitions({ id: 'req-9', title: '登录' }, [legacy])[0].dependsOn, []);
+});
+
+test('parseEstimate() reads what formatEstimate() writes, and nothing else', () => {
+  for (const hours of [0.25, 0.5, 1, 2.5, 16]) assert.equal(productLead.parseEstimate(productLead.formatEstimate(hours)), hours);
+  assert.equal(productLead.parseEstimate('预计 45 分钟'), 0.75);
+  assert.equal(productLead.parseEstimate('2h'), null);
+  assert.equal(productLead.parseEstimate('大约两小时'), null);
+});

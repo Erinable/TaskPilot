@@ -227,3 +227,43 @@ describe('execution store', () => {
     expect(execution.acceptanceOverride).toBeNull();
   });
 });
+
+describe('queue actions', () => {
+  test('claiming while another package is in progress asks first, and declining claims nothing', async () => {
+    current.task = taskView({ status: 'pending', humanTransitions: ['claim'] });
+    useTasksStore().tasks = [taskView({ id: 'other', title: '另一个包', status: 'in_progress' })];
+    const execution = useExecutionStore();
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+    await execution.claimFromQueue('t1');
+    expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].title).toBe('已经有 1 个工作包在执行中');
+    expect(api.transition).not.toHaveBeenCalled();
+
+    vi.mocked(feedback.confirmAction).mockResolvedValue(true);
+    await execution.claimFromQueue('t1');
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim');
+  });
+
+  test('claiming with nothing else in progress does not ask about it', async () => {
+    current.task = taskView({ status: 'pending', humanTransitions: ['claim'] });
+    useTasksStore().tasks = [];
+    vi.mocked(feedback.confirmAction).mockResolvedValue(true);
+    await useExecutionStore().claimFromQueue('t1');
+    expect(vi.mocked(feedback.confirmAction).mock.calls.map(([options]) => options.title)).not.toContain('已经有 1 个工作包在执行中');
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim');
+  });
+
+  test('waiving a dependency asks, then updates the package everywhere', async () => {
+    const dependency = { id: 'r1-wp1', title: '实现用例', status: 'in_progress' as const, waived: false, blocking: true };
+    current.task = taskView({ status: 'pending', dependencies: [dependency] });
+    useTasksStore().tasks = [current.task];
+    const execution = useExecutionStore();
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+    expect(await execution.waiveDependency(current.task, dependency)).toBe(false);
+    expect(api.waiveDependency).not.toHaveBeenCalled();
+
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+    expect(await execution.waiveDependency(current.task, dependency)).toBe(true);
+    expect(api.waiveDependency).toHaveBeenCalledWith('t1', 'r1-wp1');
+    expect(useTasksStore().tasks[0].dependencies[0].blocking).toBe(false);
+  });
+});

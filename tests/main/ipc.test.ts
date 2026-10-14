@@ -2001,3 +2001,97 @@ test('costs: the report rejects other ranges and counts recorded calls', async (
   assert.equal(report.bySubject[0].title, SAMPLE_TASKS.find((task) => task.id === 'auth-edge-tests')?.title);
   assert.equal(report.prices, null);
 });
+
+// Publishes a two-package plan where the second depends on the first.
+const publishChain = async (h: Awaited<ReturnType<typeof harness>>) => {
+  h.agentCalls.length = 0;
+  const { data } = await h.call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await settle(h.call, data.id);
+  await h.call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  await settle(h.call, data.id);
+  await h.call(CHANNELS.requirementsPublish, data.id);
+  return { first: `${data.id}-wp1`, second: `${data.id}-wp2` };
+};
+
+test('dependencies: a package waits for its predecessor, and the developer can waive it', async () => {
+  const second = { ...PLAN_OUTPUT.packages[0], title: '接入登录路由', dependsOn: [1] };
+  const h = await harness({ agent: fakeAgent({ plan: { ...PLAN_OUTPUT, packages: [PLAN_OUTPUT.packages[0], second] } }) });
+  const { first, second: next } = await publishChain(h);
+  const waiting = (await h.call(CHANNELS.getTask, next)).data as TaskView;
+  assert.deepEqual(waiting.dependencies, [{ id: first, title: '实现登录接口', status: 'pending', waived: false, blocking: true }]);
+
+  const refused = await h.call(CHANNELS.transition, next, 'claim');
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, 'dependencies_pending');
+
+  assert.equal((await h.call(CHANNELS.waiveDependency, next, 'someone-else')).ok, false);
+  const waived = (await h.call(CHANNELS.waiveDependency, next, first)).data as TaskView;
+  assert.deepEqual([waived.dependencies[0].waived, waived.dependencies[0].blocking], [true, false]);
+  assert.equal((await h.call(CHANNELS.transition, next, 'claim')).data.status, 'in_progress');
+  // Waiving is for packages not started yet.
+  assert.equal((await h.call(CHANNELS.waiveDependency, next, first)).error.code, 'invalid_state');
+});
+
+test('dependencies: a finished predecessor unblocks, and done records completedAt', async () => {
+  const second = { ...PLAN_OUTPUT.packages[0], title: '接入登录路由', dependsOn: [1] };
+  const h = await harness({ agent: fakeAgent({ plan: { ...PLAN_OUTPUT, packages: [PLAN_OUTPUT.packages[0], second] } }) });
+  const { first, second: next } = await publishChain(h);
+  await h.store.transition(first, 'claim', 'human', { baseline: 'HEAD' });
+  await h.store.transition(first, 'submit_for_review', 'human');
+  await h.store.beginReview(first);
+  await h.store.completeReview(first, {
+    passed: true,
+    reasons: [],
+    evidence: [],
+    checks: [],
+    acceptance: [],
+    report: null,
+    diff: { files: [], skipped: [], outOfScope: [] },
+    costUsd: 0,
+  } as never);
+  const done = (await h.call(CHANNELS.getTask, first)).data as TaskView;
+  assert.equal(done.status, 'done');
+  assert.ok(done.completedAt && Date.parse(done.completedAt) >= Date.parse(done.claimedAt as string));
+  const unblocked = (await h.call(CHANNELS.getTask, next)).data as TaskView;
+  assert.equal(unblocked.dependencies[0].blocking, false);
+  assert.equal((await h.call(CHANNELS.transition, next, 'claim')).data.status, 'in_progress');
+});
+
+test('milestones: progress follows the requirement packages, and a requirement sits in one plan', async () => {
+  const second = { ...PLAN_OUTPUT.packages[0], title: '接入登录路由', dependsOn: [1] };
+  const h = await harness({ agent: fakeAgent({ plan: { ...PLAN_OUTPUT, packages: [PLAN_OUTPUT.packages[0], second] } }) });
+  const { first } = await publishChain(h);
+  const requirementId = first.replace(/-wp1$/, '');
+  const created = await h.call(CHANNELS.milestoneCreate, { version: '0.3.0', targetDate: '2026-10-31', requirementIds: [requirementId, 'not-a-requirement'] });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  let [plan] = (created.data as { milestones: { id: string; requirements: { title: string }[]; done: number; total: number; complete: boolean }[] }).milestones;
+  assert.deepEqual([plan.done, plan.total, plan.complete, plan.requirements.length], [0, 2, false, 1]);
+
+  await h.store.transition(first, 'claim', 'human', { baseline: 'HEAD' });
+  await h.store.transition(first, 'submit_for_review', 'human');
+  await h.store.beginReview(first);
+  await h.store.completeReview(first, {
+    passed: true,
+    reasons: [],
+    evidence: [],
+    checks: [],
+    acceptance: [],
+    report: null,
+    diff: { files: [], skipped: [], outOfScope: [] },
+    costUsd: 0,
+  } as never);
+  [plan] = (await h.call(CHANNELS.releaseGet)).data.milestones;
+  assert.deepEqual([plan.done, plan.total], [1, 2]);
+
+  const other = (await h.call(CHANNELS.milestoneCreate, { version: '0.4.0', requirementIds: [] })).data.milestones.find((item) => item.version === '0.4.0');
+  const moved = (await h.call(CHANNELS.milestoneAssign, requirementId, other.id)).data.milestones;
+  assert.deepEqual(
+    moved.map((item) => [item.version, item.requirementIds.length]),
+    [
+      ['0.3.0', 0],
+      ['0.4.0', 1],
+    ],
+  );
+  assert.equal((await h.call(CHANNELS.milestoneAssign, 'unknown', other.id)).error.code, 'invalid_argument');
+  assert.equal((await h.call(CHANNELS.milestoneCreate, { version: 'v1' })).error.code, 'invalid_argument');
+});

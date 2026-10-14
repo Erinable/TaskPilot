@@ -24,6 +24,10 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
         <span class="plan-package-index">{{ `工作包 ${index + 1}` }}</span>
         <h3>{{ pkg.title }}</h3>
         <p>{{ pkg.description }}</p>
+        <p v-if="pkg.dependsOn?.length" class="plan-depends">
+          <AppIcon name="clock" />
+          {{ `先完成工作包 ${pkg.dependsOn.join('、')} 才能开始` }}
+        </p>
       </div>
       <div class="plan-package-meta">
         <span class="priority">
@@ -70,3 +74,18 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
     </div>
   </article>
 </template>
+
+<style scoped>
+.plan-depends {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.plan-depends .icon {
+  width: 12px;
+  height: 12px;
+}
+</style>

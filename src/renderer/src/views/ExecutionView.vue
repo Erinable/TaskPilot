@@ -12,6 +12,7 @@ import ScopePanel from '@/components/execution/ScopePanel.vue';
 import StepsPanel from '@/components/execution/StepsPanel.vue';
 import VerifyPanel from '@/components/execution/VerifyPanel.vue';
 import CodingPanel from '@/components/execution/CodingPanel.vue';
+import DependencyList from '@/components/queue/DependencyList.vue';
 import DifficultyChip from '@/components/DifficultyChip.vue';
 import TermHint from '@/components/TermHint.vue';
 import { nextStep } from '@/lib/next_step.ts';
@@ -87,6 +88,7 @@ onBeforeUnmount(() => execution.close());
         </div>
       </div>
 
+      <DependencyList v-if="task.dependencies.length" :task="task" />
       <div v-if="advice?.text" class="next-step" role="status" data-next-step>
         <AppIcon name="sparkle" />
         <div>

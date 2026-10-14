@@ -15,8 +15,15 @@ export const nextStep = (task: ipc.TaskView): NextStep => {
   const total = task.steps.length;
   const done = task.completedSteps.length;
   switch (task.status) {
-    case 'pending':
+    case 'pending': {
+      const blocking = (task.dependencies ?? []).filter((dependency) => dependency.blocking);
+      if (blocking.length)
+        return {
+          text: `要先等「${blocking.map((dependency) => dependency.title ?? dependency.id).join('」「')}」完成，这个包会用到它写的代码。确实想先做，可以在下面解除依赖。`,
+          action: null,
+        };
       return { text: '读一遍下面的步骤和验收条件，准备好了就开始。开始后 TaskPilot 会记下项目当前的样子，用来对比你的改动。', action: 'claim' };
+    }
     case 'in_progress':
       if (done < total)
         return {

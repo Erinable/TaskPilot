@@ -199,4 +199,54 @@ describe('ReleaseView', () => {
     expect(view.findAll('.history-row')).toHaveLength(23);
     expect(view.find('.release-history .view-all-button').exists()).toBe(false);
   });
+
+  const milestone = (overrides: Partial<ipc.MilestoneView> = {}): ipc.MilestoneView => ({
+    id: 'ms1',
+    version: '0.3.0',
+    targetDate: null,
+    requirementIds: ['r1', 'r2'],
+    createdAt: '',
+    releasedAt: null,
+    requirements: [
+      { id: 'r1', title: '邮箱登录', done: 2, total: 2 },
+      { id: 'r2', title: '发票邮件', done: 1, total: 4 },
+    ],
+    done: 3,
+    total: 6,
+    complete: false,
+    ...overrides,
+  });
+
+  test('version plans show progress per requirement, and an empty page invites one', async () => {
+    let view = await render();
+    expect(view.find('.milestone-panel .empty-hint').text()).toContain('还没有版本计划');
+    view.unmount();
+
+    state.current = fakes.releaseState({ milestones: [milestone()] });
+    view = await render();
+    const card = view.find('[data-milestone="0.3.0"]');
+    expect(card.find('.milestone-count').text()).toBe('3/6 个工作包');
+    expect(card.find('[role="progressbar"]').attributes('aria-valuenow')).toBe('50');
+    expect(card.findAll('.milestone-requirements li').map((node) => node.text())).toEqual(['邮箱登录已完成', '发票邮件1/4 包']);
+    expect(card.find('.milestone-ready').exists()).toBe(false);
+  });
+
+  test('a finished plan starts the release draft', async () => {
+    state.current = fakes.releaseState({ milestones: [milestone({ done: 6, complete: true })] });
+    const view = await render();
+    await view.find('.milestone-ready button').trigger('click');
+    await flushPromises();
+    expect(api.generate).toHaveBeenCalled();
+  });
+
+  test('creating a plan sends the version and date', async () => {
+    const view = await render();
+    await view.find('.milestone-panel .panel-heading button').trigger('click');
+    await view.find('.milestone-form input[aria-label="版本号"]').setValue('0.4.0');
+    await view.find('.milestone-form').trigger('submit');
+    await flushPromises();
+    expect(api.createMilestone).toHaveBeenCalledWith({ version: '0.4.0', targetDate: null, requirementIds: [] });
+    expect(view.find('.milestone-form').exists()).toBe(false);
+    expect(view.find('[data-milestone="0.4.0"]').exists()).toBe(true);
+  });
 });

@@ -11,6 +11,7 @@ import { describeErrorInfo } from '@/lib/errors.ts';
 import AgentBubble from './AgentBubble.vue';
 import InterfacesPanel from './InterfacesPanel.vue';
 import PlanPackageCard from './PlanPackageCard.vue';
+import MilestonePicker from './MilestonePicker.vue';
 import * as model from './requirement_model.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -193,6 +194,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
           </span>
         </div>
         <PlanPackageCard v-for="(pkg, index) in plan.packages" :key="index" :pkg="pkg" :index="index" />
+        <MilestonePicker v-if="item.status === 'published'" :requirement-id="item.id" />
         <div class="req-actions sticky">
           <button v-if="item.status === 'published'" class="primary-button" type="button" @click="report(store.showQueue())">
             <AppIcon name="arrow-right" />
