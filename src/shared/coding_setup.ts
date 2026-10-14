@@ -1,9 +1,26 @@
 // Why the coding runtime is unavailable, in plain words, from the probe's raw
-// reason (sudo, the wrapper, or the CLI). The raw text stays available for
-// anyone who needs it; this is what a beginner reads first.
-export type CodingSetupIssue = 'user_missing' | 'wrapper_missing' | 'sudo_denied' | 'cli_missing' | 'cli_broken' | 'unsupported_config' | 'timeout' | 'unknown';
+// reason (sudo, the wrapper, the CLI, or the sandbox self-check). The raw
+// text stays available for anyone who needs it; this is what a beginner
+// reads first.
+export type CodingSetupIssue =
+  | 'sandbox_cli_missing'
+  | 'sandbox_unsupported'
+  | 'sandbox_broken'
+  | 'user_missing'
+  | 'wrapper_missing'
+  | 'sudo_denied'
+  | 'cli_missing'
+  | 'cli_broken'
+  | 'unsupported_config'
+  | 'timeout'
+  | 'unknown';
 
+// Sandbox reasons start with "sandbox:" (coding_sandbox.ts), so they are
+// matched first.
 const RULES: [RegExp, CodingSetupIssue][] = [
+  [/^sandbox: \S+ CLI not found on PATH/, 'sandbox_cli_missing'],
+  [/^sandbox: (macOS only|sandbox-exec not found)/, 'sandbox_unsupported'],
+  [/^sandbox: /, 'sandbox_broken'],
   [/unknown user taskpilot-coder|no such user/i, 'user_missing'],
   [/taskpilot-coding-wrapper: command not found|wrapper.*(No such file|not found)/i, 'wrapper_missing'],
   [/a password is required|not allowed to execute|is not in the sudoers|may not run sudo/i, 'sudo_denied'],
@@ -17,6 +34,21 @@ export const codingSetupIssue = (reason: string | null): CodingSetupIssue => RUL
 
 // Title, explanation and whether running the setup script is the fix.
 export const CODING_SETUP_TEXT: Record<CodingSetupIssue, { title: string; body: string; runSetup: boolean }> = {
+  sandbox_cli_missing: {
+    title: '找不到所选的 CLI',
+    body: '沙箱模式用你自己账号里装好的 CLI，但在 PATH 里没找到它。先在终端里安装并登录一次；如果它装在 nvm 这类工具里，到「设置 → 环境」把命令路径改成「登录 shell」。',
+    runSetup: false,
+  },
+  sandbox_unsupported: {
+    title: '这台电脑用不了沙箱模式',
+    body: '沙箱模式依赖 macOS 自带的 sandbox-exec。到「设置 → 模型与智能体 → 编码隔离」改用独立账号模式。',
+    runSetup: false,
+  },
+  sandbox_broken: {
+    title: '沙箱自检没有通过，已停止',
+    body: '每次运行前，TaskPilot 会先在沙箱里试读一个它不该读到的文件，确认确实被挡住。这次自检没通过，可能是系统更新改变了沙箱的行为。为安全起见不会继续运行。可以重试；如果一直失败，改用独立账号模式。',
+    runSetup: false,
+  },
   user_missing: {
     title: '还没有设置编码专用账号',
     body: 'Coding Agent 会在你电脑上改代码、执行命令。为了不让它碰到你的密钥、云凭据和其他项目，它在一个单独的系统账号 taskpilot-coder 里运行。这个账号还没创建。',

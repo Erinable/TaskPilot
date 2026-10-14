@@ -93,7 +93,8 @@ const harness = async ({
   let config = await repositories.loadConfig();
   const handlers = new Map<Channel, (event: unknown, ...args: unknown[]) => any>();
   const store = await new WorkPackageStore(repoDir).load(listTasks());
-  let prefs = preferences.defaults();
+  // The coding tests below fake the separate-user wrapper; sandbox mode has its own tests.
+  let prefs: preferences.Preferences = { ...preferences.defaults(), coding: { isolation: 'separate-user', extraRead: [], extraWrite: [] } };
   const changes: { next: preferences.Preferences; previous: preferences.Preferences }[] = [];
   const revealed: string[] = [];
   const launched: { file: string; args: string[] }[] = [];
@@ -559,6 +560,7 @@ const validPrefs = (overrides: Record<string, object> = {}) => ({
   appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
   agents: preferences.defaults().agents,
+  coding: { isolation: 'separate-user', extraRead: [], extraWrite: [], ...overrides.coding },
 });
 
 test('preferences:set saves, returns initials, and notifies the main process', async () => {
@@ -2094,4 +2096,61 @@ test('milestones: progress follows the requirement packages, and a requirement s
   );
   assert.equal((await h.call(CHANNELS.milestoneAssign, 'unknown', other.id)).error.code, 'invalid_argument');
   assert.equal((await h.call(CHANNELS.milestoneCreate, { version: 'v1' })).error.code, 'invalid_argument');
+});
+
+test('coding isolation: sandbox mode runs under userData as the current user, and later reads follow the run', async () => {
+  const seen: { prepare?: unknown; run?: unknown; probe?: unknown; read: unknown[]; clean: unknown[] } = { read: [], clean: [] };
+  const preview = filePatch('tests/auth/login-user.test.ts', 'test("x", () => {});');
+  const h = await harness({
+    seedState: {
+      'auth-edge-tests': { status: 'in_progress', baseline: 'HEAD', claimedAt: new Date().toISOString(), completedSteps: [], deviations: [], review: null },
+    },
+    coding: {
+      codingProbe: async (options) => {
+        seen.probe = options?.sandbox;
+        return codingRuntime({ boundary: 'sandbox' });
+      },
+      codingPrepare: async (_root, _baseline, options) => {
+        seen.prepare = options;
+        return { runName: options!.runName!, directory: options!.runName! };
+      },
+      codingRun: async (options) => {
+        seen.run = options.sandbox;
+        return {
+          output: 'done',
+          usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+          events: [],
+          sessionId: null,
+        };
+      },
+      codingReadPatch: async (_runName, _scope, options) => {
+        seen.read.push(options?.sandbox);
+        return preview;
+      },
+      codingApplyPatch: async () => [],
+      codingClean: async (_runName, options) => void seen.clean.push(options?.sandbox),
+      codingSnapshot: async (_root, baseline) => baseline,
+    },
+  });
+  const saved = await h.call(CHANNELS.preferencesSet, validPrefs({ coding: { isolation: 'sandbox', extraRead: ['/srv/shared'], extraWrite: [] } }));
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  await h.call(CHANNELS.codingStatus);
+  assert.deepEqual((seen.probe as { extraRead: string[] }).extraRead, ['/srv/shared']);
+
+  await h.call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '实现边界测试' });
+  const ready = await settleCoding(h.call, 'auth-edge-tests');
+  const run = ready.codingRun!;
+  assert.equal(path.dirname(run.runName), path.join(h.configDir, 'coding-runs'));
+  assert.equal(run.user, os.userInfo().username);
+  const prepared = seen.prepare as { sandbox?: { runRoot: string }; cli?: string };
+  assert.equal(prepared.sandbox?.runRoot, path.join(h.configDir, 'coding-runs'));
+  assert.equal(prepared.cli, run.cli);
+  assert.ok(seen.run, 'the CLI ran with the sandbox');
+
+  // A run keeps the mode it started in, even after the setting changes.
+  await h.call(CHANNELS.preferencesSet, validPrefs());
+  await h.call(CHANNELS.codingPatch, 'auth-edge-tests');
+  assert.ok(seen.read.at(-1), 'the patch is still read inside the sandbox');
+  await h.call(CHANNELS.codingCancel, 'auth-edge-tests');
+  assert.ok(seen.clean.at(-1), 'the run is cleaned as a sandbox run');
 });

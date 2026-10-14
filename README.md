@@ -69,7 +69,12 @@ npm run dist
 
 分析层使用空临时目录；Pi、Grok、OpenCode 将原生 provider、模型和默认推理配置按白名单投影到私有目录，并复制各自固定的认证 JSON（如有），不会加载 hooks、MCP、扩展或完整用户配置。Claude 在 restricted 模式下仅继承原生模型映射及白名单内的推理认证 / endpoint 环境变量。Grok 支持配置里的模型凭据、许可的 `env_key`、`XAI_API_KEY` 或 `~/.grok/auth.json`。需要执行 helper 命令或任意 provider SDK 的配置会明确失败，不自动切换 CLI、provider 或模型。状态刷新只检查能力、版本与配置，不调用模型。
 
-Coding Agent 始终以独立的 `taskpilot-coder` 用户运行。CLI 必须安装在该用户 HOME 内，并通过固定的 `~/.local/bin/{claude,pi,grok,codex,opencode}` 入口启动；认证也必须在该账号内完成，不能借用主账号凭据。支持指向该 HOME 内、由该用户拥有的可执行文件的符号链接。安装 / 升级 root-owned wrapper 前请阅读 [安全边界与部署说明](docs/coding-agent-security.md)。TaskPilot 不自动创建系统账号、修改 sudoers、安装 CLI 或登录。
+Coding Agent 有两种隔离方式，在「设置 → 模型与智能体 → 编码隔离」里选：
+
+- 沙箱（默认）：用你自己账号里装好、登录过的 CLI，运行在 TaskPilot 写的 macOS 沙箱（`sandbox-exec`）里，只能读写这一轮的项目副本，读不到主目录里的其他文件；可以联网。每次运行前会先自检沙箱确实生效，否则不运行。
+- 独立账号（更严）：以独立的 `taskpilot-coder` 用户运行。CLI 必须安装在该用户 HOME 内，并通过固定的 `~/.local/bin/{claude,pi,grok,codex,opencode}` 入口启动；认证也必须在该账号内完成，不能借用主账号凭据。支持指向该 HOME 内、由该用户拥有的可执行文件的符号链接。安装 / 升级 root-owned wrapper 前请阅读 [安全边界与部署说明](docs/coding-agent-security.md)。TaskPilot 不自动创建系统账号、修改 sudoers、安装 CLI 或登录。
+
+两种方式能挡住什么、不能挡住什么，见 [安全边界与部署说明](docs/coding-agent-security.md)。
 
 ## 技术栈
 

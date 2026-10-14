@@ -429,6 +429,8 @@ export type PreferencesInput = {
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
   agents: AgentSettings;
+  // How the Coding Agent is isolated; the folders only apply to sandbox mode.
+  coding: { isolation: 'sandbox' | 'separate-user'; extraRead: string[]; extraWrite: string[] };
 };
 
 // Preferences as the renderer sees them, with derived display values.

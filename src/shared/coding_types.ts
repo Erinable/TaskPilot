@@ -7,7 +7,8 @@ export type CodingConfig = AgentRuntimeConfig & { user: string; timeoutMinutes: 
 export type CodingRuntimeStatus = {
   backend: CliId;
   protocol: string;
-  boundary: 'separate-user';
+  // sandbox: current user inside TaskPilot's sandbox-exec profile; separate-user: the taskpilot-coder account.
+  boundary: 'sandbox' | 'separate-user';
   // Set by the IPC layer: where the user finds the setup script.
   setupScript?: string;
   available: boolean;

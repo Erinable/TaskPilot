@@ -82,7 +82,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         <span class="panel-icon"><AppIcon name="terminal" /></span>
         <div>
           <h2 id="codingTitle">Coding Agent</h2>
-          <p>独立 OS 用户执行；分析、审查和提交仍由人完成</p>
+          <p>{{ coding.runtime?.boundary === 'separate-user' ? '独立账号执行' : '沙箱内执行' }}；分析、审查和提交仍由人完成</p>
         </div>
       </div>
       <span v-if="coding.run" class="coding-status" :class="coding.run.status">{{ STATUS_LABELS[coding.run.status] }}</span>
@@ -93,7 +93,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <div class="coding-setup">
         <strong>{{ setup.title }}</strong>
         <p>{{ setup.body }}</p>
-        <template v-if="setup.runSetup">
+        <template v-if="setup.runSetup && coding.runtime.boundary === 'separate-user'">
           <p>在「终端」里依次运行下面两条命令。第一条只显示它会做什么，不改任何东西；看过没问题再运行第二条，需要输入电脑密码。TaskPilot 不会替你运行。</p>
           <code class="coding-command">{{ coding.setupScript }}</code>
           <code class="coding-command">{{ coding.setupScript }} --apply</code>

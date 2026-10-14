@@ -6,6 +6,9 @@ import { CODING_SETUP_TEXT, codingSetupIssue } from '../../src/shared/coding_set
 test('codingSetupIssue() names each real failure the probe reports', () => {
   // The messages sudo and the wrapper print, as seen on macOS.
   const cases: [string | null, string][] = [
+    ['sandbox: codex CLI not found on PATH', 'sandbox_cli_missing'],
+    ['sandbox: sandbox-exec not found', 'sandbox_unsupported'],
+    ['sandbox: self-check failed (a file outside the workspace was readable)', 'sandbox_broken'],
     ['sudo: unknown user taskpilot-coder\nsudo: error initializing audit plugin sudoers_audit', 'user_missing'],
     ['sudo: /usr/local/libexec/taskpilot-coding-wrapper: command not found', 'wrapper_missing'],
     ['sudo: a password is required', 'sudo_denied'],

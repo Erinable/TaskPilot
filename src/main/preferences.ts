@@ -2,6 +2,7 @@
 // their PATH. Stored per machine in userData; nothing here is written to the
 // repository or shared with anyone.
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { LooseJson } from './loose_json.ts';
 import * as agentRuntime from '../shared/agent_runtime.ts';
@@ -27,7 +28,18 @@ export interface Preferences {
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
   agents: agentRuntime.AgentSettings;
+  coding: CodingIsolation;
 }
+
+// How the Coding Agent is kept away from the rest of the machine.
+//   sandbox: the current user, inside TaskPilot's sandbox-exec profile
+//   separate-user: the taskpilot-coder account, set up with a script
+// Folders in extraRead/extraWrite are let into the sandbox; only sandbox
+// mode reads them.
+export const ISOLATIONS = ['sandbox', 'separate-user'] as const;
+export type Isolation = (typeof ISOLATIONS)[number];
+export type CodingIsolation = { isolation: Isolation; extraRead: string[]; extraWrite: string[] };
+export const MAX_SANDBOX_FOLDERS = 20;
 
 // Preferences as the renderer sees them, with derived display values.
 export type PreferencesView = Preferences & { profile: Preferences['profile'] & { initials: string } };
@@ -52,7 +64,50 @@ export const defaults = (): Preferences => ({
   appearance: { theme: 'system', vibrancy: false },
   environment: { pathSource: 'inherit' },
   agents: agentRuntime.defaultAgentSettings(),
+  // [人工决策-2026-10-14] 新用户默认沙箱模式，独立账号模式作为更严的可选项。
+  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
 });
+
+// A folder the user let into the sandbox. Never the file system root or the
+// whole home folder: either would undo the sandbox.
+const sandboxFolder = (value: unknown, field: string): string => {
+  if (typeof value !== 'string' || !path.isAbsolute(value) || [...value].some((char) => (char.codePointAt(0) ?? 0) < 0x20) || value.length > 1024)
+    throw new PreferencesError('Folder must be an absolute path', 'invalid_choice', field);
+  const resolved = path.resolve(value);
+  if (resolved === path.parse(resolved).root || resolved === os.homedir() || resolved === path.dirname(os.homedir()))
+    throw new PreferencesError('This folder would open up the whole computer or home folder', 'invalid_choice', field);
+  return resolved;
+};
+
+const sandboxFolders = (value: unknown, field: string, strict: boolean): string[] => {
+  if (!Array.isArray(value)) {
+    if (strict && value !== undefined) throw new PreferencesError('Folders must be a list', 'invalid_choice', field);
+    return [];
+  }
+  if (value.length > MAX_SANDBOX_FOLDERS) {
+    if (strict) throw new PreferencesError(`At most ${MAX_SANDBOX_FOLDERS} folders`, 'invalid_choice', field);
+    value = value.slice(0, MAX_SANDBOX_FOLDERS);
+  }
+  const folders: string[] = [];
+  for (const entry of value as unknown[]) {
+    try {
+      folders.push(sandboxFolder(entry, field));
+    } catch (error) {
+      if (strict) throw error;
+    }
+  }
+  return [...new Set(folders)];
+};
+
+const codingIsolation = (value: unknown, strict: boolean): CodingIsolation => {
+  const raw = (value && typeof value === 'object' ? value : {}) as LooseJson;
+  if (strict && !ISOLATIONS.includes(raw.isolation)) throw new PreferencesError('Unknown isolation mode', 'invalid_choice', 'coding.isolation');
+  return {
+    isolation: pick(raw.isolation, ISOLATIONS, 'sandbox'),
+    extraRead: sandboxFolders(raw.extraRead, 'coding.extraRead', strict),
+    extraWrite: sandboxFolders(raw.extraWrite, 'coding.extraWrite', strict),
+  };
+};
 
 const codePoints = (text: string) => [...text].length;
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback);
@@ -111,6 +166,7 @@ export const normalize = (input: unknown): Preferences => {
       pathSource: pick(raw.environment?.pathSource, PATH_SOURCES, base.environment.pathSource),
     },
     agents: agentSettings(raw.agents, false),
+    coding: codingIsolation(raw.coding, false),
   };
 };
 
@@ -141,6 +197,7 @@ export const validate = (input: unknown): Preferences => {
     appearance: { theme: oneOf(raw.appearance?.theme, THEMES, 'theme'), vibrancy: raw.appearance.vibrancy },
     environment: { pathSource: oneOf(raw.environment?.pathSource, PATH_SOURCES, 'pathSource') },
     agents: agentSettings(raw.agents, true),
+    coding: codingIsolation(raw.coding, true),
   };
 };
 

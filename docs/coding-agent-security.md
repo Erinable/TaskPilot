@@ -4,12 +4,60 @@
 
 编码后端支持 Claude Code、Pi、Grok、Codex、OpenCode；默认仍为 Codex。每个角色的 CLI、模型和思考强度从「设置 → 模型与智能体」配置，运行开始后固定快照。
 
-执行边界：单独 OS 用户。当前 macOS bootstrap 是
-`scripts/setup-coding-agent-user.sh`，默认只做 dry run；创建用户和 sudoers
-前必须人工审阅并用 `--apply` 明确执行。
+执行边界有两种，在「设置 → 模型与智能体 → 编码隔离」里选，开始一轮时固定，
+之后读取补丁、清理都按这一轮开始时的方式进行：
+
+- **沙箱（默认）**：当前用户，运行在 TaskPilot 自己写的 Seatbelt profile
+  里（`/usr/bin/sandbox-exec`，见 `src/main/coding_sandbox.ts`）。不需要建账号。
+- **独立账号（更严）**：`taskpilot-coder` OS 用户。macOS bootstrap 是
+  `scripts/setup-coding-agent-user.sh`，默认只做 dry run；创建用户和 sudoers
+  前必须人工审阅并用 `--apply` 明确执行。
+
+[人工决策-2026-10-14] 新用户默认沙箱模式；默认只给工作区权限，例外由用户在设置里添加；沙箱内可以联网。由 TaskPilot 自己用 sandbox-exec 包住 CLI 进程，不依赖各 CLI 自带的沙箱。
 
 TaskPilot 不替用户执行 `sysadminctl`、`dscl`、sudoers 修改、CLI 安装或登录。
-编码用户固定为 `taskpilot-coder`，在该账号自己的 HOME 中安装和认证所选 CLI。
+
+## 沙箱模式
+
+为什么不用各 CLI 自带的沙箱（2026-10-14 在本机核实，CLI 版本见下）：
+
+| CLI | 自带系统沙箱 | 默认挡住读主目录 | 管得住自己的读写工具 |
+|---|---|---|---|
+| Codex 0.161 | 有 | 否（实测） | 未验证 |
+| Claude Code 2.1.291 | 有，默认关 | 需另加配置 | 否，只管 Bash |
+| Grok 1.0.41 | 有 | 仅 strict 档 | 是（文档）；macOS 上不限网络，失败时只警告 |
+| Pi 1.0.4 | 无 | 否 | 否 |
+| OpenCode 1.1.36 | 无 | 否 | 否 |
+
+TaskPilot 的 profile 包住整个 CLI 进程，所以 CLI 自己的工具和它执行的命令一样受限：
+
+- 写：本轮的运行目录（baseline 的 `git archive` 副本，位于
+  `userData/coding-runs/<id>`，不是真实仓库）、临时目录、所选 CLI 自己的
+  状态目录（如 `~/.claude`）、`~/.npm`，以及用户在设置里添加的可写文件夹；
+- 读：主目录以外的文件；主目录内只有上面这些、PATH 上工具所在的顶层目录
+  （如 `~/.nvm`，但 `~/.ssh`、`~/Library` 等敏感目录从不因此放开），以及用户
+  添加的可读文件夹。主目录里的文件名和大小仍可见（Node 需要 lstat）；
+- 网络：允许。CLI 要连模型 API，Seatbelt 分不清 CLI 的请求和它执行的命令；
+- 环境变量：只传 HOME、PATH、语言设置和模型服务商的 key（按名字匹配），不传
+  SSH agent socket、云服务或 GitHub token；git 全局配置指向 `/dev/null`。
+
+运行目录里的 `.git` 由 AI 控制，所以 TaskPilot 对它执行的每条 git 命令（init、
+add、diff）也在同一个 profile 里运行，并关闭 hooks、fsmonitor 和外部 diff。
+Codex 自己的 Seatbelt 无法在我们的 profile 里再启动（`sandbox_apply: Operation
+not permitted`，已实测），因此沙箱模式下 Codex 用 `--sandbox danger-full-access`，
+由外层 profile 负责限制。
+
+每次检查运行环境时先自检：在主目录里写一个不在任何放行目录中的探针文件，
+在 profile 里读它必须失败、写运行目录必须成功，否则拒绝运行。Seatbelt 没有
+公开文档且已被标为弃用，系统更新可能改变它的行为，所以自检失败时一律不运行。
+
+已接受的风险：
+
+- AI 能读到所选 CLI 自己的登录凭据和会话记录（CLI 需要它们才能工作）；
+- 可以联网，所以 AI 能把它读得到的内容发出去；
+- macOS 钥匙串走系统服务而不是文件，没能证实被挡住；
+- 主目录以外、未被 Seatbelt 另行保护的文件可读（例如放在 `/srv`、`/opt` 下的仓库）。
+  需要更严的隔离时用独立账号模式。
 
 ## 两个信任层
 
@@ -30,10 +78,9 @@ shell 工具。
 
 ### 编码执行层
 
-Coding Agent 可以读写和执行命令，但只能运行在由 baseline 导出的、独立
-OS 用户拥有的目录中。CLI sandbox 只是防御纵深，不是安全边界。个人账号
-运行时，编码 Agent 可能读取该账号的 `~/.ssh`、云 CLI 配置和其他凭据；
-推荐单独 OS 用户，强隔离场景使用容器或 VM。
+Coding Agent 可以读写和执行命令，但只能运行在由 baseline 导出的副本目录中：
+沙箱模式下由 TaskPilot 的 Seatbelt profile 限制，独立账号模式下由 OS 用户权限限制。
+各 CLI 自带的 sandbox 不作为安全边界。强隔离场景使用容器或 VM。
 
 ## 为什么不用 git worktree
 
@@ -162,6 +209,11 @@ Coding Agent 只能触发一个业务流转：`coding_submitted`（`in_progress 
 意见和人类修改，供离线评估和路由学习使用；本阶段不做在线自修改。
 
 ## 用户需完成的前置步骤
+
+沙箱模式（默认）：在自己的账号里安装并登录所选 CLI 即可。如果 CLI 装在 nvm 这类
+工具里，把「设置 → 环境」的命令路径设为「登录 shell」，让 TaskPilot 找得到它。
+
+独立账号模式：
 
 1. 审阅并执行：
 

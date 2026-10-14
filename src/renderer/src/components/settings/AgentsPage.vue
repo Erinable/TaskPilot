@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUpdated, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import CodingIsolation from './CodingIsolation.vue';
 import type { IconName } from '@/lib/icons.ts';
 import { sameValue } from '@/lib/settings_model.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
@@ -20,7 +21,7 @@ const ROLES: Record<agentRuntime.AgentId, { title: string; description: string; 
   'release-manager': { title: '发布管理', description: '版本说明与发布清单', icon: 'rocket' },
   'env-steward': { title: '环境管家', description: '探测环境，规划初始化', icon: 'cpu' },
   tutor: { title: '编程导师', description: '解释步骤，提供操作指导', icon: 'sparkle' },
-  'coding-agent': { title: '编码执行', description: '在独立账号中产出补丁', icon: 'terminal' },
+  'coding-agent': { title: '编码执行', description: '在隔离环境中产出补丁', icon: 'terminal' },
 };
 const THINKING_LABELS: Record<agentRuntime.ThinkingLevel, string> = {
   default: '跟随模型',
@@ -34,7 +35,7 @@ const THINKING_LABELS: Record<agentRuntime.ThinkingLevel, string> = {
 };
 const GROUPS = [
   { id: 'analysis', title: '规划与审查', description: '受限分析 · 不开放工具', agents: agentRuntime.AGENT_IDS.filter((agent) => agent !== 'coding-agent') },
-  { id: 'coding', title: '编码执行', description: '独立 OS 用户隔离', agents: ['coding-agent'] as agentRuntime.AgentId[] },
+  { id: 'coding', title: '编码执行', description: '沙箱或独立账号隔离', agents: ['coding-agent'] as agentRuntime.AgentId[] },
 ];
 const config = (agent: agentRuntime.AgentId) => settings.preferencesDraft?.agents[agent];
 const capability = (agent: agentRuntime.AgentId) => agentRuntime.CLI_OPTIONS.find((option) => option.id === config(agent)?.cli);
@@ -311,7 +312,13 @@ onUpdated(() => syncModelFieldAccessibility().catch((error) => console.error(err
           <div class="agent-details-copy">
             <p>{{ ROLES[agent].description }}。</p>
             <p v-if="capability(agent)?.note">{{ capability(agent)?.note }}</p>
-            <p v-if="agent === 'coding-agent'">所选 CLI 须在 taskpilot-coder 账号内安装并登录；不会使用主账号的编码权限。</p>
+            <p v-if="agent === 'coding-agent'">
+              {{
+                settings.preferencesDraft?.coding?.isolation === 'separate-user'
+                  ? '所选 CLI 须在 taskpilot-coder 账号内安装并登录；不会使用主账号的编码权限。'
+                  : '使用你自己账号里装好、登录过的 CLI，运行在 TaskPilot 的沙箱里，见下方「编码隔离」。'
+              }}
+            </p>
             <p v-if="runtime(agent)?.version" class="runtime-version">{{ runtime(agent)?.command }} · {{ runtime(agent)?.version }}</p>
             <pre v-if="runtime(agent)?.reason" class="runtime-diagnostic">{{ runtime(agent)?.reason }}</pre>
             <p v-if="settings.modelsForAgent(agent)?.defaultModel">CLI 原生默认模型：{{ settings.modelsForAgent(agent)?.defaultModel }}</p>
@@ -323,6 +330,7 @@ onUpdated(() => syncModelFieldAccessibility().catch((error) => console.error(err
           </button>
         </div>
       </section>
+      <CodingIsolation v-if="group.id === 'coding'" />
     </section>
   </div>
   <div v-else-if="settings.preferencesDraft" class="agents-empty glass" role="status">

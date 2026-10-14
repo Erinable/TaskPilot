@@ -16,6 +16,7 @@ const valid = (overrides: any = {}) => ({
   appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'login-shell', ...overrides.environment },
   agents: preferences.defaults().agents,
+  coding: preferences.defaults().coding,
 });
 
 test('load() returns defaults when the file is missing or corrupt', async () => {

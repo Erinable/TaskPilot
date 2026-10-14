@@ -2,6 +2,7 @@
 // Every handler validates its arguments here: the renderer is treated as
 // untrusted input, since the content it displays originates from AI agents.
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import * as tasks from './tasks.ts';
 import * as git from './git.ts';
@@ -22,6 +23,7 @@ import * as gitCommit from './git_commit.ts';
 import * as tutorAgent from './agents/tutor.ts';
 import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
+import * as codingSandbox from './coding_sandbox.ts';
 import * as codingLoop from './coding_loop.ts';
 import { codingCall } from './agents/model_usage.ts';
 import { buildCostReport } from './cost_report.ts';
@@ -454,8 +456,31 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const codingVerifications = new Map<string, AbortController>();
   const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
   const MAX_CODING_EVENTS = 200;
+  // ---------- Coding isolation ----------
+  // Sandbox runs live under userData/coding-runs, separate-user runs under the
+  // coder account's home; a run is cleaned and read in the mode it started in.
+  const sandboxRunRoot = path.join(configDir, codingSandbox.RUNS_DIRNAME);
+  const sandboxContext = async (): Promise<codingSandbox.SandboxContext> => {
+    const coding = getPreferences().coding;
+    const { path: envPath } = await commandPath();
+    return {
+      home: os.homedir(),
+      runRoot: sandboxRunRoot,
+      probeFile: path.join(configDir, codingSandbox.PROBE_FILENAME),
+      pathEntries: (envPath || appEnv.path).split(':').filter(Boolean),
+      extraRead: coding.extraRead,
+      extraWrite: coding.extraWrite,
+    };
+  };
+  const sandboxed = () => getPreferences().coding?.isolation !== 'separate-user';
+  const sandboxOfRun = async (runName: string) => (path.dirname(runName) === sandboxRunRoot ? await sandboxContext() : undefined);
+  const readRunPatch = async (runName: string, fileScope: string[], extra: { signal?: AbortSignal; cli?: ipc.CliId } = {}) =>
+    codingReadPatch(runName, fileScope, { ...extra, sandbox: await sandboxOfRun(runName) });
+  const cleanRun = async (runName: string) => codingClean(runName, { sandbox: await sandboxOfRun(runName) });
+  const probeCoding = async (config: ipc.AgentRuntimeConfig) => codingProbe({ config, sandbox: sandboxed() ? await sandboxContext() : undefined });
+
   const codingStatus = async (): Promise<ipc.CodingRuntimeStatus> => ({
-    ...(await codingProbe({ config: { ...getPreferences().agents['coding-agent'] } })),
+    ...(await probeCoding({ ...getPreferences().agents['coding-agent'] })),
     setupScript: codingSetupScript,
   });
   const codingRunOf = (id: string) => {
@@ -513,13 +538,15 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const baseline = await codingSnapshot(root, requireBaseline(id), task.fileScope);
     const chained = trigger !== 'human' && previous;
     const runId = codingExec.codingRunId();
+    // Fixed for the whole round, like the CLI choice.
+    const sandbox = sandboxed() ? await sandboxContext() : undefined;
     const initial: CodingRun = {
       id: runId,
       packageId: id,
-      runName: path.join(codingWorkspace.DEFAULT_RUN_ROOT, runId),
+      runName: path.join(sandbox ? sandboxRunRoot : codingWorkspace.DEFAULT_RUN_ROOT, runId),
       baseline,
       status: 'preparing',
-      user: codingExec.CODING_USER,
+      user: sandbox ? os.userInfo().username : codingExec.CODING_USER,
       model: runtimeConfig.model,
       cli: runtimeConfig.cli,
       thinking: runtimeConfig.thinking,
@@ -555,7 +582,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const settled = (async () => {
       let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
       try {
-        prepared = await codingPrepare(root, baseline, { runName: initial.runName, signal: controller.signal });
+        prepared = await codingPrepare(root, baseline, { runName: initial.runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         if (controller.signal.aborted) throw Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
         runtime.workspace = prepared;
         await updateCoding(id, { status: 'running' });
@@ -565,6 +592,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           prompt: codingPrompt(task, instruction, feedback),
           timeoutMs: 30 * 60 * 1000,
           signal: controller.signal,
+          sandbox,
           onEvent: (event) => {
             runtime.events.push(event);
             if (runtime.events.length > MAX_CODING_EVENTS) runtime.events = runtime.events.slice(-MAX_CODING_EVENTS);
@@ -573,7 +601,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         runtime.events = result.events.map((event, sequence) => ({ ...event, sequence })).slice(-MAX_CODING_EVENTS);
         codingEventHistory.set(id, [...runtime.events]);
         await updateCoding(id, { status: 'checking', output: result.output, usage: result.usage, sessionId: result.sessionId });
-        const preview = await codingReadPatch(prepared.runName, task.fileScope, { signal: controller.signal });
+        const preview = await codingReadPatch(prepared.runName, task.fileScope, { signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         await updateCoding(id, {
           status: 'ready',
           finishedAt: new Date().toISOString(),
@@ -594,7 +622,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       } finally {
         codingEventHistory.set(id, [...runtime.events]);
         const current = store.get(id).codingRun;
-        if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await codingClean(prepared.runName).catch(() => {});
+        if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await cleanRun(prepared.runName).catch(() => {});
         codingRuns.delete(id);
       }
       // Automatic rounds go on by themselves; the developer's round waits for
@@ -609,11 +637,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // path, which stops the loop for the developer.
   const autoApplyRound = async (id: string) => {
     const { task, run } = codingRunOf(id);
-    const preview = await codingReadPatch(run.runName, task.fileScope);
+    const preview = await readRunPatch(run.runName, task.fileScope);
     const decision = codingLoop.autoApply(preview);
     if (decision.highRisk) return void (await updateCoding(id, { halt: 'high_risk' }));
     if (!decision.files.length) {
-      await codingClean(run.runName).catch((error) => console.error(error));
+      await cleanRun(run.runName).catch((error) => console.error(error));
       return void (await updateCoding(id, { status: 'discarded', halt: 'no_changes' }));
     }
     await applyRound(id, preview, decision.files, false);
@@ -636,7 +664,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         patchDigest: selected.digest,
         halt: null,
       });
-      await codingClean(run.runName).catch((error) => console.error(error));
+      await cleanRun(run.runName).catch((error) => console.error(error));
       return applied;
     } catch (error) {
       await updateCoding(id, { status: 'ready', error: codingFailure(error) });
@@ -754,7 +782,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (!runtime) {
         const run = store.get(id).codingRun;
         if (!run || run.status !== 'ready') return false;
-        await codingClean(run.runName).catch(() => {});
+        await cleanRun(run.runName).catch(() => {});
         await updateCoding(id, { status: 'discarded', finishedAt: new Date().toISOString(), halt: run.trigger === 'human' ? null : 'stopped' });
         return true;
       }
@@ -769,7 +797,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const id = requireString(rawId, 'id');
       const { task, run } = codingRunOf(id);
       if (!['ready', 'applied'].includes(run.status)) failWith('Coding patch is not ready', 'coding_not_ready');
-      const preview = await codingReadPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
+      const preview = await readRunPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
       await updateCoding(id, { files: preview.files, blocked: preview.blocked, patchDigest: preview.digest });
       return preview;
     }),
@@ -786,7 +814,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const files = input.files;
       if (!Array.isArray(files) || !files.length || files.some((file) => typeof file !== 'string'))
         failWith('files must be a non-empty list of paths', 'invalid_argument', 'files');
-      const preview = await codingReadPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
+      const preview = await readRunPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
       if (preview.digest !== digest) failWith('Patch changed since preview', 'coding_digest_mismatch');
       const applied = await applyRound(id, preview, files as string[], input.allowHighRisk);
       record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
@@ -1555,7 +1583,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         AGENT_IDS.map(async (agent) => {
           const config = { ...settings[agent] };
           if (agent === 'coding-agent') {
-            const status = await codingProbe({ config });
+            const status = await probeCoding(config);
             return { agent, config, command: config.cli, available: status.available, version: status.version, reason: status.reason };
           }
           const key = JSON.stringify(config);

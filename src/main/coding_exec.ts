@@ -2,6 +2,9 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { defaultAgentSettings, supportsAgentConfig, type AgentRuntimeConfig } from '../shared/agent_runtime.ts';
 import type { CodingEvent, CodingRuntimeStatus, CodingUsage } from '../shared/coding_types.ts';
+import os from 'node:os';
+import * as sandbox from './coding_sandbox.ts';
+import type { SandboxContext } from './coding_sandbox.ts';
 export const CODING_WRAPPER_PATH = '/usr/local/libexec/taskpilot-coding-wrapper';
 export const CODING_USER = 'taskpilot-coder';
 export const SUDO_PATH = '/usr/bin/sudo';
@@ -71,6 +74,8 @@ export interface RunCodingOptions {
   signal?: AbortSignal;
   spawnFn?: SpawnFn;
   onEvent?: (event: CodingEvent) => void;
+  // Set in sandbox mode: run as the current user inside TaskPilot's profile.
+  sandbox?: SandboxContext;
 }
 
 export interface ProbeRuntimeOptions {
@@ -78,6 +83,7 @@ export interface ProbeRuntimeOptions {
   spawnFn?: SpawnFn;
   timeoutMs?: number;
   signal?: AbortSignal;
+  sandbox?: SandboxContext;
 }
 
 export interface CodingSession {
@@ -305,10 +311,15 @@ export const runCoding = async ({
   signal,
   spawnFn = defaultSpawn,
   onEvent,
+  sandbox: sandboxContext,
 }: RunCodingOptions): Promise<RunCodingResult> => {
   if (!supportsAgentConfig('coding-agent', config)) throw new CodingExecError('Unsupported coding CLI configuration', 'coding_protocol');
   const child: Spawned = (() => {
     try {
+      if (sandboxContext) {
+        const { command, args, options } = sandbox.runCommand(sandboxContext, runName, config);
+        return spawnFn(command, args, options);
+      }
       return spawnFn(SUDO_PATH, wrapperArgs(runName, CODING_WRAPPER_PATH, CODING_USER, config), {
         env: safeChildEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -460,6 +471,16 @@ const unavailableRuntime = (reason: string, config: AgentRuntimeConfig): CodingR
 
 export const probeRuntime = async (options: ProbeRuntimeOptions = {}): Promise<CodingRuntimeStatus> => {
   const config = options.config ?? defaultAgentSettings()['coding-agent'];
+  if (options.sandbox) {
+    const status: CodingRuntimeStatus = {
+      ...unavailableRuntime('', config),
+      boundary: 'sandbox',
+      config: { ...runtimeConfig(config), user: os.userInfo().username },
+    };
+    if (!supportsAgentConfig('coding-agent', config)) return { ...status, reason: 'Unsupported coding CLI configuration' };
+    const result = await sandbox.probe(options.sandbox, config, { signal: options.signal });
+    return { ...status, available: result.available, version: result.version, reason: result.reason };
+  }
   const unavailable = (reason: string): CodingRuntimeStatus => unavailableRuntime(reason, config);
   if (!supportsAgentConfig('coding-agent', config)) return unavailable('Unsupported coding CLI configuration');
   const spawnFn = options.spawnFn ?? defaultSpawn;

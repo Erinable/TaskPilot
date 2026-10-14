@@ -99,6 +99,8 @@ const preferencesForm = (prefs: ipc.Preferences): ipc.PreferencesInput => ({
   appearance: { ...prefs.appearance },
   environment: { ...prefs.environment },
   agents: clone(prefs.agents),
+  // Older main processes send no coding section; sandbox is the default.
+  coding: clone(prefs.coding ?? { isolation: 'sandbox', extraRead: [], extraWrite: [] }),
 });
 
 export const useSettingsStore = defineStore('settings', () => {

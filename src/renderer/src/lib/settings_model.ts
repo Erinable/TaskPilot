@@ -62,6 +62,7 @@ export const preferencesDraft = (prefs: Partial<PreferencesDraft>) => ({
   appearance: { theme: prefs.appearance?.theme, vibrancy: prefs.appearance?.vibrancy === true },
   environment: { pathSource: prefs.environment?.pathSource },
   agents: prefs.agents,
+  coding: prefs.coding,
 });
 
 // Which stores have unsaved edits.
@@ -81,7 +82,8 @@ export const dirtyPages = (saved: DraftPair, draft: DraftPair): Partial<Record<S
     profile: !sameValue(savedPrefs.profile, draftPrefs.profile),
     preferences: !sameValue(savedPrefs.appearance, draftPrefs.appearance),
     environment: !sameValue(savedPrefs.environment, draftPrefs.environment),
-    agents: !sameValue(savedPrefs.agents, draftPrefs.agents),
+    // Coding isolation lives on the agents page.
+    agents: !sameValue(savedPrefs.agents, draftPrefs.agents) || !sameValue(savedPrefs.coding, draftPrefs.coding),
     repository: savedWorkspace.root !== draftWorkspace.root,
     commands: !sameValue(savedWorkspace.commands, draftWorkspace.commands) || !sameValue(savedWorkspace.options, draftWorkspace.options),
     data: false,

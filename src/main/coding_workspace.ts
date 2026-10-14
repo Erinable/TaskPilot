@@ -11,6 +11,9 @@ import type { CheckKind, Check } from './workspace.ts';
 import * as verification from './verification.ts';
 import * as testReport from './test_report.ts';
 import { CODING_USER, CODING_WRAPPER_PATH, SUDO_PATH, safeChildEnv } from './coding_exec.ts';
+import * as sandbox from './coding_sandbox.ts';
+import type { SandboxContext } from './coding_sandbox.ts';
+import type { CliId } from '../shared/agent_runtime.ts';
 
 export const GIT_PATH = '/usr/bin/git';
 export const DEFAULT_RUN_ROOT = '/Users/taskpilot-coder/TaskPilotRuns';
@@ -62,6 +65,9 @@ export interface WorkspaceOptions {
   runName?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  // Set in sandbox mode, with the CLI whose state folder the profile opens.
+  sandbox?: SandboxContext;
+  cli?: CliId;
 }
 
 export interface PreparedCodingWorkspace {
@@ -327,7 +333,21 @@ const runGitArchive = async (root: string, baseline: string, runName: string, op
   }
 };
 
+// Sandbox mode reports through the same error type as the wrapper.
+const fromSandbox = async <T>(action: () => Promise<T>): Promise<T> => {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof sandbox.SandboxError) throw new CodingWorkspaceError(error.message, error.code as WorkspaceErrorCode, error.stderr);
+    throw error;
+  }
+};
+
 export const prepare = async (root: string, baseline: string, options: WorkspaceOptions = {}): Promise<PreparedCodingWorkspace> => {
+  if (options.sandbox) {
+    const context = options.sandbox;
+    return fromSandbox(() => sandbox.prepare(root, baseline, { context, runName: options.runName, signal: options.signal, cli: options.cli ?? 'codex' }));
+  }
   const runRoot = options.runRoot ?? DEFAULT_RUN_ROOT;
   const runName = options.runName ? resolveRunName(options.runName, runRoot) : path.join(runRoot, randomUUID());
   if (!safeName.test(path.basename(runName)) || path.dirname(runName) !== runRoot)
@@ -348,10 +368,12 @@ export const prepare = async (root: string, baseline: string, options: Workspace
 };
 
 export const readPatch = async (runName: string, fileScope?: FileScope, options: WorkspaceOptions = {}): Promise<CodingPatchPreview> => {
-  const result = await runWrapper('diff', runName, options);
-  const parsed = parsePatchFiles(result.stdout, fileScope);
-  const digest = createHash('sha256').update(result.stdout).digest('hex');
-  return { digest, files: parsed.files, patch: result.stdout, blocked: parsed.blocked };
+  const stdout = options.sandbox
+    ? await fromSandbox(() => sandbox.diff(runName, { context: options.sandbox as SandboxContext, cli: options.cli ?? 'codex', signal: options.signal }))
+    : (await runWrapper('diff', runName, options)).stdout;
+  const parsed = parsePatchFiles(stdout, fileScope);
+  const digest = createHash('sha256').update(stdout).digest('hex');
+  return { digest, files: parsed.files, patch: stdout, blocked: parsed.blocked };
 };
 export const runCheck = async (runName: string, kind: CheckKind, check: Check, options: WorkspaceOptions = {}): Promise<verification.CheckRun> => {
   if (!safeName.test(path.basename(resolveRunName(runName, options.runRoot ?? DEFAULT_RUN_ROOT))))
@@ -527,6 +549,10 @@ export const snapshotBaseline = async (root: string, baseline: string, paths: re
 };
 
 export const clean = async (runName: string, options: WorkspaceOptions = {}): Promise<void> => {
+  if (options.sandbox) {
+    const context = options.sandbox;
+    return fromSandbox(() => sandbox.clean(runName, { context }));
+  }
   await runWrapper('clean', runName, options);
 };
 
