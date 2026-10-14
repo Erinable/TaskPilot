@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { useCodingStore } from '@/stores/coding.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
+import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ task: ipc.TaskView }>();
@@ -36,6 +37,8 @@ const RESTARTABLE: ipc.CodingRun['status'][] = ['failed', 'cancelled', 'discarde
 
 const canStart = computed(() => !!coding.runtime?.available && !coding.active && !!coding.instruction.trim() && !coding.operation);
 const runError = computed(() => coding.run?.error);
+// Why the runtime is unavailable, in plain words; the raw reason sits folded below.
+const setup = computed(() => (coding.runtime && !coding.runtime.available ? CODING_SETUP_TEXT[codingSetupIssue(coding.runtime.reason)] : null));
 const restartable = computed(() => !!coding.run && RESTARTABLE.includes(coding.run.status) && !coding.loopActive);
 const applyDisabled = computed(() => !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.operation !== null);
 const fileDiffs = computed(() => {
@@ -85,16 +88,27 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <span v-if="coding.run" class="coding-status" :class="coding.run.status">{{ STATUS_LABELS[coding.run.status] }}</span>
     </div>
 
-    <div v-if="coding.runtime && !coding.runtime.available" class="coding-offline" role="status">
+    <div v-if="coding.runtime && !coding.runtime.available && setup" class="coding-offline" role="status">
       <AppIcon name="alert" />
-      <div>
-        <strong>编码运行时不可用</strong>
-        <p>{{ coding.runtime.reason || '请先完成独立用户配置。' }}</p>
-        <p>
-          离线设置说明：在终端里人工运行
-          <code>{{ coding.setupScript }}</code>
-          ，TaskPilot 不会自动执行脚本。
-        </p>
+      <div class="coding-setup">
+        <strong>{{ setup.title }}</strong>
+        <p>{{ setup.body }}</p>
+        <template v-if="setup.runSetup">
+          <p>在「终端」里依次运行下面两条命令。第一条只显示它会做什么，不改任何东西；看过没问题再运行第二条，需要输入电脑密码。TaskPilot 不会替你运行。</p>
+          <code class="coding-command">{{ coding.setupScript }}</code>
+          <code class="coding-command">{{ coding.setupScript }} --apply</code>
+          <p>完成后，还要在这个账号里安装并登录所选的 CLI，脚本最后会告诉你怎么做。</p>
+        </template>
+        <div class="coding-setup-actions">
+          <button class="secondary-button small" type="button" :disabled="coding.runtimeLoading" @click="coding.refreshRuntime()">
+            <AppIcon :name="coding.runtimeLoading ? 'spinner' : 'refresh'" :class="{ spin: coding.runtimeLoading }" />
+            设置好了，重新检查
+          </button>
+        </div>
+        <details v-if="coding.runtime.reason" class="coding-raw">
+          <summary>系统原始信息</summary>
+          <pre>{{ coding.runtime.reason }}</pre>
+        </details>
       </div>
     </div>
     <p v-else-if="coding.runtimeLoading" class="empty-hint">
@@ -286,6 +300,35 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-md);
   background: var(--fill);
+}
+.coding-setup {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.coding-setup p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.coding-command {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  font: var(--text-sm) var(--font-mono);
+  white-space: nowrap;
+  user-select: all;
+}
+.coding-raw {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.coding-raw pre {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
 }
 .coding-offline > .icon,
 .coding-applied > .icon {
