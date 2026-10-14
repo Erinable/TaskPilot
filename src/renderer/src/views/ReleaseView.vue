@@ -202,6 +202,11 @@ onBeforeUnmount(() => store.leave());
 .load-error {
   font-size: var(--text-sm);
 }
+/* .req-empty only pads the top (it was made for full pages); inside a panel
+   that clips, the button would sit on the bottom border. */
+.no-workspace {
+  padding: 48px 24px;
+}
 .no-workspace h2 {
   font-size: var(--text-lg);
 }

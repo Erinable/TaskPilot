@@ -110,14 +110,21 @@ onMounted(() => loadPage(null));
         读取活动记录失败：{{ error }}
         <button class="empty-action" type="button" :disabled="loading" @click="loadPage(null)">重试</button>
       </p>
-      <p v-else-if="loaded && groups.length === 0 && !nextBefore" class="empty-hint">
-        <AppIcon name="activity" />
-        {{ who === 'all' ? '还没有动态。提交需求或推进工作包后会出现在这里。' : '这段时间没有匹配的动态。' }}
-        <button v-if="who === 'all'" class="empty-action" type="button" @click="requirements.open({ compose: true }).catch((caught) => console.error(caught))">
+      <div v-else-if="loaded && groups.length === 0 && !nextBefore" class="req-empty activity-empty" data-empty="activity">
+        <span class="req-empty-icon"><AppIcon name="activity" /></span>
+        <h2>{{ who === 'all' ? '还没有动态' : '没有匹配的动态' }}</h2>
+        <p>{{ who === 'all' ? '提交需求或推进工作包后，你和 AI 团队的每一步都会出现在这里。' : '这段时间没有这类成员的操作。' }}</p>
+        <button
+          v-if="who === 'all'"
+          class="primary-button"
+          type="button"
+          @click="requirements.open({ compose: true }).catch((caught) => console.error(caught))"
+        >
+          <AppIcon name="plus" />
           新建需求
         </button>
-        <button v-else class="empty-action" type="button" @click="who = 'all'">查看全部成员</button>
-      </p>
+        <button v-else class="secondary-button" type="button" @click="who = 'all'">查看全部成员</button>
+      </div>
       <section v-for="group in groups" :key="group.day" class="activity-day" :aria-label="group.label">
         <h2 class="activity-day-label">{{ group.label }}</h2>
         <div class="activity-list">
@@ -151,6 +158,13 @@ onMounted(() => loadPage(null));
 </template>
 
 <style scoped>
+/* Same centered empty state as the queue and the map, sized for a panel. */
+.activity-empty {
+  padding: 40px 0 32px;
+}
+.activity-empty h2 {
+  font-size: var(--text-lg);
+}
 .activity-panel {
   padding: 8px 24px 16px;
 }

@@ -107,9 +107,13 @@ const remove = (list: 'extraRead' | 'extraWrite', folder: string) => {
 </template>
 
 <style scoped>
+/* Lines up with the agent row above it (16px side padding) and is set off
+   from it, so it reads as part of the coding group, not loose text. */
 .coding-isolation {
   display: grid;
   gap: var(--space-3);
+  padding: var(--space-4) 16px var(--space-4);
+  border-top: 1px solid var(--line-soft);
 }
 .coding-isolation h3 {
   margin: 0;
