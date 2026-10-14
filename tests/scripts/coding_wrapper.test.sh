@@ -121,7 +121,10 @@ traversal_source="$TMP/traversal-source"
 mkdir -p "$traversal_source/nested"
 printf 'escape\n' >"$traversal_source/nested/file"
 traversal_archive="$TMP/traversal.tar"
-(cd "$traversal_source/nested" && /usr/bin/tar -cf "$traversal_archive" ../nested/file)
+# -P keeps the ../ prefix: GNU tar (Linux CI) strips it by default, which would
+# leave a harmless archive and test nothing. bsdtar keeps it either way.
+(cd "$traversal_source/nested" && /usr/bin/tar -cPf "$traversal_archive" ../nested/file)
+/usr/bin/tar -tf "$traversal_archive" | grep -q '^\.\./' || { echo "FAIL: traversal fixture lost its ../ entry" >&2; exit 1; }
 run_wrapper mkdir "$run_root/run-4"
 expect_fail bash -c 'TASKPILOT_WRAPPER_TEST=1 TASKPILOT_WRAPPER_TEST_CONFIG="$1" bash "$2" extract "$3" < "$4"' bash "$config" "$installed" "$run_root/run-4" "$traversal_archive"
 
