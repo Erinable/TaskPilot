@@ -7,9 +7,6 @@ import { promisify } from 'node:util';
 
 import type { CodingPatchFile, CodingPatchPreview } from '../shared/coding_types.ts';
 import { looksSecret } from './repo_reader.ts';
-import type { CheckKind, Check } from './workspace.ts';
-import * as verification from './verification.ts';
-import * as testReport from './test_report.ts';
 import { CODING_USER, CODING_WRAPPER_PATH, SUDO_PATH, safeChildEnv } from './coding_exec.ts';
 import * as sandbox from './coding_sandbox.ts';
 import type { SandboxContext } from './coding_sandbox.ts';
@@ -375,52 +372,6 @@ export const readPatch = async (runName: string, fileScope?: FileScope, options:
   const digest = createHash('sha256').update(stdout).digest('hex');
   return { digest, files: parsed.files, patch: stdout, blocked: parsed.blocked };
 };
-export const runCheck = async (runName: string, kind: CheckKind, check: Check, options: WorkspaceOptions = {}): Promise<verification.CheckRun> => {
-  if (!safeName.test(path.basename(resolveRunName(runName, options.runRoot ?? DEFAULT_RUN_ROOT))))
-    throw new CodingWorkspaceError('Invalid coding run directory', 'workspace_invalid_run_name');
-  if (check.command.includes('\n') || check.command.includes('\r') || check.args.some((argument) => argument.includes('\n') || argument.includes('\r')))
-    throw new CodingWorkspaceError('Check request contains a newline', 'workspace_invalid_patch');
-  const startedAt = Date.now();
-  const request = [check.command, String(check.args.length), ...check.args].join('\n') + '\n';
-  const result = await runWrapper(
-    'check',
-    runName,
-    { ...options, timeoutMs: options.timeoutMs ?? (check.timeoutMs ? check.timeoutMs + 1_000 : undefined) },
-    request,
-    [kind],
-  );
-  if (result.exitCode === 64) throw new CodingWorkspaceError('Isolated check request was rejected', 'workspace_process_failed', result.stderr);
-  const output = `${result.stdout}${result.stderr}`;
-  let results: verification.TestResult[];
-  let report: verification.ReportInfo;
-  if (check.report.format === 'junit') {
-    const reportResult = await runWrapper('report', runName, options, undefined, [check.report.path]);
-    try {
-      results = testReport.parseJunit(reportResult.stdout);
-      report = { format: 'junit', trusted: true, problem: null };
-    } catch {
-      results = [];
-      report = { format: 'junit', trusted: false, problem: 'invalid' };
-    }
-  } else {
-    results = verification.parseResults(output).map((item) => ({ ...item, fullName: item.fullName ?? item.name }));
-    report = { format: 'stdout', trusted: true, problem: null };
-  }
-  const exitCode = result.exitCode;
-  return {
-    kind,
-    command: `${check.command} ${check.args.join(' ')}`.trim(),
-    exitCode,
-    timedOut: false,
-    durationMs: Date.now() - startedAt,
-    output,
-    results,
-    summary: verification.summarize(results, exitCode),
-    report,
-    check: { stage: check.stage, blocking: check.blocking },
-  };
-};
-
 const applyGitPatch = async (root: string, patch: string, check: boolean, spawnFn: WorkspaceSpawnFn, signal?: AbortSignal): Promise<void> => {
   if (signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
   const args = ['-C', root, 'apply', ...(check ? ['--check'] : []), '--binary'];

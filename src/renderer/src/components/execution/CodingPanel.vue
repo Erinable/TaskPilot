@@ -31,6 +31,8 @@ const HALT_TEXT: Record<ipc.CodingHalt, string> = {
   high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
   no_changes: '这一轮 AI 没有产生可以应用的改动，自动流程已停止。',
   stopped: '自动流程已停止。',
+  timed_out:
+    '这一轮超过了时间上限，AI 被停下了。下面是它停下前写好的部分，可能没写完，请逐个文件检查后再决定是否应用；也可以到「设置 → 模型与智能体 → 编码隔离」调长上限。',
 };
 // Rounds the loop can restart from: a finished chain or a stopped one.
 const RESTARTABLE: ipc.CodingRun['status'][] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
@@ -155,8 +157,8 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         :disabled="!coding.runtime?.available || coding.operation !== null"
       ></textarea>
       <p class="coding-hint">
-        第一轮的补丁由你按文件确认。应用后自动跑提交前检查，通过就提交 QA；检查失败或 QA 驳回会自动交回 AI，最多 {{ coding.maxAutoAttempts }} 轮。不会创建
-        commit 或 push。
+        第一轮的补丁由你按文件确认。应用后自动跑提交前检查，通过就提交 QA；检查失败或 QA 驳回会自动交回 AI，最多 {{ coding.maxAutoAttempts }} 轮。每轮最长
+        {{ coding.runtime?.config.timeoutMinutes ?? 30 }} 分钟。不会创建 commit 或 push。
       </p>
       <p v-if="runError" class="coding-error">
         <AppIcon name="alert" />

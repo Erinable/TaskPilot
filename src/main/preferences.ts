@@ -28,17 +28,20 @@ export interface Preferences {
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
   agents: agentRuntime.AgentSettings;
-  coding: CodingIsolation;
+  coding: CodingPreferences;
 }
 
 // How the Coding Agent is kept away from the rest of the machine.
 //   sandbox: the current user, inside TaskPilot's sandbox-exec profile
 //   separate-user: the taskpilot-coder account, set up with a script
 // Folders in extraRead/extraWrite are let into the sandbox; only sandbox
-// mode reads them.
+// mode reads them. timeoutMinutes caps one coding round.
 export const ISOLATIONS = ['sandbox', 'separate-user'] as const;
 export type Isolation = (typeof ISOLATIONS)[number];
-export type CodingIsolation = { isolation: Isolation; extraRead: string[]; extraWrite: string[] };
+// [人工决策-2026-10-15 02:06:22] 编码超时用下拉选择 15/30/60/120 分钟，默认 30；超时后保留已产出的补丁供人工查看。
+export const CODING_TIMEOUTS = [15, 30, 60, 120] as const;
+export type CodingTimeout = (typeof CODING_TIMEOUTS)[number];
+export type CodingPreferences = { isolation: Isolation; extraRead: string[]; extraWrite: string[]; timeoutMinutes: CodingTimeout };
 export const MAX_SANDBOX_FOLDERS = 20;
 
 // Preferences as the renderer sees them, with derived display values.
@@ -65,7 +68,7 @@ export const defaults = (): Preferences => ({
   environment: { pathSource: 'inherit' },
   agents: agentRuntime.defaultAgentSettings(),
   // [人工决策-2026-10-14] 新用户默认沙箱模式，独立账号模式作为更严的可选项。
-  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
+  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
 });
 
 // A folder the user let into the sandbox. Never the file system root or the
@@ -99,13 +102,15 @@ const sandboxFolders = (value: unknown, field: string, strict: boolean): string[
   return [...new Set(folders)];
 };
 
-const codingIsolation = (value: unknown, strict: boolean): CodingIsolation => {
+const codingPreferences = (value: unknown, strict: boolean): CodingPreferences => {
   const raw = (value && typeof value === 'object' ? value : {}) as LooseJson;
   if (strict && !ISOLATIONS.includes(raw.isolation)) throw new PreferencesError('Unknown isolation mode', 'invalid_choice', 'coding.isolation');
+  if (strict && !CODING_TIMEOUTS.includes(raw.timeoutMinutes)) throw new PreferencesError('Unknown coding timeout', 'invalid_choice', 'coding.timeoutMinutes');
   return {
     isolation: pick(raw.isolation, ISOLATIONS, 'sandbox'),
     extraRead: sandboxFolders(raw.extraRead, 'coding.extraRead', strict),
     extraWrite: sandboxFolders(raw.extraWrite, 'coding.extraWrite', strict),
+    timeoutMinutes: CODING_TIMEOUTS.includes(raw.timeoutMinutes) ? raw.timeoutMinutes : 30,
   };
 };
 
@@ -166,7 +171,7 @@ export const normalize = (input: unknown): Preferences => {
       pathSource: pick(raw.environment?.pathSource, PATH_SOURCES, base.environment.pathSource),
     },
     agents: agentSettings(raw.agents, false),
-    coding: codingIsolation(raw.coding, false),
+    coding: codingPreferences(raw.coding, false),
   };
 };
 
@@ -197,7 +202,7 @@ export const validate = (input: unknown): Preferences => {
     appearance: { theme: oneOf(raw.appearance?.theme, THEMES, 'theme'), vibrancy: raw.appearance.vibrancy },
     environment: { pathSource: oneOf(raw.environment?.pathSource, PATH_SOURCES, 'pathSource') },
     agents: agentSettings(raw.agents, true),
-    coding: codingIsolation(raw.coding, true),
+    coding: codingPreferences(raw.coding, true),
   };
 };
 

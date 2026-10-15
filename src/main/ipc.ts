@@ -479,10 +479,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const cleanRun = async (runName: string) => codingClean(runName, { sandbox: await sandboxOfRun(runName) });
   const probeCoding = async (config: ipc.AgentRuntimeConfig) => codingProbe({ config, sandbox: sandboxed() ? await sandboxContext() : undefined });
 
-  const codingStatus = async (): Promise<ipc.CodingRuntimeStatus> => ({
-    ...(await probeCoding({ ...getPreferences().agents['coding-agent'] })),
-    setupScript: codingSetupScript,
-  });
+  const codingStatus = async (): Promise<ipc.CodingRuntimeStatus> => {
+    const status = await probeCoding({ ...getPreferences().agents['coding-agent'] });
+    return { ...status, config: { ...status.config, timeoutMinutes: getPreferences().coding.timeoutMinutes }, setupScript: codingSetupScript };
+  };
   const codingRunOf = (id: string) => {
     const task = requireTask(id);
     const run = store.get(id).codingRun ?? codingRuns.get(id)?.run;
@@ -527,6 +527,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     { instruction, trigger, feedback }: { instruction: string; trigger: ipc.CodingTrigger; feedback: string | null },
   ): Promise<ipc.TaskView> => {
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
+    const timeoutMinutes = getPreferences().coding.timeoutMinutes;
     const task = requireTask(id);
     const state = store.get(id);
     if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
@@ -590,7 +591,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           runName: prepared.runName,
           config: runtimeConfig,
           prompt: codingPrompt(task, instruction, feedback),
-          timeoutMs: 30 * 60 * 1000,
+          timeoutMs: timeoutMinutes * 60 * 1000,
           signal: controller.signal,
           sandbox,
           onEvent: (event) => {
@@ -613,6 +614,25 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, result.usage), { kind: 'package', id });
       } catch (error) {
         const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        // A timed-out round keeps what it wrote so far for the developer to
+        // review; it is never applied automatically.
+        const partial =
+          !cancelled && prepared && errorCode(error) === 'coding_timeout'
+            ? await codingReadPatch(prepared.runName, task.fileScope, { sandbox, cli: runtimeConfig.cli }).catch((failure) => void console.error(failure))
+            : undefined;
+        if (partial?.files.length) {
+          await updateCoding(id, {
+            status: 'ready',
+            finishedAt: new Date().toISOString(),
+            error: codingFailure(error),
+            halt: 'timed_out',
+            files: partial.files,
+            blocked: partial.blocked,
+            patchDigest: partial.digest,
+          }).catch((failure) => console.error(failure));
+          record({ kind: 'coding_run', packageId: id, title: task.title, status: 'failed', costUsd: null });
+          return;
+        }
         await updateCoding(id, {
           status: cancelled ? 'cancelled' : 'failed',
           finishedAt: new Date().toISOString(),
@@ -627,7 +647,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       }
       // Automatic rounds go on by themselves; the developer's round waits for
       // a per-file review.
-      if (trigger !== 'human' && store.get(id).codingRun?.status === 'ready') continueLoop(id, () => autoApplyRound(id));
+      const settledRun = store.get(id).codingRun;
+      if (trigger !== 'human' && settledRun?.status === 'ready' && !settledRun.halt) continueLoop(id, () => autoApplyRound(id));
     })();
     track(settled);
     return viewOf(task, store.get(id));

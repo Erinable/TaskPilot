@@ -16,7 +16,7 @@ const prefs = (overrides: PreferenceOverrides = {}): ipc.PreferencesInput => ({
   appearance: { theme: 'system', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
   agents: overrides.agents ?? defaultAgentSettings(),
-  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
+  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
 });
 const ws = (overrides: Partial<ipc.WorkspaceForm> = {}): ipc.WorkspaceForm => ({
   root: '/repo',

@@ -94,7 +94,7 @@ const harness = async ({
   const handlers = new Map<Channel, (event: unknown, ...args: unknown[]) => any>();
   const store = await new WorkPackageStore(repoDir).load(listTasks());
   // The coding tests below fake the separate-user wrapper; sandbox mode has its own tests.
-  let prefs: preferences.Preferences = { ...preferences.defaults(), coding: { isolation: 'separate-user', extraRead: [], extraWrite: [] } };
+  let prefs: preferences.Preferences = { ...preferences.defaults(), coding: { isolation: 'separate-user', extraRead: [], extraWrite: [], timeoutMinutes: 30 } };
   const changes: { next: preferences.Preferences; previous: preferences.Preferences }[] = [];
   const revealed: string[] = [];
   const launched: { file: string; args: string[] }[] = [];
@@ -560,7 +560,7 @@ const validPrefs = (overrides: Record<string, object> = {}) => ({
   appearance: { theme: 'dark', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
   agents: preferences.defaults().agents,
-  coding: { isolation: 'separate-user', extraRead: [], extraWrite: [], ...overrides.coding },
+  coding: { isolation: 'separate-user', extraRead: [], extraWrite: [], timeoutMinutes: 30, ...overrides.coding },
 });
 
 test('preferences:set saves, returns initials, and notifies the main process', async () => {
@@ -1849,8 +1849,18 @@ test('role settings are independent and frozen across an in-flight requirement',
 
 // A coding harness for auth-email-login, in progress at the repository's
 // HEAD. Each round's fake agent edits login-user.ts; applying writes it.
-const loopHarness = async ({ agent = null, highRisk = false }: { agent?: FakeAgent | null; highRisk?: boolean } = {}) => {
+const loopHarness = async ({
+  agent = null,
+  highRisk = false,
+  timesOut = null,
+}: {
+  agent?: FakeAgent | null;
+  highRisk?: boolean;
+  // Rounds (1-based) whose CLI run times out after writing its patch.
+  timesOut?: ((round: number) => boolean) | null;
+} = {}) => {
   const prompts: string[] = [];
+  const timeouts: number[] = [];
   const file = highRisk ? 'tests/auth/login-user.test.ts' : 'src/auth/application/login-user.ts';
   const preview = () => filePatch(file, `export const round = ${prompts.length};`, SAMPLE_TASKS[0].fileScope);
   let root = '';
@@ -1861,6 +1871,8 @@ const loopHarness = async ({ agent = null, highRisk = false }: { agent?: FakeAge
       codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
       codingRun: async (options) => {
         prompts.push(options.prompt);
+        timeouts.push(options.timeoutMs!);
+        if (timesOut?.(prompts.length)) throw Object.assign(new Error('Coding run timed out'), { code: 'coding_timeout' });
         return {
           output: '',
           usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.1 },
@@ -1887,7 +1899,7 @@ const loopHarness = async ({ agent = null, highRisk = false }: { agent?: FakeAge
   root = h.root;
   const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
-  return { ...h, prompts, preview, file };
+  return { ...h, prompts, timeouts, preview, file };
 };
 const applyFirstRound = async (h: Awaited<ReturnType<typeof loopHarness>>, allowHighRisk = false) => {
   await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
@@ -1948,6 +1960,61 @@ test('coding loop: passing checks submit to QA, and a rejection starts the next 
   assert.match(h.prompts[1], /QA rejected[\s\S]*\[major\] src\/auth\/application\/login-user\.ts:1 没有处理空密码/);
   const events = await h.activity.recent({ days: 1, limit: 100 });
   assert.equal(events.filter((event) => event.kind === 'package_transition' && event.transition === 'coding_submitted').length, 2);
+});
+
+// The whole path a Coding Agent package takes: one reviewed round, passing
+// checks, QA, acceptance and a local commit of the scope files only.
+test('end to end: coding round → checks → QA → done → commit', async () => {
+  const h = await loopHarness({ agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  const finished = await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'done' || view.status === 'accepting');
+  // Evidence that needs a human look stops at acceptance; the developer accepts.
+  assert.equal(finished.status, 'accepting', JSON.stringify(finished.review));
+  assert.equal((await h.call(CHANNELS.transition, 'auth-email-login', 'accepted')).ok, true);
+  assert.equal(finished.codingRun?.status, 'submitted');
+  assert.equal(finished.codingRun?.attempt, 1);
+  const preview = (await h.call(CHANNELS.commitPreview, 'auth-email-login')).data;
+  assert.deepEqual(preview.files, [h.file]);
+  const commit = await h.call(CHANNELS.commitCreate, 'auth-email-login', preview.message, preview.files);
+  assert.equal(commit.ok, true, JSON.stringify(commit.error));
+  const { stdout } = await run('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: h.root });
+  assert.deepEqual(stdout.trim().split('\n'), [h.file]);
+  assert.equal((await run('git', ['status', '--porcelain', '--', h.file], { cwd: h.root })).stdout, '');
+});
+
+test('coding timeout: the round uses the configured limit and keeps the partial patch for review', async () => {
+  const h = await loopHarness({ timesOut: (round) => round === 1, agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  assert.equal((await h.call(CHANNELS.preferencesSet, validPrefs({ coding: { timeoutMinutes: 60 } }))).ok, true);
+  assert.equal((await h.call(CHANNELS.codingStatus)).data.config.timeoutMinutes, 60);
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  const task = await settleCoding(h.call, 'auth-email-login');
+  assert.deepEqual(h.timeouts, [60 * 60 * 1000]);
+  assert.equal(task.codingRun?.status, 'ready');
+  assert.equal(task.codingRun?.halt, 'timed_out');
+  assert.equal(task.codingRun?.error?.code, 'coding_timeout');
+  assert.deepEqual(
+    task.codingRun?.files.map((file) => file.path),
+    [h.file],
+  );
+  // The developer can still apply what was written.
+  const preview = h.preview();
+  assert.equal((await h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk: false, files: [h.file] })).ok, true);
+  // Let the checks and review that applying starts finish inside this test.
+  await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
+});
+
+test('coding timeout: an automatic round that times out is never applied by itself', async () => {
+  const h = await loopHarness({ timesOut: (round) => round === 2 });
+  h.setCommands({ test: LOGIN_TESTS_FAIL });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  const task = await settleLoop(h.call, 'auth-email-login', (view) => view.codingRun?.halt === 'timed_out');
+  assert.equal(task.codingRun?.status, 'ready');
+  assert.equal(task.codingRun?.attempt, 2);
+  assert.equal(h.prompts.length, 2);
+  // Round 1's patch is still what the working tree holds.
+  assert.equal(await fs.readFile(path.join(h.root, h.file), 'utf8'), 'export const round = 1;\n');
 });
 
 test('coding loop: an automatic round that touches a high-risk file stops for the developer', async () => {

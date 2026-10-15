@@ -23,7 +23,7 @@ export type CodingRunStatus =
 // What started a round: the developer, failing submit checks, or a QA rejection.
 export type CodingTrigger = 'human' | 'checks_failed' | 'qa_rejected';
 // Why the automatic loop stopped and handed back to the developer.
-export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped';
+export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped' | 'timed_out';
 export type CodingRound = { attempt: number; trigger: CodingTrigger; status: CodingRunStatus; costUsd: number | null; files: number };
 // Automatic rounds a chain gets after the developer's, shared by failed checks and QA rejections.
 export const MAX_AUTO_ATTEMPTS = 3;
