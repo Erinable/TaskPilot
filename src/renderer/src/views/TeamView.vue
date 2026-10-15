@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TeamTabs from '@/components/TeamTabs.vue';
 import * as activity from '@/lib/activity.ts';
 import { businessDay } from '@/lib/time_zone.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -48,10 +49,11 @@ const members = computed(() => {
 
 <template>
   <div class="view team-view">
+    <TeamTabs />
     <div class="page-heading">
       <div>
         <h1>AI 团队</h1>
-        <p>AI 成员分工协作：需求分析、代码审查、环境和辅导；编码在独立 OS 用户下运行。</p>
+        <p>AI 成员分工协作：拆需求、写代码、审查、发布、环境和辅导。点成员卡片看它最近做了什么。</p>
       </div>
       <span class="team-presence-chip">{{ activity.presenceSummary(app.activity?.team ?? null) }}</span>
     </div>

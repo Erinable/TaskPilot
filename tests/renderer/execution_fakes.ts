@@ -89,6 +89,7 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       cancel: vi.fn(() => ok(true)),
       patch: vi.fn(() => ok<ipc.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
       apply: vi.fn((_id: string, _input: ipc.CodingApply) => ok<ipc.CodingApplyResult>({ files: [] })),
+      active: vi.fn(() => ok<ipc.CodingActiveRun[]>([])),
     },
     workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<ipc.OpenedWith>('vscode')) },
     commit: {
@@ -105,4 +106,38 @@ export const installApi = (current: { task: ipc.TaskView }) => {
   };
   Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
   return api;
+};
+
+// A Coding Agent round, ready for review unless overridden.
+export const codingRun = (overrides: Partial<ipc.CodingRun> = {}): ipc.CodingRun => {
+  const status = overrides.status ?? 'ready';
+  return {
+    id: 'run-1',
+    packageId: 't1',
+    runName: 'run',
+    baseline: 'abcdef',
+    status,
+    user: 'coding-agent',
+    model: 'test',
+    cli: 'codex',
+    thinking: 'default',
+    runtimeVersion: '1',
+    sessionId: null,
+    instruction: '实现登录',
+    startedAt: '',
+    finishedAt: null,
+    error: null,
+    output: '',
+    usage: { inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+    files: [],
+    blocked: [],
+    checks: {},
+    patchDigest: status === 'ready' ? 'digest' : null,
+    attempt: 1,
+    trigger: 'human',
+    feedback: null,
+    halt: null,
+    rounds: [],
+    ...overrides,
+  };
 };

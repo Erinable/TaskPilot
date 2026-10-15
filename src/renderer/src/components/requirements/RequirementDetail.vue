@@ -8,6 +8,7 @@ import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import AgentBubble from './AgentBubble.vue';
 import InterfacesPanel from './InterfacesPanel.vue';
 import PlanPackageCard from './PlanPackageCard.vue';
@@ -31,6 +32,9 @@ const cancelling = ref(false);
 const publishing = ref(false);
 
 const running = computed(() => model.isRunning(props.item));
+const now = useNow();
+// The step that runs started at the requirement's last update.
+const elapsed = computed(() => (running.value ? elapsedSince(props.item.updatedAt, now.value) : null));
 const architectRunning = computed(() => running.value && props.item.phase === 'architect');
 const runningLabel = computed(() =>
   props.item.status === 'planning' ? '正在拆解工作包…' : props.item.phase === 'architect' ? 'Architect 正在阅读相关代码…' : '正在阅读需求，准备澄清问题…',
@@ -91,7 +95,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             <AppIcon name="spinner" class="spin" />
             <span>{{ runningLabel }}</span>
           </div>
-          <small>通常需要 20 秒到 1 分钟。可以先去做别的事，完成后这里会更新。</small>
+          <small>已用 {{ elapsed ?? '0 秒' }}，通常 20 秒到 1 分钟。可以先去做别的事，完成后会通知你。</small>
           <button class="secondary-button small" type="button" :disabled="cancelling" @click="onCancel">
             <AppIcon name="x" />
             取消

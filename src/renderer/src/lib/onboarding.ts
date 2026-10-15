@@ -36,7 +36,7 @@ export const buildSteps = (facts: OnboardingFacts): OnboardingStep[] => {
     {
       id: 'cli',
       title: '安装 Claude Code',
-      why: 'AI 团队通过它来读需求、拆任务、检查你的代码。装好后在终端运行一次 claude 完成登录。',
+      why: 'AI 团队通过它来读需求、拆任务、检查改动。装好后在终端运行一次 claude 完成登录。让 AI 写代码用的 CLI 之后可以在设置里另选。',
       icon: 'terminal',
       done: cli,
       waiting: false,

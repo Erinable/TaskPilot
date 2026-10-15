@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TeamTabs from '@/components/TeamTabs.vue';
 import { useCostsStore } from '@/stores/costs.ts';
 import * as view from '@/lib/cost_view.ts';
 import type * as ipc from '@shared/ipc_types.ts';
@@ -18,6 +19,7 @@ onMounted(() => costs.load().catch((error) => console.error(error)));
 
 <template>
   <div class="view costs-view">
+    <TeamTabs />
     <div class="page-heading">
       <div>
         <h1>成本</h1>

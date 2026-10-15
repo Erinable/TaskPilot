@@ -15,8 +15,10 @@ import CodingPanel from '@/components/execution/CodingPanel.vue';
 import DependencyList from '@/components/queue/DependencyList.vue';
 import DifficultyChip from '@/components/DifficultyChip.vue';
 import TermHint from '@/components/TermHint.vue';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
+import { useCodingStore } from '@/stores/coding.ts';
 import { ACTIONS, useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -24,6 +26,8 @@ const PRIORITY_LABELS: Record<ipc.Priority, string> = { high: '高优先级', me
 
 const app = useAppStore();
 const execution = useExecutionStore();
+const coding = useCodingStore();
+const now = useNow();
 const backButton = ref<HTMLButtonElement | null>(null);
 
 const task = computed(() => execution.current);
@@ -36,6 +40,9 @@ const advice = computed(() => (task.value ? nextStep(task.value) : null));
 // steps remain, the advice is to write code, so no button leads.
 const leading = computed(() => actions.value.find((action) => action.name === advice.value?.action) ?? null);
 const others = computed(() => actions.value.filter((action) => action !== leading.value));
+const elapsed = computed(() => elapsedSince(advice.value?.since, now.value));
+// While a package is being worked on, the Coding Agent leads the page.
+const codingFirst = computed(() => task.value?.status === 'in_progress');
 
 const back = () => {
   app
@@ -43,6 +50,7 @@ const back = () => {
     .then((left) => left && execution.close())
     .catch((error) => console.error(error));
 };
+const handOff = () => coding.start().catch((error) => console.error(error));
 const transition = (name: ipc.HumanTransition) => {
   execution.runTransition(name).catch((error) => console.error(error));
 };
@@ -94,9 +102,22 @@ onBeforeUnmount(() => execution.close());
         <div>
           <strong>下一步</strong>
           <p>{{ advice.text }}</p>
+          <p v-if="elapsed" class="next-step-elapsed">已用 {{ elapsed }}</p>
         </div>
       </div>
       <div class="exec-actions">
+        <button
+          v-if="advice?.coding"
+          class="primary-button"
+          type="button"
+          data-action="hand-off"
+          :disabled="!coding.canStart"
+          :title="coding.runtime && !coding.runtime.available ? '编码 CLI 还不可用，见下方 Coding Agent 面板' : undefined"
+          @click="handOff"
+        >
+          <AppIcon :name="coding.operation === 'start' ? 'spinner' : 'play'" :class="{ spin: coding.operation === 'start' }" />
+          交给 Coding Agent
+        </button>
         <button
           v-if="leading"
           :class="leading.danger ? 'secondary-button danger' : 'primary-button'"
@@ -132,6 +153,8 @@ onBeforeUnmount(() => execution.close());
         </el-dropdown>
       </div>
 
+      <CodingPanel v-if="codingFirst" :task="task" />
+
       <div class="exec-columns">
         <div class="exec-column">
           <!-- Accepted work goes into git before the next package starts. -->
@@ -143,7 +166,7 @@ onBeforeUnmount(() => execution.close());
         </div>
         <div class="exec-column">
           <ScopePanel :task="task" />
-          <CodingPanel v-if="task.status === 'in_progress' || task.codingRun" :task="task" />
+          <CodingPanel v-if="!codingFirst && task.codingRun" :task="task" />
           <VerifyPanel :task="task" />
           <DiffPanel :task="task" />
         </div>

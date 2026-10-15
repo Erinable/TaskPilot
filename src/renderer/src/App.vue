@@ -20,6 +20,7 @@ import { useSettingsStore } from './stores/settings.ts';
 import { useExecutionStore } from './stores/execution.ts';
 import { useNotificationsStore } from './stores/notifications.ts';
 import { useRepositoriesStore } from './stores/repositories.ts';
+import { useCodingActivityStore } from './stores/coding_activity.ts';
 import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
 
@@ -29,6 +30,7 @@ const requirements = useRequirementsStore();
 const settings = useSettingsStore();
 const execution = useExecutionStore();
 const repositories = useRepositoriesStore();
+const codingActivity = useCodingActivityStore();
 
 // Dialogs (Element Plus) handle their own Escape; these are the page shortcuts.
 const onKeydown = (event: KeyboardEvent) => {
@@ -53,6 +55,7 @@ const ACTIVITY_POLL_MS = 15_000;
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown);
   app.startActivityPolling(ACTIVITY_POLL_MS);
+  codingActivity.start();
   // Notification read state is per repository, so the list comes first.
   await repositories.refresh();
   useNotificationsStore().useRepository(repositories.currentId);
@@ -75,6 +78,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
   app.stopActivityPolling();
+  codingActivity.stop();
 });
 </script>
 

@@ -6,7 +6,10 @@ import NotificationCenter from './NotificationCenter.vue';
 // The app icon's small-size variant, so the window and the Dock match.
 import appIcon from '../../../../assets/icon/icon_small.svg';
 import UserAvatar from './UserAvatar.vue';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { useAppStore } from '@/stores/app.ts';
+import { useCodingActivityStore } from '@/stores/coding_activity.ts';
+import { useExecutionStore } from '@/stores/execution.ts';
 import { usePaletteStore } from '@/stores/palette.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
@@ -15,6 +18,23 @@ const app = useAppStore();
 const settings = useSettingsStore();
 const palette = usePaletteStore();
 const repositories = useRepositoriesStore();
+const codingActivity = useCodingActivityStore();
+const execution = useExecutionStore();
+const now = useNow();
+
+// The Coding Agent's work, visible from every page; a click opens the package.
+const codingChip = computed(() => {
+  const [first, ...rest] = codingActivity.runs;
+  if (!first) return null;
+  const elapsed = elapsedSince(first.since, now.value);
+  return {
+    packageId: first.packageId,
+    text: [first.label, elapsed && `已用 ${elapsed}`].filter(Boolean).join(' · '),
+    title: `${first.title}${rest.length ? `，另有 ${rest.length} 个工作包在跑` : ''}。点击查看`,
+    more: rest.length,
+  };
+});
+const openCoding = (packageId: string) => execution.open(packageId).catch((error) => console.error(error));
 
 type RepoCommand = { kind: 'switch' | 'relocate'; id: string } | { kind: 'add' | 'settings' };
 
@@ -86,6 +106,11 @@ const workspaceName = computed(() => {
       </template>
     </el-dropdown>
     <div class="top-actions">
+      <button v-if="codingChip" class="coding-chip" type="button" data-coding-chip :title="codingChip.title" @click="openCoding(codingChip.packageId)">
+        <AppIcon name="spinner" class="spin" />
+        <span>{{ codingChip.text }}</span>
+        <span v-if="codingChip.more" class="coding-chip-more">+{{ codingChip.more }}</span>
+      </button>
       <button class="icon-button" type="button" title="搜索（⌘K）" aria-label="搜索" aria-haspopup="dialog" @click="palette.openPalette()">
         <AppIcon name="search" />
       </button>

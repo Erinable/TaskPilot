@@ -16,6 +16,7 @@ export type {
   CodingPatchPreview,
   CodingRun,
   CodingRuntimeStatus,
+  CodingActiveRun,
   CodingHalt,
   CodingRound,
   CodingRunStatus,

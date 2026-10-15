@@ -47,7 +47,7 @@ export const TRANSITION_CONFIRMS: Partial<Record<ipc.HumanTransition, ConfirmOpt
   revert_replan: { title: '撤销重新规划？', body: '恢复 Architect 修订前的计划和执行进度，偏差记录会保留。', accept: '撤销' },
 };
 
-export const VERIFY_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: 'Lint', build: 'Build', smoke: '冒烟测试' };
+export const VERIFY_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
 
 export const REVIEW_POLL_MS = 1500;
 export const BASELINE_POLL_MS = 1000;

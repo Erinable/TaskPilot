@@ -66,6 +66,7 @@ declare const api: {
     cancel: (id: string) => Promise<ipc.IpcResult<boolean>>;
     patch: (id: string) => Promise<ipc.IpcResult<ipc.CodingPatchPreview>>;
     apply: (id: string, input: ipc.CodingApply) => Promise<ipc.IpcResult<ipc.CodingApplyResult>>;
+    active: () => Promise<ipc.IpcResult<ipc.CodingActiveRun[]>>;
   };
   activity: {
     overview: () => Promise<ipc.IpcResult<ipc.ActivityOverview>>;

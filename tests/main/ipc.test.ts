@@ -1853,9 +1853,12 @@ const loopHarness = async ({
   agent = null,
   highRisk = false,
   timesOut = null,
+  hold = null,
 }: {
   agent?: FakeAgent | null;
   highRisk?: boolean;
+  // The CLI run waits on this before it returns.
+  hold?: Promise<void> | null;
   // Rounds (1-based) whose CLI run times out after writing its patch.
   timesOut?: ((round: number) => boolean) | null;
 } = {}) => {
@@ -1872,6 +1875,7 @@ const loopHarness = async ({
       codingRun: async (options) => {
         prompts.push(options.prompt);
         timeouts.push(options.timeoutMs!);
+        await hold;
         if (timesOut?.(prompts.length)) throw Object.assign(new Error('Coding run timed out'), { code: 'coding_timeout' });
         return {
           output: '',
@@ -2003,6 +2007,23 @@ test('coding timeout: the round uses the configured limit and keeps the partial 
   assert.equal((await h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk: false, files: [h.file] })).ok, true);
   // Let the checks and review that applying starts finish inside this test.
   await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
+});
+
+test('coding:active lists the packages with a round or its checks in flight', async () => {
+  const release = Promise.withResolvers<void>();
+  const h = await loopHarness({ hold: release.promise });
+  assert.deepEqual((await h.call(CHANNELS.codingActive)).data, []);
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  assert.deepEqual((await h.call(CHANNELS.codingActive)).data, [{ packageId: 'auth-email-login', title: SAMPLE_TASKS[0].title }]);
+  release.resolve();
+  await settleCoding(h.call, 'auth-email-login');
+  // The round leaves the list once its run has fully settled.
+  let active = (await h.call(CHANNELS.codingActive)).data;
+  for (let index = 0; index < 100 && active.length; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active = (await h.call(CHANNELS.codingActive)).data;
+  }
+  assert.deepEqual(active, []);
 });
 
 test('coding timeout: an automatic round that times out is never applied by itself', async () => {

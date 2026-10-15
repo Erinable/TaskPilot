@@ -53,6 +53,19 @@ export const ERROR_HINTS: Record<string, string> = {
   file_missing: '这个文件还不存在。按执行指令新建它后再打开。',
   not_a_file: '这不是一个文件。',
   invalid_line: '行号无效。',
+  coding_timeout: '这一轮超过了时间上限，AI 被停下了。可以在「设置 → 模型与智能体 → 编码隔离」调长每轮时间上限。',
+  coding_exit_failed: '编码 CLI 中途出错退出了。展开原始信息看看原因，常见的是没登录或额度用完。',
+  coding_spawn_failed: '启动不了编码 CLI。确认它已经安装，并且在「设置 → 运行环境」里能找到。',
+  coding_protocol: '编码 CLI 的输出看不懂，可能是 CLI 版本太新或太旧。可以重试，或换一个 CLI。',
+  coding_oversized: 'AI 写出的改动太大，超过了上限，已经丢弃。可以把说明写得更具体，让它只改必要的部分。',
+  coding_stdin_failed: '没能把说明交给编码 CLI。可以重试。',
+  coding_interrupted: 'TaskPilot 在编码或检查时退出了。改动如果已经写进项目，还在；可以重新开始。',
+  coding_failed: '编码失败了。',
+  coding_aborted: '已取消。',
+  coding_running: 'Coding Agent 已经在跑了，请等它完成或先取消。',
+  coding_digest_mismatch: '补丁在你查看之后变了，已刷新，请再确认一次。',
+  workspace_out_of_scope: '补丁改到了文件范围以外的文件，这些文件不能应用。',
+  workspace_process_failed: '准备或读取项目副本时出错了。展开原始信息看看原因。',
 };
 
 export const describeError = (error: unknown) => (error instanceof Error ? (ERROR_HINTS[(error as IpcError).code] ?? error.message) : String(error));

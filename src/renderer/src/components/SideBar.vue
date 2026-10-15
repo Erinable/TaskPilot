@@ -3,6 +3,7 @@ import { computed, nextTick } from 'vue';
 
 import AppIcon from './AppIcon.vue';
 import { useAppStore } from '@/stores/app.ts';
+import type { ViewName } from '@/stores/app.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
@@ -33,7 +34,8 @@ const showQueue = async () => {
   if (await app.navigate('queue')) execution.close();
 };
 
-const openView = async (view: 'map' | 'activity' | 'release' | 'team' | 'costs') => {
+const TEAM_VIEWS: ViewName[] = ['team', 'activity', 'costs'];
+const openView = async (view: 'map' | 'release' | 'team') => {
   if (await app.navigate(view)) execution.close();
 };
 
@@ -82,15 +84,6 @@ const team = computed(() =>
         <AppIcon name="map" class="nav-icon" />
         <span class="nav-label">工程地图</span>
       </button>
-      <button
-        class="nav-item"
-        :class="{ active: app.view === 'activity' }"
-        :title="app.sidebarCollapsed ? '活动记录' : undefined"
-        @click="openView('activity')"
-      >
-        <AppIcon name="activity" class="nav-icon" />
-        <span class="nav-label">活动记录</span>
-      </button>
       <button class="nav-item" :class="{ active: app.view === 'release' }" :title="app.sidebarCollapsed ? '发布' : undefined" @click="openView('release')">
         <AppIcon name="rocket" class="nav-icon" />
         <span class="nav-label">发布</span>
@@ -98,13 +91,15 @@ const team = computed(() =>
     </nav>
     <div class="side-section-label team-label">AI 团队</div>
     <div class="team-list">
-      <button class="nav-item" :class="{ active: app.view === 'team' }" :title="app.sidebarCollapsed ? 'AI 团队' : undefined" @click="openView('team')">
+      <!-- Members, activity and cost are tabs of one page. -->
+      <button
+        class="nav-item"
+        :class="{ active: TEAM_VIEWS.includes(app.view) }"
+        :title="app.sidebarCollapsed ? 'AI 团队' : undefined"
+        @click="openView('team')"
+      >
         <AppIcon name="bot" class="nav-icon" />
         <span class="nav-label">团队概览</span>
-      </button>
-      <button class="nav-item" :class="{ active: app.view === 'costs' }" :title="app.sidebarCollapsed ? '成本' : undefined" @click="openView('costs')">
-        <AppIcon name="coins" class="nav-icon" />
-        <span class="nav-label">成本</span>
       </button>
       <button
         v-for="member in team"

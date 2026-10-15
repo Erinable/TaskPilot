@@ -9,6 +9,28 @@ export type NextStep = {
   text: string;
   // The transition the advice points at, when it is a button.
   action: ipc.HumanTransition | null;
+  // The advice is to hand the package to the Coding Agent.
+  coding?: boolean;
+  // When the AI work the advice waits on started, for an elapsed-time clock.
+  since?: string | null;
+};
+
+// While a Coding Agent run exists, its state decides the advice.
+const codingAdvice = (task: ipc.TaskView): NextStep | null => {
+  const run = task.codingRun;
+  if (!run) return null;
+  if (['preparing', 'running', 'checking'].includes(run.status))
+    return { text: `Coding Agent 正在写第 ${run.attempt} 轮代码。可以先去做别的事，完成后会通知你。`, action: null, since: run.startedAt };
+  if (['applying', 'verifying'].includes(run.status))
+    return { text: '改动已写入项目，正在自动跑提交前检查。通过后会直接交给 QA 审查。', action: null, since: run.startedAt };
+  if (run.status === 'ready' && run.halt === 'timed_out')
+    return { text: '这一轮超时停下了，下面是它写好的部分，可能没写完。逐个文件看过再决定是否应用。', action: null };
+  if (run.status === 'ready' && (run.trigger === 'human' || run.halt))
+    return { text: 'Coding Agent 写好了。在下面逐个文件看一遍改动，勾选要保留的，再点「应用」。', action: null };
+  if (run.status === 'ready') return { text: '正在自动应用这一轮的改动。', action: null, since: run.startedAt };
+  if (run.status === 'applied' && run.halt)
+    return { text: '自动流程停下了，改动已在项目里。可以自己改完后提交审查，或在下面补充说明让 Coding Agent 再试。', action: 'submit_for_review' };
+  return null;
 };
 
 export const nextStep = (task: ipc.TaskView): NextStep => {
@@ -24,21 +46,25 @@ export const nextStep = (task: ipc.TaskView): NextStep => {
         };
       return { text: '读一遍下面的步骤和验收条件，准备好了就开始。开始后 TaskPilot 会记下项目当前的样子，用来对比你的改动。', action: 'claim' };
     }
-    case 'in_progress':
+    case 'in_progress': {
+      const coding = codingAdvice(task);
+      if (coding) return coding;
       if (done < total)
         return {
-          text: `照着「执行指令」一步步改代码，做完一步勾一步（${done} / ${total}）。不会做时点步骤下面的「这一步怎么做？」。`,
+          text: `交给 Coding Agent 照着步骤写，或者自己照着「执行指令」一步步改，做完一步勾一步（${done} / ${total}）。`,
           action: null,
+          coding: true,
         };
       return { text: '步骤都勾完了。可以先在「验证」里跑一下测试，再提交给 QA 审查。', action: 'submit_for_review' };
+    }
     case 'in_review':
-      return { text: 'QA Partner 正在检查你的改动，通常一两分钟。完成后这里会显示结果。', action: null };
+      return { text: 'QA Partner 正在检查改动，完成后这里会显示结果。', action: null, since: task.review?.startedAt ?? null };
     case 'deviation':
-      return { text: 'Architect 正在判断是改计划还是按原计划做，完成后会自动更新。', action: null };
+      return { text: 'Architect 正在判断是改计划还是按原计划做，完成后会自动更新。', action: null, since: task.adjudication?.startedAt ?? null };
     case 'accepting':
       return { text: 'QA 检查通过了，还有几项需要你亲自确认。看完「QA 审查」里的确认项，没问题就验收。', action: 'accepted' };
     case 'done':
-      return { text: '这个工作包完成了。在下面的「保存到 git」里提交改动，再去领下一个。', action: null };
+      return { text: '这个工作包完成了。在「保存到 git」里提交改动，再去领下一个。', action: null };
     case 'blocked':
       return { text: '这个工作包被标记为阻塞。阻塞的原因解决后，点「解除阻塞」继续。', action: 'unblock' };
     default:

@@ -5,7 +5,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 
 import CodingPanel from '../../../src/renderer/src/components/execution/CodingPanel.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
-import { installApi, taskView } from '../execution_fakes.ts';
+import { codingRun, installApi, taskView } from '../execution_fakes.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
@@ -66,4 +66,42 @@ test('a missing CLI does not send the user back to the setup script', async () =
   const wrapper = await render();
   expect(wrapper.find('.coding-offline strong').text()).toBe('编码专用账号里还没装所选的 CLI');
   expect(wrapper.find('.coding-command').exists()).toBe(false);
+});
+
+test('a failed round explains itself in plain words and folds the raw message', async () => {
+  const run = codingRun({ status: 'failed', error: { code: 'coding_exit_failed', message: 'codex exited with code 1: not logged in' } });
+  useExecutionStore().current = { ...useExecutionStore().current!, codingRun: run };
+  api.coding.get.mockResolvedValue({ ok: true, data: useExecutionStore().current } as never);
+  const wrapper = await render();
+  const error = wrapper.get('.coding-error');
+  expect(error.find('span').text()).toContain('中途出错退出');
+  expect(error.text()).not.toContain('coding_exit_failed');
+  expect(error.find('.coding-raw pre').text()).toContain('not logged in');
+  // Runtime details are folded; elapsed time and cost lead.
+  expect(wrapper.find('.coding-summary').text()).toContain('费用');
+  expect(wrapper.find('.coding-summary details summary').text()).toBe('运行详情');
+});
+
+test('the instruction starts prefilled, so starting needs no typing', async () => {
+  const wrapper = await render();
+  expect((wrapper.get('#codingInstruction').element as HTMLTextAreaElement).value).toContain('执行指令');
+  expect(wrapper.get('.coding-actions .primary-button').attributes('disabled')).toBeUndefined();
+});
+
+test('the patch review shows a coloured diff per file', async () => {
+  const run = codingRun();
+  useExecutionStore().current = { ...useExecutionStore().current!, codingRun: run };
+  api.coding.get.mockResolvedValue({ ok: true, data: useExecutionStore().current } as never);
+  api.coding.patch.mockResolvedValue({
+    ok: true,
+    data: {
+      digest: 'digest',
+      files: [{ path: 'src/a.ts', added: 1, removed: 1, binary: false, highRisk: false }],
+      blocked: [],
+      patch: 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\n',
+    },
+  } as never);
+  const wrapper = await render();
+  expect(wrapper.findAll('.coding-files .diff-line.add').map((line) => line.text())).toEqual(['+new']);
+  expect(wrapper.findAll('.coding-files .diff-line.del').map((line) => line.text())).toEqual(['-old']);
 });
