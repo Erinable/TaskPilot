@@ -1984,7 +1984,8 @@ test('end to end: coding round → checks → QA → done → commit', async () 
 });
 
 test('coding timeout: the round uses the configured limit and keeps the partial patch for review', async () => {
-  const h = await loopHarness({ timesOut: (round) => round === 1 });
+  const h = await loopHarness({ timesOut: (round) => round === 1, agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
   assert.equal((await h.call(CHANNELS.preferencesSet, validPrefs({ coding: { timeoutMinutes: 60 } }))).ok, true);
   assert.equal((await h.call(CHANNELS.codingStatus)).data.config.timeoutMinutes, 60);
   await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
@@ -2000,6 +2001,8 @@ test('coding timeout: the round uses the configured limit and keeps the partial 
   // The developer can still apply what was written.
   const preview = h.preview();
   assert.equal((await h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk: false, files: [h.file] })).ok, true);
+  // Let the checks and review that applying starts finish inside this test.
+  await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
 });
 
 test('coding timeout: an automatic round that times out is never applied by itself', async () => {
