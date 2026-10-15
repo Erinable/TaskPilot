@@ -242,3 +242,22 @@ test('runCheck() passes the check env but never lets it replace PATH', async () 
   const result = await verification.runCheck(config, 'test', { envPath: '/tp/bin' });
   assert.equal(result.output.trim(), 'yes|/tp/bin');
 });
+
+// A check that reads stdin (here `cat`, like a fake CLI in a test script or a
+// prompt) must see end of input and finish, not wait for a keyboard forever.
+test('run() closes stdin so a command that reads it finishes', async () => {
+  const config = await workspaceWith({
+    test: { command: process.execPath, args: ['-e', "process.stdin.resume(); process.stdin.on('end', () => console.log('ok 1 - stdin closed'))"] },
+  });
+  const result = await verification.run(config, 'test', { timeoutMs: 5000 });
+  assert.equal(result.timedOut, false);
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /stdin closed/);
+});
+
+test('run() streams output as it arrives', async () => {
+  const config = await workspaceWith({ test: { command: process.execPath, args: ['-e', "console.log('first'); console.error('second')"] } });
+  const chunks: string[] = [];
+  await verification.run(config, 'test', { onOutput: (chunk) => chunks.push(chunk) });
+  assert.match(chunks.join(''), /first[\s\S]*second|second[\s\S]*first/);
+});

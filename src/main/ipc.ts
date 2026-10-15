@@ -1747,6 +1747,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     allowScripts: boolean;
     results: Partial<Record<ipc.EnvStepId, ipc.EnvStepResult>>;
     running: ipc.EnvStepId | null;
+    // The running step's output so far (its tail) and when it started.
+    live: { output: string; startedAt: string } | null;
   };
 
   // One session per app run, in memory only: the plan is cheap to redo and
@@ -1762,6 +1764,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     allowScripts: false,
     results: {},
     running: null,
+    live: null,
   };
   let envController: AbortController | null = null;
   const ENV_OUTPUT_CHARS = 4000;
@@ -1784,6 +1787,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     costUsd: env.costUsd,
     allowScripts: env.allowScripts,
     running: env.running,
+    live: env.live,
     steps: envSteps().map((step) => ({
       id: step.id,
       kind: step.kind,
@@ -1841,6 +1845,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         allowScripts: keepResults ? env.allowScripts : false,
         results: keepResults ? env.results : {},
         running: null,
+        live: null,
       };
       const session = env;
       const controller = new AbortController();
@@ -1893,6 +1898,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const controller = new AbortController();
       envController = controller;
       session.running = step.id;
+      session.live = { output: '', startedAt: new Date().toISOString() };
       const line = workspace.formatCommandLine(step);
       const run = (async () => {
         try {
@@ -1900,6 +1906,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             signal: controller.signal,
             envPath: (await commandPath()).path,
             timeoutMs: 15 * 60 * 1000,
+            onOutput: (chunk) => {
+              if (session.live) session.live.output = (session.live.output + chunk).slice(-ENV_OUTPUT_CHARS);
+            },
           });
           session.results[step.id] = {
             line,
@@ -1913,6 +1922,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           };
         } finally {
           session.running = null;
+          session.live = null;
           if (envController === controller) envController = null;
         }
       })();
@@ -2467,7 +2477,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     await tutor?.open(dir);
     activity?.prune().catch((error) => console.error('[activity] prune failed', error));
     // The steward's plan described the previous repository's toolchain.
-    env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null };
+    env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null, live: null };
     console.debug(`[repositories] switched id=${id} packages=${tasks.listTasks().length}`);
   };
 

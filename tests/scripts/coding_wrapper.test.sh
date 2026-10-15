@@ -152,17 +152,17 @@ grep -qx 'model_reasoning_effort=high' "$fake_args" || fail 'Codex thinking sele
 grep -qx 'gpt-5-codex' "$fake_args" || fail 'Codex model selection was not forwarded'
 grep -q '^--sandbox$' "$fake_args" && grep -q '^workspace-write$' "$fake_args" || fail 'Codex workspace sandbox was not enforced'
 
-run_wrapper run "$run_root/run-1" claude 'claude-model' high
+run_wrapper run "$run_root/run-1" claude 'claude-model' high </dev/null
 grep -qx -- '--effort' "$fake_args" && grep -qx 'high' "$fake_args" || fail 'Claude effort was not forwarded'
-run_wrapper run "$run_root/run-1" pi 'provider/model' xhigh
+run_wrapper run "$run_root/run-1" pi 'provider/model' xhigh </dev/null
 grep -qx 'xhigh' "$fake_args" || fail 'Pi thinking was not forwarded'
-run_wrapper run "$run_root/run-1" grok 'grok-model' medium
+run_wrapper run "$run_root/run-1" grok 'grok-model' medium </dev/null
 grep -qx -- '--output-format' "$fake_args" && grep -qx 'streaming-messages-json' "$fake_args" || fail 'Grok did not enable JSONL output'
 grep -qx -- '--reasoning-effort' "$fake_args" && grep -qx 'medium' "$fake_args" || fail 'Grok reasoning effort was not forwarded'
 cp "$TMP/fake-cli" "$agent_home/.local/bin/opencode.real"
 rm "$agent_home/.local/bin/opencode"
 ln -s opencode.real "$agent_home/.local/bin/opencode"
-run_wrapper run "$run_root/run-1" opencode 'provider/model' high
+run_wrapper run "$run_root/run-1" opencode 'provider/model' high </dev/null
 grep -qx -- '--variant' "$fake_args" && grep -qx 'high' "$fake_args" || fail 'OpenCode variant was not forwarded'
 
 rm "$agent_home/.local/bin/codex"

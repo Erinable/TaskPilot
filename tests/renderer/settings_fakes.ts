@@ -69,6 +69,7 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
   costUsd: 0,
   allowScripts: false,
   running: null,
+  live: null,
   steps: [
     { id: 'install', kind: 'install', script: null, line: 'npm ci --ignore-scripts', result: null },
     { id: 'test', kind: 'test', script: 'test', line: 'npm run test', result: null },

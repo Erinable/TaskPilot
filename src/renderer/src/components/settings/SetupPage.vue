@@ -1,16 +1,29 @@
 <script setup lang="ts">
+import { nextTick, ref, watch } from 'vue';
+
 import AppIcon from '@/components/AppIcon.vue';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { KIND_LABEL, resultText, useSetupStore } from '@/stores/setup.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const setup = useSetupStore();
+const now = useNow();
+const liveOutput = ref<HTMLElement | null>(null);
+// The newest output stays in view while a step runs.
+watch(
+  () => setup.view?.live?.output,
+  () => nextTick(() => liveOutput.value && (liveOutput.value.scrollTop = liveOutput.value.scrollHeight)),
+);
 
 const run = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
 };
 const onAllowScripts = (value: string | number | boolean) => run(setup.setAllowScripts(value === true));
 const stepState = (step: ipc.EnvStep) => {
-  if (setup.view?.running === step.id) return { text: '运行中', tone: 'in_progress' };
+  if (setup.view?.running === step.id) {
+    const elapsed = elapsedSince(setup.view.live?.startedAt, now.value);
+    return { text: elapsed ? `运行中 · ${elapsed}` : '运行中', tone: 'in_progress' };
+  }
   if (step.result) return { text: resultText(step.result), tone: step.result.ok ? 'done' : 'blocked' };
   return { text: '未运行', tone: '' };
 };
@@ -103,7 +116,11 @@ const stepState = (step: ipc.EnvStep) => {
               {{ step.result ? '再次运行' : '运行' }}
             </button>
           </div>
-          <details v-if="step.result?.output" class="setup-output" :open="!step.result.ok">
+          <div v-if="setup.view.running === step.id" class="setup-output live">
+            <p>实时输出</p>
+            <pre ref="liveOutput" class="verify-output" aria-live="polite">{{ setup.view.live?.output || '等待输出…' }}</pre>
+          </div>
+          <details v-else-if="step.result?.output" class="setup-output" :open="!step.result.ok">
             <summary>输出（最后部分）</summary>
             <pre class="verify-output">{{ step.result.output }}</pre>
           </details>
