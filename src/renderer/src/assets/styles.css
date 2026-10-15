@@ -3313,6 +3313,15 @@ button.avatar:hover {
   font-size: var(--text-sm);
   cursor: pointer;
 }
+.setup-output.live > p {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.setup-output.live pre {
+  max-height: 240px;
+  overflow: auto;
+}
 .setup-retry {
   display: flex;
   align-items: center;

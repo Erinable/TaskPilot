@@ -71,6 +71,8 @@ export interface RunOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
   envPath?: string | null;
+  // Receives output as it arrives, for a live view of a long command.
+  onOutput?: (chunk: string) => void;
 }
 
 // A criterion paired with its test result by matchAcceptance().
@@ -162,6 +164,9 @@ const spawn = (command: string, args: string[], options: ExecFileOptions & { onS
     const child = execFile(command, args, { ...options, encoding: 'utf8' }, (error, stdout, stderr) => {
       resolve({ error, stdout, stderr });
     });
+    // Checks are never interactive. Without an end of input, a command that
+    // reads stdin (a prompt, a watch mode, `cat`) would wait forever.
+    child.stdin?.end();
     options.onSpawn?.(child);
   });
 
@@ -170,10 +175,16 @@ const execute = async (
   root: string,
   entry: CommandEntry,
   kind: string,
-  { signal, timeoutMs, envPath, env = {} }: RunOptions & { env?: Record<string, string> },
+  { signal, timeoutMs, envPath, onOutput, env = {} }: RunOptions & { env?: Record<string, string> },
 ): Promise<CommandOutcome> => {
   const startedAt = Date.now();
   const { error, stdout, stderr } = await spawn(entry.command, entry.args, {
+    onSpawn: onOutput
+      ? (child) => {
+          child.stdout?.on('data', (chunk) => onOutput(String(chunk)));
+          child.stderr?.on('data', (chunk) => onOutput(String(chunk)));
+        }
+      : undefined,
     cwd: root,
     maxBuffer: MAX_BUFFER,
     timeout: timeoutMs,
@@ -216,10 +227,10 @@ const requireEntry = (config: VerificationTarget, kind: string): { root: string;
 export const run = async (
   config: VerificationTarget,
   kind: string,
-  { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath }: RunOptions = {},
+  { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath, onOutput }: RunOptions = {},
 ): Promise<RunResult> => {
   const { root, entry } = requireEntry(config, kind);
-  const outcome = await execute(root, entry, kind, { signal, timeoutMs, envPath, env: entry.env });
+  const outcome = await execute(root, entry, kind, { signal, timeoutMs, envPath, onOutput, env: entry.env });
   const results = parseResults(outcome.output);
   return { ...outcome, results, summary: summarize(results, outcome.exitCode) };
 };

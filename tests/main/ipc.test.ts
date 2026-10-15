@@ -1077,6 +1077,36 @@ test('env: plan, confirm steps one by one, then apply the scripts', async () => 
   assert.deepEqual(saved.checks.test, { command: 'npm', args: ['test'], stage: 'submit', blocking: true, report: { format: 'stdout' }, env: {} });
 });
 
+test('env: a running step shows its output and start time, and a step reading stdin still finishes', async () => {
+  const h = await envHarness();
+  const manifest = {
+    name: 'env-fixture',
+    private: true,
+    // Prints, then waits for stdin to end before finishing.
+    scripts: {
+      test: "node -e \"console.log('halfway'); process.stdin.resume(); process.stdin.on('end', () => setTimeout(() => console.log('done'), 300))\"",
+      lint: 'node -e 0',
+    },
+  };
+  await fs.writeFile(path.join(h.root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await run('git', ['commit', '-qam', 'stdin script'], { cwd: h.root });
+  await h.call(CHANNELS.envPlan);
+  await settleEnv(h.call);
+  const finished = h.call(CHANNELS.envRunStep, 'test');
+  let live: { output: string; startedAt: string } | null = null;
+  for (let index = 0; index < 400 && !live?.output.includes('halfway'); index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    live = (await h.call(CHANNELS.envGet)).data.live;
+  }
+  assert.match(live?.output ?? '', /halfway/);
+  assert.ok(Number.isFinite(Date.parse(live!.startedAt)));
+  const view = (await finished).data;
+  assert.equal(view.live, null);
+  const result = view.steps.find((step) => step.id === 'test').result;
+  assert.equal(result.ok, true, result.output);
+  assert.match(result.output, /done/);
+});
+
 test('env: re-planning with a failure hands the steward the failed output', async () => {
   const { call, agentCalls } = await envHarness();
   await call(CHANNELS.envPlan);

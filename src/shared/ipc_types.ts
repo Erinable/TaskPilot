@@ -703,6 +703,8 @@ export type EnvState = {
   allowScripts: boolean;
   // Id of the step running now.
   running: EnvStepId | null;
+  // The running step's latest output and its start time; null when idle.
+  live: { output: string; startedAt: string } | null;
   steps: EnvStep[];
   // The workspace's current command line per kind ('' when not configured).
   configured: Record<CheckKind, string>;
