@@ -651,6 +651,8 @@ export type EnvFacts = {
   versionFiles: { path: string; content: string }[];
   workflows: string[];
   tools: { node: string | null; npm: string | null };
+  // Dependencies that only work after their install scripts run.
+  installScripts: string[];
 };
 
 // Corrections TaskPilot made to the steward's plan.
@@ -678,12 +680,17 @@ export type EnvStepResult = {
   at: string;
 };
 
-export type EnvStepId = 'install' | ScriptKind;
+export type EnvStepId = 'install' | 'rebuild' | ScriptKind;
 
 export type EnvStep = {
   id: EnvStepId;
   kind: EnvStepId;
   script: string | null;
+  // For the rebuild step: the packages whose install scripts it runs.
+  packages: string[];
+  // The step deletes node_modules before installing (npm ci over an
+  // existing install), so it asks before running.
+  replacesInstall: boolean;
   line: string;
   result: EnvStepResult | null;
 };
