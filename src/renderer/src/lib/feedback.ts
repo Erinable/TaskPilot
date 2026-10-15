@@ -25,13 +25,17 @@ export const showToast = (message: string, tone: ToastTone = /失败|无效|无�
 
 // An AI teammate finished something. A toast when the window is in front; a
 // system notification as well when it is not, so nobody has to wait watching
-// a spinner. Text only: the body can quote agent output.
-export const announceAgent = (message: string, tone?: ToastTone) => {
+// a spinner. Text only: the body can quote agent output. `onOpen` runs when
+// the notification is clicked, to show what it is about.
+export const announceAgent = (message: string, tone?: ToastTone, onOpen?: () => void) => {
   showToast(message, tone);
   if (document.hasFocus() || typeof Notification === 'undefined') return;
   try {
     const notice = new Notification('TaskPilot', { body: message, silent: false });
-    notice.onclick = () => window.focus();
+    notice.onclick = () => {
+      window.focus();
+      onOpen?.();
+    };
   } catch (error) {
     console.error('[feedback] system notification failed', error);
   }

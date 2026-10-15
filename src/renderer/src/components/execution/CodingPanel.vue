@@ -2,14 +2,20 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
 import { useCodingStore } from '@/stores/coding.ts';
+import { VERIFY_LABELS } from '@/stores/execution.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
+import { describeErrorInfo } from '@/lib/errors.ts';
+import { diffLineKind } from '@/lib/review_model.ts';
 import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ task: ipc.TaskView }>();
 const coding = useCodingStore();
 const highRiskConsent = ref(false);
+const now = useNow();
 
 const STATUS_LABELS: Record<ipc.CodingRun['status'], string> = {
   preparing: '准备中',
@@ -24,7 +30,8 @@ const STATUS_LABELS: Record<ipc.CodingRun['status'], string> = {
   cancelled: '已取消',
   discarded: '已丢弃',
 };
-const CHECK_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: 'Lint', build: 'Build', smoke: '冒烟测试' };
+// The transcript in plain words; the CLI's raw event kinds mean nothing to a beginner.
+const EVENT_LABELS: Record<ipc.CodingEvent['type'], string> = { status: '进度', text: '说明', thinking: '思考', tool: '操作', error: '出错' };
 const TRIGGER_LABELS: Record<ipc.CodingTrigger, string> = { human: '你发起', checks_failed: '检查失败后重试', qa_rejected: 'QA 驳回后重试' };
 const HALT_TEXT: Record<ipc.CodingHalt, string> = {
   attempts_exhausted: '已自动重试 3 轮仍未通过，交给你处理：可以自己修改，或补充说明后重新开始。',
@@ -37,8 +44,11 @@ const HALT_TEXT: Record<ipc.CodingHalt, string> = {
 // Rounds the loop can restart from: a finished chain or a stopped one.
 const RESTARTABLE: ipc.CodingRun['status'][] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
 
-const canStart = computed(() => !!coding.runtime?.available && !coding.active && !!coding.instruction.trim() && !coding.operation);
 const runError = computed(() => coding.run?.error);
+// The plain explanation, with the CLI's own message folded below when it adds something.
+const runErrorText = computed(() => describeErrorInfo(runError.value));
+const runErrorDetail = computed(() => (runError.value?.message && runError.value.message !== runErrorText.value ? runError.value.message : null));
+const elapsed = computed(() => (coding.active || coding.loopActive ? elapsedSince(coding.run?.startedAt, now.value) : null));
 // Why the runtime is unavailable, in plain words; the raw reason sits folded below.
 const setup = computed(() => (coding.runtime && !coding.runtime.available ? CODING_SETUP_TEXT[codingSetupIssue(coding.runtime.reason)] : null));
 const restartable = computed(() => !!coding.run && RESTARTABLE.includes(coding.run.status) && !coding.loopActive);
@@ -47,7 +57,10 @@ const fileDiffs = computed(() => {
   const segments = coding.patch ? splitPatch(coding.patch.patch) : [];
   return (coding.patch?.files ?? []).map((file, index) => ({
     file,
-    diff: segments[index] ?? '',
+    lines: (segments[index] ?? '')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => ({ kind: diffLineKind(line), text: line })),
     applicable: coding.applicable(file),
     reasons: (coding.patch?.blocked ?? []).filter((entry) => entry.path === file.path).map((entry) => entry.reason),
   }));
@@ -121,12 +134,18 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <AppIcon name="alert" />
       {{ coding.runtimeError }}
     </p>
-    <div v-if="coding.runtime && !coding.run" class="coding-meta" aria-label="当前编码运行时">
-      <span>CLI：{{ coding.runtime.backend }}</span>
-      <span>模型：{{ coding.runtime.config.model || 'CLI 默认模型' }}</span>
-      <span>思考：{{ coding.runtime.config.thinking }}</span>
-      <span>协议：{{ coding.runtime.protocol }}</span>
-    </div>
+    <details v-if="coding.runtime && !coding.run" class="coding-details">
+      <summary>运行配置</summary>
+      <div class="coding-meta" aria-label="当前编码运行时">
+        <span>CLI：{{ coding.runtime.backend }}</span>
+        <span>模型：{{ coding.runtime.config.model || 'CLI 默认模型' }}</span>
+        <span>
+          <TermHint term="thinking" />
+          ：{{ coding.runtime.config.thinking }}
+        </span>
+        <span>每轮最长 {{ coding.runtime.config.timeoutMinutes }} 分钟</span>
+      </div>
+    </details>
 
     <div v-if="coding.run && (coding.run.rounds.length || coding.run.attempt > 1)" class="coding-rounds" aria-label="编码轮次">
       <strong>第 {{ coding.run.attempt }} 轮（自动重试最多 {{ coding.maxAutoAttempts }} 轮）</strong>
@@ -147,43 +166,55 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
     </p>
 
     <div v-if="!coding.run || restartable" class="coding-start">
-      <label for="codingInstruction">开发者指令</label>
+      <label for="codingInstruction">给 Coding Agent 的说明</label>
       <textarea
         id="codingInstruction"
         v-model="coding.instruction"
         rows="4"
         maxlength="12000"
-        placeholder="描述要实现的代码变更、边界和验证方式"
+        placeholder="工作包的步骤、文件范围和验收条件会自动带上。这里写你想额外强调的。"
         :disabled="!coding.runtime?.available || coding.operation !== null"
       ></textarea>
       <p class="coding-hint">
-        第一轮的补丁由你按文件确认。应用后自动跑提交前检查，通过就提交 QA；检查失败或 QA 驳回会自动交回 AI，最多 {{ coding.maxAutoAttempts }} 轮。每轮最长
-        {{ coding.runtime?.config.timeoutMinutes ?? 30 }} 分钟。不会创建 commit 或 push。
+        AI 在项目副本里写，写好后由你逐个文件确认。之后自动检查、交给 QA，没通过会自动交回 AI 重试，最多 {{ coding.maxAutoAttempts }} 轮。不会提交或推送。
       </p>
-      <p v-if="runError" class="coding-error">
+      <div v-if="runError" class="coding-error">
         <AppIcon name="alert" />
-        {{ runError.code }}：{{ runError.message }}
-      </p>
+        <span>{{ runErrorText }}</span>
+        <details v-if="runErrorDetail" class="coding-raw">
+          <summary>原始信息</summary>
+          <pre>{{ runErrorDetail }}</pre>
+        </details>
+      </div>
       <div class="coding-actions">
-        <button v-if="coding.run" class="secondary-button" type="button" :disabled="!canStart" @click="retry">
+        <button v-if="coding.run" class="secondary-button" type="button" :disabled="!coding.canStart" @click="retry">
           <AppIcon name="refresh" />
           重新开始编码
         </button>
-        <button v-else class="primary-button" type="button" :disabled="!canStart" @click="start">
+        <button v-else class="primary-button" type="button" :disabled="!coding.canStart" @click="start">
           <AppIcon name="play" />
-          明确开始编码
+          开始编码
         </button>
       </div>
     </div>
 
     <template v-if="coding.run">
-      <div class="coding-meta">
-        <span>用户：{{ coding.run.user }}</span>
-        <span>CLI：{{ coding.run.cli }}</span>
-        <span>模型：{{ coding.run.model || 'CLI 默认模型' }}</span>
-        <span>思考：{{ coding.run.thinking }}</span>
-        <span>Token：{{ tokenText }}</span>
-        <span>费用：{{ cost }}</span>
+      <div class="coding-summary" role="status">
+        <span v-if="elapsed">已用 {{ elapsed }}</span>
+        <span>费用 {{ cost }}</span>
+        <details class="coding-details">
+          <summary>运行详情</summary>
+          <div class="coding-meta">
+            <span>账号：{{ coding.run.user }}</span>
+            <span>CLI：{{ coding.run.cli }}</span>
+            <span>模型：{{ coding.run.model || 'CLI 默认模型' }}</span>
+            <span>
+              <TermHint term="thinking" />
+              ：{{ coding.run.thinking }}
+            </span>
+            <span>Token：{{ tokenText }}</span>
+          </div>
+        </details>
       </div>
       <div class="coding-actions">
         <button
@@ -204,14 +235,17 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         <div v-if="coding.events.length === 0" class="empty-hint">等待编码 Agent 输出…</div>
         <div v-for="event in coding.events" :key="event.sequence" class="coding-event">
           <time>{{ new Date(event.at).toLocaleTimeString() }}</time>
-          <strong>{{ event.type }}</strong>
+          <strong :class="event.type">{{ EVENT_LABELS[event.type] }}</strong>
           <span>{{ event.text }}</span>
         </div>
       </div>
 
       <div v-if="coding.run.status === 'ready' && (coding.run.trigger === 'human' || coding.run.halt)" class="coding-result">
         <div class="coding-result-heading">
-          <strong>按文件确认补丁</strong>
+          <strong>
+            逐个文件确认
+            <TermHint term="patch" label="补丁" />
+          </strong>
           <span v-if="coding.patchLoading">正在读取补丁…</span>
           <span v-else-if="coding.patch">已勾选 {{ coding.selectedFiles.length }} / {{ coding.patch.files.length }} 个文件</span>
         </div>
@@ -232,7 +266,9 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
                 <strong v-if="entry.file.highRisk" class="risk-label">高风险</strong>
                 <span v-if="!entry.applicable" class="blocked-label">不能应用：{{ entry.reasons.join('；') }}</span>
               </summary>
-              <pre class="coding-diff">{{ entry.diff }}</pre>
+              <div class="diff-body coding-diff-body">
+                <div v-for="(line, index) in entry.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
+              </div>
             </details>
           </li>
         </ul>
@@ -264,7 +300,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <div v-if="checks.length" class="coding-checks" aria-label="编码前置检查">
         <strong>前置检查</strong>
         <div v-for="entry in checks" :key="entry.kind">
-          <span>{{ CHECK_LABELS[entry.kind] }}</span>
+          <span>{{ VERIFY_LABELS[entry.kind] }}</span>
           <span :class="entry.check.summary.ok ? 'check-pass' : 'check-fail'">{{ entry.check.summary.ok ? '通过' : '失败' }}</span>
         </div>
       </div>
@@ -367,6 +403,42 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
+/* Elapsed time and cost lead; the runtime details stay folded. */
+.coding-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.coding-details summary {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.coding-details .coding-meta {
+  margin-top: 6px;
+}
+.coding-summary .coding-details {
+  flex-basis: 100%;
+}
+div.coding-error {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  font-size: var(--text-sm);
+}
+div.coding-error .coding-raw {
+  grid-column: 2;
+}
+.coding-event strong.error {
+  color: var(--danger);
+}
+.coding-event strong.tool {
+  color: var(--accent);
+}
 .coding-transcript {
   max-height: 220px;
   overflow: auto;
@@ -420,7 +492,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.coding-files .coding-diff {
+.coding-files .coding-diff-body {
   margin-top: 6px;
 }
 .risk-label {

@@ -812,6 +812,17 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       return true;
     }),
   );
+  // The packages with a round or its checks in flight, for the app-wide
+  // indicator. Two in-memory maps, so it is cheap to poll.
+  ipcMain.handle(
+    CHANNELS.codingActive,
+    wrap((): ipc.CodingActiveRun[] =>
+      [...new Set([...codingRuns.keys(), ...codingVerifications.keys()])].map((packageId) => ({
+        packageId,
+        title: tasks.getTask(packageId)?.title ?? packageId,
+      })),
+    ),
+  );
   ipcMain.handle(
     CHANNELS.codingPatch,
     wrap(async (_event, rawId): Promise<ipc.CodingPatchPreview> => {

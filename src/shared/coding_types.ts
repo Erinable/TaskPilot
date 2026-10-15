@@ -83,3 +83,5 @@ export type CodingStart = { instruction: string; resume?: boolean };
 // files: the patch paths the developer accepted; the rest are left out.
 export type CodingApply = { digest: string; allowHighRisk: boolean; files: string[] };
 export type CodingApplyResult = { files: string[] };
+// Packages with a Coding Agent round or its checks running in this process.
+export type CodingActiveRun = { packageId: string; title: string };

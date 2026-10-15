@@ -2,6 +2,8 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TermHint from '@/components/TermHint.vue';
+import { GLOSSARY } from '@/lib/glossary.ts';
 import * as reviewModel from '@/lib/review_model.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore, VERIFY_LABELS } from '@/stores/execution.ts';
@@ -9,11 +11,12 @@ import type * as ipc from '@shared/ipc_types.ts';
 import EvidenceRow from './EvidenceRow.vue';
 import FailureExplain from './FailureExplain.vue';
 
+// Each check names what it does; the tooltip explains it in plain words.
 const SEGMENTS: { kind: ipc.CheckKind; icon: IconName; label: string }[] = [
   { kind: 'test', icon: 'flask', label: '测试' },
-  { kind: 'lint', icon: 'wand', label: 'Lint' },
-  { kind: 'build', icon: 'box', label: 'Build' },
-  { kind: 'smoke', icon: 'rocket', label: '冒烟' },
+  { kind: 'lint', icon: 'wand', label: '代码检查' },
+  { kind: 'build', icon: 'box', label: '构建' },
+  { kind: 'smoke', icon: 'rocket', label: '冒烟测试' },
 ];
 
 const props = defineProps<{ task: ipc.TaskView }>();
@@ -59,7 +62,7 @@ const remeasure = () => {
     </div>
     <div v-if="task.codingRun?.status === 'applied'" class="host-warning" role="alert">
       <AppIcon name="alert" />
-      编码 Agent 改动已应用；验证命令会以当前主机用户权限执行，请确认命令和工作区范围。
+      Coding Agent 的改动已写进项目。下面的检查用你自己的账号权限运行，会执行项目里的代码。
     </div>
     <div class="segmented" role="group" aria-label="验证命令">
       <button
@@ -69,6 +72,7 @@ const remeasure = () => {
         :class="{ selected: execution.verifyKind === segment.kind, running: execution.verifyRunning && execution.verifyKind === segment.kind }"
         type="button"
         :data-verify="segment.kind"
+        :title="GLOSSARY[segment.kind].meaning"
         :disabled="execution.verifyRunning"
         @click="run(segment.kind)"
       >
@@ -77,7 +81,10 @@ const remeasure = () => {
       </button>
     </div>
     <div v-if="task.baseline && baseline.text" class="baseline-status" :class="{ measuring: task.baselineChecks?.status === 'measuring' }">
-      <p>{{ baseline.text }}</p>
+      <p>
+        {{ baseline.text }}
+        <TermHint term="baseline" label="" />
+      </p>
       <button v-if="baseline.canRemeasure && task.status === 'in_progress'" class="secondary-button small" type="button" @click="remeasure">
         <AppIcon name="refresh" />
         重新测量基线

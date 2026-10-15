@@ -105,14 +105,10 @@ describe('QueueView', () => {
     expect(wrapper.find('.activity-list img').exists()).toBe(false);
   });
 
-  test('before the first overview the metrics show placeholders and the feed stays empty', () => {
+  test('before anything is finished the metrics are hidden and the feed stays empty', () => {
     const wrapper = render();
-    expect(
-      wrapper
-        .findAll('.metric-card strong')
-        .map((node) => node.text())
-        .slice(1),
-    ).toEqual(['–', '–', '–']);
+    // Weekly numbers would all read "–" on day one.
+    expect(wrapper.find('.metrics-row').exists()).toBe(false);
     expect(wrapper.find('.team-presence').exists()).toBe(false);
     expect(wrapper.find('.activity-list .empty-hint').exists()).toBe(false);
   });

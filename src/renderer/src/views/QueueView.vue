@@ -62,6 +62,8 @@ const doneTrend = computed(() => (overview.value ? activity.doneTrend(overview.v
 const durationTrend = computed(() => (overview.value ? activity.durationTrend(overview.value.metrics) : null));
 const presenceSummary = computed(() => activity.presenceSummary(overview.value?.team ?? null));
 const teamOnline = computed(() => overview.value?.team.available === true);
+// Weekly numbers mean nothing before the first package is finished.
+const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'done') || (overview.value?.metrics.doneThisWeek ?? 0) > 0);
 </script>
 
 <template>
@@ -74,7 +76,7 @@ const teamOnline = computed(() => overview.value?.team.available === true);
           <span>{{ greetingName }}</span>
           <AppIcon name="sparkle" class="wave" />
         </h1>
-        <p>AI 团队正在协作，你负责把已验证的指令写进代码。</p>
+        <p>写下想做的功能，AI 团队负责拆解、写代码和检查，每个关键决定都由你点头。</p>
       </div>
       <div class="heading-actions">
         <div v-if="presenceSummary" class="team-presence" :class="{ offline: !teamOnline }">
@@ -90,7 +92,7 @@ const teamOnline = computed(() => overview.value?.team.available === true);
 
     <OnboardingChecklist />
 
-    <section class="metrics-row">
+    <section v-if="hasHistory" class="metrics-row">
       <div class="metric-card glass">
         <div class="metric-icon accent"><AppIcon name="inbox" /></div>
         <div>

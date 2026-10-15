@@ -3,7 +3,7 @@
 import type * as ipc from '@shared/ipc_types.ts';
 import type { IconName } from './icons.ts';
 
-export const KIND_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: 'Lint', build: 'Build', smoke: '冒烟测试' };
+export const KIND_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
 
 export type EvidenceTone = 'done' | 'blocked' | 'in_review' | '';
 

@@ -55,19 +55,27 @@ describe('ExecutionView', () => {
     wrapper.unmount();
   });
 
-  test('with steps left, the advice is to write code and no action leads', async () => {
+  test('with steps left, the advice offers the Coding Agent first and it leads the page', async () => {
     current.task = taskView({ completedSteps: [], humanTransitions: ['submit_for_review', 'block'] });
     const { wrapper } = await mountOpen();
-    expect(wrapper.get('[data-next-step]').text()).toContain('照着「执行指令」一步步改代码');
+    expect(wrapper.get('[data-next-step]').text()).toContain('交给 Coding Agent');
     expect(wrapper.find('.exec-actions > [data-transition]').exists()).toBe(false);
     expect(wrapper.find('[data-action="more-transitions"]').exists()).toBe(true);
+    // The instruction comes prefilled, so one click hands the package over.
+    const handOff = wrapper.get('[data-action="hand-off"]');
+    expect(handOff.attributes('disabled')).toBeUndefined();
+    // The Coding Agent panel sits above the two columns.
+    expect(wrapper.find('.view > .coding-panel').exists()).toBe(true);
+    await handOff.trigger('click');
+    await flushPromises();
+    expect(api.coding.start).toHaveBeenCalledWith('t1', { instruction: expect.stringContaining('执行指令') });
     wrapper.unmount();
   });
 
   test('while the AI team works, the advice says so and there are no actions', async () => {
     current.task = taskView({ status: 'in_review', statusLabel: '审查中' });
     const { wrapper } = await mountOpen();
-    expect(wrapper.get('[data-next-step]').text()).toContain('QA Partner 正在检查你的改动');
+    expect(wrapper.get('[data-next-step]').text()).toContain('QA Partner 正在检查改动');
     expect(wrapper.find('.exec-actions [data-transition]').exists()).toBe(false);
     wrapper.unmount();
   });

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import TeamTabs from '@/components/TeamTabs.vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { businessDay, businessTimeZone, previousDay } from '@/lib/time_zone.ts';
@@ -91,6 +92,7 @@ onMounted(() => loadPage(null));
 
 <template>
   <div class="view activity-view">
+    <TeamTabs />
     <div class="page-heading">
       <div>
         <h1>活动记录</h1>

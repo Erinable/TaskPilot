@@ -346,6 +346,31 @@ code {
   gap: var(--space-2);
   -webkit-app-region: no-drag;
 }
+/* What the Coding Agent is doing, from any page */
+.coding-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 12px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.coding-chip:hover,
+.coding-chip:focus-visible {
+  background: var(--fill-hover);
+}
+.coding-chip .icon {
+  width: 14px;
+  height: 14px;
+}
+.coding-chip-more {
+  color: var(--text-tertiary);
+}
 .icon-button {
   position: relative;
   width: 34px;
@@ -1561,6 +1586,14 @@ code {
 }
 .next-step p {
   margin: 2px 0 0;
+}
+.next-step .next-step-elapsed {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+/* The Coding Agent spans the page while a package is being worked on. */
+.view > .coding-panel {
+  margin-bottom: var(--space-4);
 }
 .el-dropdown-menu__item.danger {
   color: var(--danger);

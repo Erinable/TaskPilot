@@ -66,4 +66,16 @@ describe('SideBar', () => {
     expect(useAppStore().sidebarCollapsed).toBe(false);
     vi.restoreAllMocks();
   });
+  test('members, activity and cost share one entry, which stays active on each tab', async () => {
+    const wrapper = mount(SideBar);
+    const labels = wrapper.findAll('.nav-item .nav-label').map((node) => node.text());
+    expect(labels).not.toContain('活动记录');
+    expect(labels).not.toContain('成本');
+    const team = wrapper.findAll('.nav-item').find((node) => node.text().includes('团队概览'))!;
+    for (const view of ['team', 'activity', 'costs'] as const) {
+      useAppStore().view = view;
+      await wrapper.vm.$nextTick();
+      expect(team.classes()).toContain('active');
+    }
+  });
 });

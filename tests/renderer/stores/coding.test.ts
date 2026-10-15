@@ -6,7 +6,7 @@ import { useCodingStore } from '../../../src/renderer/src/stores/coding.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
-import { installApi, taskView } from '../execution_fakes.ts';
+import { codingRun, installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -15,34 +15,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-const readyRun = (status: ipc.CodingRun['status']): ipc.CodingRun => ({
-  id: 'run-1',
-  packageId: 't1',
-  runName: 'run',
-  baseline: 'abcdef',
-  status,
-  user: 'coding-agent',
-  model: 'test',
-  cli: 'codex',
-  thinking: 'default',
-  runtimeVersion: '1',
-  sessionId: null,
-  instruction: '实现登录',
-  startedAt: '',
-  finishedAt: null,
-  error: null,
-  output: '',
-  usage: { inputTokens: null, outputTokens: null, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
-  files: [],
-  blocked: [],
-  checks: {},
-  patchDigest: status === 'ready' ? 'digest' : null,
-  attempt: 1,
-  trigger: 'human',
-  feedback: null,
-  halt: null,
-  rounds: [],
-});
+const readyRun = (status: ipc.CodingRun['status']) => codingRun({ status });
 
 const file = (path: string, highRisk = false): ipc.CodingPatchFile => ({ path, added: 1, removed: 0, binary: false, highRisk });
 const twoFilePatch: ipc.CodingPatchPreview = {

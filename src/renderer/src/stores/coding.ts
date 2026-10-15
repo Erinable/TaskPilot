@@ -12,11 +12,14 @@ export const CODING_POLL_MS = 1000;
 export const CODING_SETUP_SCRIPT = 'scripts/setup-coding-agent-user.sh';
 
 const ACTIVE_STATUSES: ipc.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying', 'verifying'];
+// The package's own steps, scope and acceptance criteria go into every prompt,
+// so a first round needs no retyping; the developer can add to it.
+export const DEFAULT_INSTRUCTION = '按工作包的执行指令完成全部步骤，满足验收条件，只改文件范围内的文件。';
 const TERMINAL_STATUSES: ipc.CodingRun['status'][] = ['ready', 'applied', 'submitted', 'failed', 'cancelled', 'discarded'];
 
 // The loop is still moving on its own: a round is working, an automatic
 // round's patch is about to be applied, or QA is reviewing its submission.
-const looping = (task: ipc.TaskView) => {
+export const looping = (task: ipc.TaskView) => {
   const codingRun = task.codingRun;
   if (!codingRun || codingRun.halt) return false;
   if (ACTIVE_STATUSES.includes(codingRun.status)) return true;
@@ -55,6 +58,7 @@ export const useCodingStore = defineStore('coding', () => {
     const codingRun = run.value;
     return codingRun ? ACTIVE_STATUSES.includes(codingRun.status) : false;
   });
+  const canStart = computed(() => !!runtime.value?.available && !active.value && !!instruction.value.trim() && !operation.value && eligible.value);
   const refreshRuntime = async () => {
     const token = ++runtimeGeneration;
     runtimeLoading.value = true;
@@ -167,7 +171,7 @@ export const useCodingStore = defineStore('coding', () => {
     try {
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return;
-      instruction.value = task.codingRun?.instruction ?? '';
+      instruction.value = task.codingRun?.instruction ?? DEFAULT_INSTRUCTION;
       roundId = task.codingRun?.id ?? null;
       if (looping(task)) startPolling(id, token);
       else if (task.codingRun?.status === 'ready') await loadPatch(id, token);
@@ -303,6 +307,7 @@ export const useCodingStore = defineStore('coding', () => {
     run,
     eligible,
     active,
+    canStart,
     terminal,
     loopActive,
     highRisk,

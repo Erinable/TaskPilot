@@ -10,6 +10,10 @@ export const GLOSSARY = {
   smoke: { term: '冒烟测试', meaning: '构建后快速跑一下，确认程序能正常启动，最基本的功能没坏。' },
   build: { term: 'Build（构建）', meaning: '把源代码编译或打包成能运行的程序，能发现类型错误等问题。' },
   commit: { term: '提交（commit）', meaning: '把一组改动存进 git 历史，像给项目拍一张快照，以后可以回看或撤回。' },
+  thinking: { term: '思考强度', meaning: '模型动手前想多久。越高越仔细，也越慢、越贵；「跟随模型」用 CLI 的默认值。' },
+  patch: { term: '补丁', meaning: 'AI 写出的改动清单：哪个文件、哪几行、怎么改。你勾选并应用后，才会真正写进项目。' },
+  adjudication: { term: '裁决', meaning: '你报告偏差后，Architect 判断该怎么办：驳回报告照原计划做，或者重新规划这个工作包。' },
+  test: { term: '测试', meaning: '运行项目自带的自动化测试，确认功能按预期工作，没有把原来好的地方改坏。' },
   blocked: { term: '阻塞', meaning: '因为外部原因暂时做不下去，比如在等别人的接口。标记后它不会被当作进行中。' },
 } as const;
 
