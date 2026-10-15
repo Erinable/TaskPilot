@@ -12,6 +12,8 @@ import { useSettingsStore } from '@/stores/settings.ts';
 const settings = useSettingsStore();
 const coding = computed(() => settings.preferencesDraft?.coding ?? null);
 
+const TIMEOUTS = [15, 30, 60, 120] as const;
+
 const MODES = [
   {
     value: 'sandbox',
@@ -69,6 +71,16 @@ const remove = (list: 'extraRead' | 'extraWrite', folder: string) => {
         </span>
       </label>
     </div>
+
+    <label class="coding-timeout">
+      <span>
+        <strong>每轮时间上限</strong>
+        <small class="hint">到时间 AI 会被停下，已经写好的部分留给你检查，不会自动应用。</small>
+      </span>
+      <el-select v-model="coding.timeoutMinutes" aria-label="每轮时间上限" class="coding-timeout-select">
+        <el-option v-for="minutes in TIMEOUTS" :key="minutes" :label="`${minutes} 分钟`" :value="minutes" />
+      </el-select>
+    </label>
 
     <template v-if="coding.isolation === 'sandbox'">
       <div class="sandbox-defaults">
@@ -153,6 +165,21 @@ const remove = (list: 'extraRead' | 'extraWrite', folder: string) => {
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.6;
+}
+.coding-timeout {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-sm);
+}
+.coding-timeout span {
+  display: grid;
+  gap: var(--space-1);
+}
+.coding-timeout-select {
+  width: 140px;
+  flex: none;
 }
 .sandbox-defaults {
   padding: var(--space-3) var(--space-4);

@@ -16,7 +16,7 @@ export const preferences = (): ipc.Preferences => ({
   appearance: { theme: 'system', vibrancy: false },
   environment: { pathSource: 'inherit' },
   agents: defaultAgentSettings(),
-  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
+  coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
 });
 
 export const workspaceView = () => ({

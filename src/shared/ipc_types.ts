@@ -429,8 +429,9 @@ export type PreferencesInput = {
   appearance: { theme: Theme; vibrancy: boolean };
   environment: { pathSource: PathSource };
   agents: AgentSettings;
-  // How the Coding Agent is isolated; the folders only apply to sandbox mode.
-  coding: { isolation: 'sandbox' | 'separate-user'; extraRead: string[]; extraWrite: string[] };
+  // How the Coding Agent is isolated (the folders only apply to sandbox mode),
+  // and how long one coding round may run.
+  coding: { isolation: 'sandbox' | 'separate-user'; extraRead: string[]; extraWrite: string[]; timeoutMinutes: 15 | 30 | 60 | 120 };
 };
 
 // Preferences as the renderer sees them, with derived display values.

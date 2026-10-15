@@ -123,3 +123,15 @@ test('saving rejects unsafe role capability and malformed model or thinking', as
   }
   await assert.rejects(fs.access(path.join(dir, preferences.PREFERENCES_FILENAME)));
 });
+
+test('coding timeout: only the listed choices are saved, and a hand-edited file falls back to 30 minutes', () => {
+  assert.equal(preferences.validate({ ...valid(), coding: { ...preferences.defaults().coding, timeoutMinutes: 120 } }).coding.timeoutMinutes, 120);
+  for (const bad of [45, '30', 0, null]) {
+    assert.throws(
+      () => preferences.validate({ ...valid(), coding: { ...preferences.defaults().coding, timeoutMinutes: bad } }),
+      { code: 'invalid_choice' },
+      String(bad),
+    );
+  }
+  assert.equal(preferences.normalize({ coding: { isolation: 'sandbox', timeoutMinutes: 999 } }).coding.timeoutMinutes, 30);
+});

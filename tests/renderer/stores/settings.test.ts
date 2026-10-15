@@ -74,7 +74,7 @@ test('agent configs save independently, reload, and expose runtime status withou
     appearance: { theme: 'system', vibrancy: false },
     environment: { pathSource: 'inherit' },
     agents: { ...defaultAgentSettings(), qa: { cli: 'claude', model: 'provider/test-model', thinking: 'default' } },
-    coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
+    coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
   });
   await settings.open('agents');
   expect(settings.preferencesDraft!.agents.qa.model).toBe('provider/test-model');
@@ -149,7 +149,7 @@ test('save checks the workspace, then sends each dirty store in form shape', asy
     appearance: { theme: 'dark', vibrancy: false },
     environment: { pathSource: 'inherit' },
     agents: defaultAgentSettings(),
-    coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] },
+    coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
   });
   expect(api.workspace.info).toHaveBeenCalled();
   expect(useAppStore().preferences?.appearance.theme).toBe('dark');

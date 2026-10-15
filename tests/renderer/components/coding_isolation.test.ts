@@ -2,6 +2,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 
 import CodingIsolation from '../../../src/renderer/src/components/settings/CodingIsolation.vue';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
@@ -14,13 +15,13 @@ let picked: string | null = '/srv/shared';
 beforeEach(() => {
   setActivePinia(createPinia());
   const prefs = preferences();
-  useSettingsStore().preferencesDraft = { ...prefs, coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] } } as never;
+  useSettingsStore().preferencesDraft = { ...prefs, coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 } } as never;
   (window as unknown as { taskpilot: unknown }).taskpilot = { workspace: { pickRoot: vi.fn(async () => ({ ok: true, data: picked })) } };
   vi.mocked(feedback.confirmAction).mockClear();
 });
 
 const render = async () => {
-  const wrapper = mount(CodingIsolation);
+  const wrapper = mount(CodingIsolation, { global: { plugins: [ElementPlus] } });
   await flushPromises();
   return wrapper;
 };
@@ -59,4 +60,10 @@ test('separate-user mode hides the sandbox exceptions', async () => {
   await wrapper.findAll('input[type="radio"]')[1].setValue(true);
   expect(draft().isolation).toBe('separate-user');
   expect(wrapper.find('.sandbox-exceptions').exists()).toBe(false);
+});
+
+test('the round time limit is a choice of fixed minutes, 30 by default', async () => {
+  const wrapper = await render();
+  expect(wrapper.find('.coding-timeout').text()).toContain('每轮时间上限');
+  expect(draft().timeoutMinutes).toBe(30);
 });

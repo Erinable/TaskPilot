@@ -87,9 +87,10 @@ test('runDirOf() accepts only direct children of the run root', () => {
 });
 
 test('preferences: sandbox is the default, and folders that would undo it are refused', () => {
-  assert.deepEqual(preferences.defaults().coding, { isolation: 'sandbox', extraRead: [], extraWrite: [] });
+  assert.deepEqual(preferences.defaults().coding, { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 });
   const base = { ...preferences.defaults(), profile: { displayName: '', avatarColor: 'sunset' } };
-  const withFolders = (extraRead: unknown[]) => preferences.validate({ ...base, coding: { isolation: 'sandbox', extraRead, extraWrite: [] } });
+  const withFolders = (extraRead: unknown[]) =>
+    preferences.validate({ ...base, coding: { isolation: 'sandbox', extraRead, extraWrite: [], timeoutMinutes: 30 } });
   assert.deepEqual(withFolders(['/srv/a', '/srv/a/']).coding.extraRead, ['/srv/a']);
   for (const bad of ['/', os.homedir(), path.dirname(os.homedir()), 'relative/path', `/srv/a\nb`]) {
     assert.throws(() => withFolders([bad]), { code: 'invalid_choice' }, JSON.stringify(bad));
@@ -99,6 +100,7 @@ test('preferences: sandbox is the default, and folders that would undo it are re
     isolation: 'sandbox',
     extraRead: ['/srv/ok'],
     extraWrite: [],
+    timeoutMinutes: 30,
   });
 });
 
