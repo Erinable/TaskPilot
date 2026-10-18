@@ -103,6 +103,7 @@ const stepState = (step: ipc.EnvStep) => {
             <div class="setup-step-label">
               <strong>{{ KIND_LABEL[step.kind] ?? step.kind }}</strong>
               <code>{{ step.line }}</code>
+              <small v-if="step.replacesInstall" class="setup-step-warn">会先删除现有的 node_modules 再重装</small>
             </div>
             <span class="status-pill" :class="stepState(step).tone">{{ stepState(step).text }}</span>
             <button

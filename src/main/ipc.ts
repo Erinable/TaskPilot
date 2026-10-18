@@ -1792,6 +1792,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       id: step.id,
       kind: step.kind,
       script: 'script' in step ? step.script : null,
+      packages: 'packages' in step ? step.packages : [],
+      replacesInstall: step.kind === 'install' && step.args[0] === 'ci' && Boolean(env.facts?.nodeModules),
       line: workspace.formatCommandLine(step),
       result: env.results[step.id] ?? null,
     })),
@@ -1916,7 +1918,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             exitCode: result.exitCode,
             timedOut: result.timedOut,
             durationMs: result.durationMs,
-            summary: step.kind === 'install' ? null : result.summary,
+            summary: step.kind === 'install' || step.kind === 'rebuild' ? null : result.summary,
             output: result.output.slice(-ENV_OUTPUT_CHARS),
             at: new Date().toISOString(),
           };

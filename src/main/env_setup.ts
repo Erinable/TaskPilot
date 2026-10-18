@@ -58,6 +58,10 @@ export interface EnvFacts {
   versionFiles: FactFile[];
   workflows: FactFile[];
   tools: { node: string | null; npm: string | null };
+  // Packages the npm lockfile marks hasInstallScript, minus optional ones
+  // (platform-only builds such as fsevents). With --ignore-scripts they are
+  // installed but unusable.
+  installScripts: string[];
 }
 
 export type Blocker = 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
@@ -68,15 +72,23 @@ export interface SetupPlan {
   scripts: Partial<Record<ScriptKind, string | null>>;
 }
 
-// One runnable setup step.
-export type SetupStep = CommandEntry & ({ id: 'install'; kind: 'install' } | { id: ScriptKind; kind: ScriptKind; script: string });
+// One runnable setup step. `rebuild` runs the install scripts of only the
+// packages that need them, after an install that skipped scripts.
+export type SetupStep = CommandEntry &
+  ({ id: 'install'; kind: 'install' } | { id: 'rebuild'; kind: 'rebuild'; packages: string[] } | { id: ScriptKind; kind: ScriptKind; script: string });
 
 // Reads a tool's version; injectable for tests.
 export type ToolVersion = (command: string, args: string[], envPath?: string | null) => Promise<string | null>;
 
-export type EnvSetupErrorCode = 'invalid_script' | 'invalid_mode';
+export type EnvSetupErrorCode = 'invalid_script' | 'invalid_mode' | 'invalid_package';
 // npm's own script-name rules are loose; this is what TaskPilot will pass on.
 export const SCRIPT_NAME = /^[A-Za-z0-9][\w:.-]{0,63}$/;
+// npm package names, optionally scoped: lowercase, no leading dot, dash or
+// underscore. Nothing that could read as a flag or a path reaches npm.
+export const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._~-]{0,213}\/)?[a-z0-9][a-z0-9._~-]{0,213}$/;
+// Lockfiles are large; this one is read on its own budget.
+const MAX_LOCKFILE_BYTES = 8 * 1024 * 1024;
+const MAX_INSTALL_SCRIPTS = 50;
 
 export class EnvSetupError extends Error {
   code: EnvSetupErrorCode;
@@ -125,6 +137,25 @@ export const parseManifest = (content: string): Manifest => {
   };
 };
 
+// Top-level packages an npm v2/v3 lockfile marks hasInstallScript. Nested
+// copies are rebuilt with their top-level name; optional packages are skipped.
+export const parseInstallScripts = (content: string): string[] => {
+  let packages: Record<string, LooseJson>;
+  try {
+    packages = JSON.parse(content)?.packages ?? {};
+  } catch {
+    return [];
+  }
+  if (!packages || typeof packages !== 'object') return [];
+  const names = new Set<string>();
+  for (const [key, entry] of Object.entries(packages)) {
+    if (!entry || typeof entry !== 'object' || entry.hasInstallScript !== true || entry.optional === true) continue;
+    const name = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    if (key.includes('node_modules/') && PACKAGE_NAME.test(name)) names.add(name);
+  }
+  return [...names].sort().slice(0, MAX_INSTALL_SCRIPTS);
+};
+
 // Collects setup facts without running anything from the repository: tracked
 // manifests and CI workflows (through repo_reader), whether node_modules
 // exists, and the node/npm versions on the command PATH.
@@ -141,6 +172,10 @@ export const probe = async (root: string, { envPath, version = toolVersion }: { 
   const read = (file: string) => content.get(file) as string;
 
   const lockfiles = tracked.filter((file) => Object.hasOwn(LOCKFILES, file));
+  const npmLockfile = ['package-lock.json', 'npm-shrinkwrap.json'].find((file) => lockfiles.includes(file));
+  const lock = npmLockfile
+    ? (await readTracked(root, [npmLockfile], { maxFiles: 1, maxFileBytes: MAX_LOCKFILE_BYTES, maxTotalBytes: MAX_LOCKFILE_BYTES })).files[0]
+    : undefined;
   const managers = [...new Set(lockfiles.map((file) => LOCKFILES[file]))];
   let nodeModules = false;
   try {
@@ -160,6 +195,7 @@ export const probe = async (root: string, { envPath, version = toolVersion }: { 
       node: await version('node', ['--version'], envPath),
       npm: await version('npm', ['--version'], envPath),
     },
+    installScripts: lock ? parseInstallScripts(lock.content) : [],
   };
 };
 
@@ -179,6 +215,12 @@ export const scriptCommand = (name: string): CommandEntry => {
   return name === 'test' ? { command: 'npm', args: ['test'] } : { command: 'npm', args: ['run', name] };
 };
 
+// `npm rebuild <names>` runs only those packages' install scripts.
+export const rebuildCommand = (packages: string[]): CommandEntry => {
+  if (!packages.length || packages.some((name) => !PACKAGE_NAME.test(name))) throw new EnvSetupError('Invalid package name', 'invalid_package');
+  return { command: 'npm', args: ['rebuild', ...packages] };
+};
+
 export const installCommand = (mode: string, { allowScripts = false } = {}): CommandEntry => {
   if (mode !== 'ci' && mode !== 'install') throw new EnvSetupError(`Invalid install mode: ${mode}`, 'invalid_mode');
   return {
@@ -190,11 +232,16 @@ export const installCommand = (mode: string, { allowScripts = false } = {}): Com
 // Turns a validated plan into runnable steps. Script names must exist in the
 // probed package.json, so a plan can only name commands the repository
 // already defines.
-export const buildSteps = (plan: SetupPlan, facts: Pick<EnvFacts, 'manifest'>, { allowScripts = false } = {}): SetupStep[] => {
+// The rebuild step names only packages the lockfile marks, and exists only
+// when install skips scripts.
+// [人工决策-2026-10-15 16:05:04] 默认仍带 --ignore-scripts；锁文件标了 hasInstallScript 的非可选包，由用户点击「运行必需的安装脚本」单独 npm rebuild，其余依赖的脚本不跑（默认拒绝、按包放行）。npm ci 覆盖已有 node_modules 时先确认。
+export const buildSteps = (plan: SetupPlan, facts: Pick<EnvFacts, 'manifest' | 'installScripts'>, { allowScripts = false } = {}): SetupStep[] => {
   const scripts = facts.manifest?.scripts ?? {};
   const steps: SetupStep[] = [];
   if (plan.install !== 'skip') {
     steps.push({ id: 'install', kind: 'install', ...installCommand(plan.install, { allowScripts }) });
+    const packages = facts.installScripts ?? [];
+    if (!allowScripts && packages.length) steps.push({ id: 'rebuild', kind: 'rebuild', packages, ...rebuildCommand(packages) });
   }
   for (const kind of SCRIPT_KINDS) {
     const name = plan.scripts[kind];

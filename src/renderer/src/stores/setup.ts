@@ -28,7 +28,11 @@ const adjustmentText = (adjustment: ipc.EnvAdjustment) => {
   if (adjustment.code === 'unknown_script') return `package.json 里没有脚本「${adjustment.script}」，已取消 ${adjustment.kind} 步骤。`;
   return (adjustment as { code: string }).code;
 };
-export const KIND_LABEL: Record<string, string> = { install: '安装依赖', test: '测试', lint: 'Lint', build: 'Build' };
+export const KIND_LABEL: Record<string, string> = { install: '安装依赖', rebuild: '运行必需的安装脚本', test: '测试', lint: '代码检查', build: '构建' };
+// Packages listed by name before the rest are counted.
+const NAMED_PACKAGES = 4;
+const packageList = (packages: string[]) =>
+  packages.length > NAMED_PACKAGES ? `${packages.slice(0, NAMED_PACKAGES).join('、')} 等 ${packages.length} 个` : packages.join('、');
 
 export type SetupNotice = { tone: 'danger' | 'info' | 'warning'; icon: IconName; text: string; detail: string | null };
 export type ApplyItem = { kind: ipc.ScriptKind; proposed: string; current: string; disabled: boolean; note: string };
@@ -101,6 +105,19 @@ export const useSetupStore = defineStore('setup', () => {
     for (const adjustment of current.plan?.adjustments ?? []) items.push({ tone: 'info', icon: 'info', text: adjustmentText(adjustment), detail: null });
     for (const issue of current.plan?.issues ?? []) items.push({ tone: 'warning', icon: 'alert', text: issue.text, detail: issue.fix || null });
     if (current.plan?.installReason) items.push({ tone: 'info', icon: 'box', text: `安装方式：${current.plan.installReason}`, detail: null });
+    // Packages that are installed but unusable until their scripts run.
+    const needed = current.facts?.installScripts ?? [];
+    if (needed.length && current.plan?.install !== 'skip')
+      items.push(
+        current.allowScripts
+          ? { tone: 'info', icon: 'box', text: `${packageList(needed)}需要安装脚本才能用，已允许全部依赖的安装脚本，安装时会一起运行。`, detail: null }
+          : {
+              tone: 'warning',
+              icon: 'alert',
+              text: `${packageList(needed)}要运行安装脚本才能用（例如下载程序本体或编译）。跳过脚本安装后，请接着运行「${KIND_LABEL.rebuild}」这一步，只为这几个包运行脚本，其他依赖的脚本仍然不跑。`,
+              detail: null,
+            },
+      );
     return items;
   });
 
@@ -108,6 +125,7 @@ export const useSetupStore = defineStore('setup', () => {
   const retryText = computed(() => {
     const failed = failedStep.value;
     if (!failed) return '';
+    if (failed.kind === 'rebuild') return '有依赖的安装脚本运行失败了。展开输出看看是哪个包；常见原因是网络下载失败，可以再运行一次。';
     return failed.kind === 'install' && !view.value?.allowScripts
       ? '安装失败了。如果错误来自原生模块编译，可以打开上面的「允许依赖的安装脚本」再试；也可以让环境管家看看输出。'
       : `「${KIND_LABEL[failed.kind]}」失败了。环境管家可以读取输出并给出排查建议。`;
@@ -210,6 +228,25 @@ export const useSetupStore = defineStore('setup', () => {
   // Only a step id crosses IPC; the main process rebuilds the command.
   const runStep = async (stepId: ipc.EnvStepId) => {
     if (busy.value || view.value?.stale) return false;
+    const step = view.value?.steps.find((candidate) => candidate.id === stepId);
+    // npm ci starts by deleting node_modules; a working install would be lost.
+    if (step?.replacesInstall) {
+      const confirmed = await confirmAction({
+        title: '先删除现有依赖再重装？',
+        body: 'npm ci 会先删除项目里现有的 node_modules，再按 package-lock.json 重新安装。如果现在的依赖能正常用，可以跳过这一步。',
+        accept: '删除并重装',
+        danger: true,
+      });
+      if (!confirmed) return false;
+    }
+    if (step?.kind === 'rebuild') {
+      const confirmed = await confirmAction({
+        title: `运行 ${step.packages.length} 个依赖的安装脚本？`,
+        body: `会以你的用户权限在本机运行这些包的安装脚本：${step.packages.join('、')}。它们来自 package-lock.json 里标记了需要安装脚本的包，其他依赖的脚本不会运行。`,
+        accept: '运行',
+      });
+      if (!confirmed) return false;
+    }
     return act(window.taskpilot.env.runStep(stepId), '运行失败');
   };
 

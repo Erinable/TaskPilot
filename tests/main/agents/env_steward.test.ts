@@ -12,6 +12,7 @@ const FACTS = {
   versionFiles: [{ path: '.nvmrc', content: '20' }],
   workflows: [{ path: '.github/workflows/ci.yml', content: 'run: npm ci' }],
   tools: { node: 'v18.0.0', npm: '9.0.0' },
+  installScripts: [],
 };
 
 const PLAN = {

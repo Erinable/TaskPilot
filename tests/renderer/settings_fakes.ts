@@ -55,6 +55,7 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
     versionFiles: [],
     workflows: [],
     tools: { node: 'v22.0.0', npm: '10.0.0' },
+    installScripts: [],
   },
   blockers: [],
   plan: {
@@ -71,8 +72,8 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
   running: null,
   live: null,
   steps: [
-    { id: 'install', kind: 'install', script: null, line: 'npm ci --ignore-scripts', result: null },
-    { id: 'test', kind: 'test', script: 'test', line: 'npm run test', result: null },
+    { id: 'install', kind: 'install', script: null, packages: [], replacesInstall: false, line: 'npm ci --ignore-scripts', result: null },
+    { id: 'test', kind: 'test', script: 'test', packages: [], replacesInstall: false, line: 'npm run test', result: null },
   ],
   configured: { test: '', lint: '', build: '', smoke: '' },
   ...overrides,

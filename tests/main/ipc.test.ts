@@ -1107,6 +1107,77 @@ test('env: a running step shows its output and start time, and a step reading st
   assert.match(result.output, /done/);
 });
 
+test('env: a scripts-off install is followed by a rebuild that runs only the marked packages', async () => {
+  const h = await envHarness();
+  // Two local dependencies with a postinstall. npm marks both; the test then
+  // keeps only one marked, to show the rebuild runs exactly what is listed.
+  for (const name of ['needs-build', 'left-alone']) {
+    const dir = path.join(h.root, 'deps', name);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({ name, version: '1.0.0', scripts: { postinstall: "node -e \"require('fs').writeFileSync('built.txt','ok')\"" } }),
+    );
+  }
+  const manifest = JSON.parse(await fs.readFile(path.join(h.root, 'package.json'), 'utf8'));
+  manifest.dependencies = { 'needs-build': 'file:deps/needs-build', 'left-alone': 'file:deps/left-alone' };
+  await fs.writeFile(path.join(h.root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  // Copies, not symlinks, as a registry install would give.
+  await fs.writeFile(path.join(h.root, '.npmrc'), 'install-links=true\n');
+  const { entries } = (await h.call(CHANNELS.environmentInfo)).data;
+  await run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund'], { cwd: h.root, env: { ...process.env, PATH: entries.join(':') } });
+  const lock = JSON.parse(await fs.readFile(path.join(h.root, 'package-lock.json'), 'utf8'));
+  delete lock.packages['node_modules/left-alone'].hasInstallScript;
+  await fs.writeFile(path.join(h.root, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
+  await run('git', ['add', '-A'], { cwd: h.root });
+  await run('git', ['commit', '-qm', 'deps'], { cwd: h.root });
+
+  await h.call(CHANNELS.envPlan);
+  const view = await settleEnv(h.call);
+  assert.equal(view.status, 'ready', JSON.stringify(view.error));
+  assert.deepEqual(view.facts.installScripts, ['needs-build']);
+  assert.deepEqual(
+    view.steps.map((step) => [step.id, step.line]),
+    [
+      ['install', 'npm install --ignore-scripts --no-audit --no-fund'],
+      ['rebuild', 'npm rebuild needs-build'],
+      ['test', 'npm test'],
+      ['lint', 'npm run lint'],
+    ],
+  );
+  const built = (name: string) =>
+    fs.access(path.join(h.root, 'node_modules', name, 'built.txt')).then(
+      () => true,
+      () => false,
+    );
+  const installed = (await h.call(CHANNELS.envRunStep, 'install')).data.steps[0].result;
+  assert.equal(installed.ok, true, installed.output);
+  assert.equal(await built('needs-build'), false, 'install skipped the script');
+  const rebuilt = (await h.call(CHANNELS.envRunStep, 'rebuild')).data.steps[1].result;
+  assert.equal(rebuilt.ok, true, rebuilt.output);
+  assert.equal(await built('needs-build'), true, 'rebuild ran the marked package');
+  assert.equal(await built('left-alone'), false, 'an unmarked package stays unbuilt');
+
+  // Allowing every script makes the rebuild step unnecessary.
+  assert.deepEqual(
+    (await h.call(CHANNELS.envSetAllowScripts, true)).data.steps.map((step) => step.id),
+    ['install', 'test', 'lint'],
+  );
+});
+
+test('env: npm ci over an existing node_modules is flagged as replacing it', async () => {
+  const h = await envHarness({ overrides: { env: { ...ENV_PLAN, install: { mode: 'ci', reason: '有 lockfile' } } } });
+  await fs.writeFile(path.join(h.root, 'package-lock.json'), JSON.stringify({ name: 'env-fixture', lockfileVersion: 3, packages: { '': {} } }));
+  await run('git', ['add', '-A'], { cwd: h.root });
+  await run('git', ['commit', '-qm', 'lock'], { cwd: h.root });
+  await fs.mkdir(path.join(h.root, 'node_modules'));
+  await h.call(CHANNELS.envPlan);
+  const view = await settleEnv(h.call);
+  const install = view.steps.find((step) => step.id === 'install');
+  assert.match(install.line, /^npm ci /);
+  assert.equal(install.replacesInstall, true);
+});
+
 test('env: re-planning with a failure hands the steward the failed output', async () => {
   const { call, agentCalls } = await envHarness();
   await call(CHANNELS.envPlan);

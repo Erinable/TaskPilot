@@ -95,3 +95,46 @@ test('buildSteps only runs scripts the manifest defines', () => {
   );
   assert.throws(() => envSetup.buildSteps({ install: 'skip', scripts: { test: 'nope' } }, facts), { code: 'invalid_script' });
 });
+
+const LOCK = JSON.stringify({
+  lockfileVersion: 3,
+  packages: {
+    '': { name: 'demo' },
+    'node_modules/electron': { version: '40.0.0', dev: true, hasInstallScript: true },
+    'node_modules/@scope/native': { version: '1.0.0', hasInstallScript: true },
+    'node_modules/vite/node_modules/esbuild': { version: '0.25.0', hasInstallScript: true },
+    // Platform-only and optional: skipping its script is expected.
+    'node_modules/fsevents': { version: '2.3.3', optional: true, hasInstallScript: true },
+    'node_modules/plain': { version: '1.0.0' },
+    // Never passed to npm: not a package name.
+    'node_modules/--force': { hasInstallScript: true },
+  },
+});
+
+test('the lockfile names the packages that need install scripts, without optional ones', async () => {
+  assert.deepEqual(envSetup.parseInstallScripts(LOCK), ['@scope/native', 'electron', 'esbuild']);
+  assert.deepEqual(envSetup.parseInstallScripts('{broken'), []);
+  const root = await repo({ 'package.json': JSON.stringify({ name: 'demo' }), 'package-lock.json': LOCK });
+  assert.deepEqual((await envSetup.probe(root, { version: fakeVersions() })).installScripts, ['@scope/native', 'electron', 'esbuild']);
+});
+
+test('a scripts-off install is followed by a rebuild of only those packages', () => {
+  const facts: any = { manifest: { scripts: {} }, installScripts: ['electron', 'esbuild'] };
+  const plan = { install: 'ci' as const, scripts: {} };
+  assert.deepEqual(
+    envSetup.buildSteps(plan, facts).map((s) => [s.id, s.command, ...s.args]),
+    [
+      ['install', 'npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+      ['rebuild', 'npm', 'rebuild', 'electron', 'esbuild'],
+    ],
+  );
+  // With scripts allowed, install runs them all; no rebuild step.
+  assert.deepEqual(
+    envSetup.buildSteps(plan, facts, { allowScripts: true }).map((s) => s.id),
+    ['install'],
+  );
+  // No install, nothing to rebuild.
+  assert.deepEqual(envSetup.buildSteps({ install: 'skip', scripts: {} }, facts), []);
+  assert.throws(() => envSetup.rebuildCommand(['--global']), { code: 'invalid_package' });
+  assert.throws(() => envSetup.rebuildCommand([]), { code: 'invalid_package' });
+});

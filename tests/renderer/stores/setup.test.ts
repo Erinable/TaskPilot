@@ -119,3 +119,55 @@ test('planning polls while the page is visible', async () => {
   await vi.advanceTimersByTimeAsync(1600);
   expect(api.env.get.mock.calls.length).toBe(calls + 2);
 });
+
+const withInstallScripts = (overrides: Record<string, unknown> = {}) => {
+  const base = envState();
+  return envState({
+    facts: { ...base.facts, installScripts: ['electron', 'esbuild'] },
+    steps: [
+      { ...base.steps[0], replacesInstall: true },
+      {
+        id: 'rebuild',
+        kind: 'rebuild',
+        script: null,
+        packages: ['electron', 'esbuild'],
+        replacesInstall: false,
+        line: 'npm rebuild electron esbuild',
+        result: null,
+      },
+    ],
+    ...overrides,
+  });
+};
+
+test('packages that need install scripts are named, with the step that runs them', async () => {
+  api.env.get.mockReturnValue(ok(withInstallScripts()));
+  const setup = await onSetupPage();
+  const notice = setup.notices.find((item) => item.text.includes('electron'));
+  expect(notice?.tone).toBe('warning');
+  expect(notice?.text).toContain('运行必需的安装脚本');
+  api.env.get.mockReturnValue(ok(withInstallScripts({ allowScripts: true })));
+  await setup.render();
+  expect(setup.notices.find((item) => item.text.includes('electron'))?.tone).toBe('info');
+});
+
+test('npm ci over an existing install asks first; declining runs nothing', async () => {
+  api.env.get.mockReturnValue(ok(withInstallScripts()));
+  const setup = await onSetupPage();
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+  expect(await setup.runStep('install')).toBe(false);
+  expect(api.env.runStep).not.toHaveBeenCalled();
+  expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('node_modules');
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  expect(await setup.runStep('install')).toBe(true);
+  expect(api.env.runStep).toHaveBeenCalledWith('install');
+});
+
+test('the rebuild step names its packages before it runs', async () => {
+  api.env.get.mockReturnValue(ok(withInstallScripts()));
+  const setup = await onSetupPage();
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  expect(await setup.runStep('rebuild')).toBe(true);
+  expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('electron、esbuild');
+  expect(api.env.runStep).toHaveBeenCalledWith('rebuild');
+});

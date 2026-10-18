@@ -3313,6 +3313,12 @@ button.avatar:hover {
   font-size: var(--text-sm);
   cursor: pointer;
 }
+.setup-step-warn {
+  display: block;
+  margin-top: 2px;
+  color: var(--warning);
+  font-size: var(--text-sm);
+}
 .setup-output.live > p {
   margin: 0 0 4px;
   color: var(--text-muted);
