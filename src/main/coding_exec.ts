@@ -314,6 +314,15 @@ export const runCoding = async ({
   sandbox: sandboxContext,
 }: RunCodingOptions): Promise<RunCodingResult> => {
   if (!supportsAgentConfig('coding-agent', config)) throw new CodingExecError('Unsupported coding CLI configuration', 'coding_protocol');
+  // The CLI's sign-in goes into the run's own home, never its real state folder.
+  const runDir = sandboxContext ? sandbox.runDirOf(sandboxContext, runName) : null;
+  if (sandboxContext && runDir) {
+    try {
+      await sandbox.seedAgentHome(sandboxContext, runDir, config.cli);
+    } catch (caught) {
+      throw new CodingExecError('Could not prepare the coding home', 'coding_spawn_failed', { stderr: redact(String(caught)) });
+    }
+  }
   const child: Spawned = (() => {
     try {
       if (sandboxContext) {
@@ -453,8 +462,12 @@ export const runCoding = async ({
   } catch (caught) {
     terminate(new CodingExecError('Could not send coding prompt', 'coding_stdin_failed', { stderr: redact(String(caught)) }));
   }
-  const result = await promise;
-  return result;
+  try {
+    return await promise;
+  } finally {
+    // A refreshed token goes back; nothing else the agent wrote does.
+    if (sandboxContext && runDir) await sandbox.syncCredentials(sandboxContext, runDir, config.cli).catch((error) => console.error(error));
+  }
 };
 
 const runtimeConfig = (config: AgentRuntimeConfig): CodingRuntimeStatus['config'] => ({ ...config, user: CODING_USER, timeoutMinutes: 30 });

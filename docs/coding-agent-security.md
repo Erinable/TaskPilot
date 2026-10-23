@@ -32,8 +32,10 @@ TaskPilot 不替用户执行 `sysadminctl`、`dscl`、sudoers 修改、CLI 安�
 TaskPilot 的 profile 包住整个 CLI 进程，所以 CLI 自己的工具和它执行的命令一样受限：
 
 - 写：本轮的运行目录（baseline 的 `git archive` 副本，位于
-  `userData/coding-runs/<id>`，不是真实仓库）、临时目录、所选 CLI 自己的
-  状态目录（如 `~/.claude`）、`~/.npm`，以及用户在设置里添加的可写文件夹；
+  `userData/coding-runs/<id>`，不是真实仓库）、这次运行专用的主目录
+  （`<id>-home`，HOME、XDG 目录和 npm 缓存都指向它）、临时目录，以及用户在
+  设置里添加的可写文件夹。所选 CLI 真实的状态目录（`~/.claude`、`~/.codex`
+  等）和 `~/.npm` 不可读也不可写；
 - 读：主目录以外的文件；主目录内只有上面这些、PATH 上工具所在的顶层目录
   （如 `~/.nvm`，但 `~/.ssh`、`~/Library` 等敏感目录从不因此放开），以及用户
   添加的可读文件夹。主目录里的文件名和大小仍可见（Node 需要 lstat）；
@@ -53,7 +55,13 @@ not permitted`，已实测），因此沙箱模式下 Codex 用 `--sandbox dange
 
 已接受的风险：
 
-- AI 能读到所选 CLI 自己的登录凭据和会话记录（CLI 需要它们才能工作）；
+- AI 能读到所选 CLI 的登录凭据（复制进专用主目录，CLI 需要它们才能工作）；
+
+[人工决策-2026-10-19] 每次运行给 CLI 一个临时 HOME，只复制登录凭据和必要配置
+（Claude 的 settings.json 只保留 env、apiKeyHelper、model，不带 hooks 和插件）。
+运行结束后只回写内容变了、仍是同结构 JSON 对象、且真实文件已存在的凭据文件，
+其余一律丢弃。自检额外确认沙箱里写不进真实的 CLI 状态目录。修复前，沙箱把这些
+目录设为可写，AI 能写入 hooks 或配置，在用户下次沙箱外运行 CLI 时执行。
 - 可以联网，所以 AI 能把它读得到的内容发出去；
 - macOS 钥匙串走系统服务而不是文件，没能证实被挡住；
 - 主目录以外、未被 Seatbelt 另行保护的文件可读（例如放在 `/srv`、`/opt` 下的仓库）。
