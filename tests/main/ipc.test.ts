@@ -204,23 +204,28 @@ const filePatch = (file: string, line: string, scope?: readonly string[]): Codin
   parsePatchPreview(`diff --git a/${file} b/${file}\nindex 1111111..2222222 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-export {};\n+${line}\n`, scope);
 
 type TestCall = (channel: Channel, ...args: unknown[]) => Promise<IpcResult<unknown>>;
+// Waits on wall-clock time, not event-loop turns: a round writes the store to
+// disk several times, which a slow CI runner can take well over 100 ms to do.
+const SETTLE_TIMEOUT_MS = 5000;
 const settleCoding = async (call: TestCall, id: string): Promise<TaskView> => {
   let last = 'no response';
-  for (let index = 0; index < 200; index += 1) {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     const response = await call(CHANNELS.codingGet, id);
     if (response.ok) {
       const task = response.data as TaskView;
       last = JSON.stringify(task.codingRun);
       if (task.codingRun && ['ready', 'failed', 'cancelled', 'discarded'].includes(task.codingRun.status)) return task;
     } else last = JSON.stringify(response.error);
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(`coding run never settled: ${last}`);
 };
 // Polls until the automatic loop reaches `done`.
 const settleLoop = async (call: TestCall, id: string, done: (task: TaskView) => boolean): Promise<TaskView> => {
   let last = 'no response';
-  for (let index = 0; index < 800; index += 1) {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     const response = await call(CHANNELS.codingGet, id);
     if (response.ok) {
       const task = response.data as TaskView;
