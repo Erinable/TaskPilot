@@ -19,7 +19,10 @@ vi.setConfig({ testTimeout: 20_000 });
 // A stand-in agent; tests answer with plain objects or reject.
 type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
 type CodingOverrides = Partial<
-  Pick<IpcDeps, 'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot'>
+  Pick<
+    IpcDeps,
+    'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot' | 'probeAgent' | 'checkSignIn'
+  >
 >;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
@@ -105,11 +108,13 @@ const harness = async ({
   const tutor = await new TutorStore(repoDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
+  // What the fake login shell reports; tests can prepend a folder of fake CLIs.
+  let shellPathPrefix = '/tp/shell/bin';
   const pathResolver = createPathResolver({
     inherited: '/usr/bin:/bin',
     read: async () => {
       shellReads += 1;
-      return `/tp/shell/bin:${process.env.PATH}`;
+      return `${shellPathPrefix}:${process.env.PATH}`;
     },
   });
   ipc = registerIpcHandlers(
@@ -144,6 +149,9 @@ const harness = async ({
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
         return (await agent(options)) as StructuredResult;
       },
+      // Never run the real CLIs from a test.
+      probeAgent: async (config) => ({ command: config.cli, available: true, version: 'test', reason: null }),
+      checkSignIn: async () => ({ state: 'signed_in', source: 'test' }),
       ...coding,
     },
   );
@@ -156,7 +164,12 @@ const harness = async ({
     config = { ...config, root: next };
   };
   const getConfig = () => config;
+  // Must be called before anything reads the login shell, which is cached.
+  const setShellPathPrefix = (next: string) => {
+    shellPathPrefix = next;
+  };
   return {
+    setShellPathPrefix,
     // Null only with withRepo: false, and those tests never read it.
     call,
     store,
@@ -619,6 +632,48 @@ test('verify:run uses the login-shell PATH once that preference is saved', async
   await call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }));
   const after = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
   assert.ok(after.startsWith('/tp/shell/bin:'), after);
+});
+
+test('agent:status reports sign-in for the analysis CLI and the coding CLI, checking a shared CLI once', async () => {
+  const checked: string[] = [];
+  const { call } = await harness({
+    coding: {
+      checkSignIn: async (cli) => {
+        checked.push(cli);
+        return cli === 'codex' ? { state: 'signed_out', source: null } : { state: 'signed_in', source: 'claude auth status' };
+      },
+    },
+  });
+  const status = (await call(CHANNELS.agentStatus)).data;
+  assert.equal(status.available, true);
+  assert.deepEqual(status.signIn, { state: 'signed_in', source: 'claude auth status' });
+  // The fake PATH has no codex, so it is reported as not installed and not checked.
+  assert.deepEqual(status.coding, { cli: 'codex', installed: false, signIn: null });
+  assert.deepEqual(checked, ['claude']);
+  // With the coding CLI on the PATH it is checked too.
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-bin-'));
+  onTestFinished(() => fs.rm(bin, { recursive: true, force: true }));
+  await fs.writeFile(path.join(bin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
+  checked.length = 0;
+  const withCodex = await harness({
+    coding: { checkSignIn: async (cli) => (checked.push(cli), cli === 'codex' ? { state: 'signed_out', source: null } : { state: 'signed_in', source: 'x' }) },
+  });
+  withCodex.setShellPathPrefix(bin);
+  assert.equal((await withCodex.call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }))).ok, true);
+  assert.deepEqual((await withCodex.call(CHANNELS.agentStatus)).data.coding, { cli: 'codex', installed: true, signIn: { state: 'signed_out', source: null } });
+  assert.deepEqual(checked.sort(), ['claude', 'codex']);
+
+  // A missing analysis CLI is not checked for sign-in.
+  checked.length = 0;
+  const offline = await harness({
+    coding: {
+      probeAgent: async (config) => ({ command: config.cli, available: false, version: null, reason: 'missing' }),
+      checkSignIn: async (cli) => (checked.push(cli), { state: 'unknown', source: null }),
+    },
+  });
+  const missing = (await offline.call(CHANNELS.agentStatus)).data;
+  assert.equal(missing.signIn, null);
+  assert.ok(!checked.includes('claude'));
 });
 
 test('data:reset-progress clears execution state but keeps config and preferences', async () => {

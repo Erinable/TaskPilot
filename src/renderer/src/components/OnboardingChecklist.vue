@@ -13,8 +13,6 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
-const INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
-
 const app = useAppStore();
 const repositories = useRepositoriesStore();
 const requirements = useRequirementsStore();
@@ -23,7 +21,8 @@ const settings = useSettingsStore();
 const agent = ref<ipc.AgentStatus | null>(null);
 const testCommand = ref<string | null>(null);
 const checking = ref(false);
-const showInstall = ref(false);
+// The step whose terminal command is shown.
+const shownCommand = ref<onboarding.OnboardingStepId | null>(null);
 
 // The CLI and the test command are not in any store the queue reads.
 const recheck = async () => {
@@ -44,14 +43,15 @@ const steps = computed(() =>
 );
 // Hidden until the first check answers, so it never flashes for a set-up user.
 const visible = computed(() => agent.value !== null && testCommand.value !== null && !onboarding.isComplete(steps.value));
-const doneCount = computed(() => steps.value.filter((step) => step.done).length);
-// The first step not done is the one to do now.
-const nextId = computed(() => steps.value.find((step) => !step.done)?.id ?? null);
+const required = computed(() => steps.value.filter((step) => !step.optional));
+const doneCount = computed(() => required.value.filter((step) => step.done).length);
+// The first required step not done is the one to do now.
+const nextId = computed(() => required.value.find((step) => !step.done)?.id ?? null);
 
-const copyInstall = async () => {
+const copyCommand = async (command: string) => {
   try {
-    await navigator.clipboard.writeText(INSTALL_COMMAND);
-    showToast('已复制安装命令');
+    await navigator.clipboard.writeText(command);
+    showToast('已复制命令');
   } catch (error) {
     console.error('[onboarding] clipboard failed', error);
     showToast('复制失败：系统剪贴板不可用', 'error');
@@ -59,7 +59,7 @@ const copyInstall = async () => {
 };
 
 const run = async (id: onboarding.OnboardingStepId) => {
-  if (id === 'cli') showInstall.value = !showInstall.value;
+  if (id === 'cli' || id === 'coding') shownCommand.value = shownCommand.value === id ? null : id;
   else if (id === 'repository') {
     if (await repositories.add()) await recheck();
   } else if (id === 'checks') await settings.open('setup');
@@ -74,7 +74,7 @@ onMounted(() => recheck());
     <div class="panel-heading">
       <div>
         <h2 id="onboardingTitle">开始使用 TaskPilot</h2>
-        <p>完成这 {{ steps.length }} 步，AI 团队就能帮你把想法拆成可以照着写的任务。已完成 {{ doneCount }} / {{ steps.length }}</p>
+        <p>完成这 {{ required.length }} 步，AI 团队就能帮你把想法拆成可以照着写的任务。已完成 {{ doneCount }} / {{ required.length }}</p>
       </div>
       <button class="icon-button small" type="button" title="重新检查" aria-label="重新检查" :disabled="checking" @click="recheck">
         <AppIcon :name="checking ? 'spinner' : 'refresh'" :class="{ spin: checking }" />
@@ -85,7 +85,7 @@ onMounted(() => recheck());
         v-for="(step, index) in steps"
         :key="step.id"
         class="onboarding-step"
-        :class="{ done: step.done, next: step.id === nextId, waiting: step.waiting && !step.done }"
+        :class="{ done: step.done, next: step.id === nextId, waiting: step.waiting && !step.done, optional: step.optional }"
         :data-step="step.id"
       >
         <span class="onboarding-mark" aria-hidden="true">
@@ -98,11 +98,11 @@ onMounted(() => recheck());
             <span v-if="step.done" class="visually-hidden">（已完成）</span>
           </strong>
           <p>{{ step.why }}</p>
-          <div v-if="step.id === 'cli' && showInstall && !step.done" class="onboarding-install">
-            <p>在终端里运行下面这行命令（需要先装好 Node.js），装好后回来点「重新检查」：</p>
+          <div v-if="step.command && shownCommand === step.id && !step.done" class="onboarding-install">
+            <p>在终端里运行下面这行命令（安装需要先装好 Node.js），完成后回来点「重新检查」：</p>
             <div class="onboarding-command">
-              <code>{{ INSTALL_COMMAND }}</code>
-              <button class="secondary-button small" type="button" @click="copyInstall">
+              <code>{{ step.command }}</code>
+              <button class="secondary-button small" type="button" @click="copyCommand(step.command)">
                 <AppIcon name="copy" />
                 复制
               </button>

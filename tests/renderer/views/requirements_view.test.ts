@@ -6,7 +6,7 @@ import ElementPlus from 'element-plus';
 
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
-import { installApi, planPackage, requirement } from '../requirements_fakes.ts';
+import { agentStatus, installApi, planPackage, requirement } from '../requirements_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -164,7 +164,7 @@ describe('RequirementsView', () => {
   });
 
   test('compose shows what the agents will see, and warns when the CLI is missing', async () => {
-    api.agent.status.mockResolvedValueOnce({ ok: true, data: { available: false, command: null } });
+    api.agent.status.mockResolvedValueOnce({ ok: true, data: agentStatus({ available: false, command: null, signIn: null }) });
     api.workspace.info.mockResolvedValueOnce({ ok: true, data: { configured: true, root: '/Users/me/projects/app' } as never });
     const { wrapper } = await render({ compose: true });
     expect(wrapper.find('.req-context-list li').text()).toContain('Architect 会读取仓库 app 中');
