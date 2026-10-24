@@ -117,6 +117,10 @@ declare const api: {
     ask: (id: string, stepIndex: number) => Promise<ipc.IpcResult<ipc.TutorState>>;
     cancel: (id: string, stepIndex: number) => Promise<ipc.IpcResult<boolean>>;
   };
+  practice: {
+    reference: (id: string) => Promise<ipc.IpcResult<string>>;
+    grade: (id: string, skipReference: boolean) => Promise<ipc.IpcResult<ipc.TaskView>>;
+  };
 };
 
 export type TaskPilotApi = typeof api;

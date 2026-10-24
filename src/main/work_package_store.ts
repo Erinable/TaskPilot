@@ -13,7 +13,7 @@ import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from
 import type { CheckKind } from './workspace.ts';
 
 import type { CodingRun } from '../shared/coding_types.ts';
-import type { ExecutionMode } from '../shared/ipc_types.ts';
+import type { ExecutionMode, Grade, ReferenceRun } from '../shared/ipc_types.ts';
 export const STATE_FILENAME = 'work-packages.json';
 
 // Why an agent run failed.
@@ -159,6 +159,10 @@ export interface WorkPackageState {
   // Who writes the code, chosen at claim. Null before a claim, after a
   // release or replan, and on packages claimed before modes existed.
   mode: ExecutionMode | null;
+  // Practice only: Coding Agent's reference solution and Tutor's grading.
+  // Both belong to one claim of one plan, so release and replan clear them.
+  referenceRun: ReferenceRun | null;
+  grade: Grade | null;
   // When the package reached done, for estimate-vs-actual; null before.
   completedAt: string | null;
   // Dependencies the developer chose to skip; they no longer block claiming.
@@ -206,6 +210,8 @@ const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState =>
   replanUndo: null,
   codingRun: null,
   mode: null,
+  referenceRun: null,
+  grade: null,
   completedAt: null,
   waivedDependencies: [],
 });
@@ -306,6 +312,17 @@ export class WorkPackageStore {
             error: { code: 'coding_interrupted', message: 'Checks were interrupted when the app closed' },
           };
         }
+        // Nor a reference run or a grading; grading can be asked again.
+        if (merged.referenceRun?.status === 'running') {
+          merged.referenceRun = {
+            ...merged.referenceRun,
+            status: 'failed',
+            error: { code: 'coding_interrupted', message: 'The reference run was interrupted when the app closed' },
+          };
+        }
+        if (merged.grade && ['waiting', 'running'].includes(merged.grade.status)) {
+          merged.grade = { ...merged.grade, status: 'failed', error: { code: 'agent_interrupted', message: 'Grading was interrupted when the app closed' } };
+        }
         if (merged.codingRun && ['preparing', 'running', 'checking', 'applying'].includes(merged.codingRun.status)) {
           merged.codingRun = {
             ...merged.codingRun,
@@ -400,6 +417,8 @@ export class WorkPackageStore {
       entry.review = null;
       entry.baselineChecks = null;
       entry.mode = null;
+      entry.referenceRun = null;
+      entry.grade = null;
     }
     if (name === 'report_deviation') {
       if (!deviation?.note?.trim()) {
@@ -620,6 +639,8 @@ export class WorkPackageStore {
       entry.baselineChecks = null;
       entry.review = null;
       entry.mode = null;
+      entry.referenceRun = null;
+      entry.grade = null;
     }
     entry.adjudication = {
       ...entry.adjudication,
@@ -656,6 +677,27 @@ export class WorkPackageStore {
     const entry = this.get(id);
     if (entry.status !== 'pending') throw new StoreError('Dependencies only block a pending package', 'invalid_state');
     if (!entry.waivedDependencies.includes(dependency)) entry.waivedDependencies = [...entry.waivedDependencies, dependency];
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  // Writes the practice records of one claim. `expect` is the id of the run
+  // the caller started: a late write from a run that was replaced (release,
+  // replan, a new claim) is dropped and null returned.
+  async setReferenceRun(id: string, run: ReferenceRun | null, expect?: string): Promise<WorkPackageState | null> {
+    const entry = this.get(id);
+    if (expect !== undefined && entry.referenceRun?.id !== expect) return null;
+    entry.referenceRun = run ? structuredClone(run) : null;
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  async setGrade(id: string, grade: Grade | null, expect?: string): Promise<WorkPackageState | null> {
+    const entry = this.get(id);
+    if (expect !== undefined && entry.grade?.id !== expect) return null;
+    entry.grade = grade ? structuredClone(grade) : null;
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);

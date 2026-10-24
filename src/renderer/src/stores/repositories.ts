@@ -25,6 +25,8 @@ const BUSY_LABELS: Record<ipc.BusyKind, string> = {
   environment: '环境管家',
   tutor: '导师讲解',
   coding: 'Coding Agent',
+  reference: '参考答案',
+  grade: '导师判卷',
 };
 
 export const useRepositoriesStore = defineStore('repositories', () => {

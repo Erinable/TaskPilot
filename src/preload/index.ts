@@ -157,6 +157,13 @@ const api = {
     ask: (id: string, stepIndex: number) => invoke<ipc.TutorState>(CHANNELS.tutorAsk, id, stepIndex),
     cancel: (id: string, stepIndex: number) => invoke<boolean>(CHANNELS.tutorCancel, id, stepIndex),
   },
+
+  practice: {
+    // The reference patch; refused until the package was first submitted.
+    reference: (id: string) => invoke<string>(CHANNELS.referenceGet, id),
+    // Grades now: a retry, or without waiting for the reference.
+    grade: (id: string, skipReference: boolean) => invoke<ipc.TaskView>(CHANNELS.gradeStart, id, skipReference),
+  },
 };
 
 export type TaskPilotApi = typeof api;

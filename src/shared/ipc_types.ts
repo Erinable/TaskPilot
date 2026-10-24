@@ -76,6 +76,43 @@ export type ExecutionMode = 'practice' | 'ai' | 'self';
 export type PlannedMode = Exclude<ExecutionMode, 'self'>;
 export type ModeRecommendation = { mode: PlannedMode; reason: string };
 
+// ========== practice ==========
+
+// Coding Agent's reference solution for a practised package, generated in
+// the background from the claimed commit and never applied. Its patch stays
+// in the main process until the developer first submits (revealedAt).
+export type ReferenceRun = {
+  id: string;
+  status: 'running' | 'ready' | 'failed' | 'cancelled';
+  startedAt: string;
+  finishedAt: string | null;
+  error: ErrorInfo | null;
+  files: { path: string; added: number; removed: number }[];
+  costUsd: number | null;
+  revealedAt: string | null;
+};
+
+// Tutor's marking of a practised submission against the reference.
+//   thinking  how the problem was approached
+//   writing   how the code does it (constructs, APIs, error handling)
+//   style     naming, layout and the repository's conventions
+export type GradeCategory = 'thinking' | 'writing' | 'style';
+export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string };
+export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[] };
+// waiting: QA has finished but the reference is still being written.
+export type Grade = {
+  id: string;
+  status: 'waiting' | 'running' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt: string | null;
+  error: ErrorInfo | null;
+  // The submission graded; the same diff is not graded twice.
+  diffDigest: string;
+  withReference: boolean;
+  report: GradeReport | null;
+  costUsd: number;
+};
+
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
 
@@ -342,6 +379,9 @@ export type WorkPackageState = {
   // Chosen at claim; null before, after a release or replan, and on
   // packages claimed before modes existed.
   mode: ExecutionMode | null;
+  // Practice only; cleared on release and replan.
+  referenceRun: ReferenceRun | null;
+  grade: Grade | null;
 };
 
 // The effective definition (Architect's replan laid over it) plus its state.
@@ -357,6 +397,8 @@ export type TaskView = TaskDefinition & {
   adjudication: Adjudication | null;
   codingRun: CodingRun | null;
   mode: ExecutionMode | null;
+  referenceRun: ReferenceRun | null;
+  grade: Grade | null;
   // Null when never replanned; the definition itself is already applied.
   revision: Omit<Revision, 'definition'> | null;
   // Human transitions available now, after the state guards.
@@ -887,7 +929,7 @@ export type Repository = {
 export type RepositoryList = { repositories: Repository[]; current: string | null };
 
 // Background work a switch would cancel.
-export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor' | 'coding';
+export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor' | 'coding' | 'reference' | 'grade';
 export type BusyRun = { kind: BusyKind; label: string };
 
 // ========== commit ==========

@@ -25,6 +25,8 @@ import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
 import * as codingSandbox from './coding_sandbox.ts';
 import * as codingLoop from './coding_loop.ts';
+import * as practice from './practice.ts';
+import { collectChanges } from './review_diff.ts';
 import { codingCall } from './agents/model_usage.ts';
 import { buildCostReport } from './cost_report.ts';
 import { estimateMicros, loadPrices, priceFor, syncPrices } from './model_prices.ts';
@@ -177,6 +179,8 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState, 
     adjudication: state.adjudication ?? null,
     codingRun: state.codingRun ?? null,
     mode: state.mode ?? null,
+    referenceRun: state.referenceRun ?? null,
+    grade: state.grade ?? null,
     revision: state.revision && {
       version: state.revision.version,
       reason: state.revision.reason,
@@ -999,6 +1003,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         await store
           .completeReview(id, outcome.result)
           .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
+          // Awaited so a repository switch waits for the grade to be recorded.
+          .then(() => (store.get(id).mode === 'practice' ? startGrade(id).catch((error) => console.error('[grade] could not start', error)) : undefined))
           .then(
             () => continueLoop(id, () => continueAfterReview(id)),
             (error) => store.failReview(id, error).catch(() => {}),
@@ -1008,6 +1014,179 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     track(settled);
     return toWireState(entry);
   };
+
+  // ========== Practice: reference solution and grading ==========
+  // See ./practice.ts for the rules. Both runs belong to one claim: release,
+  // replan and a repository switch abort them, and a late write from a
+  // replaced run is dropped by the store (setReferenceRun/setGrade `expect`).
+
+  const referenceRuns = new Map<string, AbortController>(); // package id -> AbortController
+  const gradeRuns = new Map<string, AbortController>(); // package id -> AbortController
+  const referenceFile = (id: string) => practice.referencePath(repositories.dataDir(), id);
+
+  // Coding Agent writes the reference in its own run directory, from the
+  // claimed commit, in the background. Never applied; never auto-retried.
+  const startReference = (id: string) => {
+    const task = requireTask(id);
+    const root = requireRoot();
+    const baseline = requireBaseline(id);
+    const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
+    const timeoutMinutes = getPreferences().coding.timeoutMinutes;
+    const controller = new AbortController();
+    referenceRuns.set(id, controller);
+    const runId = codingExec.codingRunId();
+    const initial: ipc.ReferenceRun = {
+      id: runId,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+      files: [],
+      costUsd: null,
+      revealedAt: null,
+    };
+    console.debug(`[reference] start package=${id} run=${runId}`);
+    const settled = (async () => {
+      await store.setReferenceRun(id, initial);
+      const sandbox = sandboxed() ? await sandboxContext() : undefined;
+      const runName = path.join(sandbox ? sandboxRunRoot : codingWorkspace.DEFAULT_RUN_ROOT, runId);
+      let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
+      let finished: Partial<ipc.ReferenceRun>;
+      try {
+        prepared = await codingPrepare(root, baseline, { runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
+        if (controller.signal.aborted) throw Object.assign(new Error('Reference run was cancelled'), { code: 'coding_aborted' });
+        const result = await codingRun({
+          runName: prepared.runName,
+          config: runtimeConfig,
+          prompt: codingPrompt(
+            task,
+            'Write the complete solution to this work package. It is a reference answer for a learner, so follow the repository conventions closely.',
+            null,
+          ),
+          timeoutMs: timeoutMinutes * 60 * 1000,
+          signal: controller.signal,
+          sandbox,
+        });
+        recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, result.usage), { kind: 'package', id });
+        const preview = await codingReadPatch(prepared.runName, task.fileScope, { signal: controller.signal, sandbox, cli: runtimeConfig.cli });
+        await fs.mkdir(path.dirname(referenceFile(id)), { recursive: true });
+        await fs.writeFile(referenceFile(id), preview.patch);
+        finished = {
+          status: 'ready',
+          files: preview.files.map((file) => ({ path: file.path, added: file.added, removed: file.removed })),
+          costUsd: result.usage.costUsd,
+        };
+      } catch (error) {
+        const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        if (!cancelled) console.error('[reference] run failed', error);
+        const spent = error instanceof codingExec.CodingExecError ? error.usage : null;
+        if (spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null))
+          recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, spent), { kind: 'package', id });
+        finished = { status: cancelled ? 'cancelled' : 'failed', error: codingFailure(error), costUsd: spent?.costUsd ?? null };
+      } finally {
+        if (prepared) await cleanRun(prepared.runName).catch((error) => console.error('[reference] clean failed', error));
+        if (referenceRuns.get(id) === controller) referenceRuns.delete(id);
+      }
+      const written = await store.setReferenceRun(id, { ...initial, ...finished, finishedAt: new Date().toISOString() }, runId);
+      console.debug(`[reference] done package=${id} run=${runId} status=${finished.status} kept=${Boolean(written)}`);
+      // QA may have finished first; its grade waits for the reference.
+      if (written?.grade?.status === 'waiting') startGrade(id, { force: true }).catch((error) => console.error('[grade] could not start', error));
+    })();
+    track(settled);
+  };
+
+  // Tutor grades the current submission once QA has judged it. With the
+  // reference still running the grade waits (status 'waiting') unless the
+  // developer chose not to; `force` regrades a failed or waiting grade.
+  const startGrade = async (id: string, { force = false, skipReference = false }: { force?: boolean; skipReference?: boolean } = {}) => {
+    const task = requireTask(id);
+    const state = store.get(id);
+    if (state.mode !== 'practice') failWith('Only practised packages are graded', 'not_practice');
+    const review = practice.reviewForGrade(toWireState(state).review);
+    if (!review) failWith('QA has not judged this submission yet', 'review_not_finished');
+    if (gradeRuns.has(id)) return viewOf(task, state);
+    const root = requireRoot();
+    const collected = await collectChanges(root, requireBaseline(id), { ignore: reportIgnore(getConfig()) });
+    const submission = collected.files.map((file) => ({ path: file.path, patch: file.patch }));
+    const diffDigest = practice.submissionDigest(submission);
+    if (!force && practice.alreadyGraded(state.grade, diffDigest)) return viewOf(task, state);
+    const reference = state.referenceRun;
+    const gradeId = codingExec.codingRunId();
+    const base: ipc.Grade = {
+      id: gradeId,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      error: null,
+      diffDigest,
+      withReference: false,
+      report: null,
+      costUsd: 0,
+    };
+    if (reference?.status === 'running' && !skipReference) {
+      await store.setGrade(id, { ...base, status: 'waiting' });
+      console.debug(`[grade] waiting package=${id} for the reference`);
+      return viewOf(task, store.get(id));
+    }
+    const referencePatch = reference?.status === 'ready' ? await fs.readFile(referenceFile(id), 'utf8').catch(() => null) : null;
+    const controller = new AbortController();
+    gradeRuns.set(id, controller);
+    await store.setGrade(id, { ...base, withReference: referencePatch !== null });
+    const tutorRunner = runnerFor('tutor', { kind: 'package', id });
+    const { path: envPath } = await commandPath();
+    console.debug(`[grade] start package=${id} files=${submission.length} reference=${referencePatch !== null}`);
+    const settled = (async () => {
+      let finished: Partial<ipc.Grade>;
+      try {
+        const { output, costUsd } = await tutorRunner({
+          prompt: tutorAgent.gradePrompt({ task, submission, reference: referencePatch && practice.referenceForPrompt(referencePatch), review }),
+          systemPrompt: tutorAgent.GRADE_SYSTEM_PROMPT,
+          schema: tutorAgent.GRADE_SCHEMA,
+          envPath,
+          signal: controller.signal,
+        });
+        throwIfCancelled(controller.signal);
+        finished = { status: 'done', report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path) }), costUsd: costUsd ?? 0 };
+      } catch (error) {
+        const cancelled = controller.signal.aborted;
+        if (!cancelled) console.error('[grade] run failed', error);
+        const info = asAgentError(error);
+        finished = {
+          status: 'failed',
+          error: cancelled ? { code: 'agent_cancelled', message: 'Grading was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
+        };
+      } finally {
+        if (gradeRuns.get(id) === controller) gradeRuns.delete(id);
+      }
+      await store.setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt: new Date().toISOString() }, gradeId);
+      console.debug(`[grade] done package=${id} status=${finished.status}`);
+    })();
+    track(settled);
+    return viewOf(task, store.get(id));
+  };
+
+  // [人工决策-2026-10-24 12:51:21] 先交卷再看：首次提交审查之前不返回参考补丁。
+  ipcMain.handle(
+    CHANNELS.referenceGet,
+    wrap(async (_event, rawId): Promise<string> => {
+      const id = requireString(rawId, 'id');
+      requireTask(id);
+      const state = store.get(id);
+      if (state.referenceRun?.status !== 'ready') failWith('There is no reference solution', 'no_reference');
+      if (!state.review) failWith('Submit your own solution first', 'reference_locked');
+      if (!state.referenceRun.revealedAt)
+        await store.setReferenceRun(id, { ...state.referenceRun, revealedAt: new Date().toISOString() }, state.referenceRun.id);
+      return fs.readFile(referenceFile(id), 'utf8');
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.gradeStart,
+    wrap((_event, rawId, skipReference): Promise<ipc.TaskView> => {
+      if (typeof skipReference !== 'boolean') failWith('skipReference must be boolean', 'invalid_argument', 'skipReference');
+      return startGrade(requireString(rawId, 'id'), { force: true, skipReference });
+    }),
+  );
 
   // Architect: rules on a reported deviation.
 
@@ -1050,7 +1229,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         const before = store.get(id).status;
         await store
           .completeAdjudication(id, outcome.result)
-          .then((after) => recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent'))
+          .then((after) => {
+            // A replan drops the reference and grade; stop the runs writing them.
+            if (after.status === 'pending') {
+              referenceRuns.get(id)?.abort();
+              gradeRuns.get(id)?.abort();
+            }
+            return recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent');
+          })
           .catch((error) => store.failAdjudication(id, error).catch(() => {}));
       }
     })();
@@ -1169,13 +1355,18 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       }
       // The store validates the deviation it is given.
       if (name === 'report_deviation') extra.deviation = (options as { deviation?: DeviationInput } | null | undefined)?.deviation;
-      if (name === 'release') baselineRuns.get(id)?.abort();
+      if (name === 'release') {
+        baselineRuns.get(id)?.abort();
+        referenceRuns.get(id)?.abort();
+        gradeRuns.get(id)?.abort();
+      }
       // store.transition() rejects names that are not transitions.
       const before = store.get(id).status;
       const entry = await store.transition(id, name as TransitionName, 'human', extra);
       recordTransition(id, before, entry, name as ipc.HumanTransition, 'human');
       if (name === 'claim') {
         measureBaseline(id);
+        if (entry.mode === 'practice') startReference(id);
         return toWireState(entry);
       }
       if (name === 'report_deviation' || name === 'override_dismissal') {
@@ -2539,6 +2730,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       ...[...tutorRuns.keys()].map((key): ipc.BusyRun => ({ kind: 'tutor', label: packageTitle(key.split('#')[0]) })),
       ...[...codingRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
       ...[...codingVerifications.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
+      ...[...referenceRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'reference', label: packageTitle(id) })),
+      ...[...gradeRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'grade', label: packageTitle(id) })),
     ];
   };
 
@@ -2555,6 +2748,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of codingVerifications.values()) controller.abort();
     // A tutor answer finishing late would land in the next repository's store.
     for (const controller of tutorRuns.values()) controller.abort();
+    for (const controller of referenceRuns.values()) controller.abort();
+    for (const controller of gradeRuns.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
     tutorFailures.clear();
   };

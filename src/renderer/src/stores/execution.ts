@@ -53,7 +53,13 @@ export const VERIFY_LABELS: Record<ipc.CheckKind, string> = { test: '测试', li
 export const REVIEW_POLL_MS = 1500;
 export const BASELINE_POLL_MS = 1000;
 
-const agentRunning = (task: ipc.TaskView | null) => task?.review?.status === 'running' || task?.adjudication?.status === 'running';
+// Practice runs count too: the reference and the grade land in the open page.
+const agentRunning = (task: ipc.TaskView | null) =>
+  task?.review?.status === 'running' ||
+  task?.adjudication?.status === 'running' ||
+  task?.referenceRun?.status === 'running' ||
+  task?.grade?.status === 'running' ||
+  task?.grade?.status === 'waiting';
 
 export type DeviationForm = { note: string; stepIndex: number | null; filePath: string | null };
 
@@ -249,6 +255,7 @@ export const useExecutionStore = defineStore('execution', () => {
       console.error(error);
     }
     if (before.review?.status === 'running') announceReview(task);
+    if (before.grade && before.grade.status !== 'done' && task.grade?.status === 'done') announceAgent('导师判完卷了，参考答案也可以看了。');
     if (before.adjudication?.status === 'running') announceAdjudication(task);
   };
 
@@ -402,6 +409,33 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   };
 
+  // ========== Practice ==========
+  // The reference patch, fetched once the main process allows it.
+  const reference = ref<{ id: string; patch: string } | null>(null);
+  const referenceError = ref<string | null>(null);
+
+  const loadReference = async () => {
+    const task = current.value;
+    if (!task?.referenceRun) return;
+    referenceError.value = null;
+    try {
+      reference.value = { id: task.referenceRun.id, patch: await call(window.taskpilot.practice.reference(task.id)) };
+    } catch (error) {
+      console.error(error);
+      referenceError.value = describeError(error);
+    }
+  };
+
+  const regrade = async (skipReference: boolean) => {
+    if (!current.value) return;
+    try {
+      adoptTask(await call(window.taskpilot.practice.grade(current.value.id, skipReference)));
+    } catch (error) {
+      console.error(error);
+      showToast(`判卷没能开始：${describeError(error)}`);
+    }
+  };
+
   // ========== Claim dialog ==========
   // Open while the developer picks who writes the code.
   const claimOpen = ref(false);
@@ -510,6 +544,11 @@ export const useExecutionStore = defineStore('execution', () => {
     // Transitions
     transitioning,
     runTransition,
+    // Practice
+    reference,
+    referenceError,
+    loadReference,
+    regrade,
     // Claim dialog
     claimOpen,
     claimMode,

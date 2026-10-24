@@ -61,7 +61,11 @@ export const nextStep = (task: ipc.TaskView): NextStep => {
       return { text: '步骤都勾完了。可以先在「验证」里跑一下测试，再提交给 QA 审查。', action: 'submit_for_review' };
     }
     case 'in_review':
-      return { text: 'QA Partner 正在检查改动，完成后这里会显示结果。', action: null, since: task.review?.startedAt ?? null };
+      return {
+        text: task.mode === 'practice' ? 'QA Partner 正在检查改动。检查完导师会判卷，参考答案也会解锁。' : 'QA Partner 正在检查改动，完成后这里会显示结果。',
+        action: null,
+        since: task.review?.startedAt ?? null,
+      };
     case 'deviation':
       return { text: 'Architect 正在判断是改计划还是按原计划做，完成后会自动更新。', action: null, since: task.adjudication?.startedAt ?? null };
     case 'accepting':
