@@ -9,7 +9,8 @@ import { registerIpcHandlers } from '../../src/main/ipc.ts';
 import type { IpcDeps, IpcHandle } from '../../src/main/ipc.ts';
 import type { IpcResult, TaskView, CliModelCatalog } from '../../src/shared/ipc_types.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../src/shared/coding_types.ts';
-import { parsePatchPreview } from '../../src/main/coding_workspace.ts';
+import { applyPatch, parsePatchPreview } from '../../src/main/coding_workspace.ts';
+import { previewMerge } from '../../src/main/patch_merge.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
@@ -19,7 +20,10 @@ vi.setConfig({ testTimeout: 20_000 });
 // A stand-in agent; tests answer with plain objects or reject.
 type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
 type CodingOverrides = Partial<
-  Pick<IpcDeps, 'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot'>
+  Pick<
+    IpcDeps,
+    'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot' | 'codingPreviewMerge'
+  >
 >;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
@@ -144,6 +148,8 @@ const harness = async ({
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
         return (await agent(options)) as StructuredResult;
       },
+      // Fake patches have no real blobs to merge: every file lands clean.
+      codingPreviewMerge: async (_root, _baseline, files) => files.map((file) => ({ path: file.path, state: 'clean' as const, markers: false })),
       ...coding,
     },
   );
@@ -202,6 +208,22 @@ const codingRuntime = (overrides: Partial<CodingRuntimeStatus> = {}): CodingRunt
 // A one-line patch to `file`, previewed as the main process would.
 const filePatch = (file: string, line: string, scope?: readonly string[]): CodingPatchPreview =>
   parsePatchPreview(`diff --git a/${file} b/${file}\nindex 1111111..2222222 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-export {};\n+${line}\n`, scope);
+// The same patch with real blob ids, as the isolated run's `git diff` writes
+// it, so a three-way merge can find the base.
+const realPatch = async (root: string, file: string, line: string): Promise<CodingPatchPreview> => {
+  const blobOf = async (text: string) => (await execFileAsyncWithInput('git', ['-C', root, 'hash-object', '-w', '--stdin'], text)).trim();
+  const before = await blobOf('export {};\n');
+  const after = await blobOf(`${line}\n`);
+  return parsePatchPreview(
+    `diff --git a/${file} b/${file}\nindex ${before}..${after} 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-export {};\n+${line}\n`,
+    SAMPLE_TASKS[0].fileScope,
+  );
+};
+const execFileAsyncWithInput = (command: string, args: string[], input: string) =>
+  new Promise<string>((resolve, reject) => {
+    const child = execFile(command, args, (error, stdout) => (error ? reject(error) : resolve(stdout)));
+    child.stdin?.end(input);
+  });
 
 type TestCall = (channel: Channel, ...args: unknown[]) => Promise<IpcResult<unknown>>;
 // Waits on wall-clock time, not event-loop turns: a round writes the store to
@@ -295,7 +317,7 @@ test('coding IPC registers all seven channels and preserves terminal events', as
       codingPrepare: prepare,
       codingRun: runCoding,
       codingReadPatch: async () => preview,
-      codingApplyPatch: async () => ['tests/auth/login-user.test.ts'],
+      codingApplyPatch: async () => ({ written: ['tests/auth/login-user.test.ts'], markers: [], kept: [] }),
       codingClean: async () => {},
       codingSnapshot: async (_root, baseline) => baseline,
     },
@@ -320,10 +342,19 @@ test('coding IPC registers all seven channels and preserves terminal events', as
   assert.equal(eventPage.events[0]?.text, 'done');
   const patchResponse = await h.call(CHANNELS.codingPatch, 'auth-edge-tests');
   assert.equal(patchResponse.ok, true, JSON.stringify(patchResponse));
-  const missingFiles = await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: preview.digest, allowHighRisk: true });
+  // What the panel confirms: the patch and how it merges with the working tree.
+  const reviewed = patchResponse.data as CodingPatchPreview;
+  assert.deepEqual(reviewed.merge, [{ path: 'tests/auth/login-user.test.ts', state: 'clean', markers: false }]);
+  // The bare patch digest is not enough any more.
+  assert.equal(
+    (await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: preview.digest, allowHighRisk: true, files: ['tests/auth/login-user.test.ts'] })).error
+      .code,
+    'coding_digest_mismatch',
+  );
+  const missingFiles = await h.call(CHANNELS.codingApply, 'auth-edge-tests', { digest: reviewed.mergeDigest, allowHighRisk: true });
   assert.equal(missingFiles.ok, false);
   const applied = await h.call(CHANNELS.codingApply, 'auth-edge-tests', {
-    digest: preview.digest,
+    digest: reviewed.mergeDigest,
     allowHighRisk: true,
     files: ['tests/auth/login-user.test.ts'],
   });
@@ -2000,7 +2031,7 @@ const loopHarness = async ({
             .find((line) => line.startsWith('+export'))!
             .slice(1)}\n`,
         );
-        return [file];
+        return { written: [file], markers: [], kept: [] };
       },
       codingClean: async () => {},
       codingSnapshot: async (_root, baseline) => baseline,
@@ -2015,8 +2046,13 @@ const applyFirstRound = async (h: Awaited<ReturnType<typeof loopHarness>>, allow
   await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
   const ready = await settleCoding(h.call, 'auth-email-login');
   assert.equal(ready.codingRun?.status, 'ready');
-  const preview = h.preview();
-  return h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk, files: [h.file] });
+  return h.call(CHANNELS.codingApply, 'auth-email-login', { digest: await reviewedDigest(h.call, 'auth-email-login'), allowHighRisk, files: [h.file] });
+};
+// The digest the panel confirms, from coding:patch.
+const reviewedDigest = async (call: TestCall, id: string) => {
+  const response = await call(CHANNELS.codingPatch, id);
+  if (!response.ok) throw new Error(response.error.message);
+  return (response.data as CodingPatchPreview).mergeDigest;
 };
 const LOGIN_TESTS_FAIL = { command: process.execPath, args: ['-e', "console.log('not ok 1 - login succeeds with valid credentials'); process.exit(1)"] };
 const LOGIN_TESTS_PASS = {
@@ -2093,6 +2129,150 @@ test('end to end: coding round → checks → QA → done → commit', async () 
   assert.equal((await run('git', ['status', '--porcelain', '--', h.file], { cwd: h.root })).stdout, '');
 });
 
+test('coding conflict: an edit to the same line is listed, and applying needs a choice', async () => {
+  let root = '';
+  const h = await harness({
+    agent: async (options) => fakeAgent({ review: QA_PASS })(options),
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async () => ({
+        output: '',
+        usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.1 },
+        events: [],
+        sessionId: null,
+      }),
+      codingReadPatch: async () => realPatch(root, 'src/auth/application/login-user.ts', 'export const login = "agent";'),
+      codingClean: async () => {},
+      // The round starts from what is committed.
+      codingSnapshot: async (_root, baseline) => baseline,
+      codingPreviewMerge: previewMerge,
+      codingApplyPatch: applyPatch,
+    },
+  });
+  root = h.root;
+  const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: h.root })).stdout.trim();
+  await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  await settleCoding(h.call, 'auth-email-login');
+  // Meanwhile the developer changed the same line.
+  const file = path.join(h.root, 'src/auth/application/login-user.ts');
+  await fs.writeFile(file, 'export const login = "mine";\n');
+  const preview = (await h.call(CHANNELS.codingPatch, 'auth-email-login')).data as CodingPatchPreview;
+  assert.deepEqual(preview.merge, [{ path: 'src/auth/application/login-user.ts', state: 'conflict', markers: true }]);
+  const input = { digest: preview.mergeDigest, allowHighRisk: false, files: ['src/auth/application/login-user.ts'] };
+  assert.equal((await h.call(CHANNELS.codingApply, 'auth-email-login', input)).error.code, 'merge_unresolved');
+  assert.equal(
+    (await h.call(CHANNELS.codingApply, 'auth-email-login', { ...input, resolutions: { 'src/auth/application/login-user.ts': 'bogus' } })).error.code,
+    'invalid_argument',
+  );
+  assert.equal(await fs.readFile(file, 'utf8'), 'export const login = "mine";\n');
+
+  // Markers: written, and the checks wait until they are cleared.
+  const applied = await h.call(CHANNELS.codingApply, 'auth-email-login', { ...input, resolutions: { 'src/auth/application/login-user.ts': 'markers' } });
+  assert.equal(applied.ok, true, JSON.stringify(applied));
+  assert.deepEqual(applied.data.markers, ['src/auth/application/login-user.ts']);
+  assert.match(await fs.readFile(file, 'utf8'), /<<<<<<< 你的改动\nexport const login = "mine";\n=======\nexport const login = "agent";\n>>>>>>> Coding Agent/);
+  const held = (await h.call(CHANNELS.codingGet, 'auth-email-login')).data as TaskView;
+  assert.equal(held.codingRun?.status, 'applied');
+  assert.equal(held.codingRun?.halt, 'markers');
+  assert.equal((await h.call(CHANNELS.codingResume, 'auth-email-login')).error.code, 'merge_markers_left');
+
+  // The developer resolves it; the flow goes on to the checks and QA.
+  await fs.writeFile(file, 'export const login = "both";\n');
+  assert.equal((await h.call(CHANNELS.codingResume, 'auth-email-login')).ok, true);
+  const done = await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
+  assert.equal(done.codingRun?.status, 'submitted');
+});
+
+test('coding conflict: the digest goes stale when a patched file changes after preview', async () => {
+  let root = '';
+  const h = await harness({
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async () => ({
+        output: '',
+        usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+        events: [],
+        sessionId: null,
+      }),
+      codingReadPatch: async () => realPatch(root, 'src/auth/application/login-user.ts', 'export const login = "agent";'),
+      codingClean: async () => {},
+      codingSnapshot: async (_root, baseline) => baseline,
+      codingPreviewMerge: previewMerge,
+      codingApplyPatch: applyPatch,
+    },
+  });
+  root = h.root;
+  const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: h.root })).stdout.trim();
+  await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  await settleCoding(h.call, 'auth-email-login');
+  const preview = (await h.call(CHANNELS.codingPatch, 'auth-email-login')).data as CodingPatchPreview;
+  assert.equal(preview.merge?.[0].state, 'clean');
+  // An edit after the developer looked: applying must not go ahead on stale information.
+  await fs.writeFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'export const login = "mine";\n');
+  const response = await h.call(CHANNELS.codingApply, 'auth-email-login', {
+    digest: preview.mergeDigest,
+    allowHighRisk: false,
+    files: ['src/auth/application/login-user.ts'],
+  });
+  assert.equal(response.error.code, 'coding_digest_mismatch');
+  assert.equal(await fs.readFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'utf8'), 'export const login = "mine";\n');
+});
+
+test('coding conflict: an automatic round that conflicts stops for the developer instead of overwriting', async () => {
+  let round = 0;
+  let root = '';
+  const h = await harness({
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async () => {
+        round += 1;
+        return {
+          output: '',
+          usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+          events: [],
+          sessionId: null,
+        };
+      },
+      // Round 1 changes the line; round 2 changes it again, from the same start.
+      codingReadPatch: async () => realPatch(root, 'src/auth/application/login-user.ts', `export const round = ${round};`),
+      codingClean: async () => {},
+      codingSnapshot: async (_root, baseline) => baseline,
+      codingPreviewMerge: previewMerge,
+      codingApplyPatch: applyPatch,
+    },
+  });
+  root = h.root;
+  const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: h.root })).stdout.trim();
+  await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
+  h.setCommands({ test: LOGIN_TESTS_FAIL });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  await settleCoding(h.call, 'auth-email-login');
+  const preview = (await h.call(CHANNELS.codingPatch, 'auth-email-login')).data as CodingPatchPreview;
+  assert.equal(
+    (
+      await h.call(CHANNELS.codingApply, 'auth-email-login', {
+        digest: preview.mergeDigest,
+        allowHighRisk: false,
+        files: ['src/auth/application/login-user.ts'],
+      })
+    ).ok,
+    true,
+  );
+  // Checks fail, so round 2 starts. Round 2's patch is against the original
+  // line, which round 1 already changed in the working tree: a conflict.
+  const stopped = await settleLoop(h.call, 'auth-email-login', (view) => view.codingRun?.halt === 'conflict');
+  assert.equal(stopped.codingRun?.status, 'ready');
+  assert.equal(stopped.codingRun?.attempt, 2);
+  // Round 1's change is untouched.
+  assert.equal(await fs.readFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'utf8'), 'export const round = 1;\n');
+});
+
 test('coding timeout: the round uses the configured limit and keeps the partial patch for review', async () => {
   const h = await loopHarness({ timesOut: (round) => round === 1, agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
   h.setCommands({ test: LOGIN_TESTS_PASS });
@@ -2109,8 +2289,16 @@ test('coding timeout: the round uses the configured limit and keeps the partial 
     [h.file],
   );
   // The developer can still apply what was written.
-  const preview = h.preview();
-  assert.equal((await h.call(CHANNELS.codingApply, 'auth-email-login', { digest: preview.digest, allowHighRisk: false, files: [h.file] })).ok, true);
+  assert.equal(
+    (
+      await h.call(CHANNELS.codingApply, 'auth-email-login', {
+        digest: await reviewedDigest(h.call, 'auth-email-login'),
+        allowHighRisk: false,
+        files: [h.file],
+      })
+    ).ok,
+    true,
+  );
   // Let the checks and review that applying starts finish inside this test.
   await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
 });
@@ -2321,7 +2509,7 @@ test('coding isolation: sandbox mode runs under userData as the current user, an
         seen.read.push(options?.sandbox);
         return preview;
       },
-      codingApplyPatch: async () => [],
+      codingApplyPatch: async () => ({ written: [], markers: [], kept: [] }),
       codingClean: async (_runName, options) => void seen.clean.push(options?.sandbox),
       codingSnapshot: async (_root, baseline) => baseline,
     },

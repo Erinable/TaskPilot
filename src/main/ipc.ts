@@ -49,6 +49,7 @@ import { businessDay, computeAgentCosts, computeMetrics, recentByAgent, RETENTIO
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
 import { openWorkspaceFile } from './open_file.ts';
+import * as patchMerge from './patch_merge.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
@@ -239,6 +240,8 @@ export type IpcDeps = {
   codingPrepare?: typeof codingWorkspace.prepare;
   codingRun?: typeof codingExec.runCoding;
   codingReadPatch?: typeof codingWorkspace.readPatch;
+  // How each patched file merges with the working tree; injectable for tests.
+  codingPreviewMerge?: typeof patchMerge.previewMerge;
   codingApplyPatch?: typeof codingWorkspace.applyPatch;
   codingClean?: typeof codingWorkspace.clean;
   codingSnapshot?: typeof codingWorkspace.snapshotBaseline;
@@ -282,6 +285,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     codingPrepare = codingWorkspace.prepare,
     codingRun = codingExec.runCoding,
     codingReadPatch = codingWorkspace.readPatch,
+    codingPreviewMerge = patchMerge.previewMerge,
     codingApplyPatch = codingWorkspace.applyPatch,
     codingClean = codingWorkspace.clean,
     codingSnapshot = codingWorkspace.snapshotBaseline,
@@ -507,6 +511,16 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     if (runtime?.run) runtime.run = state.codingRun as CodingRun;
     return state;
   };
+  // The renderer's choices for conflicted files, checked at the boundary.
+  const RESOLUTIONS: ipc.CodingResolution[] = ['markers', 'mine', 'theirs'];
+  const codingResolutions = (raw: unknown): Partial<Record<string, ipc.CodingResolution>> => {
+    if (raw === undefined || raw === null) return {};
+    if (typeof raw !== 'object' || Array.isArray(raw)) failWith('resolutions must be an object', 'invalid_argument', 'resolutions');
+    const entries = Object.entries(raw as Record<string, unknown>);
+    if (entries.some(([, value]) => !RESOLUTIONS.includes(value as ipc.CodingResolution)))
+      failWith('Unknown conflict resolution', 'invalid_argument', 'resolutions');
+    return Object.fromEntries(entries) as Partial<Record<string, ipc.CodingResolution>>;
+  };
   const codingFailure = (error: unknown): ipc.ErrorInfo => ({
     code: errorCode(error) ?? 'coding_failed',
     message: error instanceof Error ? error.message : String(error),
@@ -665,28 +679,40 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       await cleanRun(run.runName).catch((error) => console.error(error));
       return void (await updateCoding(id, { status: 'discarded', halt: 'no_changes' }));
     }
-    await applyRound(id, preview, decision.files, false);
+    // The developer edited the same lines meanwhile: never overwrite, ask.
+    const merge = await previewOf(run, preview.patch);
+    if (merge.some((file) => file.state === 'conflict')) return void (await updateCoding(id, { halt: 'conflict' }));
+    await applyRound(id, preview, decision.files, false, {});
     await verifyApplied(id);
   };
 
+  // How each file of `patch` would merge into the working tree now.
+  const previewOf = (run: CodingRun, patch: string) => codingPreviewMerge(requireRoot(), run.baseline, codingWorkspace.filePatches(patch));
+
   // Applies the chosen files of a ready patch to the working tree.
-  const applyRound = async (id: string, preview: ipc.CodingPatchPreview, files: string[], allowHighRisk: boolean): Promise<string[]> => {
+  const applyRound = async (
+    id: string,
+    preview: ipc.CodingPatchPreview,
+    files: string[],
+    allowHighRisk: boolean,
+    resolutions: Partial<Record<string, ipc.CodingResolution>>,
+  ): Promise<ipc.CodingApplyResult> => {
     const { task, run } = codingRunOf(id);
     const selected = codingWorkspace.parsePatchPreview(codingWorkspace.selectPatch(preview.patch, files), task.fileScope);
     const blocked = allowHighRisk ? selected.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : selected.blocked;
     await updateCoding(id, { status: 'applying', error: null });
     try {
-      const applied = await codingApplyPatch(requireRoot(), selected.patch, selected.digest, blocked);
+      const applied = await codingApplyPatch(requireRoot(), selected.patch, selected.digest, blocked, { baseline: run.baseline, resolutions });
       await updateCoding(id, {
-        status: 'verifying',
+        status: applied.markers.length ? 'applied' : 'verifying',
+        halt: applied.markers.length ? 'markers' : null,
         finishedAt: new Date().toISOString(),
         files: selected.files,
         blocked: preview.blocked,
         patchDigest: selected.digest,
-        halt: null,
       });
       await cleanRun(run.runName).catch((error) => console.error(error));
-      return applied;
+      return { files: applied.written, markers: applied.markers, kept: applied.kept };
     } catch (error) {
       await updateCoding(id, { status: 'ready', error: codingFailure(error) });
       throw error;
@@ -831,7 +857,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (!['ready', 'applied'].includes(run.status)) failWith('Coding patch is not ready', 'coding_not_ready');
       const preview = await readRunPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
       await updateCoding(id, { files: preview.files, blocked: preview.blocked, patchDigest: preview.digest });
-      return preview;
+      if (run.status !== 'ready') return preview;
+      const merge = await previewOf(run, preview.patch);
+      return { ...preview, merge, mergeDigest: patchMerge.mergeDigest(preview.patch, merge) };
     }),
   );
   ipcMain.handle(
@@ -840,19 +868,46 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const id = requireString(rawId, 'id');
       const { task, run } = codingRunOf(id);
       if (run.status !== 'ready') failWith('Coding patch is not ready to apply', 'coding_not_ready');
-      const input = rawInput as { digest?: unknown; allowHighRisk?: unknown; files?: unknown } | null | undefined;
+      const input = rawInput as { digest?: unknown; allowHighRisk?: unknown; files?: unknown; resolutions?: unknown } | null | undefined;
       const digest = requireString(input?.digest, 'digest');
       if (input?.allowHighRisk !== true && input?.allowHighRisk !== false) failWith('allowHighRisk must be boolean', 'invalid_argument', 'allowHighRisk');
       const files = input.files;
       if (!Array.isArray(files) || !files.length || files.some((file) => typeof file !== 'string'))
         failWith('files must be a non-empty list of paths', 'invalid_argument', 'files');
+      const resolutions = codingResolutions(input.resolutions);
       const preview = await readRunPatch(codingWorkspaceOf(id, run).runName, task.fileScope);
-      if (preview.digest !== digest) failWith('Patch changed since preview', 'coding_digest_mismatch');
-      const applied = await applyRound(id, preview, files as string[], input.allowHighRisk);
+      // The digest covers the patch and how it merges now: an edit to a
+      // patched file since the developer looked sends them back to look again.
+      const merge = await previewOf(run, preview.patch);
+      if (patchMerge.mergeDigest(preview.patch, merge) !== digest) failWith('Patch or working tree changed since preview', 'coding_digest_mismatch');
+      const selected = new Set(files as string[]);
+      const unresolved = merge.find((file) => file.state === 'conflict' && selected.has(file.path) && !resolutions[file.path]);
+      if (unresolved) failWith(`Choose how to resolve ${unresolved.path}`, 'merge_unresolved', 'resolutions');
+      const applied = await applyRound(id, preview, files as string[], input.allowHighRisk, resolutions);
       record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
       codingRuns.delete(id);
+      // Conflict markers left in a file hold the checks until they are cleared.
+      if (!applied.markers.length) continueLoop(id, () => verifyApplied(id));
+      return applied;
+    }),
+  );
+
+  // After the developer cleared the conflict markers an apply left, the
+  // automatic flow goes on: checks, then QA. Refused while a marker remains.
+  ipcMain.handle(
+    CHANNELS.codingResume,
+    wrap(async (_event, rawId): Promise<ipc.TaskView> => {
+      const id = requireString(rawId, 'id');
+      const { task, run } = codingRunOf(id);
+      if (run.status !== 'applied' || run.halt !== 'markers') failWith('Nothing is waiting on conflict markers', 'coding_not_ready');
+      const left = await patchMerge.filesWithMarkers(
+        requireRoot(),
+        run.files.map((file) => file.path),
+      );
+      if (left.length) failWith(`Conflict markers remain in ${left.join(', ')}`, 'merge_markers_left');
+      await updateCoding(id, { status: 'verifying', halt: null });
       continueLoop(id, () => verifyApplied(id));
-      return { files: applied };
+      return viewOf(task, store.get(id));
     }),
   );
 

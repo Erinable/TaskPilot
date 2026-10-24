@@ -51,6 +51,8 @@ export const useCodingStore = defineStore('coding', () => {
   let roundId: string | null = null;
   // Patch paths the developer accepts; all applicable files by default.
   const selectedFiles = ref<string[]>([]);
+  // The developer's choice for each conflicted file.
+  const resolutions = ref<Partial<Record<string, ipc.CodingResolution>>>({});
 
   const run = computed(() => execution.current?.codingRun ?? null);
   const eligible = computed(() => execution.current?.status === 'in_progress' || !!run.value);
@@ -82,6 +84,10 @@ export const useCodingStore = defineStore('coding', () => {
   const applicable = (file: ipc.CodingPatchFile) =>
     !(patch.value?.blocked ?? []).some((entry) => entry.path === file.path && entry.reason !== 'high-risk project control or test path');
   const highRisk = computed(() => (patch.value?.files ?? []).some((file) => file.highRisk && selectedFiles.value.includes(file.path)));
+  const mergeOf = (filePath: string) => patch.value?.merge?.find((file) => file.path === filePath) ?? null;
+  // Selected conflicts still waiting for a choice.
+  const unresolved = computed(() => selectedFiles.value.filter((filePath) => mergeOf(filePath)?.state === 'conflict' && !resolutions.value[filePath]));
+  const conflicts = computed(() => (patch.value?.merge ?? []).filter((file) => file.state === 'conflict'));
   const hasBlocked = computed(() => blockedPaths.value.size > 0);
 
   const stopPolling = () => {
@@ -103,6 +109,7 @@ export const useCodingStore = defineStore('coding', () => {
       const value = await call(window.taskpilot.coding.patch(id));
       if (sameSelection(id, token)) {
         patch.value = value;
+        resolutions.value = {};
         // High-risk files start unticked: applying them is an explicit choice.
         selectedFiles.value = value.files.filter((file) => applicable(file) && !file.highRisk).map((file) => file.path);
       }
@@ -255,16 +262,34 @@ export const useCodingStore = defineStore('coding', () => {
 
   const apply = async (allowHighRisk: boolean) => {
     const id = selectedId.value;
-    const digest = patch.value?.digest ?? run.value?.patchDigest;
+    // The merge digest also covers how the files merge with the working tree.
+    const digest = patch.value?.mergeDigest ?? patch.value?.digest ?? run.value?.patchDigest;
     const files = [...selectedFiles.value];
     if (!id || !digest || operation.value || run.value?.status !== 'ready' || !files.length) return false;
     if (highRisk.value && !allowHighRisk) return false;
+    if (unresolved.value.length) return false;
+    const chosen = Object.fromEntries(Object.entries(resolutions.value).filter(([filePath]) => files.includes(filePath)));
+    const overwrites = Object.entries(chosen)
+      .filter(([, choice]) => choice === 'theirs')
+      .map(([filePath]) => filePath);
+    // Taking the agent's version throws away the developer's own edits: ask on its own.
+    if (overwrites.length) {
+      const confirmed = await confirmAction({
+        title: `用 AI 的版本覆盖 ${overwrites.length} 个文件？`,
+        body: `你在这些文件里的改动会被 AI 的版本替换，不能自动恢复：${overwrites.join('、')}。`,
+        accept: '覆盖我的改动',
+        danger: true,
+      });
+      if (!confirmed) return false;
+    }
+    const withMarkers = Object.values(chosen).filter((choice) => choice === 'markers').length;
     const skipped = (patch.value?.files.length ?? files.length) - files.length;
     const confirmed = await confirmAction({
       title: highRisk.value ? `应用 ${files.length} 个文件？（含高风险文件）` : `应用 ${files.length} 个文件？`,
       body: [
         '应用后会用你的账号权限自动跑提交前检查。检查通过就由 Coding Agent 提交 QA 审查；没通过或 QA 驳回时，会把问题交回 AI 自动重试，最多 3 轮。',
         skipped > 0 ? `没勾选的 ${skipped} 个文件不会写入。` : '',
+        withMarkers ? `有 ${withMarkers} 个文件会写入冲突标记，自动检查先暂停，等你在编辑器里改完再继续。` : '',
         highRisk.value ? '你勾选了高风险的项目控制或测试文件，请先检查它们的 diff。' : '',
       ]
         .filter(Boolean)
@@ -276,17 +301,45 @@ export const useCodingStore = defineStore('coding', () => {
     operation.value = 'apply';
     const token = generation;
     try {
-      const result = await call(window.taskpilot.coding.apply(id, { digest, allowHighRisk, files }));
+      const result = await call(window.taskpilot.coding.apply(id, { digest, allowHighRisk, files, resolutions: chosen }));
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return false;
       await execution.refreshDiff();
       if (!sameSelection(id, token)) return false;
       patch.value = null;
       startPolling(id, token);
-      showToast(`已应用 ${result.files.length} 个文件，正在跑提交前检查。`);
+      showToast(
+        result.markers.length
+          ? `已写入 ${result.files.length} 个文件，其中 ${result.markers.length} 个有冲突标记。改完后点「冲突已解决，继续」。`
+          : `已应用 ${result.files.length} 个文件，正在跑提交前检查。`,
+      );
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `应用编码改动失败：${describeError(cause)}`;
+      return false;
+    } finally {
+      operation.value = null;
+    }
+  };
+
+  const setResolution = (filePath: string, choice: ipc.CodingResolution) => {
+    resolutions.value = { ...resolutions.value, [filePath]: choice };
+  };
+
+  // Conflict markers cleared: the checks and QA go on.
+  const resume = async () => {
+    const id = selectedId.value;
+    if (!id || operation.value) return false;
+    operation.value = 'apply';
+    const token = generation;
+    try {
+      const task = await call(window.taskpilot.coding.resume(id));
+      if (!adopt(task, id, token)) return false;
+      startPolling(id, token);
+      showToast('冲突已解决，正在跑提交前检查。');
+      return true;
+    } catch (cause) {
+      if (sameSelection(id, token)) error.value = `继续失败：${describeError(cause)}`;
       return false;
     } finally {
       operation.value = null;
@@ -315,6 +368,12 @@ export const useCodingStore = defineStore('coding', () => {
     selectedFiles,
     applicable,
     toggleFile,
+    resolutions,
+    setResolution,
+    mergeOf,
+    unresolved,
+    conflicts,
+    resume,
     maxAutoAttempts: MAX_AUTO_ATTEMPTS,
     select,
     leave,

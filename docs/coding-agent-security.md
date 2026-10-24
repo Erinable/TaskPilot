@@ -99,6 +99,7 @@ MVP 使用 archive/import/export：
 7. 主用户只通过 agent 用户执行的 `git diff --binary` 读取 patch。
 8. TaskPilot 对 patch 做路径、symlink、secret、`.git`、out-of-scope 检查。
 9. 人类确认后，主用户把 patch 应用到自己的 checkout；不允许自动 commit 或 push。
+   应用走三方合并（`src/main/patch_merge.ts`）：先在私有索引（GIT_INDEX_FILE）里按文件预演，真实索引和工作区只在开发者确认后、按其选择写入；冲突文件不会被自动覆盖。
 
 不存在 agent 用户可写的共享交换目录。主用户只把 baseline 从 stdout 流进去，
 再把 patch 从 stdout 读出来。

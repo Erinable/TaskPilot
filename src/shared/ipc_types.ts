@@ -18,6 +18,8 @@ export type {
   CodingRuntimeStatus,
   CodingActiveRun,
   CodingHalt,
+  CodingMergeFile,
+  CodingResolution,
   CodingRound,
   CodingRunStatus,
   CodingStart,

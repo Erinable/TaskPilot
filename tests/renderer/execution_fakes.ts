@@ -88,8 +88,9 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       events: vi.fn((_id: string, _after: number) => ok<ipc.CodingEventPage>({ events: [], next: -1, truncated: false })),
       cancel: vi.fn(() => ok(true)),
       patch: vi.fn(() => ok<ipc.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
-      apply: vi.fn((_id: string, _input: ipc.CodingApply) => ok<ipc.CodingApplyResult>({ files: [] })),
+      apply: vi.fn((_id: string, _input: ipc.CodingApply) => ok<ipc.CodingApplyResult>({ files: [], markers: [], kept: [] })),
       active: vi.fn(() => ok<ipc.CodingActiveRun[]>([])),
+      resume: vi.fn((_id: string) => ok(current.task)),
     },
     workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<ipc.OpenedWith>('vscode')) },
     commit: {

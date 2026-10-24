@@ -9,6 +9,7 @@ import type { CodingPatchFile, CodingPatchPreview } from '../shared/coding_types
 import { looksSecret } from './repo_reader.ts';
 import { CODING_USER, CODING_WRAPPER_PATH, SUDO_PATH, safeChildEnv } from './coding_exec.ts';
 import * as sandbox from './coding_sandbox.ts';
+import * as patchMerge from './patch_merge.ts';
 import type { SandboxContext } from './coding_sandbox.ts';
 import type { CliId } from '../shared/agent_runtime.ts';
 
@@ -372,48 +373,6 @@ export const readPatch = async (runName: string, fileScope?: FileScope, options:
   const digest = createHash('sha256').update(stdout).digest('hex');
   return { digest, files: parsed.files, patch: stdout, blocked: parsed.blocked };
 };
-const applyGitPatch = async (root: string, patch: string, check: boolean, spawnFn: WorkspaceSpawnFn, signal?: AbortSignal): Promise<void> => {
-  if (signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
-  const args = ['-C', root, 'apply', ...(check ? ['--check'] : []), '--binary'];
-  const child = spawnFn(GIT_PATH, args, { env: safeChildEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
-  let stderr = '';
-  child.stderr.on('data', (chunk: unknown) => {
-    if (Buffer.byteLength(stderr) < 64 * 1024) stderr += String(chunk).slice(0, 64 * 1024 - Buffer.byteLength(stderr));
-  });
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
-  let settled = false;
-  const fail = (error: CodingWorkspaceError) => {
-    if (settled) return;
-    settled = true;
-    try {
-      child.stdin.end();
-    } catch {
-      /* stream may already be closed */
-    }
-    child.kill?.('SIGTERM');
-    signal?.removeEventListener('abort', abort);
-    reject(error);
-  };
-  const abort = () => fail(new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted'));
-  signal?.addEventListener('abort', abort, { once: true });
-  child.once('error', (error) => fail(new CodingWorkspaceError('git apply failed to start', 'workspace_spawn_failed', error.message)));
-  child.once('close', (code) => {
-    if (settled) return;
-    if (code !== 0) fail(new CodingWorkspaceError(`git apply ${check ? 'check' : 'apply'} failed`, 'workspace_process_failed', stderr));
-    else {
-      settled = true;
-      signal?.removeEventListener('abort', abort);
-      resolve();
-    }
-  });
-  try {
-    child.stdin.end(patch);
-  } catch (caught) {
-    fail(new CodingWorkspaceError('Could not send patch to git', 'workspace_process_failed', String(caught)));
-  }
-  await promise;
-};
-
 const assertPatchTargetsSafe = async (root: string, files: readonly CodingPatchFile[]): Promise<void> => {
   const rootStat = await fs.lstat(root).catch(() => null);
   if (!rootStat || !rootStat.isDirectory() || rootStat.isSymbolicLink())
@@ -431,13 +390,25 @@ const assertPatchTargetsSafe = async (root: string, files: readonly CodingPatchF
   }
 };
 
+// Each file's part of a patch, for a per-file merge.
+export const filePatches = (patch: string): patchMerge.FilePatch[] =>
+  patch
+    .split(/(?=^diff --git )/m)
+    .filter((segment) => segment.startsWith('diff --git '))
+    .map((segment) => ({ path: parsePatchFiles(segment, undefined).files[0].path, patch: segment }));
+
+// Writes a reviewed patch into the developer's working tree. The safety
+// checks come first and hold for every write: the digest must match what
+// the developer saw, no blocked or unsafe path, no symlink on the way. Then
+// each file is merged three ways against the round baseline, so edits the
+// developer made meanwhile are kept; a conflict needs `resolutions`.
 export const applyPatch = async (
   root: string,
   patch: string,
   previewDigest: string,
   blocked: readonly BlockedPatch[] | boolean,
-  options: WorkspaceOptions = {},
-): Promise<string[]> => {
+  options: WorkspaceOptions & { baseline?: string; resolutions?: Partial<Record<string, patchMerge.Resolution>> } = {},
+): Promise<{ written: string[]; markers: string[]; kept: string[] }> => {
   const digest = createHash('sha256').update(patch).digest('hex');
   if (digest !== previewDigest) throw new CodingWorkspaceError('Patch digest does not match the preview', 'workspace_digest_mismatch');
   if (options.signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
@@ -446,10 +417,7 @@ export const applyPatch = async (
   const intrinsicBlocked = parsed.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path');
   if (blockedPaths.length || intrinsicBlocked.length) throw new CodingWorkspaceError('Patch contains blocked or unsafe paths', 'workspace_blocked_patch');
   await assertPatchTargetsSafe(root, parsed.files);
-  const spawnFn = options.spawnFn ?? defaultSpawn;
-  await applyGitPatch(root, patch, true, spawnFn, options.signal);
-  await applyGitPatch(root, patch, false, spawnFn, options.signal);
-  return parsed.files.map((file) => file.path);
+  return patchMerge.applyMerged(root, options.baseline ?? 'HEAD', filePatches(patch), options.resolutions ?? {});
 };
 
 // The part of a patch that touches `selected` paths, cut at `diff --git`
