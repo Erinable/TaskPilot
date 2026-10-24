@@ -10,7 +10,9 @@ import type { IpcDeps, IpcHandle } from '../../src/main/ipc.ts';
 import type { IpcResult, TaskView, CliModelCatalog } from '../../src/shared/ipc_types.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../src/shared/coding_types.ts';
 import { parsePatchPreview } from '../../src/main/coding_workspace.ts';
+import { AgentRunError } from '../../src/main/agents/claude_cli.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
+import { CodingExecError } from '../../src/main/coding_exec.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
@@ -1960,11 +1962,14 @@ const loopHarness = async ({
   highRisk = false,
   timesOut = null,
   hold = null,
+  failWith = null,
 }: {
   agent?: FakeAgent | null;
   highRisk?: boolean;
   // The CLI run waits on this before it returns.
   hold?: Promise<void> | null;
+  // Every CLI run throws this.
+  failWith?: Error | null;
   // Rounds (1-based) whose CLI run times out after writing its patch.
   timesOut?: ((round: number) => boolean) | null;
 } = {}) => {
@@ -1981,7 +1986,13 @@ const loopHarness = async ({
       codingRun: async (options) => {
         prompts.push(options.prompt);
         timeouts.push(options.timeoutMs!);
-        await hold;
+        // Like the real runner, a cancel ends the wait, even one that came first.
+        if (hold) {
+          const cancelled = () => Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
+          if (options.signal?.aborted) throw cancelled();
+          await Promise.race([hold, new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(cancelled()), { once: true }))]);
+        }
+        if (failWith) throw failWith;
         if (timesOut?.(prompts.length)) throw Object.assign(new Error('Coding run timed out'), { code: 'coding_timeout' });
         return {
           output: '',
@@ -2179,6 +2190,91 @@ test('costs: every analysis call is recorded with its CLI, model and work packag
     subject: { kind: 'package', id: 'auth-edge-tests' },
     at: costs[0].at,
   });
+});
+
+test('data:reset-progress cancels a running coding round instead of waiting for it', async () => {
+  // A round that only ends when it is cancelled, like a 30-minute CLI run.
+  const h = await loopHarness({ hold: new Promise(() => {}) });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  assert.deepEqual((await h.call(CHANNELS.codingActive)).data.length, 1);
+  const reset = await Promise.race([h.call(CHANNELS.dataResetProgress), new Promise((resolve) => setTimeout(() => resolve('hung'), 3000))]);
+  assert.notEqual(reset, 'hung', 'reset waited for the coding round');
+  assert.equal((await h.call(CHANNELS.getTask, 'auth-email-login')).data.status, 'pending');
+});
+
+test('repositories: switching cancels a running tutor answer so it cannot land in the next repository', async () => {
+  // The answer is slow; it finishes only after cancellation or when released.
+  const release = Promise.withResolvers<void>();
+  let cancelled = false;
+  const agent: FakeAgent = async (options) => {
+    if (stepOf(options.schema) !== 'tutor') return fakeAgent()(options);
+    options.signal!.addEventListener('abort', () => (cancelled = true));
+    await release.promise;
+    return fakeAgent()(options);
+  };
+  const { call } = await harness({ agent, seedState: { 'auth-edge-tests': claimedState } });
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  // Adding a repository switches to it; the switch must stop the tutor first.
+  const switching = call(CHANNELS.repositoriesAdd, await gitRepo(), true);
+  for (let index = 0; index < 200 && !cancelled; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  release.resolve();
+  await switching;
+  assert.equal(cancelled, true, 'the tutor run was not cancelled');
+  assert.deepEqual((await call(CHANNELS.repositoriesBusy)).data, []);
+});
+
+test('activity: an applied coding round is recorded as finished once', async () => {
+  const h = await loopHarness({ agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
+  const events = await h.activity.recent({ days: 1, limit: 100 });
+  assert.equal(events.filter((event) => event.kind === 'coding_run' && event.status === 'finished').length, 1);
+});
+
+test('costs: a failed call and a paid-for schema retry are recorded too', async () => {
+  const spent = (input: number) => ({
+    cli: 'claude' as const,
+    provider: 'anthropic',
+    model: 'm',
+    costUsd: input / 1000,
+    tokens: { input, output: 1, cacheRead: 0, cacheWrite: 0 },
+  });
+  let reviews = 0;
+  const h = await harness({
+    agent: async (options) => {
+      if (stepOf(options.schema) !== 'review') return fakeAgent()(options);
+      reviews += 1;
+      // The first review fails after spending; the retry passes after one paid-for failed attempt.
+      if (reviews === 1) throw new AgentRunError('model gave up', 'agent_failed', undefined, spent(10));
+      return { ...((await fakeAgent()(options)) as StructuredResult), call: spent(30), spentBefore: [spent(20)] };
+    },
+  });
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  await submitEdgeTests(h);
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.call(CHANNELS.reviewRetry, 'auth-edge-tests');
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.activity.flush();
+  const costs = (await h.activity.window(1)).flatMap((record) => (record.kind === 'agent_cost' && record.agent === 'qa' ? [record] : []));
+  assert.deepEqual(
+    costs.map((record) => record.call?.tokens?.input),
+    [10, 20, 30],
+  );
+});
+
+test('costs: a coding round that fails after spending tokens still records them', async () => {
+  const failure = new CodingExecError('exited', 'coding_exit_failed');
+  failure.usage = { inputTokens: 500, outputTokens: 20, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.42 };
+  const h = await loopHarness({ failWith: failure });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  const task = await settleCoding(h.call, 'auth-email-login');
+  assert.equal(task.codingRun?.status, 'failed');
+  assert.equal(task.codingRun?.usage.costUsd, 0.42);
+  await h.activity.flush();
+  const costs = (await h.activity.window(1)).flatMap((record) => (record.kind === 'agent_cost' && record.agent === 'coding-agent' ? [record] : []));
+  assert.equal(costs.length, 1);
+  assert.equal(costs[0].call?.costUsd, 0.42);
 });
 
 test('costs: the report rejects other ranges and counts recorded calls', async () => {

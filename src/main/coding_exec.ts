@@ -23,6 +23,8 @@ export class CodingExecError extends Error {
   readonly stderr: string;
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
+  // Tokens and cost the CLI reported before the run failed; set by runCoding.
+  usage: CodingUsage | null = null;
 
   constructor(message: string, code: CodingExecErrorCode, options: { stderr?: string; exitCode?: number | null; signal?: NodeJS.Signals | null } = {}) {
     super(message);
@@ -421,8 +423,11 @@ export const runCoding = async ({
       escalation = undefined;
     }
     if (signal && abortListener) signal.removeEventListener('abort', abortListener);
-    if (error) reject(error);
-    else resolve({ output: output.text, usage, events, sessionId: null });
+    if (error) {
+      // A failed or timed-out run may already have spent tokens.
+      error.usage = usage;
+      reject(error);
+    } else resolve({ output: output.text, usage, events, sessionId: null });
   };
   child.once('error', (error) => {
     terminate(new CodingExecError('Coding runner failed to start', 'coding_spawn_failed', { stderr: redact(error.message) }));

@@ -55,6 +55,8 @@ export interface StructuredResult {
   output: unknown;
   costUsd: number | null;
   call?: ModelCall;
+  // Failed attempts before this result that were still paid for.
+  spentBefore?: ModelCall[];
 }
 
 export type RunAgent = (options: RunStructuredOptions) => Promise<StructuredResult>;
@@ -77,12 +79,17 @@ const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 export class AgentRunError extends Error {
   code: AgentErrorCode;
   detail?: string;
+  // What the failed run spent, when the CLI reported it; recorded like a success.
+  call?: ModelCall;
+  // Attempts before this one that also failed but were paid for.
+  spentBefore: ModelCall[] = [];
 
-  constructor(message: string, code: AgentErrorCode, detail?: string) {
+  constructor(message: string, code: AgentErrorCode, detail?: string, call?: ModelCall) {
     super(message);
     this.name = 'AgentRunError';
     this.code = code;
     if (detail) this.detail = detail;
+    if (call) this.call = call;
   }
 }
 
@@ -140,7 +147,7 @@ export const parseEnvelope = (stdout: string): StructuredResult => {
   if (envelope.is_error || envelope.subtype !== 'success') {
     // The CLI gave up after its own schema-repair attempts; worth one fresh try.
     const reason = envelope.subtype === 'error_max_structured_output_retries' ? 'agent_schema_retry' : 'agent_failed';
-    throw new AgentRunError(redact(String(envelope.result || `Agent run ended with ${envelope.subtype}`)), reason);
+    throw new AgentRunError(redact(String(envelope.result || `Agent run ended with ${envelope.subtype}`)), reason, undefined, claudeCall(envelope));
   }
   let output = envelope.structured_output;
   if (output === undefined && typeof envelope.result === 'string') {
@@ -279,13 +286,19 @@ export const runStructured: RunAgent = async (options) => {
     return await runOnce(options);
   } catch (error) {
     if (codeOf(error) !== 'agent_schema_retry') throw error;
+    // The first attempt was paid for; it counts with whatever comes next.
+    const first = (error as AgentRunError).call;
     try {
-      return await runOnce(options);
+      const result = await runOnce(options);
+      return { ...result, spentBefore: first ? [first] : [] };
     } catch (retryError) {
-      if (codeOf(retryError) === 'agent_schema_retry') {
-        throw new AgentRunError('Agent could not produce output in the required format', 'agent_bad_output');
-      }
-      throw retryError;
+      const spent = (retryError as AgentRunError).call;
+      const failure =
+        codeOf(retryError) === 'agent_schema_retry'
+          ? new AgentRunError('Agent could not produce output in the required format', 'agent_bad_output', undefined, spent)
+          : retryError;
+      if (failure instanceof AgentRunError && first) failure.spentBefore = [first];
+      throw failure;
     }
   }
 };
