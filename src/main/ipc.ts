@@ -10,7 +10,7 @@ import * as workspace from './workspace.ts';
 import * as verification from './verification.ts';
 import * as preferences from './preferences.ts';
 import { createPathResolver } from './shell_env.ts';
-import type * as claudeCli from './agents/claude_cli.ts';
+import * as claudeCli from './agents/claude_cli.ts';
 import * as cliRunner from './agents/cli_runner.ts';
 import type { CliProbeResult } from './agents/cli_runner.ts';
 import { AGENT_IDS, CLI_IDS, supportsAgentConfig } from '../shared/agent_runtime.ts';
@@ -49,6 +49,7 @@ import { businessDay, computeAgentCosts, computeMetrics, recentByAgent, RETENTIO
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
 import { openWorkspaceFile } from './open_file.ts';
+import * as cliSignIn from './cli_sign_in.ts';
 import * as patchMerge from './patch_merge.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
@@ -227,6 +228,8 @@ export type IpcDeps = {
   // Replaces claude-cli.runStructured (tests).
   runAgent?: RunAgent;
   probeAgent?: typeof cliRunner.probeCli;
+  // Offline sign-in check for a CLI; injectable so tests never run a real CLI.
+  checkSignIn?: typeof cliSignIn.checkSignIn;
   modelCatalog?: typeof readModelCatalog;
   // Called after generated packages are added to the queue.
   onPackagesPublished?: (definitions: TaskDefinition[]) => void;
@@ -276,6 +279,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     requirements = null,
     runAgent,
     probeAgent = cliRunner.probeCli,
+    checkSignIn = cliSignIn.checkSignIn,
     modelCatalog = readModelCatalog,
     onPackagesPublished,
     activity = null,
@@ -301,9 +305,19 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const config = { ...getPreferences().agents[agent] };
     return async (options) => {
       if (!supportsAgentConfig(agent, config)) throw codedError('The selected CLI cannot safely run this analysis agent', 'agent_unavailable');
-      const result = runAgent
-        ? await runAgent({ ...options, command: config.cli, model: config.model || null, thinking: config.thinking })
-        : await cliRunner.runStructured(options, config);
+      let result: claudeCli.StructuredResult;
+      try {
+        result = runAgent
+          ? await runAgent({ ...options, command: config.cli, model: config.model || null, thinking: config.thinking })
+          : await cliRunner.runStructured(options, config);
+      } catch (error) {
+        // A failed, timed-out or cancelled call can still have been billed;
+        // whatever the CLI reported for it is recorded like a success.
+        if (error instanceof claudeCli.AgentRunError)
+          for (const call of [...error.spentBefore, ...(error.call ? [error.call] : [])]) recordCall(agent, call, subject);
+        throw error;
+      }
+      for (const call of result.spentBefore ?? []) recordCall(agent, call, subject);
       recordCall(agent, result.call ?? { cli: config.cli, provider: null, model: config.model || null, costUsd: result.costUsd, tokens: null }, subject);
       return result;
     };
@@ -628,6 +642,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, result.usage), { kind: 'package', id });
       } catch (error) {
         const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        // A failed, timed-out or cancelled round can still have been billed.
+        const spent = error instanceof codingExec.CodingExecError ? error.usage : null;
+        if (spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null)) {
+          recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, spent), { kind: 'package', id });
+          await updateCoding(id, { usage: spent }).catch((failure) => console.error(failure));
+        }
         // A timed-out round keeps what it wrote so far for the developer to
         // review; it is never applied automatically.
         const partial =
@@ -644,7 +664,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             blocked: partial.blocked,
             patchDigest: partial.digest,
           }).catch((failure) => console.error(failure));
-          record({ kind: 'coding_run', packageId: id, title: task.title, status: 'failed', costUsd: null });
+          record({ kind: 'coding_run', packageId: id, title: task.title, status: 'failed', costUsd: spent?.costUsd ?? null });
           return;
         }
         await updateCoding(id, {
@@ -652,7 +672,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           finishedAt: new Date().toISOString(),
           error: codingFailure(error),
         }).catch(() => {});
-        record({ kind: 'coding_run', packageId: id, title: task.title, status: cancelled ? 'cancelled' : 'failed', costUsd: null });
+        record({ kind: 'coding_run', packageId: id, title: task.title, status: cancelled ? 'cancelled' : 'failed', costUsd: spent?.costUsd ?? null });
       } finally {
         codingEventHistory.set(id, [...runtime.events]);
         const current = store.get(id).codingRun;
@@ -883,8 +903,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const selected = new Set(files as string[]);
       const unresolved = merge.find((file) => file.state === 'conflict' && selected.has(file.path) && !resolutions[file.path]);
       if (unresolved) failWith(`Choose how to resolve ${unresolved.path}`, 'merge_unresolved', 'resolutions');
+      // The round's "finished" was recorded when it produced the patch.
       const applied = await applyRound(id, preview, files as string[], input.allowHighRisk, resolutions);
-      record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: run.usage.costUsd });
       codingRuns.delete(id);
       // Conflict markers left in a file hold the checks until they are cleared.
       if (!applied.markers.length) continueLoop(id, () => verifyApplied(id));
@@ -1305,10 +1325,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.dataResetProgress,
     wrap(async (): Promise<ipc.PackageSummary> => {
-      // Running reviews would otherwise write their result over the reset.
-      for (const controller of reviews.values()) controller.abort();
-      for (const controller of adjudications.values()) controller.abort();
-      await Promise.allSettled([...pendingRuns]);
+      // Every background run would otherwise write its result over the reset;
+      // a coding round or baseline left running could hold it for minutes.
+      await cancelAll();
       await store.reset();
       return store.summary();
     }),
@@ -1656,8 +1675,26 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (): Promise<ipc.AgentStatus> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await commandPath();
-      const [product, architect] = await Promise.all([probeAgent(settings['product-lead'], envPath), probeAgent(settings.architect, envPath)]);
-      return { available: product.available && architect.available, command: product.available ? product.command : null };
+      const codingCli = settings['coding-agent'].cli;
+      const [product, architect, codingInstalled] = await Promise.all([
+        probeAgent(settings['product-lead'], envPath),
+        probeAgent(settings.architect, envPath),
+        workspace.resolveExecutable(codingCli, { envPath }).then(Boolean),
+      ]);
+      const available = product.available && architect.available;
+      // One check per CLI, shared when analysis and coding use the same one.
+      const signIns = new Map<string, Promise<ipc.CliSignIn>>();
+      const signInOf = (cli: typeof codingCli) => signIns.get(cli) ?? signIns.set(cli, checkSignIn(cli, { envPath })).get(cli)!;
+      const [analysisSignIn, codingSignIn] = await Promise.all([
+        available ? signInOf(settings['product-lead'].cli) : null,
+        codingInstalled ? signInOf(codingCli) : null,
+      ]);
+      return {
+        available,
+        command: product.available ? product.command : null,
+        signIn: analysisSignIn,
+        coding: { cli: codingCli, installed: codingInstalled, signIn: codingSignIn },
+      };
     }),
   );
   ipcMain.handle(
@@ -2494,6 +2531,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of adjudications.values()) controller.abort();
     for (const runtime of codingRuns.values()) runtime.controller.abort();
     for (const controller of codingVerifications.values()) controller.abort();
+    // A tutor answer finishing late would land in the next repository's store.
+    for (const controller of tutorRuns.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
     tutorFailures.clear();
   };

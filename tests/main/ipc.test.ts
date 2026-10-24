@@ -11,7 +11,9 @@ import type { IpcResult, TaskView, CliModelCatalog } from '../../src/shared/ipc_
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../src/shared/coding_types.ts';
 import { applyPatch, parsePatchPreview } from '../../src/main/coding_workspace.ts';
 import { previewMerge } from '../../src/main/patch_merge.ts';
+import { AgentRunError } from '../../src/main/agents/claude_cli.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../src/main/agents/claude_cli.ts';
+import { CodingExecError } from '../../src/main/coding_exec.ts';
 import type { Channel } from '../../src/shared/ipc_channels.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
@@ -22,7 +24,16 @@ type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
 type CodingOverrides = Partial<
   Pick<
     IpcDeps,
-    'codingProbe' | 'codingPrepare' | 'codingRun' | 'codingReadPatch' | 'codingApplyPatch' | 'codingClean' | 'codingSnapshot' | 'codingPreviewMerge'
+    | 'codingProbe'
+    | 'codingPrepare'
+    | 'codingRun'
+    | 'codingReadPatch'
+    | 'codingApplyPatch'
+    | 'codingClean'
+    | 'codingSnapshot'
+    | 'codingPreviewMerge'
+    | 'probeAgent'
+    | 'checkSignIn'
   >
 >;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
@@ -109,11 +120,13 @@ const harness = async ({
   const tutor = await new TutorStore(repoDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
+  // What the fake login shell reports; tests can prepend a folder of fake CLIs.
+  let shellPathPrefix = '/tp/shell/bin';
   const pathResolver = createPathResolver({
     inherited: '/usr/bin:/bin',
     read: async () => {
       shellReads += 1;
-      return `/tp/shell/bin:${process.env.PATH}`;
+      return `${shellPathPrefix}:${process.env.PATH}`;
     },
   });
   ipc = registerIpcHandlers(
@@ -150,6 +163,9 @@ const harness = async ({
       },
       // Fake patches have no real blobs to merge: every file lands clean.
       codingPreviewMerge: async (_root, _baseline, files) => files.map((file) => ({ path: file.path, state: 'clean' as const, markers: false })),
+      // Never run the real CLIs from a test.
+      probeAgent: async (config) => ({ command: config.cli, available: true, version: 'test', reason: null }),
+      checkSignIn: async () => ({ state: 'signed_in', source: 'test' }),
       ...coding,
     },
   );
@@ -162,7 +178,12 @@ const harness = async ({
     config = { ...config, root: next };
   };
   const getConfig = () => config;
+  // Must be called before anything reads the login shell, which is cached.
+  const setShellPathPrefix = (next: string) => {
+    shellPathPrefix = next;
+  };
   return {
+    setShellPathPrefix,
     // Null only with withRepo: false, and those tests never read it.
     call,
     store,
@@ -650,6 +671,48 @@ test('verify:run uses the login-shell PATH once that preference is saved', async
   await call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }));
   const after = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
   assert.ok(after.startsWith('/tp/shell/bin:'), after);
+});
+
+test('agent:status reports sign-in for the analysis CLI and the coding CLI, checking a shared CLI once', async () => {
+  const checked: string[] = [];
+  const { call } = await harness({
+    coding: {
+      checkSignIn: async (cli) => {
+        checked.push(cli);
+        return cli === 'codex' ? { state: 'signed_out', source: null } : { state: 'signed_in', source: 'claude auth status' };
+      },
+    },
+  });
+  const status = (await call(CHANNELS.agentStatus)).data;
+  assert.equal(status.available, true);
+  assert.deepEqual(status.signIn, { state: 'signed_in', source: 'claude auth status' });
+  // The fake PATH has no codex, so it is reported as not installed and not checked.
+  assert.deepEqual(status.coding, { cli: 'codex', installed: false, signIn: null });
+  assert.deepEqual(checked, ['claude']);
+  // With the coding CLI on the PATH it is checked too.
+  const bin = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-bin-'));
+  onTestFinished(() => fs.rm(bin, { recursive: true, force: true }));
+  await fs.writeFile(path.join(bin, 'codex'), '#!/bin/sh\n', { mode: 0o755 });
+  checked.length = 0;
+  const withCodex = await harness({
+    coding: { checkSignIn: async (cli) => (checked.push(cli), cli === 'codex' ? { state: 'signed_out', source: null } : { state: 'signed_in', source: 'x' }) },
+  });
+  withCodex.setShellPathPrefix(bin);
+  assert.equal((await withCodex.call(CHANNELS.preferencesSet, validPrefs({ environment: { pathSource: 'login-shell' } }))).ok, true);
+  assert.deepEqual((await withCodex.call(CHANNELS.agentStatus)).data.coding, { cli: 'codex', installed: true, signIn: { state: 'signed_out', source: null } });
+  assert.deepEqual(checked.sort(), ['claude', 'codex']);
+
+  // A missing analysis CLI is not checked for sign-in.
+  checked.length = 0;
+  const offline = await harness({
+    coding: {
+      probeAgent: async (config) => ({ command: config.cli, available: false, version: null, reason: 'missing' }),
+      checkSignIn: async (cli) => (checked.push(cli), { state: 'unknown', source: null }),
+    },
+  });
+  const missing = (await offline.call(CHANNELS.agentStatus)).data;
+  assert.equal(missing.signIn, null);
+  assert.ok(!checked.includes('claude'));
 });
 
 test('data:reset-progress clears execution state but keeps config and preferences', async () => {
@@ -1991,11 +2054,14 @@ const loopHarness = async ({
   highRisk = false,
   timesOut = null,
   hold = null,
+  failWith = null,
 }: {
   agent?: FakeAgent | null;
   highRisk?: boolean;
   // The CLI run waits on this before it returns.
   hold?: Promise<void> | null;
+  // Every CLI run throws this.
+  failWith?: Error | null;
   // Rounds (1-based) whose CLI run times out after writing its patch.
   timesOut?: ((round: number) => boolean) | null;
 } = {}) => {
@@ -2012,7 +2078,13 @@ const loopHarness = async ({
       codingRun: async (options) => {
         prompts.push(options.prompt);
         timeouts.push(options.timeoutMs!);
-        await hold;
+        // Like the real runner, a cancel ends the wait, even one that came first.
+        if (hold) {
+          const cancelled = () => Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
+          if (options.signal?.aborted) throw cancelled();
+          await Promise.race([hold, new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(cancelled()), { once: true }))]);
+        }
+        if (failWith) throw failWith;
         if (timesOut?.(prompts.length)) throw Object.assign(new Error('Coding run timed out'), { code: 'coding_timeout' });
         return {
           output: '',
@@ -2367,6 +2439,91 @@ test('costs: every analysis call is recorded with its CLI, model and work packag
     subject: { kind: 'package', id: 'auth-edge-tests' },
     at: costs[0].at,
   });
+});
+
+test('data:reset-progress cancels a running coding round instead of waiting for it', async () => {
+  // A round that only ends when it is cancelled, like a 30-minute CLI run.
+  const h = await loopHarness({ hold: new Promise(() => {}) });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  assert.deepEqual((await h.call(CHANNELS.codingActive)).data.length, 1);
+  const reset = await Promise.race([h.call(CHANNELS.dataResetProgress), new Promise((resolve) => setTimeout(() => resolve('hung'), 3000))]);
+  assert.notEqual(reset, 'hung', 'reset waited for the coding round');
+  assert.equal((await h.call(CHANNELS.getTask, 'auth-email-login')).data.status, 'pending');
+});
+
+test('repositories: switching cancels a running tutor answer so it cannot land in the next repository', async () => {
+  // The answer is slow; it finishes only after cancellation or when released.
+  const release = Promise.withResolvers<void>();
+  let cancelled = false;
+  const agent: FakeAgent = async (options) => {
+    if (stepOf(options.schema) !== 'tutor') return fakeAgent()(options);
+    options.signal!.addEventListener('abort', () => (cancelled = true));
+    await release.promise;
+    return fakeAgent()(options);
+  };
+  const { call } = await harness({ agent, seedState: { 'auth-edge-tests': claimedState } });
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  // Adding a repository switches to it; the switch must stop the tutor first.
+  const switching = call(CHANNELS.repositoriesAdd, await gitRepo(), true);
+  for (let index = 0; index < 200 && !cancelled; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  release.resolve();
+  await switching;
+  assert.equal(cancelled, true, 'the tutor run was not cancelled');
+  assert.deepEqual((await call(CHANNELS.repositoriesBusy)).data, []);
+});
+
+test('activity: an applied coding round is recorded as finished once', async () => {
+  const h = await loopHarness({ agent: async (options) => fakeAgent({ review: QA_PASS })(options) });
+  h.setCommands({ test: LOGIN_TESTS_PASS });
+  assert.equal((await applyFirstRound(h)).ok, true);
+  await settleLoop(h.call, 'auth-email-login', (view) => view.status === 'accepting');
+  const events = await h.activity.recent({ days: 1, limit: 100 });
+  assert.equal(events.filter((event) => event.kind === 'coding_run' && event.status === 'finished').length, 1);
+});
+
+test('costs: a failed call and a paid-for schema retry are recorded too', async () => {
+  const spent = (input: number) => ({
+    cli: 'claude' as const,
+    provider: 'anthropic',
+    model: 'm',
+    costUsd: input / 1000,
+    tokens: { input, output: 1, cacheRead: 0, cacheWrite: 0 },
+  });
+  let reviews = 0;
+  const h = await harness({
+    agent: async (options) => {
+      if (stepOf(options.schema) !== 'review') return fakeAgent()(options);
+      reviews += 1;
+      // The first review fails after spending; the retry passes after one paid-for failed attempt.
+      if (reviews === 1) throw new AgentRunError('model gave up', 'agent_failed', undefined, spent(10));
+      return { ...((await fakeAgent()(options)) as StructuredResult), call: spent(30), spentBefore: [spent(20)] };
+    },
+  });
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  await submitEdgeTests(h);
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.call(CHANNELS.reviewRetry, 'auth-edge-tests');
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.activity.flush();
+  const costs = (await h.activity.window(1)).flatMap((record) => (record.kind === 'agent_cost' && record.agent === 'qa' ? [record] : []));
+  assert.deepEqual(
+    costs.map((record) => record.call?.tokens?.input),
+    [10, 20, 30],
+  );
+});
+
+test('costs: a coding round that fails after spending tokens still records them', async () => {
+  const failure = new CodingExecError('exited', 'coding_exit_failed');
+  failure.usage = { inputTokens: 500, outputTokens: 20, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.42 };
+  const h = await loopHarness({ failWith: failure });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  const task = await settleCoding(h.call, 'auth-email-login');
+  assert.equal(task.codingRun?.status, 'failed');
+  assert.equal(task.codingRun?.usage.costUsd, 0.42);
+  await h.activity.flush();
+  const costs = (await h.activity.window(1)).flatMap((record) => (record.kind === 'agent_cost' && record.agent === 'coding-agent' ? [record] : []));
+  assert.equal(costs.length, 1);
+  assert.equal(costs[0].call?.costUsd, 0.42);
 });
 
 test('costs: the report rejects other ranges and counts recorded calls', async () => {

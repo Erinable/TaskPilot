@@ -81,7 +81,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     try {
       const [workspace, agent] = await Promise.all([
         call(window.taskpilot.workspace.info()),
-        call(window.taskpilot.agent.status()).catch(() => ({ available: false, command: null })),
+        call(window.taskpilot.agent.status()).catch(() => ({ available: false })),
       ]);
       if (generation === contextGeneration && composing.value) composeContext.value = { workspace, agentAvailable: agent.available };
     } catch (error) {

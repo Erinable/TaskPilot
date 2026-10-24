@@ -23,6 +23,8 @@ export class CodingExecError extends Error {
   readonly stderr: string;
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
+  // Tokens and cost the CLI reported before the run failed; set by runCoding.
+  usage: CodingUsage | null = null;
 
   constructor(message: string, code: CodingExecErrorCode, options: { stderr?: string; exitCode?: number | null; signal?: NodeJS.Signals | null } = {}) {
     super(message);
@@ -314,6 +316,15 @@ export const runCoding = async ({
   sandbox: sandboxContext,
 }: RunCodingOptions): Promise<RunCodingResult> => {
   if (!supportsAgentConfig('coding-agent', config)) throw new CodingExecError('Unsupported coding CLI configuration', 'coding_protocol');
+  // The CLI's sign-in goes into the run's own home, never its real state folder.
+  const runDir = sandboxContext ? sandbox.runDirOf(sandboxContext, runName) : null;
+  if (sandboxContext && runDir) {
+    try {
+      await sandbox.seedAgentHome(sandboxContext, runDir, config.cli);
+    } catch (caught) {
+      throw new CodingExecError('Could not prepare the coding home', 'coding_spawn_failed', { stderr: redact(String(caught)) });
+    }
+  }
   const child: Spawned = (() => {
     try {
       if (sandboxContext) {
@@ -412,8 +423,11 @@ export const runCoding = async ({
       escalation = undefined;
     }
     if (signal && abortListener) signal.removeEventListener('abort', abortListener);
-    if (error) reject(error);
-    else resolve({ output: output.text, usage, events, sessionId: null });
+    if (error) {
+      // A failed or timed-out run may already have spent tokens.
+      error.usage = usage;
+      reject(error);
+    } else resolve({ output: output.text, usage, events, sessionId: null });
   };
   child.once('error', (error) => {
     terminate(new CodingExecError('Coding runner failed to start', 'coding_spawn_failed', { stderr: redact(error.message) }));
@@ -453,8 +467,12 @@ export const runCoding = async ({
   } catch (caught) {
     terminate(new CodingExecError('Could not send coding prompt', 'coding_stdin_failed', { stderr: redact(String(caught)) }));
   }
-  const result = await promise;
-  return result;
+  try {
+    return await promise;
+  } finally {
+    // A refreshed token goes back; nothing else the agent wrote does.
+    if (sandboxContext && runDir) await sandbox.syncCredentials(sandboxContext, runDir, config.cli).catch((error) => console.error(error));
+  }
 };
 
 const runtimeConfig = (config: AgentRuntimeConfig): CodingRuntimeStatus['config'] => ({ ...config, user: CODING_USER, timeoutMinutes: 30 });
