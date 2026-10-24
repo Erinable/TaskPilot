@@ -8,8 +8,8 @@
 //
 // What the process may do:
 //   write: its run directory (a git-archive copy of the package, never the
-//          real repository), temp folders, the selected CLI's own state
-//          folder, ~/.npm, and folders the user added in settings
+//          real repository), its own home (below), temp folders, and
+//          folders the user added in settings
 //   read:  everything outside the home folder; inside it only the above, the
 //          toolchain on PATH (e.g. ~/.nvm), and folders the user added.
 //          File names and sizes in home stay visible (Node needs lstat).
@@ -18,6 +18,15 @@
 // Every git command on the run directory runs inside the profile too: the
 // agent controls that directory's .git, so its config or hooks must never
 // run outside the sandbox.
+//
+// The CLI runs with HOME set to a per-run folder holding copies of its
+// credential and config files. The real state folders (~/.claude, ~/.codex
+// ...) are neither readable nor writable: an agent that could write them
+// could plant hooks or config the user's own CLI would run, unsandboxed, the
+// next time. Only credential files are copied back after a run (an OAuth
+// token may have rotated), and only when they are still JSON objects.
+//
+// [人工决策-2026-10-19] 沙箱逃逸修法选方案 1：每次运行给 CLI 一个临时 HOME，只复制登录凭据和必要配置；真实状态目录不可读写；运行后只回写变化过的凭据文件。
 //
 // [人工决策-2026-10-14] 新用户默认用沙箱模式；默认只给工作区权限，例外由用户在设置里添加；沙箱内可以联网。
 // [人工决策-2026-10-14] 由 TaskPilot 自己用 sandbox-exec 包住 CLI 进程，不依赖各 CLI 自带的沙箱。
@@ -39,17 +48,35 @@ export const PROBE_FILENAME = 'coding-sandbox-probe.txt';
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-// Each CLI's own state under home: sign-in, sessions, logs. It must be
-// writable for the CLI to work, so the agent can read its own credentials.
-export const CLI_STATE: Record<CliId, string[]> = {
-  claude: ['.claude', '.claude.json', '.config/claude'],
-  codex: ['.codex'],
-  pi: ['.pi'],
-  grok: ['.grok'],
-  opencode: ['.config/opencode', '.local/share/opencode', '.local/state/opencode', '.cache/opencode'],
+// The files each CLI needs from the real home, relative to it. `credential`
+// files are copied back after a run when they changed; `keys` keeps only
+// those top-level JSON keys (Claude's settings also hold hooks and plugins,
+// which must not reach the run).
+export type HomeFile = { path: string; credential?: boolean; keys?: string[] };
+export const CLI_HOME_FILES: Record<CliId, HomeFile[]> = {
+  claude: [
+    { path: '.claude/.credentials.json', credential: true },
+    { path: '.claude/settings.json', keys: ['env', 'apiKeyHelper', 'model'] },
+    { path: '.claude.json', keys: ['hasCompletedOnboarding', 'oauthAccount', 'userID', 'primaryApiKey', 'customApiKeyResponses'] },
+  ],
+  codex: [{ path: '.codex/auth.json', credential: true }, { path: '.codex/config.toml' }],
+  pi: [{ path: '.pi/agent/auth.json', credential: true }, { path: '.pi/agent/models.json' }, { path: '.pi/agent/settings.json' }],
+  grok: [{ path: '.grok/auth.json', credential: true }, { path: '.grok/config.toml' }],
+  opencode: [
+    { path: '.local/share/opencode/auth.json', credential: true },
+    { path: '.config/opencode/opencode.json' },
+    { path: '.config/opencode/opencode.jsonc' },
+  ],
 };
-// Caches package managers write to while installing dependencies.
-const TOOL_CACHES = ['.npm'];
+// The real state folder a self-check tries to write into; it must fail.
+export const CLI_STATE_ROOT: Record<CliId, string> = {
+  claude: '.claude',
+  codex: '.codex',
+  pi: '.pi',
+  grok: '.grok',
+  opencode: '.config/opencode',
+};
+const MAX_HOME_FILE_BYTES = 1024 * 1024;
 // Never opened up by the toolchain rule, even when something on PATH lives there.
 export const SENSITIVE = [
   '.ssh',
@@ -155,17 +182,18 @@ export const buildProfile = (spec: ProfileSpec): string => {
   ].join('\n');
 };
 
-// Folders the CLI may write and read for one run.
-export const profileFor = (context: SandboxContext, cli: CliId, runDir: string, executable: string | null): ProfileSpec => {
-  const home = context.home;
-  const state = [...CLI_STATE[cli], ...TOOL_CACHES].map((entry) => path.join(home, entry));
-  return {
-    home,
-    runDir,
-    writable: [...state, ...context.extraWrite],
-    readable: [...toolchainRoots(home, context.pathEntries, executable), ...context.extraRead],
-  };
-};
+// The run's own home, beside its directory: never inside it, or the agent's
+// diff would include it.
+export const agentHomeOf = (runDir: string) => `${runDir}-home`;
+
+// Folders the CLI may write and read for one run. The real CLI state folders
+// are not among them; the run's own home stands in for them.
+export const profileFor = (context: SandboxContext, cli: CliId, runDir: string, executable: string | null): ProfileSpec => ({
+  home: context.home,
+  runDir,
+  writable: [agentHomeOf(runDir), ...context.extraWrite],
+  readable: [...toolchainRoots(context.home, context.pathEntries, executable), ...context.extraRead],
+});
 
 // ========== Environment ==========
 
@@ -174,9 +202,15 @@ export const profileFor = (context: SandboxContext, cli: CliId, runDir: string, 
 const PROVIDER_KEY =
   /^(?:ANTHROPIC|OPENAI|XAI|GROK|GEMINI|GOOGLE_GENERATIVE_AI|DEEPSEEK|MOONSHOT|OPENROUTER|MISTRAL|GROQ|ZAI|DASHSCOPE)_[A-Z0-9_]*(?:KEY|TOKEN|BASE_URL)$/;
 
-export const sandboxEnv = (context: SandboxContext, source: NodeJS.ProcessEnv = processEnv()): NodeJS.ProcessEnv => {
+// `agentHome` is the run's own home; caches and XDG folders live under it.
+export const sandboxEnv = (context: SandboxContext, source: NodeJS.ProcessEnv = processEnv(), agentHome = context.home): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
-    HOME: context.home,
+    HOME: agentHome,
+    XDG_CONFIG_HOME: path.join(agentHome, '.config'),
+    XDG_DATA_HOME: path.join(agentHome, '.local', 'share'),
+    XDG_STATE_HOME: path.join(agentHome, '.local', 'state'),
+    XDG_CACHE_HOME: path.join(agentHome, '.cache'),
+    npm_config_cache: path.join(agentHome, '.npm'),
     USER: source.USER ?? os.userInfo().username,
     LOGNAME: source.LOGNAME ?? os.userInfo().username,
     PATH: context.pathEntries.join(':'),
@@ -192,6 +226,78 @@ export const sandboxEnv = (context: SandboxContext, source: NodeJS.ProcessEnv = 
   return env;
 };
 
+// ========== The run's own home ==========
+
+// One file from the real home, as it goes into the run's home: a regular
+// file (never a symlink), at most 1 MB, and for `keys` a filtered JSON object.
+const seedContent = async (source: string, file: Pick<HomeFile, 'keys'>): Promise<string | null> => {
+  let stat: fs.Stats;
+  try {
+    stat = await fsp.lstat(source);
+  } catch {
+    return null;
+  }
+  if (!stat.isFile() || stat.size > MAX_HOME_FILE_BYTES) return null;
+  const content = await fsp.readFile(source, 'utf8');
+  if (!file.keys) return content;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const kept = Object.fromEntries(Object.entries(parsed).filter(([key]) => file.keys?.includes(key)));
+  return `${JSON.stringify(kept, null, 2)}\n`;
+};
+
+// Creates the run's home and copies in the CLI's sign-in and config files.
+// Runs as TaskPilot, outside the profile, before the CLI starts.
+export const seedAgentHome = async (context: SandboxContext, runDir: string, cli: CliId): Promise<string> => {
+  const agentHome = agentHomeOf(runDir);
+  await fsp.mkdir(agentHome, { recursive: true, mode: 0o700 });
+  for (const file of CLI_HOME_FILES[cli]) {
+    const content = await seedContent(path.join(context.home, file.path), file);
+    if (content === null) continue;
+    const target = path.join(agentHome, file.path);
+    await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    await fsp.writeFile(target, content, { mode: 0o600 });
+  }
+  return agentHome;
+};
+
+const jsonKeys = (content: string | null): string | null => {
+  if (content === null) return null;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed).sort().join('\u0000') : null;
+  } catch {
+    return null;
+  }
+};
+
+// After a run, copies back credential files whose content changed (an OAuth
+// refresh). Only an update in place: the real file must exist and both must
+// be JSON objects with the same top-level keys, so the agent cannot add a
+// login or reshape the file. Config and everything else stays behind.
+export const syncCredentials = async (context: SandboxContext, runDir: string, cli: CliId): Promise<string[]> => {
+  const agentHome = agentHomeOf(runDir);
+  const updated: string[] = [];
+  for (const file of CLI_HOME_FILES[cli].filter((entry) => entry.credential)) {
+    const target = path.join(context.home, file.path);
+    const written = await seedContent(path.join(agentHome, file.path), {});
+    const current = await seedContent(target, {});
+    const shape = jsonKeys(written);
+    if (written === null || current === null || written === current || shape === null || shape !== jsonKeys(current)) continue;
+    const temporary = `${target}.taskpilot-${randomUUID().slice(0, 8)}`;
+    await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    await fsp.writeFile(temporary, written, { mode: 0o600 });
+    await fsp.rename(temporary, target);
+    updated.push(file.path);
+  }
+  return updated;
+};
+
 // ========== Running under the profile ==========
 
 export const sandboxArgs = (profile: string, command: string, args: readonly string[]): string[] => ['-p', profile, command, ...args];
@@ -201,6 +307,8 @@ interface RunOptions {
   input?: string | NodeJS.ReadableStream;
   timeoutMs?: number;
   signal?: AbortSignal;
+  // HOME for the command; the run's own home when the CLI runs.
+  agentHome?: string;
 }
 
 // Runs one command under the profile and collects its output.
@@ -209,11 +317,15 @@ const runSandboxed = async (
   profile: string,
   command: string,
   args: readonly string[],
-  { cwd, input, timeoutMs = 60_000, signal }: RunOptions,
+  { cwd, input, timeoutMs = 60_000, signal, agentHome }: RunOptions,
 ): Promise<{ stdout: string; stderr: string; code: number }> => {
   if (signal?.aborted) throw new SandboxError('Cancelled', 'workspace_aborted');
   const spawnFn = context.spawnFn ?? defaultSpawn;
-  const child = spawnFn(SANDBOX_EXEC_PATH, sandboxArgs(profile, command, args), { cwd, env: sandboxEnv(context), stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawnFn(SANDBOX_EXEC_PATH, sandboxArgs(profile, command, args), {
+    cwd,
+    env: sandboxEnv(context, processEnv(), agentHome ?? context.home),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   let stdout = '';
   let stderr = '';
   let bytes = 0;
@@ -267,6 +379,7 @@ export const prepare = async (
   const runDir = runDirOf(context, runName ?? randomUUID());
   await fsp.mkdir(context.runRoot, { recursive: true, mode: 0o700 });
   await fsp.mkdir(runDir, { mode: 0o700 });
+  await fsp.mkdir(agentHomeOf(runDir), { mode: 0o700 });
   const profile = buildProfile(profileFor(context, cli, runDir, null));
   try {
     const archive = (context.spawnFn ?? defaultSpawn)(GIT_PATH, ['-C', root, 'archive', '--format=tar', baseline], {
@@ -323,7 +436,9 @@ export const digestOf = (patch: string) => createHash('sha256').update(patch).di
 
 // fs.rm does not follow symlinks, so nothing outside the run directory goes.
 export const clean = async (runName: string, { context }: { context: SandboxContext }): Promise<void> => {
-  await fsp.rm(runDirOf(context, runName), { recursive: true, force: true });
+  const runDir = runDirOf(context, runName);
+  await fsp.rm(runDir, { recursive: true, force: true });
+  await fsp.rm(agentHomeOf(runDir), { recursive: true, force: true });
 };
 
 // ========== CLI ==========
@@ -384,7 +499,8 @@ export const cliArgs = (config: AgentRuntimeConfig): string[] => {
   }
 };
 
-// The spawn for one coding run, for coding_exec.ts to drive.
+// The spawn for one coding run, for coding_exec.ts to drive. The run's
+// home must be seeded first (seedAgentHome).
 export const runCommand = (
   context: SandboxContext,
   runName: string,
@@ -397,7 +513,7 @@ export const runCommand = (
   return {
     command: SANDBOX_EXEC_PATH,
     args: sandboxArgs(profile, executable, cliArgs(config)),
-    options: { cwd: runDir, env: sandboxEnv(context), stdio: ['pipe', 'pipe', 'pipe'], detached: true },
+    options: { cwd: runDir, env: sandboxEnv(context, processEnv(), agentHomeOf(runDir)), stdio: ['pipe', 'pipe', 'pipe'], detached: true },
   };
 };
 
@@ -431,7 +547,15 @@ export const probe = async (context: SandboxContext, config: AgentRuntimeConfig,
     if (leaked.code === 0) return { available: false, version: null, reason: 'sandbox: self-check failed (a file outside the workspace was readable)' };
     const wrote = await runSandboxed(context, profile, '/usr/bin/touch', [path.join(checkDir, 'ok')], { cwd: checkDir, timeoutMs: 15_000, signal });
     if (wrote.code !== 0) return { available: false, version: null, reason: 'sandbox: self-check failed (the workspace was not writable)' };
-    const version = await runSandboxed(context, profile, executable, ['--version'], { cwd: checkDir, timeoutMs: 30_000, signal });
+    // The CLI's real state folder holds config its unsandboxed runs read.
+    const planted = path.join(context.home, CLI_STATE_ROOT[config.cli], `taskpilot-probe-${randomUUID().slice(0, 8)}`);
+    const plantedResult = await runSandboxed(context, profile, '/usr/bin/touch', [planted], { cwd: checkDir, timeoutMs: 15_000, signal });
+    if (plantedResult.code === 0) {
+      await fsp.rm(planted, { force: true });
+      return { available: false, version: null, reason: "sandbox: self-check failed (the CLI's own config folder was writable)" };
+    }
+    const agentHome = await seedAgentHome(context, checkDir, config.cli);
+    const version = await runSandboxed(context, profile, executable, ['--version'], { cwd: checkDir, timeoutMs: 30_000, signal, agentHome });
     const text = version.stdout.trim().split('\n').at(-1)?.trim() ?? '';
     if (version.code !== 0 || !text) return { available: false, version: null, reason: `sandbox: ${config.cli} CLI did not start inside the sandbox` };
     return { available: true, version: text, reason: null };
@@ -439,5 +563,6 @@ export const probe = async (context: SandboxContext, config: AgentRuntimeConfig,
     return { available: false, version: null, reason: `sandbox: self-check failed (${(error as Error).message})` };
   } finally {
     await fsp.rm(checkDir, { recursive: true, force: true }).catch(() => {});
+    await fsp.rm(agentHomeOf(checkDir), { recursive: true, force: true }).catch(() => {});
   }
 };
