@@ -93,6 +93,7 @@ const api = {
     cancel: (id: string) => invoke<boolean>(CHANNELS.codingCancel, id),
     patch: (id: string) => invoke<ipc.CodingPatchPreview>(CHANNELS.codingPatch, id),
     apply: (id: string, input: ipc.CodingApply) => invoke<ipc.CodingApplyResult>(CHANNELS.codingApply, id, input),
+    resume: (id: string) => invoke<ipc.TaskView>(CHANNELS.codingResume, id),
     active: () => invoke<ipc.CodingActiveRun[]>(CHANNELS.codingActive),
   },
 

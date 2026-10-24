@@ -38,6 +38,8 @@ const HALT_TEXT: Record<ipc.CodingHalt, string> = {
   high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
   no_changes: '这一轮 AI 没有产生可以应用的改动，自动流程已停止。',
   stopped: '自动流程已停止。',
+  conflict: '这一轮的改动和你在这段时间里改的内容撞在了同一处，自动流程停下了，没有覆盖你的改动。请在下面为冲突的文件选怎么处理。',
+  markers: '有文件写入了冲突标记（<<<<<<< 你的改动 / >>>>>>> Coding Agent 那几行）。在编辑器里保留想要的内容、删掉标记并保存，再点「冲突已解决，继续」。',
   timed_out:
     '这一轮超过了时间上限，AI 被停下了。下面是它停下前写好的部分，可能没写完，请逐个文件检查后再决定是否应用；也可以到「设置 → 模型与智能体 → 编码隔离」调长上限。',
 };
@@ -52,7 +54,18 @@ const elapsed = computed(() => (coding.active || coding.loopActive ? elapsedSinc
 // Why the runtime is unavailable, in plain words; the raw reason sits folded below.
 const setup = computed(() => (coding.runtime && !coding.runtime.available ? CODING_SETUP_TEXT[codingSetupIssue(coding.runtime.reason)] : null));
 const restartable = computed(() => !!coding.run && RESTARTABLE.includes(coding.run.status) && !coding.loopActive);
-const applyDisabled = computed(() => !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.operation !== null);
+const applyDisabled = computed(
+  () =>
+    !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.unresolved.length > 0 || coding.operation !== null,
+);
+const MERGE_LABELS: Record<ipc.CodingMergeFile['state'], string> = { clean: '', merged: '已和你的改动合并', conflict: '和你的改动冲突' };
+// The choices for one conflict; markers only where the file can carry them.
+const choicesFor = (merge: ipc.CodingMergeFile) => [
+  ...(merge.markers ? [{ value: 'markers' as const, label: '写入冲突标记，我来改' }] : []),
+  { value: 'mine' as const, label: '保留我的，跳过 AI 的改动' },
+  { value: 'theirs' as const, label: '用 AI 的版本覆盖' },
+];
+const resume = () => coding.resume().catch((error) => console.error(error));
 const fileDiffs = computed(() => {
   const segments = coding.patch ? splitPatch(coding.patch.patch) : [];
   return (coding.patch?.files ?? []).map((file, index) => ({
@@ -231,6 +244,10 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         </button>
       </div>
 
+      <p v-if="coding.active && coding.run.status !== 'verifying'" class="coding-hint coding-scope-hint">
+        AI 写代码时，尽量别改这个工作包范围内的文件（{{ task.fileScope.slice(0, 3).join('、') }}{{ task.fileScope.length > 3 ? ' 等' : '' }}）。
+        改了也没关系：应用时会先合并，撞在同一处才需要你来选。
+      </p>
       <div class="coding-transcript" aria-live="polite" aria-label="编码 Agent 实时记录">
         <div v-if="coding.events.length === 0" class="empty-hint">等待编码 Agent 输出…</div>
         <div v-for="event in coding.events" :key="event.sequence" class="coding-event">
@@ -264,8 +281,28 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
                 <code>{{ entry.file.path }}</code>
                 <span>+{{ entry.file.added }} −{{ entry.file.removed }}</span>
                 <strong v-if="entry.file.highRisk" class="risk-label">高风险</strong>
+                <span v-if="coding.mergeOf(entry.file.path)?.state === 'merged'" class="merge-label">{{ MERGE_LABELS.merged }}</span>
+                <strong v-if="coding.mergeOf(entry.file.path)?.state === 'conflict'" class="conflict-label">{{ MERGE_LABELS.conflict }}</strong>
                 <span v-if="!entry.applicable" class="blocked-label">不能应用：{{ entry.reasons.join('；') }}</span>
               </summary>
+              <div
+                v-if="coding.mergeOf(entry.file.path)?.state === 'conflict' && coding.selectedFiles.includes(entry.file.path)"
+                class="conflict-choice"
+                role="radiogroup"
+                :aria-label="`${entry.file.path} 的冲突怎么处理`"
+              >
+                <label v-for="choice in choicesFor(coding.mergeOf(entry.file.path)!)" :key="choice.value">
+                  <input
+                    type="radio"
+                    :name="`resolve-${entry.file.path}`"
+                    :value="choice.value"
+                    :checked="coding.resolutions[entry.file.path] === choice.value"
+                    :disabled="coding.operation !== null"
+                    @change="coding.setResolution(entry.file.path, choice.value)"
+                  />
+                  {{ choice.label }}
+                </label>
+              </div>
               <div class="diff-body coding-diff-body">
                 <div v-for="(line, index) in entry.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
               </div>
@@ -276,6 +313,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
           <input v-model="highRiskConsent" type="checkbox" />
           我已检查勾选的高风险文件的 diff，同意应用
         </label>
+        <p v-if="coding.unresolved.length" class="coding-hint">还有 {{ coding.unresolved.length }} 个冲突的文件没选怎么处理。</p>
         <button class="primary-button" type="button" :disabled="applyDisabled" @click="apply">
           <AppIcon name="check" />
           应用勾选的文件并自动检查
@@ -289,7 +327,22 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         <AppIcon name="spinner" class="spin" />
         补丁已写入工作区，正在用你的账号权限跑提交前检查…
       </div>
-      <div v-if="coding.run.status === 'applied'" class="coding-applied" role="alert">
+      <div v-if="coding.run.status === 'applied' && coding.run.halt === 'markers'" class="coding-applied" role="alert">
+        <AppIcon name="alert" />
+        <div>
+          <p>这些文件里可能有冲突标记，改完再继续：</p>
+          <ul>
+            <li v-for="file in coding.run.files" :key="file.path">
+              <code>{{ file.path }}</code>
+            </li>
+          </ul>
+          <button class="primary-button small" type="button" :disabled="coding.operation !== null" @click="resume">
+            <AppIcon name="check" />
+            冲突已解决，继续
+          </button>
+        </div>
+      </div>
+      <div v-else-if="coding.run.status === 'applied'" class="coding-applied" role="alert">
         <AppIcon name="alert" />
         改动已写入工作区，自动流程停在这里。你可以自己修改后提交审查，或补充说明后重新开始编码。
       </div>
@@ -497,6 +550,23 @@ div.coding-error .coding-raw {
 }
 .risk-label {
   color: var(--danger);
+}
+.conflict-label {
+  color: var(--warning);
+}
+.merge-label {
+  color: var(--text-tertiary);
+}
+.conflict-choice {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 4px 24px;
+  font-size: var(--text-sm);
+}
+.conflict-choice label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 .blocked-label {
   color: var(--danger);

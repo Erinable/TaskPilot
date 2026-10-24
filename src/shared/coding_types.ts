@@ -23,7 +23,10 @@ export type CodingRunStatus =
 // What started a round: the developer, failing submit checks, or a QA rejection.
 export type CodingTrigger = 'human' | 'checks_failed' | 'qa_rejected';
 // Why the automatic loop stopped and handed back to the developer.
-export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped' | 'timed_out';
+// `conflict`: an automatic round's patch conflicts with the developer's
+// edits. `markers`: conflict markers were written and must be cleared before
+// the checks run.
+export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped' | 'timed_out' | 'conflict' | 'markers';
 export type CodingRound = { attempt: number; trigger: CodingTrigger; status: CodingRunStatus; costUsd: number | null; files: number };
 // Automatic rounds a chain gets after the developer's, shared by failed checks and QA rejections.
 export const MAX_AUTO_ATTEMPTS = 3;
@@ -47,6 +50,10 @@ export type CodingPatchPreview = {
   files: CodingPatchFile[];
   patch: string;
   blocked: { path: string; reason: string }[];
+  // How each file merges with the working tree now; set by coding:patch.
+  merge?: CodingMergeFile[];
+  // What coding:apply confirms: the patch and its merge state together.
+  mergeDigest?: string;
 };
 export type CodingRun = {
   id: string;
@@ -81,7 +88,16 @@ export type CodingRun = {
 };
 export type CodingStart = { instruction: string; resume?: boolean };
 // files: the patch paths the developer accepted; the rest are left out.
-export type CodingApply = { digest: string; allowHighRisk: boolean; files: string[] };
-export type CodingApplyResult = { files: string[] };
+// How one patched file lands on the developer's working tree: `clean` (the
+// file is as the agent saw it), `merged` (the developer changed it too, in
+// other places), or `conflict`. `markers`: the conflict can be written as
+// text with conflict markers; binary files and delete/edit conflicts cannot.
+export type CodingMergeFile = { path: string; state: 'clean' | 'merged' | 'conflict'; markers: boolean };
+// The developer's choice for a conflicted file.
+export type CodingResolution = 'markers' | 'mine' | 'theirs';
+export type CodingApply = { digest: string; allowHighRisk: boolean; files: string[]; resolutions?: Partial<Record<string, CodingResolution>> };
+// `markers`: files written with conflict markers; `kept`: conflicts where the
+// developer kept their own version.
+export type CodingApplyResult = { files: string[]; markers: string[]; kept: string[] };
 // Packages with a Coding Agent round or its checks running in this process.
 export type CodingActiveRun = { packageId: string; title: string };

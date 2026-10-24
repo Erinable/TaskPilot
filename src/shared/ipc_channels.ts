@@ -43,6 +43,7 @@ export const CHANNELS = {
   codingCancel: 'coding:cancel',
   codingPatch: 'coding:patch',
   codingApply: 'coding:apply',
+  codingResume: 'coding:resume',
   codingActive: 'coding:active',
   envGet: 'env:get',
   envPlan: 'env:plan',

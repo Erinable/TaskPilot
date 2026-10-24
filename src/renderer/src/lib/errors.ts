@@ -65,6 +65,9 @@ export const ERROR_HINTS: Record<string, string> = {
   coding_running: 'Coding Agent 已经在跑了，请等它完成或先取消。',
   coding_digest_mismatch: '补丁在你查看之后变了，已刷新，请再确认一次。',
   workspace_out_of_scope: '补丁改到了文件范围以外的文件，这些文件不能应用。',
+  merge_unresolved: '有冲突的文件还没选怎么处理。',
+  merge_markers_left: '还有文件里留着冲突标记（<<<<<<< 那几行）。改完保存后再点继续。',
+  merge_cannot_apply: '这个文件没法写成带冲突标记的版本（比如二进制文件，或一边删了一边改了）。请选「保留我的」或「用 AI 的」。',
   workspace_process_failed: '准备或读取项目副本时出错了。展开原始信息看看原因。',
 };
 
