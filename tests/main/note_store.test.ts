@@ -160,7 +160,8 @@ test('a full notebook refuses new notes and deletes nothing', async () => {
   assert.equal(store.list().truncated, true);
   await assert.rejects(() => store.create(input()), { code: 'notes_full' });
   assert.equal((await fs.readdir(notesDir(configDir))).length, MAX_NOTES + 2);
-});
+  // Writes and reads 5002 files.
+}, 30_000);
 
 test('deleting hands the file to the trash', async () => {
   const configDir = await dir();

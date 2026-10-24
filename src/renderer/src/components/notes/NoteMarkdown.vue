@@ -10,6 +10,7 @@ import type { PropType, VNode, VNodeArrayChildren } from 'vue';
 import type { ElementContent, RootContent as HastContent } from 'hast';
 import type { Nodes, Root } from 'mdast';
 
+import NoteMath from '@/components/notes/NoteMath.vue';
 import * as markdown from '@shared/note_markdown.ts';
 
 const lowlight = createLowlight(common);
@@ -105,6 +106,10 @@ export default defineComponent({
           return h('del', children(node));
         case 'inlineCode':
           return h('code', node.value);
+        case 'inlineMath':
+          return h(NoteMath, { tex: node.value });
+        case 'math':
+          return h(NoteMath, { tex: node.value, display: true });
         case 'code':
           return h('pre', { class: 'note-code' }, [
             h('code', { class: node.lang ? `hljs language-${node.lang}` : 'hljs' }, highlighted(node.value, node.lang)),

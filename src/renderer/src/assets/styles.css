@@ -212,6 +212,17 @@ code {
   background: var(--glass-bg-strong);
 }
 
+/* Panels docked to a window edge are divided by one hairline in the line
+ * colour: the glass's white border and top highlight would draw a second,
+ * white line beside it. */
+.topbar.glass,
+.sidebar.glass,
+.settings-nav.glass,
+.req-list-pane.glass {
+  border-color: var(--line-soft);
+  box-shadow: none;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .glass,
   .glass-strong {
@@ -240,9 +251,6 @@ code {
   border-width: 0 0 1px;
   border-radius: 0;
   -webkit-app-region: drag;
-}
-.topbar.glass {
-  box-shadow: inset 0 -1px 0 var(--line-soft);
 }
 .brand-area {
   width: 176px;
@@ -488,9 +496,6 @@ code {
 }
 .sidebar.collapsed .team-list {
   margin-top: var(--space-6);
-}
-.sidebar.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
 }
 .side-section-label {
   color: var(--text-tertiary);
@@ -2501,9 +2506,6 @@ button.avatar:hover {
   border-width: 0 1px 0 0;
   border-radius: 0;
 }
-.settings-nav.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
-}
 .settings-nav-title {
   margin: 0 8px 14px;
   color: var(--text);
@@ -3421,9 +3423,6 @@ body.vibrancy .glass {
   padding: 22px 12px;
   border-width: 0 1px 0 0;
   border-radius: 0;
-}
-.req-list-pane.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
 }
 .req-list-header {
   display: flex;

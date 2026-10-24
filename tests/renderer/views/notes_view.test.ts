@@ -11,6 +11,10 @@ import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositor
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
 
+// KaTeX checks once, when it loads, that the page is not in quirks mode;
+// happy-dom reports no compatMode at all, while the app page has a doctype.
+vi.hoisted(() => Object.defineProperty(document, 'compatMode', { value: 'CSS1Compat', configurable: true }));
+
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
   announceAgent: vi.fn(),
@@ -49,6 +53,8 @@ const mountView = async (notes: ipc.NoteMeta[]) => {
   setActivePinia(pinia);
   useRepositoriesStore().currentId = 'r1';
   const wrapper = mount(NotesView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+  // Tests refresh by hand; a background poll would race them.
+  useNotesStore().stopPolling();
   await flushPromises();
   return wrapper;
 };
@@ -245,6 +251,22 @@ describe('NoteMarkdown', () => {
     expect(wrapper.find('script').exists()).toBe(false);
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.text()).toContain('<script>x</script>');
+  });
+
+  test('$inline$ and $$display$$ math is typeset by KaTeX; links in TeX stay inert and bad TeX shows its source', async () => {
+    const wrapper = mount(NoteMarkdown, {
+      props: {
+        body: '令 $\\sigma(z)$ 为 sigmoid：\n\n$$\n\\sigma(z)=\\frac{1}{1+e^{-z}}\n$$\n\n$\\href{javascript:alert(1)}{x}$ 和 $\\frac{1$\n',
+        exists: () => false,
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('.note-math-inline .katex').exists()).toBe(true);
+    expect(wrapper.find('.note-math-display .katex-display').exists()).toBe(true);
+    expect(wrapper.find('.katex mfrac').exists()).toBe(true);
+    // Untrusted, KaTeX prints \\href as red text instead of making a link.
+    expect(wrapper.find('a').exists()).toBe(false);
+    expect(wrapper.findAll('.note-math-error').map((error) => error.text())).toEqual(['\\frac{1']);
   });
 
   test('tables, quotes and #tags render', async () => {

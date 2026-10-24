@@ -159,7 +159,7 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
   const tree = markdown.parseMarkdown(parsed.body);
   const scan = markdown.scanBody(parsed.body, tree);
   const links = [...new Map(scan.links.map((link) => [markdown.titleKey(link.target), link.target])).values()];
-  const excerpt = markdown.excerptOf(tree);
+  const excerpt = markdown.excerptOf(tree, id.slice(0, -'.md'.length));
   const savedSummary = loose.string(fields.summary, MAX_SUMMARY * 2);
   const created = typeof fields.created === 'string' && !Number.isNaN(Date.parse(fields.created)) ? new Date(fields.created) : stat.birthtime;
   return {

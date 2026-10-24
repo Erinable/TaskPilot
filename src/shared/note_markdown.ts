@@ -1,10 +1,13 @@
 // Markdown in learning notes, shared by the main process (backlinks, renames)
-// and the renderer (preview). A note body is Markdown with GitHub extensions
-// plus Obsidian's [[wiki links]] and #tags; neither is recognised inside code.
+// and the renderer (preview). A note body is Markdown with GitHub extensions,
+// $inline$ and $$display$$ math as in Obsidian, plus Obsidian's [[wiki
+// links]] and #tags; neither is recognised inside code or math.
 // A note's title is its file name, so titles follow Obsidian's file rules.
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
+import { mathFromMarkdown } from 'mdast-util-math';
 import { gfm } from 'micromark-extension-gfm';
+import { math } from 'micromark-extension-math';
 import type { Nodes, Root } from 'mdast';
 
 export const MAX_TITLE = 80;
@@ -41,7 +44,9 @@ export const toTitle = (text: string): string => {
 // Links resolve by title, ignoring case, as in Obsidian.
 export const titleKey = (title: string) => title.trim().toLowerCase();
 
-export const parseMarkdown = (body: string): Root => fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
+// singleDollarTextMath: $x$ is math, as in Obsidian.
+export const parseMarkdown = (body: string): Root =>
+  fromMarkdown(body, { extensions: [gfm(), math({ singleDollarTextMath: true })], mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()] });
 
 export const plainText = (node: Nodes): string =>
   'value' in node && typeof node.value === 'string' ? node.value : 'children' in node ? node.children.map((child) => plainText(child)).join('') : '';
@@ -72,12 +77,17 @@ export const isTag = (name: string) => !/^[\d/_-]+$/.test(name);
 // The text of a link as it reads: its alias, or the target and heading.
 export const linkLabel = (link: WikiLink) => link.alias ?? (link.heading ? `${link.target} › ${link.heading}` : link.target);
 
-// The note's prose as one line of plain text, blocks separated by spaces;
-// code blocks and tables are left out.
-export const excerptOf = (tree: Root): string =>
+// Plain text of a node with inline math left out (TeX source reads badly).
+const proseText = (node: Nodes): string =>
+  node.type === 'inlineMath' ? '' : 'children' in node ? node.children.map((child) => proseText(child)).join('') : plainText(node);
+
+// The note's prose as one line of plain text, blocks separated by spaces.
+// Code, math, tables and a heading that only repeats the title are left out.
+export const excerptOf = (tree: Root, title: string | null = null): string =>
   tree.children
-    .filter((node) => node.type !== 'code' && node.type !== 'table' && node.type !== 'html')
-    .map((node) => plainText(node))
+    .filter((node, index) => !(index === 0 && node.type === 'heading' && title !== null && titleKey(plainText(node)) === titleKey(title)))
+    .filter((node) => node.type !== 'code' && node.type !== 'math' && node.type !== 'table' && node.type !== 'html')
+    .map((node) => proseText(node))
     .join(' ')
     .replace(WIKI_LINK, (_whole, inner: string) => linkLabel(splitLink(inner)))
     .replace(/\s+/g, ' ')

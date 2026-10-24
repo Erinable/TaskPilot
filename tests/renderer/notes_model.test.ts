@@ -105,4 +105,14 @@ describe('note markdown', () => {
     expect(scan.links.map((link) => link.target)).toEqual(['链']);
     expect(scan.tags).toEqual(['标签']);
   });
+
+  test('math is not searched for links or tags, nor shown in excerpts', () => {
+    const body = '公式 $a_{#1}$ 和\n\n$$\n[[不是链接]] \\#x\n$$\n';
+    const scan = markdown.scanBody(body);
+    expect(scan.links).toEqual([]);
+    expect(scan.tags).toEqual([]);
+    expect(markdown.excerptOf(markdown.parseMarkdown(body))).toBe('公式 和');
+    expect(markdown.excerptOf(markdown.parseMarkdown('# 逻辑回归\n\n正文'), '逻辑回归')).toBe('正文');
+    expect(markdown.excerptOf(markdown.parseMarkdown('# 别的\n\n正文'), '逻辑回归')).toBe('别的 正文');
+  });
 });

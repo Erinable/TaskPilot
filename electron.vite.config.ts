@@ -24,5 +24,8 @@ export default defineConfig({
   renderer: {
     resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } },
     plugins: [vue(), unocss(), devCsp()],
+    // The CSP allows fonts from 'self' only, so KaTeX's small fonts must
+    // stay files instead of being inlined as data: URLs.
+    build: { assetsInlineLimit: (file) => (/\.(woff2?|ttf)$/.test(file) ? false : undefined) },
   },
 });
