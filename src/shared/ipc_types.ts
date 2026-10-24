@@ -882,7 +882,12 @@ export type Repository = {
   current: boolean;
   // The root no longer holds a git repository (moved, renamed or deleted).
   missing: boolean;
+  // Work waiting in it; null when its saved data could not be read.
+  counts: RepositoryCounts | null;
 };
+
+// active: in progress, in review, in deviation or blocked.
+export type RepositoryCounts = { pending: number; active: number; accepting: number };
 
 export type RepositoryList = { repositories: Repository[]; current: string | null };
 

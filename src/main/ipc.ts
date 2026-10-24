@@ -41,6 +41,8 @@ import {
 } from './agents/pipeline.ts';
 import { humanTransitions } from './work_package_store.ts';
 import { REGISTRY_FILENAME, REPO_FILES } from './repositories.ts';
+import { readCounts } from './repository_summary.ts';
+import { countStatuses } from '../shared/repository_counts.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import type { TransitionName } from './work_package_status.ts';
 import { env as appEnv } from './env.ts';
@@ -2563,6 +2565,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const current = repositories.current?.id ?? null;
     const entries = repositories.list();
     const present = await Promise.all(entries.map((entry) => git.isRepo(entry.root).catch(() => false)));
+    // The open repository from memory, so the counts match the queue.
+    const openCounts = () => {
+      const states = store.all();
+      return countStatuses(tasks.listTasks().map((task) => states[task.id]?.status ?? task.status));
+    };
+    const counts = await Promise.all(entries.map((entry) => (entry.id === current ? openCounts() : readCounts(repositories.dataDir(entry.id)))));
     return {
       current,
       repositories: entries.map((entry: RepositoryEntry, index) => ({
@@ -2572,6 +2580,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         lastOpenedAt: entry.lastOpenedAt,
         current: entry.id === current,
         missing: !present[index],
+        counts: counts[index],
       })),
     };
   };

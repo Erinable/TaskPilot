@@ -125,13 +125,28 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     }
   };
 
-  // Picks a folder, registers it and opens it.
+  // Picks a folder and registers it. The first repository opens; later
+  // ones are only listed, so adding never pulls the developer away from the
+  // project in front of them (the sidebar lists it to switch to).
   const add = async () => {
     const root = await pickFolder();
     if (!root) return false;
-    const added = await runSwitch(() => window.taskpilot.repositories.add(root, true));
-    if (added) showToast(`已添加并切换到 ${current.value?.name ?? '仓库'}`);
-    return added;
+    if (!currentId.value) {
+      const added = await runSwitch(() => window.taskpilot.repositories.add(root, true));
+      if (added) showToast(`已添加并打开 ${current.value?.name ?? '仓库'}`);
+      return added;
+    }
+    try {
+      const before = new Set(repositories.value.map((repo) => repo.id));
+      apply(await call(window.taskpilot.repositories.add(root, false)));
+      const added = repositories.value.find((repo) => !before.has(repo.id));
+      showToast(added ? `已添加 ${added.name}，在侧栏「项目」里点它就能切换。` : '这个仓库已经在列表里了。');
+      return true;
+    } catch (error) {
+      console.error('[repositories] add failed', error);
+      showToast(`添加仓库失败：${describeError(error)}`);
+      return false;
+    }
   };
 
   // Points a moved repository at its new folder. No switch, so no cancel.
