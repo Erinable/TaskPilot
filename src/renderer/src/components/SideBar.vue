@@ -36,7 +36,7 @@ const showQueue = async () => {
 };
 
 const TEAM_VIEWS: ViewName[] = ['team', 'activity', 'costs'];
-const openView = async (view: 'map' | 'release' | 'team') => {
+const openView = async (view: 'map' | 'release' | 'team' | 'notes') => {
   if (await app.navigate(view)) execution.close();
 };
 
@@ -88,6 +88,16 @@ const team = computed(() =>
       <button class="nav-item" :class="{ active: app.view === 'release' }" :title="app.sidebarCollapsed ? '发布' : undefined" @click="openView('release')">
         <AppIcon name="rocket" class="nav-icon" />
         <span class="nav-label">发布</span>
+      </button>
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'notes' }"
+        :title="app.sidebarCollapsed ? '学习笔记' : undefined"
+        data-nav="notes"
+        @click="openView('notes')"
+      >
+        <AppIcon name="list-checks" class="nav-icon" />
+        <span class="nav-label">学习笔记</span>
       </button>
     </nav>
     <ProjectList />

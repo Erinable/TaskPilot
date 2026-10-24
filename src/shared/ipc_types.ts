@@ -97,7 +97,8 @@ export type ReferenceRun = {
 //   writing   how the code does it (constructs, APIs, error handling)
 //   style     naming, layout and the repository's conventions
 export type GradeCategory = 'thinking' | 'writing' | 'style';
-export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string };
+// repeated: one of the developer's notes already describes this mistake.
+export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string; repeated: boolean };
 export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[] };
 // waiting: QA has finished but the reference is still being written.
 export type Grade = {
@@ -112,6 +113,21 @@ export type Grade = {
   report: GradeReport | null;
   costUsd: number;
 };
+
+// ========== notes ==========
+
+// Where a note came from; every part is optional (a hand-written note has none).
+export type NoteSource = {
+  repositoryId: string | null;
+  repositoryName: string | null;
+  packageId: string | null;
+  packageTitle: string | null;
+  file: string | null;
+  line: number | null;
+};
+// category: set when saved from a grade comment, or chosen by hand.
+export type NoteInput = { title: string; body: string; category: GradeCategory | null; tags: string[]; source: NoteSource | null };
+export type Note = NoteInput & { id: string; createdAt: string; updatedAt: string };
 
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };

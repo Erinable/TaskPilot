@@ -38,8 +38,8 @@ const GRADE: ipc.Grade = {
     summary: '能跑通，边界情况少了一个。',
     strengths: ['函数名说清了用途'],
     comments: [
-      { category: 'thinking', file: 'src/auth.ts', line: 4, observation: '没有考虑空密码。', betterWay: '先列出输入的几种情况再写代码。' },
-      { category: 'style', file: null, line: null, observation: '变量用了缩写。', betterWay: '写全名。' },
+      { category: 'thinking', file: 'src/auth.ts', line: 4, observation: '没有考虑空密码。', betterWay: '先列出输入的几种情况再写代码。', repeated: true },
+      { category: 'style', file: null, line: null, observation: '变量用了缩写。', betterWay: '写全名。', repeated: false },
     ],
   },
 };
@@ -92,6 +92,22 @@ describe('PracticePanel', () => {
     });
     await failed.get('[data-action="regrade"]').trigger('click');
     expect(api.practice.grade).toHaveBeenLastCalledWith('t1', false);
+  });
+
+  test('a grade comment is saved as a note pointing back at the package and line, and repeats are marked', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE });
+    expect(wrapper.get('[data-category="thinking"] [data-repeated]').text()).toBe('又出现了');
+    expect(wrapper.find('[data-category="style"] [data-repeated]').exists()).toBe(false);
+    await wrapper.get('[data-category="thinking"] [data-action="save-note"]').trigger('click');
+    await flushPromises();
+    expect(api.notes.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'thinking',
+        body: '没有考虑空密码。\n\n下次可以：先列出输入的几种情况再写代码。',
+        source: expect.objectContaining({ packageId: 't1', packageTitle: '邮箱登录', file: 'src/auth.ts', line: 4 }),
+      }),
+    );
+    expect(wrapper.get('[data-category="thinking"] [data-action="save-note"]').text()).toBe('已存为笔记');
   });
 
   test('agent text renders as text', async () => {

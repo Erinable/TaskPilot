@@ -121,6 +121,12 @@ declare const api: {
     reference: (id: string) => Promise<ipc.IpcResult<string>>;
     grade: (id: string, skipReference: boolean) => Promise<ipc.IpcResult<ipc.TaskView>>;
   };
+  notes: {
+    list: () => Promise<ipc.IpcResult<ipc.Note[]>>;
+    create: (input: ipc.NoteInput) => Promise<ipc.IpcResult<ipc.Note>>;
+    update: (id: string, input: Omit<ipc.NoteInput, 'source'>) => Promise<ipc.IpcResult<ipc.Note>>;
+    remove: (id: string) => Promise<ipc.IpcResult<boolean>>;
+  };
 };
 
 export type TaskPilotApi = typeof api;

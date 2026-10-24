@@ -49,6 +49,7 @@ import * as preferences from '../../src/main/preferences.ts';
 import { createPathResolver } from '../../src/main/shell_env.ts';
 import { RepositoryRegistry } from '../../src/main/repositories.ts';
 import { TutorStore } from '../../src/main/tutor_store.ts';
+import { NoteStore } from '../../src/main/note_store.ts';
 import * as git from '../../src/main/git.ts';
 
 const run = promisify(execFile);
@@ -118,6 +119,7 @@ const harness = async ({
   const activity = new ActivityLog(repoDir, { timeZone: 'Asia/Shanghai' });
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();
+  const notes = await new NoteStore(configDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   // What the fake login shell reports; tests can prepend a folder of fake CLIs.
@@ -156,6 +158,7 @@ const harness = async ({
       releases,
       modelCatalog,
       tutor,
+      notes,
       runAgent: async (options) => {
         agentCalls.push(options);
         if (!agent) throw Object.assign(new Error('no agent in this test'), { code: 'agent_unavailable' });
@@ -199,6 +202,7 @@ const harness = async ({
     revealed,
     launched,
     requirements,
+    notes,
     agentCalls,
     shellReads: () => shellReads,
     shutdown: () => ipc?.shutdown(),
@@ -523,8 +527,15 @@ const GRADE_REPORT = {
   summary: '用例覆盖了大小写，写法清楚。',
   strengths: ['用例名直接说明了要验证的行为'],
   comments: [
-    { category: 'writing', file: 'tests/auth/login-user.test.ts', line: 1, observation: '用例里没有断言。', betterWay: '加一个 expect，确认登录结果。' },
-    { category: 'style', file: 'src/elsewhere.ts', line: 3, observation: '命名和周围不一致。', betterWay: '沿用现有的驼峰命名。' },
+    {
+      category: 'writing',
+      file: 'tests/auth/login-user.test.ts',
+      line: 1,
+      observation: '用例里没有断言。',
+      betterWay: '加一个 expect，确认登录结果。',
+      repeated: true,
+    },
+    { category: 'style', file: 'src/elsewhere.ts', line: 3, observation: '命名和周围不一致。', betterWay: '沿用现有的驼峰命名。', repeated: false },
   ],
 };
 
@@ -2963,4 +2974,51 @@ test('practice: packages claimed another way get no reference and no grade', asy
   assert.equal(reviewed.grade, null);
   assert.equal(h.prompts.length, 0);
   assert.equal((await h.call(CHANNELS.gradeStart, 'auth-edge-tests', false)).error.code, 'not_practice');
+});
+
+// ========== notes ==========
+
+test('notes: the channels create, edit and delete notes, which stay with the developer across repositories', async () => {
+  const h = await harness();
+  const created = await h.call(CHANNELS.notesCreate, {
+    title: '先写失败的测试',
+    body: '先红后绿',
+    category: 'thinking',
+    tags: ['tdd'],
+    source: { repositoryId: 'r', repositoryName: 'app', packageId: 'p', packageTitle: '登录', file: 'src/a.ts', line: 2 },
+  });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  assert.equal((await h.call(CHANNELS.notesCreate, { title: '' })).error.code, 'invalid_note');
+  const edited = await h.call(CHANNELS.notesUpdate, created.data.id, { title: '先写失败的测试！', body: '', category: null, tags: [] });
+  assert.equal(edited.data.source.file, 'src/a.ts');
+
+  const other = await gitRepo();
+  const added = await h.call(CHANNELS.repositoriesAdd, other, true);
+  assert.equal(added.ok, true);
+  assert.deepEqual(
+    (await h.call(CHANNELS.notesList)).data.map((note) => note.title),
+    ['先写失败的测试！'],
+  );
+
+  assert.equal((await h.call(CHANNELS.notesDelete, created.data.id)).data, true);
+  assert.equal((await h.call(CHANNELS.notesDelete, created.data.id)).error.code, 'unknown_note');
+  assert.deepEqual((await h.call(CHANNELS.notesList)).data, []);
+});
+
+test('practice: grading reads the developer notes and keeps repeated only when there were some', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const without = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(without.grade!.report!.comments[0].repeated, false, 'nothing can repeat with no notes');
+  assert.match(callFor(h.agentCalls, 'grade').prompt, /<developer_notes>\n\(none\)/);
+
+  await h.notes.create({ title: '用例要有断言', body: '没有 expect 的测试什么也证明不了', category: 'writing', tags: [], source: null });
+  await h.call(CHANNELS.gradeStart, 'auth-edge-tests', false);
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done' && task.grade.id !== without.grade!.id);
+  assert.equal(graded.grade!.report!.comments[0].repeated, true);
+  const prompt = h.agentCalls.filter((c) => stepOf(c.schema) === 'grade').at(-1)!.prompt;
+  assert.match(prompt, /<developer_notes>\n- \[writing\] 用例要有断言: 没有 expect 的测试什么也证明不了/);
 });

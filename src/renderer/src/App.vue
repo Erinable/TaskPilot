@@ -12,6 +12,7 @@ import ActivityView from './views/ActivityView.vue';
 import ReleaseView from './views/ReleaseView.vue';
 import TeamView from './views/TeamView.vue';
 import CostView from './views/CostView.vue';
+import NotesView from './views/NotesView.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import { useAppStore } from './stores/app.ts';
 import { useTasksStore } from './stores/tasks.ts';
@@ -106,6 +107,7 @@ onBeforeUnmount(() => {
           <ReleaseView v-else-if="app.view === 'release'" />
           <TeamView v-else-if="app.view === 'team'" />
           <CostView v-else-if="app.view === 'costs'" />
+          <NotesView v-else-if="app.view === 'notes'" />
         </div>
         <!-- Settings stays mounted so unsaved drafts survive leaving and coming back. -->
         <SettingsView v-show="app.view === 'settings'" />

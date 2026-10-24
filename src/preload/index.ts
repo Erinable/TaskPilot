@@ -164,6 +164,14 @@ const api = {
     // Grades now: a retry, or without waiting for the reference.
     grade: (id: string, skipReference: boolean) => invoke<ipc.TaskView>(CHANNELS.gradeStart, id, skipReference),
   },
+
+  notes: {
+    list: () => invoke<ipc.Note[]>(CHANNELS.notesList),
+    create: (input: ipc.NoteInput) => invoke<ipc.Note>(CHANNELS.notesCreate, input),
+    // The source stays as recorded; only the developer's text changes.
+    update: (id: string, input: Omit<ipc.NoteInput, 'source'>) => invoke<ipc.Note>(CHANNELS.notesUpdate, id, input),
+    remove: (id: string) => invoke<boolean>(CHANNELS.notesDelete, id),
+  },
 };
 
 export type TaskPilotApi = typeof api;

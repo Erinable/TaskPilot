@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import type { Grade, Review } from '../shared/ipc_types.ts';
+import type { Grade, GradeCategory, Note, Review } from '../shared/ipc_types.ts';
 
 export const REFERENCES_DIRNAME = 'references';
 // What of the reference Tutor reads; the submission is capped by review_diff.
@@ -47,4 +47,16 @@ export const reviewForGrade = (review: Review | null): { passed: boolean; summar
       (issue) => `[${issue.severity}] ${issue.file ? `${issue.file}${issue.line ? `:${issue.line}` : ''} ` : ''}${issue.text}`,
     ),
   };
+};
+
+export const MAX_GRADE_NOTES = 10;
+
+// The developer's notes Tutor reads when grading: those about a file this
+// submission changed, then those with a grading category, newest first,
+// at most MAX_GRADE_NOTES. Notes come newest first from the store.
+export const notesForGrade = (notes: Note[], changedPaths: string[]): { category: GradeCategory | null; title: string; body: string }[] => {
+  const changed = new Set(changedPaths);
+  const sameFile = notes.filter((note) => note.source?.file && changed.has(note.source.file));
+  const categorized = notes.filter((note) => note.category && !sameFile.includes(note));
+  return [...sameFile, ...categorized].slice(0, MAX_GRADE_NOTES).map((note) => ({ category: note.category, title: note.title, body: note.body }));
 };

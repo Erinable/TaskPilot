@@ -63,6 +63,7 @@ import type { Requirement, RequirementStore } from './requirement_store.ts';
 import type { EnvFailure } from './agents/env_steward.ts';
 import type { ReleaseStore } from './release_store.ts';
 import type { TutorStore } from './tutor_store.ts';
+import type { NoteStore } from './note_store.ts';
 import type { RepositoryEntry, RepositoryRegistry } from './repositories.ts';
 import type { ReleasePackage } from './agents/pipeline.ts';
 import type { TaskDefinition } from './tasks.ts';
@@ -247,6 +248,8 @@ export type IpcDeps = {
   releases?: ReleaseStore | null;
   // Enables Tutor.
   tutor?: TutorStore | null;
+  // Learning notes; global, not per repository.
+  notes?: NoteStore | null;
   codingProbe?: typeof codingExec.probeRuntime;
   codingPrepare?: typeof codingWorkspace.prepare;
   codingRun?: typeof codingExec.runCoding;
@@ -293,6 +296,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     activity = null,
     releases = null,
     tutor = null,
+    notes = null,
     codingProbe = codingExec.probeRuntime,
     codingPrepare = codingWorkspace.prepare,
     codingRun = codingExec.runCoding,
@@ -1136,19 +1140,35 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = runnerFor('tutor', { kind: 'package', id });
     const { path: envPath } = await commandPath();
-    console.debug(`[grade] start package=${id} files=${submission.length} reference=${referencePatch !== null}`);
+    const history = notes
+      ? practice.notesForGrade(
+          notes.list(),
+          submission.map((file) => file.path),
+        )
+      : [];
+    console.debug(`[grade] start package=${id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);
     const settled = (async () => {
       let finished: Partial<ipc.Grade>;
       try {
         const { output, costUsd } = await tutorRunner({
-          prompt: tutorAgent.gradePrompt({ task, submission, reference: referencePatch && practice.referenceForPrompt(referencePatch), review }),
+          prompt: tutorAgent.gradePrompt({
+            task,
+            submission,
+            reference: referencePatch && practice.referenceForPrompt(referencePatch),
+            review,
+            notes: history,
+          }),
           systemPrompt: tutorAgent.GRADE_SYSTEM_PROMPT,
           schema: tutorAgent.GRADE_SCHEMA,
           envPath,
           signal: controller.signal,
         });
         throwIfCancelled(controller.signal);
-        finished = { status: 'done', report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path) }), costUsd: costUsd ?? 0 };
+        finished = {
+          status: 'done',
+          report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path), hasNotes: history.length > 0 }),
+          costUsd: costUsd ?? 0,
+        };
       } catch (error) {
         const cancelled = controller.signal.aborted;
         if (!cancelled) console.error('[grade] run failed', error);
@@ -2717,6 +2737,30 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
+  // ========== Notes ==========
+  // One global list; the store validates every field it is given.
+  const requireNotes = () => notes ?? failWith('Notes are unavailable', 'unsupported');
+
+  ipcMain.handle(
+    CHANNELS.notesList,
+    wrap((): ipc.Note[] => requireNotes().list()),
+  );
+  ipcMain.handle(
+    CHANNELS.notesCreate,
+    wrap((_event, input): Promise<ipc.Note> => requireNotes().create(input)),
+  );
+  ipcMain.handle(
+    CHANNELS.notesUpdate,
+    wrap((_event, rawId, input): Promise<ipc.Note> => requireNotes().update(requireString(rawId, 'id'), input)),
+  );
+  ipcMain.handle(
+    CHANNELS.notesDelete,
+    wrap(async (_event, rawId): Promise<boolean> => {
+      await requireNotes().remove(requireString(rawId, 'id'));
+      return true;
+    }),
+  );
+
   // Repositories
 
   // What a switch would cancel, named for the confirmation dialog.
@@ -2758,7 +2802,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Waits for every queued store write, including the activity appends
   // that are not awaited where they are recorded.
-  const flushStores = () => Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush()]);
+  const flushStores = () => Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush(), notes?.flush()]);
 
   const repositoryList = async (): Promise<ipc.RepositoryList> => {
     const current = repositories.current?.id ?? null;

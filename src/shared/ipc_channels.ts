@@ -80,6 +80,10 @@ export const CHANNELS = {
   tutorCancel: 'tutor:cancel',
   referenceGet: 'reference:get',
   gradeStart: 'grade:start',
+  notesList: 'notes:list',
+  notesCreate: 'notes:create',
+  notesUpdate: 'notes:update',
+  notesDelete: 'notes:delete',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
