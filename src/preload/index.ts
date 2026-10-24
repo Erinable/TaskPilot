@@ -166,11 +166,25 @@ const api = {
   },
 
   notes: {
-    list: () => invoke<ipc.Note[]>(CHANNELS.notesList),
-    create: (input: ipc.NoteInput) => invoke<ipc.Note>(CHANNELS.notesCreate, input),
+    // Every note without its body; `since` returns null when nothing changed.
+    list: (since: number | null) => invoke<ipc.NoteList | null>(CHANNELS.notesList, since),
+    get: (id: string) => invoke<ipc.Note>(CHANNELS.notesGet, id),
+    // Ids of notes whose title, tags or body contain the query.
+    search: (query: string) => invoke<string[]>(CHANNELS.notesSearch, query),
+    // autoRename: a taken title gets a number instead of being refused.
+    create: (input: ipc.NoteInput, autoRename: boolean) => invoke<ipc.NoteSaved>(CHANNELS.notesCreate, input, autoRename),
     // The source stays as recorded; only the developer's text changes.
-    update: (id: string, input: Omit<ipc.NoteInput, 'source'>) => invoke<ipc.Note>(CHANNELS.notesUpdate, id, input),
+    update: (id: string, edit: ipc.NoteEdit) => invoke<ipc.NoteSaved>(CHANNELS.notesUpdate, id, edit),
+    // Moves the file to the system trash.
     remove: (id: string) => invoke<boolean>(CHANNELS.notesDelete, id),
+    // Tutor writes the note's summary (costs a model call).
+    summarize: (id: string, baseVersion: string) => invoke<ipc.NoteSaved>(CHANNELS.notesSummarize, id, baseVersion),
+    // null goes back to the default folder; files are never moved.
+    setDirectory: (directory: string | null) => invoke<ipc.NoteList>(CHANNELS.notesSetDirectory, directory),
+    pickDirectory: () => invoke<string | null>(CHANNELS.notesPickDirectory),
+    reveal: () => invoke<boolean>(CHANNELS.notesReveal),
+    // http(s) and mailto links only, opened by the system.
+    openUrl: (url: string) => invoke<boolean>(CHANNELS.notesOpenUrl, url),
   },
 };
 

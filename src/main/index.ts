@@ -101,7 +101,7 @@ app.whenReady().then(async () => {
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();
   // Notes follow the developer, not the repository.
-  const notes = await new NoteStore(configDir).load();
+  const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
   // Expired day files go at startup; a failure only leaves old files behind.
   activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -146,6 +146,8 @@ app.whenReady().then(async () => {
     },
     // Only reached with a path open_file.ts has confined to the workspace.
     revealFile: (file) => shell.showItemInFolder(file),
+    // Only reached with an http(s) or mailto URL (checked in ipc.ts).
+    openUrl: (url) => shell.openExternal(url),
     pickDirectory: async (defaultPath) => {
       const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
       const parent = BrowserWindow.getFocusedWindow();

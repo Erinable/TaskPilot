@@ -226,6 +226,8 @@ export type IpcDeps = {
   revealPath?: (dir: string) => Promise<void>;
   // Shows a workspace file in the OS file manager (shell.showItemInFolder).
   revealFile?: (file: string) => void;
+  // Opens a link from a note in the default browser or mail app.
+  openUrl?: (url: string) => Promise<void>;
   // Replaces how open_file.ts starts the editor (tests).
   launchEditor?: (file: string, args: string[]) => Promise<void>;
   // Shown on the environment page.
@@ -284,6 +286,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     onPreferencesChanged,
     revealPath,
     revealFile,
+    openUrl,
     launchEditor,
     appVersion,
     codingSetupScript = 'scripts/setup-coding-agent-user.sh',
@@ -1142,7 +1145,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const { path: envPath } = await commandPath();
     const history = notes
       ? practice.notesForGrade(
-          notes.list(),
+          notes.list().notes,
           submission.map((file) => file.path),
         )
       : [];
@@ -2738,25 +2741,117 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   );
 
   // ========== Notes ==========
-  // One global list; the store validates every field it is given.
+  // One global folder of Markdown files; the store validates every field.
   const requireNotes = () => notes ?? failWith('Notes are unavailable', 'unsupported');
+  // The last folder the developer picked in the native dialog: the only
+  // folder notes:set-directory accepts besides the default (null).
+  let pickedNotesDirectory: string | null = null;
+  const noteSummaries = new Map<string, AbortController>();
 
   ipcMain.handle(
     CHANNELS.notesList,
-    wrap((): ipc.Note[] => requireNotes().list()),
+    wrap((_event, since): ipc.NoteList | null => {
+      const store = requireNotes();
+      return since === store.revision ? null : store.list();
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.notesGet,
+    wrap((_event, rawId): ipc.Note => requireNotes().get(requireString(rawId, 'id'))),
+  );
+  ipcMain.handle(
+    CHANNELS.notesSearch,
+    wrap((_event, query): string[] => requireNotes().search(typeof query === 'string' ? query.slice(0, 200) : '')),
   );
   ipcMain.handle(
     CHANNELS.notesCreate,
-    wrap((_event, input): Promise<ipc.Note> => requireNotes().create(input)),
+    wrap((_event, input, autoRename): Promise<ipc.NoteSaved> => requireNotes().create(input, { autoRename: autoRename === true })),
   );
   ipcMain.handle(
     CHANNELS.notesUpdate,
-    wrap((_event, rawId, input): Promise<ipc.Note> => requireNotes().update(requireString(rawId, 'id'), input)),
+    wrap((_event, rawId, edit): Promise<ipc.NoteSaved> => requireNotes().update(requireString(rawId, 'id'), edit)),
   );
   ipcMain.handle(
     CHANNELS.notesDelete,
     wrap(async (_event, rawId): Promise<boolean> => {
       await requireNotes().remove(requireString(rawId, 'id'));
+      return true;
+    }),
+  );
+
+  // Tutor condenses the note into the summary grading reads. Waits for the
+  // answer; the edit it saves is pinned to the version it summarised.
+  ipcMain.handle(
+    CHANNELS.notesSummarize,
+    wrap(async (_event, rawId, rawVersion): Promise<ipc.NoteSaved> => {
+      const store = requireNotes();
+      const id = requireString(rawId, 'id');
+      const baseVersion = requireString(rawVersion, 'baseVersion');
+      const note = store.get(id);
+      if (note.version !== baseVersion) return failWith('The note changed on disk since it was opened', 'note_conflict');
+      if (noteSummaries.has(id)) return failWith('A summary of this note is already being written', 'invalid_state');
+      const controller = new AbortController();
+      noteSummaries.set(id, controller);
+      const { path: envPath } = await commandPath();
+      console.debug(`[notes] summarize id=${id} length=${note.body.length}`);
+      const run = (async () => {
+        try {
+          const { output } = await runnerFor('tutor')({
+            prompt: tutorAgent.summaryPrompt(note),
+            systemPrompt: tutorAgent.SUMMARY_SYSTEM_PROMPT,
+            schema: tutorAgent.SUMMARY_SCHEMA,
+            envPath,
+            signal: controller.signal,
+          });
+          throwIfCancelled(controller.signal);
+          return await store.setSummary(id, tutorAgent.validateSummary(output), baseVersion);
+        } finally {
+          noteSummaries.delete(id);
+        }
+      })();
+      track(run);
+      return run;
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.notesPickDirectory,
+    wrap(async (): Promise<string | null> => {
+      if (!pickDirectory) return failWith('Directory picker is unavailable', 'unsupported');
+      pickedNotesDirectory = await pickDirectory(requireNotes().directory);
+      return pickedNotesDirectory;
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.notesSetDirectory,
+    wrap((_event, directory): Promise<ipc.NoteList> => {
+      if (directory === null) return requireNotes().setDirectory(null);
+      if (pickedNotesDirectory === null || directory !== pickedNotesDirectory)
+        return failWith('Choose the folder with the folder picker', 'invalid_argument', 'directory');
+      return requireNotes().setDirectory(pickedNotesDirectory);
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.notesOpenUrl,
+    wrap(async (_event, raw): Promise<boolean> => {
+      if (!openUrl) return failWith('Opening links is unavailable', 'unsupported');
+      const url = requireString(raw, 'url');
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return failWith('Not a link', 'invalid_argument', 'url');
+      }
+      if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return failWith('Only web and mail links open', 'invalid_argument', 'url');
+      await openUrl(parsed.href);
+      return true;
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.notesReveal,
+    wrap(async (): Promise<boolean> => {
+      if (!revealPath) return failWith('Opening the folder is unavailable', 'unsupported');
+      await revealPath(requireNotes().directory);
       return true;
     }),
   );
@@ -2778,6 +2873,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       ...[...codingVerifications.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
       ...[...referenceRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'reference', label: packageTitle(id) })),
       ...[...gradeRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'grade', label: packageTitle(id) })),
+      ...(noteSummaries.size ? [{ kind: 'tutor', label: '笔记总结' } as ipc.BusyRun] : []),
     ];
   };
 
@@ -2796,6 +2892,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     for (const controller of tutorRuns.values()) controller.abort();
     for (const controller of referenceRuns.values()) controller.abort();
     for (const controller of gradeRuns.values()) controller.abort();
+    for (const controller of noteSummaries.values()) controller.abort();
     await Promise.allSettled([...pendingRuns]);
     tutorFailures.clear();
   };

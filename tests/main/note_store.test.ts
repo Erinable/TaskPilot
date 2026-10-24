@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { MAX_NOTES, NOTES_FILENAME, NoteStore, validateNote } from '../../src/main/note_store.ts';
+import { DEFAULT_DIRNAME, LOCATION_FILENAME, MAX_NOTES, NoteStore, validateNote } from '../../src/main/note_store.ts';
 
 const dir = async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-notes-'));
@@ -13,44 +13,133 @@ const dir = async () => {
 };
 const input = (overrides = {}) => ({
   title: '先写失败的测试',
-  body: '先红后绿。\n\t再重构。',
+  body: '先红后绿。\n\n```ts\nexpect(x).toBe(1)\n```\n',
   category: 'thinking',
-  tags: ['测试', '测试', 'tdd'],
+  tags: ['测试', '#测试', 'tdd'],
   source: null,
   ...overrides,
 });
-
-test('notes are saved, listed newest first, and survive a reload', async () => {
-  const configDir = await dir();
-  let now = Date.parse('2026-10-24T00:00:00Z');
-  const store = await new NoteStore(configDir, { now: () => new Date((now += 1000)) }).load();
-  const first = await store.create(input());
-  const second = await store.create(input({ title: '变量写全名', category: 'style' }));
-  assert.deepEqual(first.tags, ['测试', 'tdd'], 'tags are deduplicated');
-  assert.equal(first.body, '先红后绿。\n\t再重构。', 'newlines and tabs are kept');
-  assert.deepEqual(
-    store.list().map((note) => note.id),
-    [second.id, first.id],
-  );
-
-  await store.update(first.id, { title: '先写失败的测试（改）', body: '', category: null, tags: [] });
-  assert.equal(store.list()[0].id, first.id, 'an edit moves the note to the top');
-  const reloaded = await new NoteStore(configDir).load();
-  assert.equal(reloaded.get(first.id).title, '先写失败的测试（改）');
-  assert.equal(reloaded.get(first.id).category, null);
+const open = async (configDir: string, options = {}) => {
+  const store = await new NoteStore(configDir, { watch: false, ...options }).load();
+  onTestFinished(() => store.close());
+  return store;
+};
+const notesDir = (configDir: string) => path.join(configDir, DEFAULT_DIRNAME);
+const edit = (note: { version: string }, overrides = {}) => ({
+  title: '先写失败的测试',
+  body: 'b',
+  category: null,
+  tags: [],
+  baseVersion: note.version,
+  ...overrides,
 });
 
-test('an edit keeps the recorded source whatever the renderer sends', async () => {
-  const store = await new NoteStore(await dir()).load();
-  const source = { repositoryId: 'r', repositoryName: 'app', packageId: 'p', packageTitle: '登录', file: 'src/a.ts', line: 3 };
-  const note = await store.create(input({ source }));
-  const edited = await store.update(note.id, { ...input(), source: { ...source, file: '../../etc/passwd' } });
-  assert.deepEqual(edited.source, source);
+test('a note is a Markdown file named by its title, its fields in the frontmatter', async () => {
+  const configDir = await dir();
+  const store = await open(configDir, { now: () => new Date('2026-10-24T00:00:00Z') });
+  const { note } = await store.create(input());
+  assert.equal(note.id, '先写失败的测试.md');
+  assert.deepEqual(note.tags, ['测试', 'tdd'], 'tags are deduplicated and lose their #');
+  const raw = await fs.readFile(path.join(notesDir(configDir), note.id), 'utf8');
+  assert.equal(raw, '---\ncategory: thinking\ntags:\n  - 测试\n  - tdd\ncreated: 2026-10-24T00:00:00.000Z\n---\n先红后绿。\n\n```ts\nexpect(x).toBe(1)\n```\n');
+  assert.equal((await open(configDir)).get(note.id).body, input().body, 'survives a reload');
+  await assert.rejects(() => store.create(input()), { code: 'note_exists' });
+  assert.equal((await store.create(input(), { autoRename: true })).note.title, '先写失败的测试 2');
+});
+
+test('links, #tags in the body and an excerpt are read from the Markdown, never from code', async () => {
+  const store = await open(await dir());
+  const body = '# 标题\n见 [[变量命名|命名]] 和 [[测试#断言]]，#习惯 #123\n\n`[[不是链接]] #不是`\n\n```\n[[也不是]]\n```\n';
+  const { note } = await store.create(input({ body }));
+  assert.deepEqual(note.links, ['变量命名', '测试']);
+  assert.deepEqual(note.inlineTags, ['习惯']);
+  assert.match(note.excerpt, /^标题 见 命名 和 测试 › 断言，#习惯/);
+  assert.equal(note.excerpt.includes('也不是'), false, 'code blocks stay out of the excerpt');
+});
+
+test('files written by other programs keep the fields TaskPilot does not know', async () => {
+  const configDir = await dir();
+  await fs.mkdir(notesDir(configDir), { recursive: true });
+  await fs.writeFile(path.join(notesDir(configDir), 'Obsidian.md'), '---\naliases: [别名]\ntags: a, b\ncssclass: wide\n---\n正文\n');
+  await fs.writeFile(path.join(notesDir(configDir), 'ignored.txt'), 'x');
+  await fs.mkdir(path.join(notesDir(configDir), 'sub'));
+  await fs.writeFile(path.join(notesDir(configDir), 'sub', 'deep.md'), 'x');
+  const store = await open(configDir);
+  assert.deepEqual(
+    store.list().notes.map((note) => note.id),
+    ['Obsidian.md'],
+    'only top-level .md files',
+  );
+  const note = store.get('Obsidian.md');
+  assert.deepEqual(note.tags, ['a', 'b']);
+  await store.update(note.id, edit(note, { title: 'Obsidian', body: '新正文\n', category: 'style', tags: ['a'] }));
+  const raw = await fs.readFile(path.join(notesDir(configDir), 'Obsidian.md'), 'utf8');
+  assert.match(raw, /aliases: \[ 别名 \]/);
+  assert.match(raw, /cssclass: wide/);
+  assert.match(raw, /category: style/);
+  assert.match(raw, /---\n新正文\n$/);
+});
+
+test('a save refuses to overwrite a file another program changed, unless forced', async () => {
+  const configDir = await dir();
+  const store = await open(configDir);
+  const { note } = await store.create(input());
+  await fs.writeFile(path.join(notesDir(configDir), note.id), '外部改的\n');
+  await assert.rejects(() => store.update(note.id, edit(note, { body: '我的' })), { code: 'note_conflict' });
+  assert.equal(store.get(note.id).body, '外部改的\n', 'the check reread the file');
+  const saved = await store.update(note.id, edit(note, { body: '我的', force: true }));
+  assert.equal(saved.note.body, '我的');
+});
+
+test('a note with broken frontmatter is shown but never saved over', async () => {
+  const configDir = await dir();
+  await fs.mkdir(notesDir(configDir), { recursive: true });
+  await fs.writeFile(path.join(notesDir(configDir), '坏的.md'), '---\na: [\n---\n正文\n');
+  const store = await open(configDir);
+  const note = store.get('坏的.md');
+  assert.equal(note.frontmatterError, true);
+  assert.equal(note.body, '正文\n');
+  await assert.rejects(() => store.update(note.id, edit(note, { title: '坏的' })), { code: 'frontmatter_invalid' });
+});
+
+test('renaming moves the file and, when asked, points [[old title]] elsewhere at the new one', async () => {
+  const configDir = await dir();
+  const store = await open(configDir);
+  const { note } = await store.create(input({ title: '命名' }));
+  const linking = (await store.create(input({ title: '引用', body: '见 [[命名]]、[[命名#小节|这里]] 和 `[[命名]]`' }))).note;
+  const untouched = (await store.create(input({ title: '无关', body: '[[别的]]' }))).note;
+  const saved = await store.update(note.id, edit(note, { title: '变量命名', renameLinks: true }));
+  assert.equal(saved.note.id, '变量命名.md');
+  assert.equal(saved.relinked, 1);
+  await assert.rejects(() => fs.stat(path.join(notesDir(configDir), '命名.md')), { code: 'ENOENT' });
+  assert.equal(store.get(linking.id).body, '见 [[变量命名]]、[[变量命名#小节|这里]] 和 `[[命名]]`');
+  assert.match(await fs.readFile(path.join(notesDir(configDir), linking.id), 'utf8'), /^---\ncategory: thinking/, 'the frontmatter is kept');
+  assert.equal(store.get(untouched.id).version, untouched.version);
+
+  const again = store.get('变量命名.md');
+  await assert.rejects(() => store.update(again.id, edit(again, { title: '引用' })), { code: 'note_exists' });
+  const caseOnly = await store.update(again.id, edit(again, { title: '变量命名X' }));
+  assert.equal((await store.update(caseOnly.note.id, edit(caseOnly.note, { title: '变量命名x' }))).note.id, '变量命名x.md');
+});
+
+test('a summary is pinned to the body it summarised', async () => {
+  const store = await open(await dir());
+  const { note } = await store.create(input());
+  const summarized = (await store.setSummary(note.id, '先写会失败的测试再实现。', note.version)).note;
+  assert.equal(summarized.summary, '先写会失败的测试再实现。');
+  assert.equal(summarized.summaryStale, false);
+  const edited = (await store.update(note.id, edit(summarized, { body: '改了' }))).note;
+  assert.equal(edited.summary, '先写会失败的测试再实现。', 'kept when the edit leaves it out');
+  assert.equal(edited.summaryStale, true);
+  assert.equal((await store.update(note.id, edit(edited, { summary: null }))).note.summary, null);
+  await assert.rejects(() => store.setSummary(note.id, 'x', note.version), { code: 'note_conflict' });
 });
 
 test('bad input is refused field by field', () => {
   for (const [bad, field] of [
     [input({ title: ' ' }), 'title'],
+    [input({ title: 'a/b' }), 'title'],
+    [input({ title: '[[x]]' }), 'title'],
     [input({ title: 'x'.repeat(81) }), 'title'],
     [input({ body: 'a‮b' }), 'body'],
     [input({ category: 'mood' }), 'category'],
@@ -59,27 +148,72 @@ test('bad input is refused field by field', () => {
     [input({ source: 'x' }), 'source'],
   ] as const)
     assert.throws(() => validateNote(bad), { code: 'invalid_note', field }, field);
+  assert.equal(validateNote(input({ body: 'x'.repeat(100_000) })).body.length, 100_000, 'bodies have no length limit');
 });
 
 test('a full notebook refuses new notes and deletes nothing', async () => {
   const configDir = await dir();
-  const saved = Array.from({ length: MAX_NOTES }, (_unused, index) => ({ id: `n${index}`, ...input(), createdAt: '', updatedAt: `${index}` }));
-  await fs.writeFile(path.join(configDir, NOTES_FILENAME), JSON.stringify(saved));
-  const store = await new NoteStore(configDir).load();
+  await fs.mkdir(notesDir(configDir), { recursive: true });
+  await Promise.all(Array.from({ length: MAX_NOTES + 2 }, (_unused, index) => fs.writeFile(path.join(notesDir(configDir), `n${index}.md`), `${index}`)));
+  const store = await open(configDir);
+  assert.equal(store.list().notes.length, MAX_NOTES);
+  assert.equal(store.list().truncated, true);
   await assert.rejects(() => store.create(input()), { code: 'notes_full' });
-  assert.equal(store.list().length, MAX_NOTES);
-  await store.remove('n0');
-  await store.create(input());
-  assert.equal(store.list().length, MAX_NOTES);
-  await assert.rejects(() => store.remove('n0'), { code: 'unknown_note' });
+  assert.equal((await fs.readdir(notesDir(configDir))).length, MAX_NOTES + 2);
 });
 
-test('an unreadable notes file is kept aside, not overwritten', async () => {
+test('deleting hands the file to the trash', async () => {
   const configDir = await dir();
-  await fs.writeFile(path.join(configDir, NOTES_FILENAME), '{oops');
+  const trashed: string[] = [];
+  const store = await open(configDir, { trash: async (file: string) => void trashed.push(file) });
+  const { note } = await store.create(input());
+  await store.remove(note.id);
+  assert.deepEqual(trashed, [path.join(notesDir(configDir), note.id)]);
+  assert.deepEqual(store.list().notes, []);
+  await assert.rejects(() => store.remove(note.id), { code: 'unknown_note' });
+});
+
+test('a chosen folder is remembered; a missing one falls back to the default and says so', async () => {
+  const configDir = await dir();
+  const vault = await dir();
+  await fs.writeFile(path.join(vault, '库里的.md'), 'x');
+  const store = await open(configDir);
+  const list = await store.setDirectory(vault);
+  assert.equal(list.custom, true);
+  assert.deepEqual(
+    list.notes.map((note) => note.id),
+    ['库里的.md'],
+  );
+  assert.equal(JSON.parse(await fs.readFile(path.join(configDir, LOCATION_FILENAME), 'utf8')).directory, vault);
+  assert.equal((await open(configDir)).directory, vault);
+  await assert.rejects(() => store.setDirectory(path.join(vault, 'nope')), { code: 'notes_directory_invalid' });
+
+  await fs.rm(vault, { recursive: true });
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   onTestFinished(() => errors.mockRestore());
-  const store = await new NoteStore(configDir, { now: () => new Date(42) }).load();
-  assert.deepEqual(store.list(), []);
-  assert.equal(await fs.readFile(path.join(configDir, `${NOTES_FILENAME}.corrupt-42`), 'utf8'), '{oops');
+  const fallback = await open(configDir);
+  assert.equal(fallback.directory, notesDir(configDir));
+  assert.equal(fallback.list().unavailable, vault);
+  assert.equal((await store.setDirectory(null)).custom, false);
+  await assert.rejects(() => fs.access(path.join(configDir, LOCATION_FILENAME)), { code: 'ENOENT' });
+});
+
+test('the watcher picks up files changed by other programs', async () => {
+  const configDir = await dir();
+  const store = await open(configDir, { watch: true });
+  const before = store.revision;
+  await fs.writeFile(path.join(notesDir(configDir), '外部.md'), '来自 Obsidian\n');
+  await vi.waitFor(() => assert.equal(store.get('外部.md').body, '来自 Obsidian\n'), { timeout: 3000 });
+  assert.ok(store.revision > before);
+  await fs.unlink(path.join(notesDir(configDir), '外部.md'));
+  await vi.waitFor(() => assert.deepEqual(store.list().notes, []), { timeout: 3000 });
+});
+
+test('search matches title, tags and body in any case', async () => {
+  const store = await open(await dir());
+  await store.create(input({ title: 'Naming', body: 'use FULL words', tags: ['style'] }));
+  await store.create(input({ title: '其他', body: '', tags: [] }));
+  assert.deepEqual(store.search('full'), ['Naming.md']);
+  assert.deepEqual(store.search('STYLE'), ['Naming.md']);
+  assert.deepEqual(store.search(' '), []);
 });

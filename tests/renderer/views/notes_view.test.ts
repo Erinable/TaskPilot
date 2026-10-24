@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 
 import NotesView from '../../../src/renderer/src/views/NotesView.vue';
+import NoteMarkdown from '../../../src/renderer/src/components/notes/NoteMarkdown.vue';
 import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
@@ -14,25 +15,36 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
   announceAgent: vi.fn(),
   confirmAction: vi.fn(async () => true),
+  confirmChoice: vi.fn(async () => 'accept'),
   openDialogs: { value: 0 },
 }));
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
-const NOTE: ipc.Note = {
-  id: 'n1',
+const meta = (overrides: Partial<ipc.NoteMeta> = {}): ipc.NoteMeta => ({
+  id: '用例要有断言.md',
   title: '用例要有断言',
-  body: '<b>没有 expect</b>',
   category: 'writing',
   tags: ['测试'],
+  inlineTags: [],
   source: { repositoryId: 'r1', repositoryName: 'app', packageId: 'p1', packageTitle: '登录', file: 'src/a.ts', line: 4 },
-  createdAt: '',
-  updatedAt: '',
-};
+  summary: null,
+  summaryStale: false,
+  links: [],
+  excerpt: '没有 expect',
+  createdAt: '2026-10-20T02:00:00Z',
+  updatedAt: '2026-10-24T02:00:00Z',
+  version: 'v1',
+  frontmatterError: false,
+  ...overrides,
+});
+const NOTE: ipc.Note = { ...meta(), body: '# 断言\n\n<b>没有 expect</b> 见 [[命名]] 和 [[不存在]]\n\n- [ ] 补上\n\n```ts\nconst a = 1\n```\n' };
+const LINKING = meta({ id: '命名.md', title: '命名', category: null, tags: [], links: ['用例要有断言'], excerpt: '链接到断言', source: null, version: 'v9' });
 
-let api: { notes: Record<string, ReturnType<typeof vi.fn>>; workspace: { openFile: ReturnType<typeof vi.fn> } };
+let api: { businessTimeZone: string; notes: Record<string, ReturnType<typeof vi.fn>>; workspace: { openFile: ReturnType<typeof vi.fn> } };
+const list = (notes: ipc.NoteMeta[]): ipc.NoteList => ({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes });
 
-const mountView = async (notes: ipc.Note[]) => {
-  api.notes.list.mockImplementation(() => ok(notes));
+const mountView = async (notes: ipc.NoteMeta[]) => {
+  api.notes.list.mockImplementation(() => ok(list(notes)));
   const pinia = createPinia();
   setActivePinia(pinia);
   useRepositoriesStore().currentId = 'r1';
@@ -44,16 +56,33 @@ const mountView = async (notes: ipc.Note[]) => {
 beforeEach(() => {
   document.body.replaceChildren();
   api = {
+    businessTimeZone: 'Asia/Shanghai',
     notes: {
-      list: vi.fn(() => ok([])),
-      create: vi.fn((input: ipc.NoteInput) => ok({ ...input, id: 'new', createdAt: '', updatedAt: '' })),
-      update: vi.fn((id: string, input: ipc.NoteInput) => ok({ ...NOTE, ...input, id })),
+      list: vi.fn(() => ok(list([]))),
+      get: vi.fn((id: string) => ok(id === NOTE.id ? NOTE : { ...LINKING, body: '[[用例要有断言]]' })),
+      search: vi.fn(() => ok([])),
+      create: vi.fn((input: ipc.NoteInput) =>
+        ok({ revision: 2, relinked: 0, note: { ...meta({ id: `${input.title}.md`, title: input.title, source: null }), body: input.body } }),
+      ),
+      update: vi.fn((id: string, edit: ipc.NoteEdit) =>
+        ok({ revision: 2, relinked: 1, note: { ...NOTE, ...edit, id: `${edit.title}.md`, version: 'v2', summary: edit.summary ?? null } }),
+      ),
       remove: vi.fn(() => ok(true)),
+      summarize: vi.fn(() => ok({ revision: 3, relinked: 0, note: { ...NOTE, summary: '测试必须有断言', version: 'v3' } })),
+      pickDirectory: vi.fn(() => ok(null)),
+      setDirectory: vi.fn(),
+      reveal: vi.fn(() => ok(true)),
+      openUrl: vi.fn(() => ok(true)),
     },
     workspace: { openFile: vi.fn(() => ok('vscode')) },
   };
   Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
 });
+
+const openFirst = async (wrapper: Awaited<ReturnType<typeof mountView>>) => {
+  await wrapper.get('[data-note="用例要有断言.md"] .post-title').trigger('click');
+  await flushPromises();
+};
 
 describe('NotesView', () => {
   test('with no notes it says how to get one', async () => {
@@ -61,36 +90,169 @@ describe('NotesView', () => {
     expect(wrapper.get('[data-notes-empty]').text()).toContain('存为笔记');
   });
 
-  test('shows a note as text with its source, which opens the file in its own repository', async () => {
-    const wrapper = await mountView([NOTE]);
-    const card = wrapper.get('[data-note="n1"]');
-    expect(card.find('b').exists()).toBe(false);
-    expect(card.text()).toContain('<b>没有 expect</b>');
-    expect(card.text()).toContain('写法');
-    await card.get('.note-source').trigger('click');
+  test('the index lists notes by month with their date, category and tags', async () => {
+    const wrapper = await mountView([meta({ createdAt: '2026-10-24T02:00:00Z' }), { ...LINKING, createdAt: '2026-09-30T20:00:00Z' }]);
+    // 2026-09-30T20:00Z is already October in Shanghai.
+    expect(wrapper.findAll('.post-group h3').map((heading) => heading.text())).toEqual(['2026 年 10 月']);
+    const item = wrapper.get('[data-note="用例要有断言.md"]');
+    expect(item.get('time').text()).toBe('2026-10-24');
+    expect(item.text()).toContain('写法');
+    expect(item.text()).toContain('#测试');
+    await item.get('.post-tag').trigger('click');
+    await flushPromises();
+    expect(useNotesStore().filter.tag).toBe('测试');
+    expect(wrapper.find('[data-note="命名.md"]').exists()).toBe(false);
+  });
+
+  test('a note opens as its own page, rendering Markdown as nodes, never as markup, with its backlinks', async () => {
+    const wrapper = await mountView([meta(), LINKING]);
+    await openFirst(wrapper);
+    expect(wrapper.find('.blog-index').exists()).toBe(false);
+    expect(wrapper.get('.article-head h1').text()).toBe('用例要有断言');
+    const preview = wrapper.get('[data-note-preview]');
+    expect(preview.find('h1').text()).toBe('断言');
+    expect(preview.find('b').exists()).toBe(false);
+    expect(preview.text()).toContain('<b>没有 expect</b>');
+    expect(preview.find('.hljs-keyword').text()).toBe('const');
+    expect(preview.find('a.wiki-link:not(.missing)').text()).toBe('命名');
+    expect(preview.find('a.wiki-link.missing').text()).toBe('不存在');
+    expect(wrapper.get('[data-backlinks]').text()).toContain('命名');
+    await wrapper.get('.article-source .blog-link').trigger('click');
     expect(api.workspace.openFile).toHaveBeenCalledWith('src/a.ts', 4);
   });
 
-  test('writing a note by hand saves it with no source', async () => {
-    const wrapper = await mountView([]);
-    await wrapper.get('[data-action="new-note"]').trigger('click');
-    await wrapper.get('#noteTitle').setValue('命名写全');
-    await wrapper.get('form[data-note-editor]').trigger('submit');
+  test('a [[link]] goes to that note’s page, and back returns', async () => {
+    const wrapper = await mountView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('a.wiki-link:not(.missing)').trigger('click');
     await flushPromises();
-    expect(api.notes.create).toHaveBeenCalledWith({ title: '命名写全', body: '', category: null, tags: [], source: null });
-    expect(wrapper.find('[data-note-editor]').exists()).toBe(false);
-    expect(wrapper.get('[data-note="new"]').text()).toContain('命名写全');
+    expect(wrapper.get('.article-head h1').text()).toBe('命名');
+    await wrapper.get('[data-action="back"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('.article-head h1').text()).toBe('用例要有断言');
+    await wrapper.get('[data-action="back"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.blog-index').exists()).toBe(true);
   });
 
-  test('deleting asks first', async () => {
-    const wrapper = await mountView([NOTE]);
+  test('a missing [[link]] is created after asking and opens in the editor', async () => {
+    const wrapper = await mountView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('a.wiki-link.missing').trigger('click');
+    await flushPromises();
+    expect(api.notes.create).toHaveBeenCalledWith({ title: '不存在', body: '', category: null, tags: [], source: null }, false);
+    expect(useNotesStore().current?.title).toBe('不存在');
+    expect(wrapper.find('[data-note-editor]').exists()).toBe(true);
+  });
+
+  test('ticking a task saves it at once', async () => {
+    const wrapper = await mountView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('.note-task input').trigger('change');
+    await flushPromises();
+    expect(api.notes.update).toHaveBeenCalledWith(
+      '用例要有断言.md',
+      expect.objectContaining({ body: expect.stringContaining('- [x] 补上'), baseVersion: 'v1' }),
+    );
+    // IPC structured-clones its arguments, which reactive proxies fail.
+    expect(() => structuredClone(api.notes.update.mock.calls[0][1])).not.toThrow();
+  });
+
+  test('editing a rename asks to update links, then returns to reading', async () => {
+    const wrapper = await mountView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('.note-title-input').setValue('断言');
+    await wrapper.get('[data-action="save-note"]').trigger('click');
+    await flushPromises();
+    expect(feedback.confirmChoice).toHaveBeenCalled();
+    expect(api.notes.update).toHaveBeenCalledWith(
+      '用例要有断言.md',
+      expect.objectContaining({ title: '断言', baseVersion: 'v1', renameLinks: true, force: false }),
+    );
+    expect(useNotesStore().notes.map((entry) => entry.id)).toEqual(['断言.md', '命名.md']);
+    expect(wrapper.find('[data-note-editor]').exists()).toBe(false);
+    expect(wrapper.get('.article-head h1').text()).toBe('断言');
+  });
+
+  test('leaving unsaved edits asks first', async () => {
+    const wrapper = await mountView([meta()]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    useNotesStore().draft!.body = '改了';
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+    await wrapper.get('[data-action="notes-home"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-note-editor]').exists()).toBe(true);
+  });
+
+  test('a file changed elsewhere while editing offers to keep or drop the edits', async () => {
+    const wrapper = await mountView([meta()]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    const store = useNotesStore();
+    store.draft!.body = '我的修改';
+    api.notes.list.mockImplementation(() => ok({ ...list([meta({ version: 'v5' })]), revision: 7 }));
+    await store.refresh();
+    await flushPromises();
+    expect(wrapper.find('[data-note-conflict]').exists()).toBe(true);
+    expect(store.draft!.body).toBe('我的修改');
+    await wrapper.get('[data-action="discard-mine"]').trigger('click');
+    await flushPromises();
+    expect(store.draft!.body).toBe(NOTE.body);
+    expect(wrapper.find('[data-note-conflict]').exists()).toBe(false);
+  });
+
+  test('Tutor writes the summary on request', async () => {
+    const wrapper = await mountView([meta()]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('[data-action="summarize"]').trigger('click');
+    await flushPromises();
+    expect(api.notes.summarize).toHaveBeenCalledWith('用例要有断言.md', 'v1');
+    expect(useNotesStore().draft!.summary).toBe('测试必须有断言');
+  });
+
+  test('deleting asks first and goes back', async () => {
+    const wrapper = await mountView([meta()]);
+    await openFirst(wrapper);
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     await wrapper.get('[data-action="delete-note"]').trigger('click');
     await flushPromises();
     expect(api.notes.remove).not.toHaveBeenCalled();
     await wrapper.get('[data-action="delete-note"]').trigger('click');
     await flushPromises();
-    expect(api.notes.remove).toHaveBeenCalledWith('n1');
+    expect(api.notes.remove).toHaveBeenCalledWith('用例要有断言.md');
     expect(useNotesStore().notes).toEqual([]);
+    expect(wrapper.find('.blog-index').exists()).toBe(true);
+  });
+});
+
+describe('NoteMarkdown', () => {
+  test('links open only web and mail addresses; raw HTML and images stay text', async () => {
+    const wrapper = mount(NoteMarkdown, {
+      props: { body: '[web](https://example.com) [bad](javascript:alert(1)) ![pic](https://x/y.png)\n\n<script>x</script>\n', exists: () => false },
+    });
+    const links = wrapper.findAll('a.external-link');
+    await links[0].trigger('click');
+    await links[1].trigger('click');
+    expect(wrapper.emitted('open-url')).toEqual([['https://example.com']]);
+    expect(links.every((link) => link.attributes('href') === undefined)).toBe(true);
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.text()).toContain('<script>x</script>');
+  });
+
+  test('tables, quotes and #tags render', async () => {
+    const wrapper = mount(NoteMarkdown, { props: { body: '> 引用 #习惯\n\n| a | b |\n| - | - |\n| 1 | 2 |\n', exists: () => true } });
+    expect(wrapper.find('blockquote').text()).toContain('引用');
+    expect(wrapper.findAll('th').map((cell) => cell.text())).toEqual(['a', 'b']);
+    expect(wrapper.findAll('td').map((cell) => cell.text())).toEqual(['1', '2']);
+    await wrapper.get('a.note-tag').trigger('click');
+    expect(wrapper.emitted('open-tag')).toEqual([['习惯']]);
   });
 });

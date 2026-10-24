@@ -103,9 +103,10 @@ describe('PracticePanel', () => {
     expect(api.notes.create).toHaveBeenCalledWith(
       expect.objectContaining({
         category: 'thinking',
-        body: '没有考虑空密码。\n\n下次可以：先列出输入的几种情况再写代码。',
+        body: '没有考虑空密码。\n\n## 下次可以\n\n先列出输入的几种情况再写代码。\n',
         source: expect.objectContaining({ packageId: 't1', packageTitle: '邮箱登录', file: 'src/auth.ts', line: 4 }),
       }),
+      true,
     );
     expect(wrapper.get('[data-category="thinking"] [data-action="save-note"]').text()).toBe('已存为笔记');
   });

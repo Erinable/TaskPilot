@@ -122,10 +122,17 @@ declare const api: {
     grade: (id: string, skipReference: boolean) => Promise<ipc.IpcResult<ipc.TaskView>>;
   };
   notes: {
-    list: () => Promise<ipc.IpcResult<ipc.Note[]>>;
-    create: (input: ipc.NoteInput) => Promise<ipc.IpcResult<ipc.Note>>;
-    update: (id: string, input: Omit<ipc.NoteInput, 'source'>) => Promise<ipc.IpcResult<ipc.Note>>;
+    list: (since: number | null) => Promise<ipc.IpcResult<ipc.NoteList | null>>;
+    get: (id: string) => Promise<ipc.IpcResult<ipc.Note>>;
+    search: (query: string) => Promise<ipc.IpcResult<string[]>>;
+    create: (input: ipc.NoteInput, autoRename: boolean) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
+    update: (id: string, edit: ipc.NoteEdit) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
     remove: (id: string) => Promise<ipc.IpcResult<boolean>>;
+    summarize: (id: string, baseVersion: string) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
+    setDirectory: (directory: string | null) => Promise<ipc.IpcResult<ipc.NoteList>>;
+    pickDirectory: () => Promise<ipc.IpcResult<string | null>>;
+    reveal: () => Promise<ipc.IpcResult<boolean>>;
+    openUrl: (url: string) => Promise<ipc.IpcResult<boolean>>;
   };
 };
 
