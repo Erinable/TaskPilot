@@ -2,7 +2,7 @@
 // generated and the user published from the requirement center; there are no
 // built-in samples. Inline code in `steps` is marked with backticks and
 // rendered as <code>.
-import type { PackageDifficulty } from '../shared/ipc_types.ts';
+import type { ModeRecommendation, PackageDifficulty } from '../shared/ipc_types.ts';
 import type { WorkPackageStatus } from './work_package_status.ts';
 import { isInside } from './workspace.ts';
 
@@ -34,6 +34,9 @@ export interface TaskDefinition {
   acceptance: AcceptanceCriterion[];
   // Absent on packages planned before difficulty existed.
   difficulty?: PackageDifficulty;
+  // Whether to practise it or hand it to Coding Agent. Absent on packages
+  // planned before modes existed.
+  recommendedMode?: ModeRecommendation;
   // Ids of packages from the same requirement that must be done first.
   // Absent on packages planned before dependencies existed.
   dependsOn?: string[];

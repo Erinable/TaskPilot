@@ -49,6 +49,9 @@ export const nextStep = (task: ipc.TaskView): NextStep => {
     case 'in_progress': {
       const coding = codingAdvice(task);
       if (coding) return coding;
+      if (done < total && task.mode === 'practice')
+        return { text: `照着「执行指令」自己写，做完一步勾一步（${done} / ${total}）。卡住了点步骤下的「这一步怎么做？」问 Tutor。`, action: null };
+      if (done < total && task.mode === 'ai') return { text: '把下面的说明交给 Coding Agent，它写完后你逐个文件看改动。', action: null, coding: true };
       if (done < total)
         return {
           text: `交给 Coding Agent 照着步骤写，或者自己照着「执行指令」一步步改，做完一步勾一步（${done} / ${total}）。`,

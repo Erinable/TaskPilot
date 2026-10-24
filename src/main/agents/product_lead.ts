@@ -10,7 +10,7 @@
 //   - packages never carry commands. Verification commands come only from
 //     workspace settings (see ../workspace.ts).
 
-import type { PackageDifficulty } from '../../shared/ipc_types.ts';
+import type { ModeRecommendation, PackageDifficulty } from '../../shared/ipc_types.ts';
 import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 
@@ -18,6 +18,7 @@ export const MAX_QUESTIONS = 5;
 export const MAX_PACKAGES = 6;
 const PRIORITIES = ['high', 'medium', 'low'] as const;
 export const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
+export const PLANNED_MODES = ['practice', 'ai'] as const;
 // Icons the renderer defines (see renderer/src/lib/icons.ts) that suit a work package.
 export const PACKAGE_ICONS = ['key', 'flask', 'blocks', 'rocket', 'file', 'terminal', 'box', 'diff', 'git-branch', 'database'] as const;
 
@@ -59,6 +60,8 @@ export interface PlanPackage {
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
   difficulty: PackageDifficulty;
+  // Absent on plans saved before modes existed.
+  recommendedMode?: ModeRecommendation;
   // 1-based numbers of earlier packages in the same plan; absent on plans
   // saved before dependencies existed.
   dependsOn?: number[];
@@ -85,7 +88,7 @@ export class AgentOutputError extends Error {
 // Prompts
 
 export const SYSTEM_PROMPT = [
-  'You are Product Lead on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
+  'You are Product Lead on an AI team inside TaskPilot, a desktop app where AI agents plan software work for a developer who may be new to programming. Each package is either practised by the developer, who writes the code to learn, or written by Coding Agent.',
   'Your job is to understand a requirement, ask only the questions whose answers would change the plan, and then split the work into small work packages a developer can finish in a few hours each.',
   '',
   'Principles:',
@@ -150,7 +153,7 @@ export const planPrompt = ({
     .map((q, i) => `Q${i + 1}: ${q.text}\nA${i + 1}: ${q.answer?.trim() || '(not answered; choose a sensible default and say so in the summary)'}`)
     .join('\n\n');
   return [
-    'Plan the work for the requirement below as work packages for a human developer.',
+    'Plan the work for the requirement below as work packages.',
     '',
     'Sizing:',
     '- Use as few packages as the work allows. A change touching a few related files is one package. Split only where a package would exceed about 4 hours, or where parts can be reviewed and merged independently.',
@@ -177,6 +180,12 @@ export const planPrompt = ({
     '- medium: touches several files, or uses one idea the developer may not know yet (async code, a new library call, a database query).',
     '- hard: new structure, several unfamiliar ideas together, or tricky cases such as concurrency, security or data migration.',
     '- reason names the concrete thing that makes it easy or hard, in one plain sentence without jargon.',
+    '',
+    'Mode, whether the developer should practise the package or hand it to Coding Agent:',
+    '- practice: the core of the requirement, where writing it teaches how to think about the problem, a useful technique, or the conventions of this code.',
+    '- ai: boilerplate, configuration, wiring, renames or repetitive edits, where writing it by hand teaches little.',
+    '- Write steps, acceptance criteria and tests the same way for both; the mode only says who is best placed to write the code.',
+    '- reason says in one plain sentence what the developer would learn, or why it is not worth practising.',
     '',
     '<requirement>',
     title ? `Title: ${title}` : null,
@@ -224,7 +233,7 @@ export const PLAN_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['title', 'description', 'module', 'tags', 'priority', 'estimateHours', 'icon', 'steps', 'fileScope', 'acceptance', 'difficulty'],
+        required: ['title', 'description', 'module', 'tags', 'priority', 'estimateHours', 'icon', 'steps', 'fileScope', 'acceptance', 'difficulty', 'mode'],
         properties: {
           title: str(60),
           description: str(120, 'One line shown in the work queue'),
@@ -253,6 +262,15 @@ export const PLAN_SCHEMA = {
             properties: {
               level: { type: 'string', enum: DIFFICULTIES },
               reason: str(120, 'Why, in one plain sentence a beginner understands'),
+            },
+          },
+          mode: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['mode', 'reason'],
+            properties: {
+              mode: { type: 'string', enum: PLANNED_MODES },
+              reason: str(120, 'What practising it would teach, or why it is not worth practising'),
             },
           },
           dependsOn: {
@@ -310,6 +328,11 @@ export const scopePath = (value: unknown, path: string): string => {
 };
 
 // A package's difficulty: a level from the allowlist and a short reason.
+const recommendedMode = (value: unknown, path: string): ModeRecommendation => {
+  if (!isObject(value)) fail(path, 'is not an object');
+  return { mode: oneOf(value.mode, PLANNED_MODES, `${path}.mode`), reason: text(value.reason, `${path}.reason`, 120) };
+};
+
 const difficulty = (value: unknown, path: string): PackageDifficulty => {
   if (!isObject(value)) fail(path, 'is not an object');
   return { level: oneOf(value.level, DIFFICULTIES, `${path}.level`), reason: text(value.reason, `${path}.reason`, 120) };
@@ -352,6 +375,7 @@ export const validatePlan = (raw: unknown, { linkTests }: { linkTests: boolean }
         return criterion;
       }),
       difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
+      recommendedMode: recommendedMode(pkg.mode, `${at}.mode`),
       dependsOn: dependencies(pkg.dependsOn, i, `${at}.dependsOn`),
     };
   });
@@ -401,5 +425,7 @@ export const toTaskDefinitions = (requirement: { id: string; title: string }, pa
     fileScope: pkg.fileScope,
     acceptance: pkg.acceptance,
     difficulty: pkg.difficulty,
+    // Plans saved before modes existed have none.
+    ...(pkg.recommendedMode ? { recommendedMode: pkg.recommendedMode } : {}),
     requirementId: requirement.id,
   }));

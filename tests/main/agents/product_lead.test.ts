@@ -15,6 +15,7 @@ const validPackage = (overrides = {}) => ({
   fileScope: ['src/auth/login.ts'],
   acceptance: [{ text: '成功返回 token', test: 'login succeeds' }, { text: 'lint 通过' }],
   difficulty: { level: 'easy', reason: '照着现有的登录代码改一个文件。' },
+  mode: { mode: 'practice', reason: '能练到登录流程的写法。' },
   ...overrides,
 });
 const validPlan = (packages = [validPackage()]) => ({ summary: '按两步实现。', packages });
@@ -165,4 +166,17 @@ test('without a submit test check, the plan prompt asks for no linked tests and 
   assert.doesNotMatch(unlinked, /`test` set to the exact name of a test/);
   const plan = productLead.validatePlan(validPlan(), { linkTests: false });
   assert.deepEqual(plan.packages[0].acceptance, [{ text: '成功返回 token' }, { text: 'lint 通过' }]);
+});
+
+test('validatePlan() requires a practice-or-ai mode with a reason, and toTaskDefinitions() keeps it', () => {
+  const plan = productLead.validatePlan(validPlan(), LINKED);
+  assert.deepEqual(plan.packages[0].recommendedMode, { mode: 'practice', reason: '能练到登录流程的写法。' });
+  const [def] = productLead.toTaskDefinitions({ id: 'req-1', title: '登录' }, plan.packages);
+  assert.deepEqual(def.recommendedMode, { mode: 'practice', reason: '能练到登录流程的写法。' });
+  for (const mode of [undefined, { mode: 'self', reason: 'x' }, { mode: 'ai', reason: ' ' }])
+    assert.throws(() => productLead.validatePlan(validPlan([validPackage({ mode })]), LINKED), { code: 'agent_bad_output' });
+  assert.deepEqual(productLead.PLAN_SCHEMA.properties.packages.items.properties.mode.properties.mode.enum, productLead.PLANNED_MODES);
+  // Plans saved before modes existed publish without one.
+  const [old] = productLead.toTaskDefinitions({ id: 'req-1', title: '登录' }, [{ ...plan.packages[0], recommendedMode: undefined }]);
+  assert.equal('recommendedMode' in old, false);
 });

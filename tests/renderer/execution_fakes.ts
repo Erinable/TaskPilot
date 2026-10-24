@@ -25,6 +25,7 @@ export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView =>
   deviations: [],
   review: null,
   codingRun: null,
+  mode: null,
   baselineChecks: { status: 'measured', reason: null, commit: 'abcdef12', checks: {}, startedAt: '', finishedAt: null },
   adjudication: null,
   revision: null,
@@ -46,6 +47,7 @@ export const state = (task: ipc.TaskView): ipc.WorkPackageState => ({
   adjudication: task.adjudication,
   replanUndo: null,
   codingRun: task.codingRun,
+  mode: task.mode,
 });
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });

@@ -72,6 +72,37 @@ describe('ExecutionView', () => {
     wrapper.unmount();
   });
 
+  test('a practised package shows no Coding Agent and says who writes the code', async () => {
+    current.task = taskView({ completedSteps: [], mode: 'practice', humanTransitions: ['submit_for_review', 'release'] });
+    const { wrapper } = await mountOpen();
+    expect(wrapper.find('.coding-panel').exists()).toBe(false);
+    expect(wrapper.find('[data-action="hand-off"]').exists()).toBe(false);
+    expect(wrapper.get('[data-mode-chip]').text()).toBe('自己练习');
+    expect(wrapper.get('[data-next-step]').text()).toContain('Tutor');
+    wrapper.unmount();
+  });
+
+  test('starting a package asks who writes it, with the plan recommendation preselected', async () => {
+    current.task = taskView({
+      status: 'pending',
+      baseline: null,
+      claimedAt: null,
+      humanTransitions: ['claim'],
+      recommendedMode: { mode: 'ai', reason: '只是改配置，练手意义不大。' },
+    });
+    const { wrapper } = await mountOpen();
+    await wrapper.get('.exec-actions > [data-transition="claim"]').trigger('click');
+    await flushPromises();
+    expect(api.transition).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-recommendation]')?.textContent).toContain('只是改配置，练手意义不大。');
+    (document.body.querySelector('[data-mode="practice"] input') as HTMLInputElement).click();
+    await flushPromises();
+    (document.body.querySelector('[data-action="confirm-claim"]') as HTMLButtonElement).click();
+    await flushPromises();
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'practice' });
+    wrapper.unmount();
+  });
+
   test('while the AI team works, the advice says so and there are no actions', async () => {
     current.task = taskView({ status: 'in_review', statusLabel: '审查中' });
     const { wrapper } = await mountOpen();

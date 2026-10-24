@@ -5,6 +5,7 @@ import { computed } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import DifficultyChip from '@/components/DifficultyChip.vue';
 import InlineCode from '@/components/InlineCode.vue';
+import { modeLabel } from '@/lib/execution_mode.ts';
 import { PRIORITY_LABELS } from './requirement_model.ts';
 import type { IconName } from '@/lib/icons.ts';
 import type * as ipc from '@shared/ipc_types.ts';
@@ -44,6 +45,11 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
       <span v-for="(tag, tagIndex) in tags" :key="tagIndex" class="tag">{{ tag }}</span>
     </div>
     <DifficultyChip :difficulty="pkg.difficulty" detailed class="plan-difficulty" />
+    <p v-if="pkg.recommendedMode" class="plan-mode" data-plan-mode>
+      <AppIcon :name="pkg.recommendedMode.mode === 'practice' ? 'flask' : 'sparkle'" />
+      <strong>建议{{ modeLabel(pkg.recommendedMode.mode) }}</strong>
+      <span>{{ pkg.recommendedMode.reason }}</span>
+    </p>
     <div class="plan-section">
       <h4>执行指令</h4>
       <ol class="plan-steps">
@@ -76,6 +82,15 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
 </template>
 
 <style scoped>
+.plan-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
 .plan-depends {
   display: inline-flex;
   gap: var(--space-1);

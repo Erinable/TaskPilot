@@ -17,6 +17,14 @@ describe('nextStep', () => {
     expect(nextStep(taskView({ status: 'in_progress', completedSteps: [0, 1] })).action).toBe('submit_for_review');
   });
 
+  test('the mode chosen at claim shapes the advice while steps remain', () => {
+    const practice = nextStep(taskView({ status: 'in_progress', mode: 'practice' }));
+    expect(practice.coding).toBeUndefined();
+    expect(practice.text).toContain('Tutor');
+    expect(nextStep(taskView({ status: 'in_progress', mode: 'ai' })).coding).toBe(true);
+    expect(nextStep(taskView({ status: 'in_progress', mode: null })).coding).toBe(true);
+  });
+
   test('AI-driven states and done have advice but no button', () => {
     for (const status of ['in_review', 'deviation', 'done'] as const) {
       const advice = nextStep(taskView({ status }));

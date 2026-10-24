@@ -326,3 +326,18 @@ test('setBaselineChecks() records only for the claimed commit and clears on rele
   await store.transition('a', 'release', 'human');
   assert.equal(store.get('a').baselineChecks, null);
 });
+
+test('the execution mode is set at claim, cleared on release and replan, and restored on revert', async () => {
+  const { store, configDir } = await newStore();
+  assert.equal(store.get('a').mode, null);
+  assert.equal((await store.transition('a', 'claim', 'human', { baseline: 'c1', mode: 'practice' })).mode, 'practice');
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get('a').mode, 'practice');
+  assert.equal((await store.transition('a', 'release', 'human')).mode, null);
+
+  await store.transition('a', 'claim', 'human', { baseline: 'c1', mode: 'ai' });
+  await store.transition('a', 'report_deviation', 'human', { deviation: { note: '接口不存在' } });
+  await store.beginAdjudication('a');
+  assert.equal((await store.completeAdjudication('a', replan)).mode, null);
+  assert.equal((await store.transition('a', 'revert_replan', 'human')).mode, 'ai');
+});

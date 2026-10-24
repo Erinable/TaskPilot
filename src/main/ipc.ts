@@ -155,6 +155,7 @@ type PackageState = ReturnType<WorkPackageStore['get']>;
 // (QA's report and diff as unknown, reason codes as strings). These casts are
 // the one place their state becomes the contract.
 const toWireState = (state: PackageState) => state as ipc.WorkPackageState;
+const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies ipc.ExecutionMode[];
 const toWireRequirement = (item: Requirement) => item as ipc.Requirement;
 
 // `task` is the effective definition (WorkPackageStore.effective()).
@@ -175,6 +176,7 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState, 
     baselineChecks: state.baselineChecks ?? null,
     adjudication: state.adjudication ?? null,
     codingRun: state.codingRun ?? null,
+    mode: state.mode ?? null,
     revision: state.revision && {
       version: state.revision.version,
       reason: state.revision.reason,
@@ -508,17 +510,23 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     return { task, run };
   };
   const codingWorkspaceOf = (id: string, run: CodingRun) => codingRuns.get(id)?.workspace ?? { runName: run.runName, directory: run.runName };
-  const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null) =>
-    [
+  // QA checks linked tests by name, so the names go in exactly as planned.
+  const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null) => {
+    const interfaces = interfacesFor(task);
+    return [
       'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
       'Do not commit, push, change git remotes, or modify files outside the requested scope.',
       `Requested files: ${task.fileScope.join(', ') || '(none)'}`,
       `Work package: ${task.title}`,
-      `Steps: ${task.steps.join(' | ')}`,
-      `Acceptance: ${task.acceptance.map((item) => item.text).join(' | ')}`,
+      'Steps:',
+      ...task.steps.map((step, index) => `${index + 1}. ${step}`),
+      'Acceptance:',
+      ...task.acceptance.map((item) => (item.test ? `- ${item.text} (proved by a test named exactly "${item.test}")` : `- ${item.text}`)),
+      ...(interfaces ? ['', '<interface_summary author="Architect">', interfaces, '</interface_summary>'] : []),
       `Developer instruction: ${instruction}`,
       ...(feedback ? ['', 'The repository already contains your previous attempt.', feedback] : []),
     ].join('\n');
+  };
   const updateCoding = async (id: string, patch: Partial<CodingRun>) => {
     const state = await store.updateCodingRun(id, patch);
     const runtime = codingRuns.get(id);
@@ -559,6 +567,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const task = requireTask(id);
     const state = store.get(id);
     if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
+    // A practice package is the developer's exercise; release it to hand it over.
+    if (state.mode === 'practice') failWith('This package is being practised; Coding Agent stays out', 'practice_mode');
     if (codingRuns.has(id) || codingVerifications.has(id)) failWith('A Coding Agent run is already active', 'coding_running');
     const previous = state.codingRun;
     if (previous && !CODING_STARTABLE.includes(previous.status)) failWith('This package already has a Coding Agent result', 'coding_result_exists');
@@ -1147,8 +1157,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawId, rawName, options): Promise<ipc.WorkPackageState> => {
       const id = requireString(rawId, 'id');
       const name = requireString(rawName, 'name');
-      const extra: { baseline?: string; deviation?: DeviationInput } = {};
+      const extra: { baseline?: string; deviation?: DeviationInput; mode?: ipc.ExecutionMode } = {};
       if (name === 'claim') {
+        const mode = (options as ipc.TransitionOptions | null | undefined)?.mode;
+        if (mode !== undefined && !EXECUTION_MODES.includes(mode)) failWith('Unknown execution mode', 'invalid_argument', 'mode');
+        extra.mode = mode;
         // [人工决策-2026-10-14] 前置包没完成就不能领取；解除依赖要人明确操作。
         const blocking = dependenciesOf(requireTask(id), store.get(id)).filter((dependency) => dependency.blocking);
         if (blocking.length) failWith(`Waiting for ${blocking.map((dependency) => dependency.title ?? dependency.id).join(', ')}`, 'dependencies_pending');

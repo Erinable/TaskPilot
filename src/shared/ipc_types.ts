@@ -66,6 +66,16 @@ export type Priority = 'high' | 'medium' | 'low';
 export type Difficulty = 'easy' | 'medium' | 'hard';
 export type PackageDifficulty = { level: Difficulty; reason: string };
 
+// Who writes a package's code, chosen when it is claimed:
+//   practice  the developer, as an exercise (Coding Agent stays out)
+//   ai        Coding Agent
+//   self      the developer, with Coding Agent available
+export type ExecutionMode = 'practice' | 'ai' | 'self';
+// Product Lead recommends one of the first two, with a plain reason;
+// packages planned before it existed have none.
+export type PlannedMode = Exclude<ExecutionMode, 'self'>;
+export type ModeRecommendation = { mode: PlannedMode; reason: string };
+
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
 
@@ -88,6 +98,7 @@ export type TaskDefinition = {
   // Set on packages generated from a requirement.
   requirementId?: string;
   difficulty?: PackageDifficulty;
+  recommendedMode?: ModeRecommendation;
   // Ids of packages from the same requirement that must be done first.
   // Absent on packages planned before dependencies existed.
   dependsOn?: string[];
@@ -122,7 +133,8 @@ export type Deviation = {
 // What the renderer sends with report_deviation.
 export type DeviationInput = { note: string; stepIndex?: number | null; filePath?: string | null };
 
-export type TransitionOptions = { deviation?: DeviationInput };
+// `mode` goes with claim; a claim without one leaves the mode unknown.
+export type TransitionOptions = { deviation?: DeviationInput; mode?: ExecutionMode };
 
 // ========== checks and evidence ==========
 
@@ -307,6 +319,8 @@ export type ReplanUndo = {
   completedSteps: number[];
   baselineChecks: BaselineChecks | null;
   review: Review | null;
+  // Absent on undo records saved before modes existed.
+  mode?: ExecutionMode | null;
 };
 
 // WorkPackageStore state for one package. transition, setStepDone and the
@@ -325,6 +339,9 @@ export type WorkPackageState = {
   adjudication: Adjudication | null;
   replanUndo: ReplanUndo | null;
   codingRun: CodingRun | null;
+  // Chosen at claim; null before, after a release or replan, and on
+  // packages claimed before modes existed.
+  mode: ExecutionMode | null;
 };
 
 // The effective definition (Architect's replan laid over it) plus its state.
@@ -339,6 +356,7 @@ export type TaskView = TaskDefinition & {
   baselineChecks: BaselineChecks | null;
   adjudication: Adjudication | null;
   codingRun: CodingRun | null;
+  mode: ExecutionMode | null;
   // Null when never replanned; the definition itself is already applied.
   revision: Omit<Revision, 'definition'> | null;
   // Human transitions available now, after the state guards.
@@ -488,6 +506,7 @@ export type PlanPackage = {
   fileScope: string[];
   acceptance: AcceptanceCriterion[];
   difficulty?: PackageDifficulty;
+  recommendedMode?: ModeRecommendation;
   // 1-based numbers of earlier packages; absent on plans saved before it existed.
   dependsOn?: number[];
 };

@@ -441,6 +441,7 @@ const PLAN_OUTPUT = {
       fileScope: ['src/auth/application/login-user.ts'],
       acceptance: [{ text: '成功返回 token', test: 'login succeeds' }],
       difficulty: { level: 'medium', reason: '要用到异步读写数据库。' },
+      mode: { mode: 'practice', reason: '能练到用例层怎么调用仓储。' },
     },
   ],
 };
@@ -818,6 +819,16 @@ test('claiming reads the baseline from git, not from the renderer', async () => 
   assert.equal(response.ok, true);
   const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   assert.equal(response.data.baseline, head);
+});
+
+test('claiming records the chosen execution mode and refuses unknown ones', async () => {
+  const { call } = await harness();
+  const bad = await call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'pair' });
+  assert.equal(bad.error.code, 'invalid_argument');
+  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
+  const claimed = await call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  assert.equal(claimed.data.mode, 'practice');
+  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.mode, 'practice');
 });
 
 test('the renderer cannot act as an agent', async () => {
@@ -2133,6 +2144,38 @@ const loopHarness = async ({
   await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
   return { ...h, prompts, timeouts, preview, file };
 };
+test('coding: a practised package keeps Coding Agent out', async () => {
+  const h = await loopHarness();
+  await h.store.transition('auth-email-login', 'release', 'human');
+  const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: h.root })).stdout.trim();
+  await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head, mode: 'practice' });
+  const refused = await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  assert.equal(refused.error.code, 'practice_mode');
+  assert.equal(h.prompts.length, 0);
+});
+
+test('coding: the prompt lists steps and the exact names of linked tests', async () => {
+  const h = await loopHarness();
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  await settleCoding(h.call, 'auth-email-login');
+  assert.match(h.prompts[0], /Steps:\n1\. /);
+  assert.match(h.prompts[0], /- 成功返回 token，不暴露用户是否存在 \(proved by a test named exactly "login succeeds with valid credentials"\)/);
+});
+
+test('coding: a planned package hands Coding Agent the Architect summary', async () => {
+  const h = await loopHarness({ agent: fakeAgent() });
+  const created = await h.call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await settle(h.call, created.data.id);
+  await h.call(CHANNELS.requirementsPlan, created.data.id, ['5 次']);
+  await settle(h.call, created.data.id);
+  await h.call(CHANNELS.requirementsPublish, created.data.id);
+  const id = `${created.data.id}-wp1`;
+  await h.call(CHANNELS.transition, id, 'claim', { mode: 'ai' });
+  await h.call(CHANNELS.codingStart, id, { instruction: '实现登录' });
+  await settleCoding(h.call, id);
+  assert.match(h.prompts[0], /<interface_summary author="Architect">\nsrc\/auth\/application\/login-user\.ts: 登录用例占位/);
+});
+
 const applyFirstRound = async (h: Awaited<ReturnType<typeof loopHarness>>, allowHighRisk = false) => {
   await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
   const ready = await settleCoding(h.call, 'auth-email-login');

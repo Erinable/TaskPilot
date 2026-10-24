@@ -6,6 +6,7 @@ import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
+import { defaultMode } from '@/lib/execution_mode.ts';
 import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import type { ConfirmOptions } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
@@ -368,8 +369,13 @@ export const useExecutionStore = defineStore('execution', () => {
     }
     const confirm = TRANSITION_CONFIRMS[name];
     if (confirm && !(await confirmAction(confirm))) return;
-    if (name === 'claim' && !(await confirmBusyClaim(current.value.id))) return;
-    if (name === 'claim' && !(await confirmDirtyClaim())) return;
+    if (name === 'claim') {
+      if (!(await confirmBusyClaim(current.value.id)) || !(await confirmDirtyClaim())) return;
+      // The claim itself goes out from the dialog, with the chosen mode.
+      claimMode.value = defaultMode(current.value);
+      claimOpen.value = true;
+      return;
+    }
     if (name === 'submit_for_review' && current.value.codingRun?.status === 'applied') {
       const proceed = await confirmAction({
         title: '确认提交审查？',
@@ -378,9 +384,14 @@ export const useExecutionStore = defineStore('execution', () => {
       });
       if (!proceed) return;
     }
+    await sendTransition(name);
+  };
+
+  const sendTransition = async (name: ipc.HumanTransition, options?: ipc.TransitionOptions) => {
+    if (!current.value) return;
     transitioning.value = name;
     try {
-      await call(window.taskpilot.transition(current.value.id, name));
+      await call(options ? window.taskpilot.transition(current.value.id, name, options) : window.taskpilot.transition(current.value.id, name));
       await reloadCurrent();
       showToast(TRANSITION_TOASTS[name] ?? '状态已更新。');
     } catch (error) {
@@ -389,6 +400,20 @@ export const useExecutionStore = defineStore('execution', () => {
     } finally {
       transitioning.value = null;
     }
+  };
+
+  // ========== Claim dialog ==========
+  // Open while the developer picks who writes the code.
+  const claimOpen = ref(false);
+  const claimMode = ref<ipc.ExecutionMode>('self');
+
+  const closeClaim = () => {
+    claimOpen.value = false;
+  };
+
+  const confirmClaim = async () => {
+    claimOpen.value = false;
+    await sendTransition('claim', { mode: claimMode.value });
   };
 
   // ========== Modals ==========
@@ -485,6 +510,11 @@ export const useExecutionStore = defineStore('execution', () => {
     // Transitions
     transitioning,
     runTransition,
+    // Claim dialog
+    claimOpen,
+    claimMode,
+    closeClaim,
+    confirmClaim,
     // Modals
     deviationOpen,
     deviationForm,

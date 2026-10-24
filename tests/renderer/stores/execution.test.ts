@@ -246,16 +246,33 @@ describe('queue actions', () => {
 
     vi.mocked(feedback.confirmAction).mockResolvedValue(true);
     await execution.claimFromQueue('t1');
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim');
+    expect(execution.claimOpen).toBe(true);
+    await execution.confirmClaim();
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
   });
 
   test('claiming with nothing else in progress does not ask about it', async () => {
     current.task = taskView({ status: 'pending', humanTransitions: ['claim'] });
     useTasksStore().tasks = [];
     vi.mocked(feedback.confirmAction).mockResolvedValue(true);
-    await useExecutionStore().claimFromQueue('t1');
+    const execution = useExecutionStore();
+    await execution.claimFromQueue('t1');
     expect(vi.mocked(feedback.confirmAction).mock.calls.map(([options]) => options.title)).not.toContain('已经有 1 个工作包在执行中');
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim');
+    await execution.confirmClaim();
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
+  });
+
+  test('the claim dialog preselects the recommended mode and claims with the one picked', async () => {
+    current.task = taskView({ status: 'pending', humanTransitions: ['claim'], recommendedMode: { mode: 'practice', reason: '能练到写法。' } });
+    useTasksStore().tasks = [];
+    const execution = useExecutionStore();
+    await execution.claimFromQueue('t1');
+    expect(execution.claimMode).toBe('practice');
+    expect(api.transition).not.toHaveBeenCalled();
+    execution.claimMode = 'ai';
+    await execution.confirmClaim();
+    expect(execution.claimOpen).toBe(false);
+    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'ai' });
   });
 
   test('waiving a dependency asks, then updates the package everywhere', async () => {
