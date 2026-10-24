@@ -35,6 +35,14 @@ describe('note charts', () => {
     expect(css).toContain('.x { fill: blue; }');
   });
 
+  test('motion along a path and attribute animation survive cleaning', () => {
+    const { svg } = sanitizeSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg"><circle r="9"><animateMotion dur="4s" repeatCount="indefinite" path="M0,0 L10,10"/></circle><rect><animateTransform attributeName="transform" type="rotate" from="0" to="90" dur="1s"/></rect></svg>',
+    );
+    expect(svg.querySelector('animateMotion')?.getAttribute('path')).toBe('M0,0 L10,10');
+    expect(svg.querySelector('animateTransform')?.getAttribute('type')).toBe('rotate');
+  });
+
   test('a cleaned drawing goes into a shadow root with its stylesheet', () => {
     const host = document.createElement('div');
     mountSvg(host, sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg"><style>rect{fill:green}</style><rect width="2" height="2"/></svg>'));
@@ -45,6 +53,23 @@ describe('note charts', () => {
 
   test('a block without an <svg> element is refused', () => {
     expect(() => sanitizeSvg('<p>not a drawing</p>')).toThrow('<svg>');
+  });
+
+  test('range sliders become play controls, labelled by the slider caption', async () => {
+    const spec = {
+      data: { values: [{ x: 1 }] },
+      params: [
+        { name: 'frame', value: 0, bind: { input: 'range', min: 0, max: 8, step: 1, name: '训练帧 ' } },
+        { name: 'pick', value: 'a', bind: { input: 'select', options: ['a'] } },
+      ],
+      mark: 'point',
+      encoding: { x: { field: 'x', type: 'quantitative' } },
+    };
+    const view = await renderVega(document.createElement('div'), JSON.stringify(spec), 'vega-lite');
+    expect(view.playables).toEqual([{ name: 'frame', label: '训练帧', min: 0, max: 8, step: 1 }]);
+    await view.set('frame', 3);
+    expect(view.get('frame')).toBe(3);
+    view.finalize();
   });
 
   test('Vega specs must be JSON objects, and never load a URL', async () => {

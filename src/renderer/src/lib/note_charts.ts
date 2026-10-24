@@ -57,10 +57,14 @@ const STYLE_ATTR = 'data-tp-style';
 const STYLE_SHEET = 'data-tp-css';
 
 const purifier = DOMPurify(window);
+// DOMPurify reports tag names in lower case (animatemotion), so they are
+// compared that way; animateMotion moves along a path and names no attribute.
+const LOWER_ANIMATION_TAGS = ANIMATION_TAGS.map((tag) => tag.toLowerCase());
 purifier.addHook('uponSanitizeElement', (node, data) => {
-  if (!ANIMATION_TAGS.includes(data.tagName) || !(node instanceof Element)) return;
+  const tag = data.tagName.toLowerCase();
+  if (!LOWER_ANIMATION_TAGS.includes(tag) || !(node instanceof Element)) return;
   const target = node.getAttribute('attributeName');
-  if (data.tagName !== 'animateMotion' && (!target || !ANIMATABLE.has(target.replace(/^[a-z]+:/i, '')))) node.remove();
+  if (tag !== 'animatemotion' && (!target || !ANIMATABLE.has(target.replace(/^[a-z]+:/i, '')))) node.remove();
 });
 
 export type SafeSvg = { svg: SVGSVGElement; css: string };
@@ -120,7 +124,29 @@ const PALETTE = ['#3f6bf5', '#e8678a', '#17915b', '#d68117', '#8b5cf6', '#0ea5b7
 
 // ========== Vega ==========
 
-export type VegaHandle = { finalize: () => void };
+// A range slider bound to a parameter, which a play button can step through.
+// label: the slider's own caption (bind.name), or the parameter name.
+export type Playable = { name: string; label: string; min: number; max: number; step: number };
+export type VegaHandle = {
+  finalize: () => void;
+  playables: Playable[];
+  get: (name: string) => number;
+  set: (name: string, value: number) => Promise<void>;
+};
+
+// Parameters bound to range sliders: the ones a play button can animate.
+const findPlayables = (spec: Record<string, unknown>): Playable[] => {
+  const lists = [spec.params, spec.signals].filter(Array.isArray) as Record<string, unknown>[][];
+  return lists.flat().flatMap((entry) => {
+    const bind = entry.bind as Record<string, unknown> | undefined;
+    if (typeof entry.name !== 'string' || bind?.input !== 'range') return [];
+    const min = Number(bind.min ?? 0);
+    const max = Number(bind.max ?? 100);
+    const step = Number(bind.step ?? (max - min) / 100);
+    const label = typeof bind.name === 'string' && bind.name.trim() ? bind.name.trim() : entry.name;
+    return Number.isFinite(min) && Number.isFinite(max) && Number.isFinite(step) && step > 0 && max > min ? [{ name: entry.name, label, min, max, step }] : [];
+  });
+};
 
 const vegaConfig = () => {
   const colors = themeColors();
@@ -175,7 +201,14 @@ export const renderVega = async (host: HTMLElement, source: string, lang: 'vega'
     view.finalize();
     throw new Error(refused);
   }
-  return { finalize: () => view.finalize() };
+  return {
+    finalize: () => view.finalize(),
+    playables: findPlayables(spec),
+    get: (name) => Number(view.signal(name)),
+    set: async (name, value) => {
+      await view.signal(name, value).runAsync();
+    },
+  };
 };
 
 // ========== Mermaid ==========

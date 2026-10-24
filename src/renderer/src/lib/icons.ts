@@ -177,6 +177,13 @@ export const ICONS = {
 
   // Work package actions
   play: { filled: true, shapes: [['path', { d: 'M8 5.5v13l10.5-6.5z' }]] },
+  pause: {
+    filled: true,
+    shapes: [
+      ['rect', { x: 7, y: 5.5, width: 3.5, height: 13, rx: 1 }],
+      ['rect', { x: 13.5, y: 5.5, width: 3.5, height: 13, rx: 1 }],
+    ],
+  },
   send: {
     shapes: [
       ['path', { d: 'M21 3 10 14' }],
