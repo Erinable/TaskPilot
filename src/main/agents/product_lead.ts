@@ -135,7 +135,17 @@ export const clarifyPrompt = ({ title, text, files, interfaces }: RequirementInp
     .join('\n');
 };
 
-export const planPrompt = ({ title, text, questions, files, interfaces }: RequirementInput & { questions?: ClarifyQuestion[] | null }): string => {
+// linkTests: the workspace runs a test check before review, so a criterion's
+// `test` can be verified. Without one a linked test could only ever be
+// missing, which rejects the package.
+export const planPrompt = ({
+  title,
+  text,
+  questions,
+  files,
+  interfaces,
+  linkTests,
+}: RequirementInput & { questions?: ClarifyQuestion[] | null; linkTests: boolean }): string => {
   const qa = (questions ?? [])
     .map((q, i) => `Q${i + 1}: ${q.text}\nA${i + 1}: ${q.answer?.trim() || '(not answered; choose a sensible default and say so in the summary)'}`)
     .join('\n\n');
@@ -157,7 +167,9 @@ export const planPrompt = ({ title, text, questions, files, interfaces }: Requir
     'Content:',
     '- Steps are concrete instructions. Mark code identifiers and paths with backticks, e.g. `src/auth/login.ts`.',
     '- fileScope lists every file the package may create or change, as paths relative to the repository root.',
-    '- Acceptance criteria are checkable outcomes. Give every package at least one criterion with `test` set to the exact name of a test the developer should write; test names must be unique across the plan.',
+    linkTests
+      ? '- Acceptance criteria are checkable outcomes. Give every package at least one criterion with `test` set to the exact name of a test the developer should write; test names must be unique across the plan.'
+      : '- Acceptance criteria are checkable outcomes. This repository has no test check that runs before review, so TaskPilot cannot run tests: leave `test` out of every criterion, and write criteria a reviewer can check by reading the change or using the app.',
     '- Never include shell commands to run.',
     '',
     'Difficulty, for a developer who may be new to programming:',
@@ -312,7 +324,9 @@ export const validateClarify = (raw: unknown): Clarification => {
   };
 };
 
-export const validatePlan = (raw: unknown): Plan => {
+// linkTests as for planPrompt(): when false, test names the model added anyway
+// are dropped, so no criterion waits for a test that will never run.
+export const validatePlan = (raw: unknown, { linkTests }: { linkTests: boolean }): Plan => {
   if (!isObject(raw)) fail('output', 'is not an object');
   const packages = list(raw.packages, 'packages', { min: 1, max: MAX_PACKAGES }).map((pkg, i) => {
     const at = `packages[${i}]`;
@@ -334,7 +348,7 @@ export const validatePlan = (raw: unknown): Plan => {
         if (!isObject(a)) fail(`${at}.acceptance[${j}]`, 'is not an object');
         const criterion: AcceptanceCriterion = { text: text(a.text, `${at}.acceptance[${j}].text`, 200) };
         const testName = optionalText(a.test, `${at}.acceptance[${j}].test`, 120);
-        if (testName) criterion.test = testName;
+        if (testName && linkTests) criterion.test = testName;
         return criterion;
       }),
       difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
