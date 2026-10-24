@@ -1755,11 +1755,13 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (raw.refresh !== undefined && typeof raw.refresh !== 'boolean') failWith('refresh must be boolean', 'invalid_argument', 'refresh');
       const cli = raw.cli as ipc.CliId;
       const scope = raw.scope as ipc.CliModelScope;
-      const key = `${scope}:${cli}`;
+      // Which account's config holds the coding models depends on the isolation mode.
+      const separateUser = scope === 'coding' && !sandboxed();
+      const key = `${scope}:${cli}:${separateUser ? 'separate-user' : 'own'}`;
       if (raw.refresh === true) modelCatalogs.delete(key);
       let reading = modelCatalogs.get(key);
       if (!reading) {
-        reading = modelCatalog(cli, scope);
+        reading = modelCatalog(cli, scope, { separateUser });
         modelCatalogs.set(key, reading);
       }
       return reading;

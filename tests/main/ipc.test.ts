@@ -303,6 +303,24 @@ test('agent model IPC isolates scopes, caches local catalogs, and refreshes only
   assert.deepEqual(reads, ['analysis:pi', 'coding:pi', 'analysis:pi']);
 });
 
+test('agent model IPC reads coding models from the account the isolation mode runs Coding Agent as', async () => {
+  const reads: unknown[] = [];
+  const modelCatalog: NonNullable<IpcDeps['modelCatalog']> = async (cli, scope, options): Promise<CliModelCatalog> => {
+    reads.push([scope, options?.separateUser]);
+    return { cli, scope, models: [], defaultModel: null, defaultThinking: null, issues: [] };
+  };
+  const h = await harness({ withRepo: false, modelCatalog });
+  await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'coding' });
+  await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'analysis' });
+  await h.call(CHANNELS.preferencesSet, validPrefs({ coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] } }));
+  await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'coding' });
+  assert.deepEqual(reads, [
+    ['coding', true],
+    ['analysis', false],
+    ['coding', false],
+  ]);
+});
+
 test('coding IPC registers all seven channels and preserves terminal events', async () => {
   const preview = filePatch('tests/auth/login-user.test.ts', 'test("x", () => {});');
   let probeCalls = 0;

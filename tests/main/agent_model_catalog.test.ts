@@ -184,3 +184,10 @@ test('Grok allowed_models filters catalog keys and wire IDs without re-adding a 
   );
   assert.equal(catalog.defaultModel, 'blocked');
 });
+
+test('in sandbox mode, coding models come from the developer config', async () => {
+  const root = await home();
+  await configFile(root, '.codex/config.toml', 'model="own-model"\n');
+  const sandbox = await readModelCatalog('codex', 'coding', { home: root });
+  assert.equal(sandbox.defaultModel, 'own-model');
+});
