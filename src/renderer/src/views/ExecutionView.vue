@@ -8,6 +8,7 @@ import CommitPanel from '@/components/execution/CommitPanel.vue';
 import DeviationDialog from '@/components/execution/DeviationDialog.vue';
 import DeviationPanel from '@/components/execution/DeviationPanel.vue';
 import DiffPanel from '@/components/execution/DiffPanel.vue';
+import PracticePanel from '@/components/execution/PracticePanel.vue';
 import ReviewPanel from '@/components/execution/ReviewPanel.vue';
 import ScopePanel from '@/components/execution/ScopePanel.vue';
 import StepsPanel from '@/components/execution/StepsPanel.vue';
@@ -168,6 +169,7 @@ onBeforeUnmount(() => execution.close());
           <!-- Accepted work goes into git before the next package starts. -->
           <CommitPanel v-if="task.status === 'accepting' || task.status === 'done'" :task="task" />
           <ReviewPanel v-if="task.review" :task="task" :review="task.review" />
+          <PracticePanel v-if="practising" :task="task" />
           <StepsPanel :task="task" />
           <AcceptancePanel :task="task" />
           <DeviationPanel :task="task" />

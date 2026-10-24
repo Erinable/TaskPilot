@@ -493,28 +493,39 @@ const RELEASE_PLAN = {
 };
 /** Which agent step a schema belongs to. */
 const stepOf = (schema) =>
-  schema.properties.hints
-    ? 'tutor'
-    : schema.properties.bump
-      ? 'release'
-      : schema.properties.verdict
-        ? 'review'
-        : schema.properties.decision
-          ? 'adjudicate'
-          : schema.properties.install
-            ? 'env'
-            : schema.properties.packages
-              ? 'plan'
-              : schema.properties.questions
-                ? 'clarify'
-                : schema.properties.modules
-                  ? 'summarize'
-                  : 'select';
+  schema.properties.strengths
+    ? 'grade'
+    : schema.properties.hints
+      ? 'tutor'
+      : schema.properties.bump
+        ? 'release'
+        : schema.properties.verdict
+          ? 'review'
+          : schema.properties.decision
+            ? 'adjudicate'
+            : schema.properties.install
+              ? 'env'
+              : schema.properties.packages
+                ? 'plan'
+                : schema.properties.questions
+                  ? 'clarify'
+                  : schema.properties.modules
+                    ? 'summarize'
+                    : 'select';
 const TUTOR_ANSWER = {
   explanation: '在测试文件里加一个用例，检查邮箱大小写不同也能登录。',
   hints: ['打开 tests/auth/login-user.test.ts', '仿照已有用例写一个新的 test()'],
   snippet: { language: 'ts', code: "test('email is case-insensitive', () => {\n  // ...\n});" },
   terms: [{ term: '用例', meaning: '一个独立的测试，检查一种情况。' }],
+};
+
+const GRADE_REPORT = {
+  summary: '用例覆盖了大小写，写法清楚。',
+  strengths: ['用例名直接说明了要验证的行为'],
+  comments: [
+    { category: 'writing', file: 'tests/auth/login-user.test.ts', line: 1, observation: '用例里没有断言。', betterWay: '加一个 expect，确认登录结果。' },
+    { category: 'style', file: 'src/elsewhere.ts', line: 3, observation: '命名和周围不一致。', betterWay: '沿用现有的驼峰命名。' },
+  ],
 };
 
 /** A fake team answering by which schema it was given. */
@@ -531,6 +542,7 @@ const fakeAgent =
       adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
       release: () => overrides.release ?? RELEASE_PLAN,
       tutor: () => overrides.tutor ?? TUTOR_ANSWER,
+      grade: () => overrides.grade ?? GRADE_REPORT,
     }[stepOf(schema)]();
     if (output instanceof Error) throw output;
     return { output, costUsd: 0.02 };
@@ -2772,4 +2784,167 @@ test('coding isolation: sandbox mode runs under userData as the current user, an
   assert.ok(seen.read.at(-1), 'the patch is still read inside the sandbox');
   await h.call(CHANNELS.codingCancel, 'auth-edge-tests');
   assert.ok(seen.clean.at(-1), 'the run is cleaned as a sandbox run');
+});
+
+// ========== practice ==========
+
+const REFERENCE_PATCH = filePatch('tests/auth/login-user.test.ts', 'test("reference", () => {});').patch;
+
+// A practice harness whose reference run waits on `hold` when given.
+const practiceHarness = async ({
+  agent = fakeAgent(),
+  hold = null,
+  failWith = null,
+}: { agent?: FakeAgent; hold?: Promise<void> | null; failWith?: Error | null } = {}) => {
+  const prompts: string[] = [];
+  const cleaned: string[] = [];
+  const h = await harness({
+    agent,
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async (options) => {
+        prompts.push(options.prompt);
+        if (hold) {
+          const cancelled = () => Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
+          if (options.signal?.aborted) throw cancelled();
+          await Promise.race([hold, new Promise((_resolve, reject) => options.signal?.addEventListener('abort', () => reject(cancelled()), { once: true }))]);
+        }
+        if (failWith) throw failWith;
+        return {
+          output: '',
+          usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: 0.2 },
+          events: [],
+          sessionId: null,
+        };
+      },
+      codingReadPatch: async (_runName, scope) => parsePatchPreview(REFERENCE_PATCH, scope),
+      codingClean: async (runName) => void cleaned.push(runName),
+      codingSnapshot: async (_root, baseline) => baseline,
+    },
+  });
+  h.setCommands({ test: EDGE_TESTS_PASS });
+  return { ...h, prompts, cleaned };
+};
+
+const settleTask = async (call, id, done: (task: TaskView) => boolean) => {
+  let last = '';
+  for (let i = 0; i < 400; i += 1) {
+    const { data } = await call(CHANNELS.getTask, id);
+    last = JSON.stringify({ status: data.status, reference: data.referenceRun?.status, grade: data.grade?.status });
+    if (done(data)) return data as TaskView;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`never settled: ${last}`);
+};
+
+const writeSubmission = async (root: string) => {
+  await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });
+  await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
+};
+
+test('practice: claiming starts a reference run that stays hidden until the first submission', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  const ready = await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  assert.deepEqual(ready.referenceRun!.files, [{ path: 'tests/auth/login-user.test.ts', added: 1, removed: 1 }]);
+  assert.match(h.prompts[0], /reference answer for a learner/);
+  assert.equal(h.cleaned.length, 1, 'the run directory is removed; the patch is kept by TaskPilot');
+  // Nothing of the patch is in the task view, and the channel refuses.
+  assert.doesNotMatch(JSON.stringify(ready), /reference\(\)|test\("reference"/);
+  assert.equal((await h.call(CHANNELS.referenceGet, 'auth-edge-tests')).error.code, 'reference_locked');
+
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleReview(h.call, 'auth-edge-tests');
+  const revealed = await h.call(CHANNELS.referenceGet, 'auth-edge-tests');
+  assert.equal(revealed.data, REFERENCE_PATCH);
+  assert.ok((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.referenceRun.revealedAt);
+});
+
+test('practice: once QA has judged, Tutor grades against the reference without moving the package', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(graded.status, 'accepting', 'grading never changes the status QA set');
+  assert.equal(graded.grade!.withReference, true);
+  assert.equal(graded.grade!.report!.comments[0].file, 'tests/auth/login-user.test.ts');
+  // A comment on a file the developer did not touch keeps its text, not the location.
+  assert.equal(graded.grade!.report!.comments[1].file, null);
+  const prompt = callFor(h.agentCalls, 'grade').prompt;
+  assert.match(prompt, /<submission>\n<file path="tests\/auth\/login-user\.test\.ts">/);
+  assert.match(prompt, /<reference_solution>\ndiff --git/);
+  assert.match(prompt, /Verdict: accepted/);
+
+  // The same submission is not graded again.
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'acceptance_rejected');
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleReview(h.call, 'auth-edge-tests');
+  await h.shutdown();
+  assert.equal(h.store.get('auth-edge-tests').grade!.id, graded.grade!.id);
+});
+
+test('practice: a grade waits for a reference still being written, or goes ahead when asked', async () => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const h = await practiceHarness({ hold });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const waiting = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'waiting');
+  assert.equal(waiting.referenceRun!.status, 'running');
+  release();
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(graded.grade!.withReference, true);
+
+  const h2 = await practiceHarness({ hold: new Promise(() => {}) });
+  await h2.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await writeSubmission(h2.root);
+  await h2.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleTask(h2.call, 'auth-edge-tests', (task) => task.grade?.status === 'waiting');
+  await h2.call(CHANNELS.gradeStart, 'auth-edge-tests', true);
+  const alone = await settleTask(h2.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(alone.grade!.withReference, false);
+  assert.match(callFor(h2.agentCalls, 'grade').prompt, /<reference_solution>\n\(none\)/);
+});
+
+test('practice: releasing cancels the reference run and clears what it would have written', async () => {
+  const h = await practiceHarness({ hold: new Promise(() => {}) });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'running');
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'release');
+  await h.shutdown();
+  const state = h.store.get('auth-edge-tests');
+  assert.equal(state.referenceRun, null);
+  assert.equal(state.mode, null);
+});
+
+test('practice: a failed reference run still lets the submission be graded on its own', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => errors.mockRestore());
+  const h = await practiceHarness({ failWith: Object.assign(new Error('boom'), { code: 'coding_failed' }) });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'failed');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(graded.grade!.withReference, false);
+  assert.equal((await h.call(CHANNELS.referenceGet, 'auth-edge-tests')).error.code, 'no_reference');
+});
+
+test('practice: packages claimed another way get no reference and no grade', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'self' });
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const reviewed = await settleReview(h.call, 'auth-edge-tests');
+  assert.equal(reviewed.referenceRun, null);
+  assert.equal(reviewed.grade, null);
+  assert.equal(h.prompts.length, 0);
+  assert.equal((await h.call(CHANNELS.gradeStart, 'auth-edge-tests', false)).error.code, 'not_practice');
 });

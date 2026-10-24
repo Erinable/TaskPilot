@@ -341,3 +341,34 @@ test('the execution mode is set at claim, cleared on release and replan, and res
   assert.equal((await store.completeAdjudication('a', replan)).mode, null);
   assert.equal((await store.transition('a', 'revert_replan', 'human')).mode, 'ai');
 });
+
+test('practice records drop late writes from a replaced run and clear on release; interrupted ones fail on reload', async () => {
+  const { store, configDir } = await newStore();
+  await store.transition('a', 'claim', 'human', { baseline: 'c1', mode: 'practice' });
+  const run = { id: 'r1', status: 'running' as const, startedAt: '', finishedAt: null, error: null, files: [], costUsd: null, revealedAt: null };
+  await store.setReferenceRun('a', run);
+  assert.equal(await store.setReferenceRun('a', { ...run, status: 'ready' }, 'r0'), null);
+  assert.equal(store.get('a').referenceRun!.status, 'running');
+  const grade = {
+    id: 'g1',
+    status: 'waiting' as const,
+    startedAt: '',
+    finishedAt: null,
+    error: null,
+    diffDigest: 'd',
+    withReference: false,
+    report: null,
+    costUsd: 0,
+  };
+  await store.setGrade('a', grade);
+
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get('a').referenceRun!.status, 'failed');
+  assert.equal(reloaded.get('a').referenceRun!.error!.code, 'coding_interrupted');
+  assert.equal(reloaded.get('a').grade!.status, 'failed');
+
+  const released = await store.transition('a', 'release', 'human');
+  assert.equal(released.referenceRun, null);
+  assert.equal(released.grade, null);
+  assert.equal(await store.setReferenceRun('a', { ...run, status: 'ready' }, 'r1'), null, 'the released run cannot write back');
+});

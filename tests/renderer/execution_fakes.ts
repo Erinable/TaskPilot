@@ -26,6 +26,8 @@ export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView =>
   review: null,
   codingRun: null,
   mode: null,
+  referenceRun: null,
+  grade: null,
   baselineChecks: { status: 'measured', reason: null, commit: 'abcdef12', checks: {}, startedAt: '', finishedAt: null },
   adjudication: null,
   revision: null,
@@ -48,6 +50,8 @@ export const state = (task: ipc.TaskView): ipc.WorkPackageState => ({
   replanUndo: null,
   codingRun: task.codingRun,
   mode: task.mode,
+  referenceRun: task.referenceRun,
+  grade: task.grade,
 });
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
@@ -100,6 +104,10 @@ export const installApi = (current: { task: ipc.TaskView }) => {
         ok<ipc.CommitPreview>({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
       ),
       create: vi.fn((_id: string, _message: string, files: string[]) => ok<ipc.CommitResult>({ commit: 'c0ffee1234', files })),
+    },
+    practice: {
+      reference: vi.fn(() => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n')),
+      grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),
     },
     tutor: {
       get: vi.fn(() => ok<ipc.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),

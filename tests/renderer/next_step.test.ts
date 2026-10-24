@@ -23,6 +23,7 @@ describe('nextStep', () => {
     expect(practice.text).toContain('Tutor');
     expect(nextStep(taskView({ status: 'in_progress', mode: 'ai' })).coding).toBe(true);
     expect(nextStep(taskView({ status: 'in_progress', mode: null })).coding).toBe(true);
+    expect(nextStep(taskView({ status: 'in_review', mode: 'practice' })).text).toContain('参考答案也会解锁');
   });
 
   test('AI-driven states and done have advice but no button', () => {
