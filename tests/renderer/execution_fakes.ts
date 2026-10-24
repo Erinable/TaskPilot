@@ -106,8 +106,26 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       create: vi.fn((_id: string, _message: string, files: string[]) => ok<ipc.CommitResult>({ commit: 'c0ffee1234', files })),
     },
     notes: {
-      list: vi.fn(() => ok<ipc.Note[]>([])),
-      create: vi.fn((input: ipc.NoteInput) => ok<ipc.Note>({ ...input, id: 'note-1', createdAt: '', updatedAt: '' })),
+      list: vi.fn(() => ok<ipc.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
+      create: vi.fn((input: ipc.NoteInput) =>
+        ok<ipc.NoteSaved>({
+          revision: 2,
+          relinked: 0,
+          note: {
+            ...input,
+            id: `${input.title}.md`,
+            inlineTags: [],
+            summary: null,
+            summaryStale: false,
+            links: [],
+            excerpt: '',
+            createdAt: '',
+            updatedAt: '',
+            version: 'v1',
+            frontmatterError: false,
+          },
+        }),
+      ),
       update: vi.fn(),
       remove: vi.fn(() => ok(true)),
     },

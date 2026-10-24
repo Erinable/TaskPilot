@@ -15,6 +15,7 @@ import { ActivityLog } from './activity_log.ts';
 import { RepositoryRegistry } from './repositories.ts';
 import { TutorStore } from './tutor_store.ts';
 import { NoteStore } from './note_store.ts';
+import { CHANNELS } from '../shared/ipc_channels.ts';
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -75,6 +76,12 @@ const createWindow = (appearance: Appearance) => {
   nativeTheme.on('updated', syncBackground);
   window.on('closed', () => nativeTheme.off('updated', syncBackground));
 
+  // Full screen hides the traffic lights, so the top bar can use their space.
+  const sendFullScreen = () => window.webContents.send(CHANNELS.windowFullScreen, window.isFullScreen());
+  window.on('enter-full-screen', sendFullScreen);
+  window.on('leave-full-screen', sendFullScreen);
+  window.webContents.on('did-finish-load', sendFullScreen);
+
   if (env.rendererUrl) window.loadURL(env.rendererUrl);
   else window.loadFile(path.join(import.meta.dirname, '..', 'renderer', 'index.html'));
   return window;
@@ -101,7 +108,7 @@ app.whenReady().then(async () => {
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();
   // Notes follow the developer, not the repository.
-  const notes = await new NoteStore(configDir).load();
+  const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
   // Expired day files go at startup; a failure only leaves old files behind.
   activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -146,6 +153,8 @@ app.whenReady().then(async () => {
     },
     // Only reached with a path open_file.ts has confined to the workspace.
     revealFile: (file) => shell.showItemInFolder(file),
+    // Only reached with an http(s) or mailto URL (checked in ipc.ts).
+    openUrl: (url) => shell.openExternal(url),
     pickDirectory: async (defaultPath) => {
       const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
       const parent = BrowserWindow.getFocusedWindow();

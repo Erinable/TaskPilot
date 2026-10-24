@@ -1,25 +1,38 @@
-// Learning notes, one global file (userData/notes.json): notes follow the
-// developer across repositories, since habits in thinking and style do.
-// Each note may point back at where it came from (a repository, package,
-// file and line); a note saved from a grade comment carries the comment's
-// category. Notes are the developer's own text: the store never trims or
-// rewrites them, and never deletes any on its own.
+// Learning notes as a folder of Markdown files, readable by Obsidian or any
+// editor: one note per top-level .md file, its title the file name, its body
+// Markdown. TaskPilot's fields (category, tags, source, summary, created)
+// live in the YAML frontmatter, beside any fields other programs put there,
+// which are kept as written. Notes follow the developer across repositories.
+//
+// The folder is userData/notes unless the developer chose another one (an
+// existing Obsidian vault, say). Other programs may change the files at any
+// time: a watcher rereads them, and a save refuses to overwrite a file that
+// changed since the editor read it unless asked to. A note whose frontmatter
+// is not valid YAML is shown but not saved, so its fields are never lost.
 //
 // [人工决策-2026-10-24 14:25:15] 笔记全局一份，上限 5000 条，满了拒绝新增、不自动删除。
-import { randomUUID } from 'node:crypto';
+// [人工决策-2026-10-24 16:12:00] 笔记改为 .md 文件目录（默认 userData/notes，可改），监听外部修改、冲突时让用户选覆盖或放弃；正文不限长度，判卷只读标题 + AI 总结（手动生成）。
+import { createHash, randomUUID } from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import YAML from 'yaml';
 
+import * as markdown from '../shared/note_markdown.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
-import type { GradeCategory, Note, NoteInput, NoteSource } from '../shared/ipc_types.ts';
+import type { GradeCategory, Note, NoteInput, NoteList, NoteMeta, NoteSaved, NoteSource } from '../shared/ipc_types.ts';
 
-export const NOTES_FILENAME = 'notes.json';
+export const DEFAULT_DIRNAME = 'notes';
+// Which folder the developer chose; absent means the default one.
+export const LOCATION_FILENAME = 'notes_location.json';
 export const MAX_NOTES = 5000;
-const MAX_TITLE = 80;
-const MAX_BODY = 4000;
+export const MAX_SUMMARY = 300;
+const EXCERPT_LENGTH = 300;
 const MAX_TAGS = 8;
 const MAX_TAG = 20;
+const WATCH_DEBOUNCE_MS = 200;
 const CATEGORIES: (GradeCategory | null)[] = ['thinking', 'writing', 'style', null];
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
 export class NoteError extends Error {
   code: string;
@@ -37,15 +50,39 @@ const fail: (message: string, field: string) => never = (message, field) => {
   throw new NoteError(message, 'invalid_note', field);
 };
 
-// Free text from the renderer; newlines and tabs are the only control
-// characters a body may hold.
-const text = (value: unknown, field: string, max: number, { multiline = false, required = true } = {}): string => {
+const text = (value: unknown, field: string, max: number): string => {
   if (typeof value !== 'string') fail(`${field} must be text`, field);
   const trimmed = value.trim();
-  if (required && !trimmed) fail(`${field} is empty`, field);
+  if (!trimmed) fail(`${field} is empty`, field);
   if ([...trimmed].length > max) fail(`${field} is longer than ${max} characters`, field);
-  if (CONTROL_CHARS.test(multiline ? trimmed.replace(/[\n\t]/g, '') : trimmed)) fail(`${field} contains control characters`, field);
+  if (CONTROL_CHARS.test(trimmed)) fail(`${field} contains control characters`, field);
   return trimmed;
+};
+
+const title = (value: unknown): string => {
+  if (typeof value !== 'string') fail('title must be text', 'title');
+  const problem = markdown.titleProblem(value.trim());
+  if (problem) fail(problem, 'title');
+  return value.trim();
+};
+
+// Bodies are the developer's Markdown, any length; only stray control
+// characters are refused (newlines, tabs and carriage returns are fine).
+const body = (value: unknown): string => {
+  if (typeof value !== 'string') fail('body must be text', 'body');
+  if (CONTROL_CHARS.test(value)) fail('body contains control characters', 'body');
+  return value;
+};
+
+const category = (value: unknown): GradeCategory | null => {
+  if (!CATEGORIES.includes((value ?? null) as GradeCategory | null)) fail('Unknown category', 'category');
+  return (value ?? null) as GradeCategory | null;
+};
+
+const tags = (value: unknown): string[] => {
+  const list = value ?? [];
+  if (!Array.isArray(list) || list.length > MAX_TAGS) fail(`tags must be a list of at most ${MAX_TAGS}`, 'tags');
+  return [...new Set(list.map((tag, index) => text(typeof tag === 'string' ? tag.replace(/^#/, '') : tag, `tags[${index}]`, MAX_TAG)))];
 };
 
 const source = (value: unknown): NoteSource | null => {
@@ -65,103 +102,458 @@ const source = (value: unknown): NoteSource | null => {
   };
 };
 
-// Checks what the renderer sends; the id and times are the store's own.
+const summary = (value: unknown): string | null => (value === null ? null : text(value, 'summary', MAX_SUMMARY));
+
+// Checks a new note from the renderer; the id and times are the store's own.
 export const validateNote = (raw: unknown): NoteInput => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('A note must be an object', 'note');
   const input = raw as Record<string, unknown>;
-  if (!CATEGORIES.includes((input.category ?? null) as GradeCategory | null)) fail('Unknown category', 'category');
-  const tags = input.tags ?? [];
-  if (!Array.isArray(tags) || tags.length > MAX_TAGS) fail(`tags must be a list of at most ${MAX_TAGS}`, 'tags');
+  return { title: title(input.title), body: body(input.body ?? ''), category: category(input.category), tags: tags(input.tags), source: source(input.source) };
+};
+
+const digest = (content: string) => createHash('sha256').update(content).digest('hex').slice(0, 16);
+const fileName = (noteTitle: string) => `${noteTitle}.md`;
+
+// ========== Reading a file ==========
+
+type Parsed = { doc: YAML.Document | null; head: string; body: string; frontmatterError: boolean };
+
+const parseFile = (raw: string): Parsed => {
+  const match = FRONTMATTER.exec(raw);
+  if (!match) return { doc: null, head: '', body: raw, frontmatterError: false };
+  const doc = YAML.parseDocument(match[1]);
+  const valid = doc.errors.length === 0 && (doc.contents === null || YAML.isMap(doc.contents));
+  return { doc: valid ? doc : null, head: match[0], body: raw.slice(match[0].length), frontmatterError: !valid };
+};
+
+// Frontmatter written by hand or by other programs: anything unexpected is
+// left out of the note's fields (and left in the file).
+const loose = {
+  string: (value: unknown, max: number) => (typeof value === 'string' && value.trim() && [...value.trim()].length <= max ? value.trim() : null),
+  tags: (value: unknown): string[] => {
+    const list = typeof value === 'string' ? value.split(/[,\s]+/) : Array.isArray(value) ? value : [];
+    return [
+      ...new Set(
+        list
+          .filter((tag): tag is string => typeof tag === 'string')
+          .map((tag) => tag.replace(/^#/, '').trim())
+          .filter(Boolean),
+      ),
+    ];
+  },
+  source: (value: unknown): NoteSource | null => {
+    try {
+      return source(value);
+    } catch {
+      return null;
+    }
+  },
+};
+
+// head: the frontmatter block exactly as written, '' when there is none.
+type Entry = { meta: NoteMeta; body: string; doc: YAML.Document | null; head: string };
+
+const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }): Entry => {
+  const parsed = parseFile(raw);
+  const fields = (parsed.doc?.toJS() ?? {}) as Record<string, unknown>;
+  const tree = markdown.parseMarkdown(parsed.body);
+  const scan = markdown.scanBody(parsed.body, tree);
+  const links = [...new Map(scan.links.map((link) => [markdown.titleKey(link.target), link.target])).values()];
+  const excerpt = markdown.excerptOf(tree, id.slice(0, -'.md'.length));
+  const savedSummary = loose.string(fields.summary, MAX_SUMMARY * 2);
+  const created = typeof fields.created === 'string' && !Number.isNaN(Date.parse(fields.created)) ? new Date(fields.created) : stat.birthtime;
   return {
-    title: text(input.title, 'title', MAX_TITLE),
-    body: text(input.body, 'body', MAX_BODY, { multiline: true, required: false }),
-    category: (input.category ?? null) as GradeCategory | null,
-    tags: [...new Set(tags.map((tag, index) => text(tag, `tags[${index}]`, MAX_TAG)))],
-    source: source(input.source),
+    meta: {
+      id,
+      title: id.slice(0, -'.md'.length),
+      category: CATEGORIES.includes(fields.category as GradeCategory) ? (fields.category as GradeCategory) : null,
+      tags: loose.tags(fields.tags),
+      inlineTags: scan.tags,
+      source: loose.source(fields.source),
+      summary: savedSummary,
+      summaryStale: savedSummary !== null && fields.summaryFor !== digest(parsed.body),
+      links,
+      excerpt: [...excerpt].length > EXCERPT_LENGTH ? `${[...excerpt].slice(0, EXCERPT_LENGTH).join('')}…` : excerpt,
+      createdAt: created.toISOString(),
+      updatedAt: stat.mtime.toISOString(),
+      version: digest(raw),
+      frontmatterError: parsed.frontmatterError,
+    },
+    body: parsed.body,
+    doc: parsed.doc,
+    head: parsed.head,
   };
 };
 
-export class NoteStore {
-  #file: string;
-  #notes = new Map<string, Note>();
-  #writes: Promise<void> = Promise.resolve();
-  #now: () => Date;
+type Fields = { category: GradeCategory | null; tags: string[]; source?: NoteSource | null; summary?: string | null; created?: string };
 
-  constructor(configDir: string, { now = () => new Date() }: { now?: () => Date } = {}) {
-    this.#file = path.join(configDir, NOTES_FILENAME);
+// The file for a body and fields, keeping every other frontmatter field.
+const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): string => {
+  const next = doc ? doc.clone() : new YAML.Document({});
+  const put = (key: string, value: unknown) => {
+    if (value === null || value === undefined || (Array.isArray(value) && !value.length)) next.delete(key);
+    else next.set(key, value);
+  };
+  put('category', fields.category);
+  put('tags', fields.tags);
+  if (fields.source !== undefined) put('source', fields.source && Object.fromEntries(Object.entries(fields.source).filter(([, value]) => value !== null)));
+  if (fields.summary !== undefined) {
+    put('summary', fields.summary);
+    put('summaryFor', fields.summary === null ? null : digest(noteBody));
+  }
+  if (fields.created) put('created', fields.created);
+  const yaml = YAML.isMap(next.contents) && next.contents.items.length ? String(next) : '';
+  return yaml ? `---\n${yaml}---\n${noteBody}` : noteBody;
+};
+
+// ========== The store ==========
+
+export type NoteEditInput = {
+  title: string;
+  body: string;
+  category: GradeCategory | null;
+  tags: string[];
+  summary?: string | null;
+  baseVersion: string;
+  force?: boolean;
+  renameLinks?: boolean;
+};
+
+type StoreOptions = {
+  now?: () => Date;
+  // Moves a deleted note's file to the system trash; tests unlink instead.
+  trash?: (file: string) => Promise<void>;
+  watch?: boolean;
+};
+
+export class NoteStore {
+  #configDir: string;
+  #directory: string;
+  #custom = false;
+  // A chosen folder that could not be opened at startup.
+  #unavailable: string | null = null;
+  #entries = new Map<string, Entry>();
+  #truncated = false;
+  #revision = 0;
+  #writes: Promise<unknown> = Promise.resolve();
+  #watcher: fsSync.FSWatcher | null = null;
+  #pending = new Set<string>();
+  #rescanAll = false;
+  #timer: ReturnType<typeof setTimeout> | null = null;
+  #refreshing: Promise<void> = Promise.resolve();
+  #now: () => Date;
+  #trash: (file: string) => Promise<void>;
+  #watch: boolean;
+
+  constructor(configDir: string, { now = () => new Date(), trash = (file) => fs.unlink(file), watch = true }: StoreOptions = {}) {
+    this.#configDir = configDir;
+    this.#directory = path.join(configDir, DEFAULT_DIRNAME);
     this.#now = now;
+    this.#trash = trash;
+    this.#watch = watch;
   }
 
+  get directory() {
+    return this.#directory;
+  }
+
+  get revision() {
+    return this.#revision;
+  }
+
+  // Opens the folder chosen last time, or the default one when that folder
+  // is gone (the list then names it, so the notes do not just disappear).
   async load(): Promise<this> {
+    const chosen = await fs
+      .readFile(path.join(this.#configDir, LOCATION_FILENAME), 'utf8')
+      .then((raw) => (JSON.parse(raw) as { directory?: unknown }).directory)
+      .catch((error) => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[notes] notes_location.json could not be read', error);
+        return null;
+      });
+    if (typeof chosen !== 'string' || !path.isAbsolute(chosen)) return this.open(null);
     try {
-      const saved: unknown = JSON.parse(await fs.readFile(this.#file, 'utf8'));
-      for (const note of (Array.isArray(saved) ? saved : []) as Note[]) {
-        if (typeof note?.id === 'string' && typeof note.title === 'string') this.#notes.set(note.id, note);
-      }
+      return await this.open(chosen);
     } catch (error) {
-      // A missing file is a first start. A corrupt one is kept for the
-      // developer to recover rather than overwritten by the next save.
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return this;
-      if (error instanceof SyntaxError) {
-        const aside = `${this.#file}.corrupt-${this.#now().getTime()}`;
-        await fs.rename(this.#file, aside);
-        console.error(`[notes] notes.json could not be read; kept it as ${path.basename(aside)}`, error);
-        return this;
-      }
-      throw error;
+      console.error(`[notes] the chosen notes folder could not be opened: ${chosen}`, error);
+      this.#unavailable = chosen;
+      return this.open(null);
     }
+  }
+
+  // Switches folders and remembers the choice; files are not moved.
+  async setDirectory(directory: string | null): Promise<NoteList> {
+    await this.open(directory);
+    this.#unavailable = null;
+    const file = path.join(this.#configDir, LOCATION_FILENAME);
+    if (directory) await fs.writeFile(file, `${JSON.stringify({ directory: this.#directory }, null, 2)}\n`);
+    else await fs.rm(file, { force: true });
+    return this.list();
+  }
+
+  // Opens a folder: the default one (null) is created; a chosen one must
+  // already exist.
+  async open(directory: string | null = null): Promise<this> {
+    const target = directory ? path.resolve(directory) : path.join(this.#configDir, DEFAULT_DIRNAME);
+    if (directory) {
+      const stat = await fs.stat(target).catch(() => null);
+      if (!stat?.isDirectory()) throw new NoteError('The notes folder does not exist', 'notes_directory_invalid', 'directory');
+    } else {
+      await fs.mkdir(target, { recursive: true });
+    }
+    await this.flush();
+    this.close();
+    this.#directory = target;
+    this.#custom = Boolean(directory);
+    await this.#scan();
+    if (this.#watch) this.#startWatching();
+    console.debug(`[notes] open directory=${target} notes=${this.#entries.size} truncated=${this.#truncated}`);
     return this;
   }
 
-  flush(): Promise<void> {
-    return this.#writes;
+  close() {
+    this.#watcher?.close();
+    this.#watcher = null;
+    if (this.#timer) clearTimeout(this.#timer);
+    this.#timer = null;
   }
 
-  // Newest first.
-  list(): Note[] {
-    return [...this.#notes.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((note) => structuredClone(note));
+  async flush(): Promise<void> {
+    await this.#writes;
+    await this.#refreshing;
+  }
+
+  list(): NoteList {
+    const notes = [...this.#entries.values()].map((entry) => structuredClone(entry.meta)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return { revision: this.#revision, directory: this.#directory, custom: this.#custom, unavailable: this.#unavailable, truncated: this.#truncated, notes };
   }
 
   get(id: string): Note {
-    const note = this.#notes.get(id);
-    if (!note) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
-    return structuredClone(note);
+    const entry = this.#entries.get(id);
+    if (!entry) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
+    return { ...structuredClone(entry.meta), body: entry.body };
   }
 
-  async create(raw: unknown): Promise<Note> {
-    const input = validateNote(raw);
-    if (this.#notes.size >= MAX_NOTES) throw new NoteError(`At most ${MAX_NOTES} notes`, 'notes_full');
-    const at = this.#now().toISOString();
-    const note: Note = { id: randomUUID(), ...input, createdAt: at, updatedAt: at };
-    this.#notes.set(note.id, note);
-    await this.#persist();
-    return structuredClone(note);
+  // Ids of notes whose title, tags or body contain the query, any case.
+  search(query: string): string[] {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    return [...this.#entries.values()]
+      .filter((entry) => [entry.meta.title, ...entry.meta.tags, entry.body].some((part) => part.toLowerCase().includes(needle)))
+      .map((entry) => entry.meta.id);
   }
 
-  // Replaces the developer-editable fields; the source stays as recorded.
-  async update(id: string, raw: unknown): Promise<Note> {
-    const current = this.get(id);
-    const input = validateNote({ ...(raw as object), source: current.source });
-    const note: Note = { ...current, ...input, updatedAt: this.#now().toISOString() };
-    this.#notes.set(id, note);
-    await this.#persist();
-    return structuredClone(note);
-  }
-
-  async remove(id: string): Promise<void> {
-    this.get(id);
-    this.#notes.delete(id);
-    await this.#persist();
-  }
-
-  #persist(): Promise<void> {
-    const write = this.#writes.then(async () => {
-      await fs.mkdir(path.dirname(this.#file), { recursive: true });
-      const tmp = `${this.#file}.tmp`;
-      await fs.writeFile(tmp, `${JSON.stringify([...this.#notes.values()], null, 2)}\n`);
-      await fs.rename(tmp, this.#file);
+  // autoRename: a taken title gets " 2", " 3"… instead of being refused.
+  create(raw: unknown, { autoRename = false } = {}): Promise<NoteSaved> {
+    return this.#serial(async () => {
+      const input = validateNote(raw);
+      if (this.#entries.size >= MAX_NOTES) throw new NoteError(`At most ${MAX_NOTES} notes`, 'notes_full');
+      const noteTitle = autoRename ? this.#freeTitle(input.title) : input.title;
+      if (this.#taken(noteTitle)) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
+      const content = render(null, input.body, { ...input, created: this.#now().toISOString() });
+      const id = fileName(noteTitle);
+      await this.#writeFile(id, content, { exclusive: true });
+      await this.#reread(id);
+      console.debug(`[notes] create id=${id}`);
+      return { revision: this.#revision, note: this.get(id), relinked: 0 };
     });
-    this.#writes = write.catch(() => {});
-    return write;
+  }
+
+  // Saves the developer's edit; the source stays as recorded. A rename moves
+  // the file and, when asked, points [[old title]] in other notes at the new one.
+  update(id: string, raw: unknown): Promise<NoteSaved> {
+    return this.#serial(async () => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('An edit must be an object', 'note');
+      const input = raw as Record<string, unknown>;
+      if (typeof input.baseVersion !== 'string') fail('baseVersion is required', 'baseVersion');
+      const nextTitle = title(input.title);
+      const nextBody = body(input.body);
+      const fields: Fields = { category: category(input.category), tags: tags(input.tags) };
+      if (input.summary !== undefined) fields.summary = summary(input.summary);
+      const current = await this.#fresh(id);
+      if (current.meta.frontmatterError)
+        throw new NoteError('The frontmatter of this note is not valid YAML; fix it in another editor first', 'frontmatter_invalid');
+      if (current.meta.version !== input.baseVersion && input.force !== true)
+        throw new NoteError('The note changed on disk since it was opened', 'note_conflict');
+      const renamed = nextTitle !== current.meta.title;
+      // Only the case changes: on a case-insensitive disk that is the same file.
+      const caseOnly = renamed && markdown.titleKey(nextTitle) === markdown.titleKey(current.meta.title);
+      if (renamed && !caseOnly && this.#taken(nextTitle)) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
+      const content = render(current.doc, nextBody, fields);
+      const nextId = fileName(nextTitle);
+      if (renamed && !caseOnly) {
+        await this.#writeFile(nextId, content, { exclusive: true });
+        await fs.unlink(this.#path(id));
+      } else {
+        await this.#writeFile(id, content);
+        if (caseOnly) await fs.rename(this.#path(id), this.#path(nextId));
+      }
+      if (renamed) this.#entries.delete(id);
+      await this.#reread(nextId);
+      const relinked = renamed && input.renameLinks === true ? await this.#relink(current.meta.title, nextTitle, nextId) : 0;
+      console.debug(`[notes] update id=${id} next=${nextId} relinked=${relinked}`);
+      return { revision: this.#revision, note: this.get(nextId), relinked };
+    });
+  }
+
+  // Writes Tutor's (or the developer's) summary without touching the body.
+  setSummary(id: string, value: string, baseVersion: string): Promise<NoteSaved> {
+    return this.#serial(async () => {
+      const current = await this.#fresh(id);
+      if (current.meta.frontmatterError) throw new NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
+      if (current.meta.version !== baseVersion) throw new NoteError('The note changed on disk since it was opened', 'note_conflict');
+      const content = render(current.doc, current.body, { category: current.meta.category, tags: current.meta.tags, summary: summary(value) });
+      await this.#writeFile(id, content);
+      await this.#reread(id);
+      return { revision: this.#revision, note: this.get(id), relinked: 0 };
+    });
+  }
+
+  remove(id: string): Promise<void> {
+    return this.#serial(async () => {
+      this.get(id);
+      await this.#trash(this.#path(id));
+      this.#entries.delete(id);
+      this.#revision += 1;
+    });
+  }
+
+  #path(id: string) {
+    return path.join(this.#directory, id);
+  }
+
+  #taken(noteTitle: string) {
+    const key = markdown.titleKey(noteTitle);
+    return [...this.#entries.values()].some((entry) => markdown.titleKey(entry.meta.title) === key);
+  }
+
+  #freeTitle(base: string): string {
+    if (!this.#taken(base)) return base;
+    for (let index = 2; ; index += 1) {
+      const suffix = ` ${index}`;
+      const candidate = `${[...base]
+        .slice(0, markdown.MAX_TITLE - suffix.length)
+        .join('')
+        .trim()}${suffix}`;
+      if (!this.#taken(candidate)) return candidate;
+    }
+  }
+
+  // Store writes run one at a time, so a rename never races another save.
+  #serial<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.#writes.then(task);
+    this.#writes = run.catch(() => {});
+    return run;
+  }
+
+  // Through a hidden temp file in the same folder, so other programs never
+  // see half a note. exclusive: refuse when the file already exists.
+  async #writeFile(id: string, content: string, { exclusive = false } = {}) {
+    const target = this.#path(id);
+    if (exclusive && (await fs.stat(target).catch(() => null))) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
+    const tmp = path.join(this.#directory, `.${randomUUID()}.tmp`);
+    await fs.writeFile(tmp, content);
+    await fs.rename(tmp, target);
+  }
+
+  // The note as it is on disk now, for checks that must not trust the cache.
+  async #fresh(id: string): Promise<Entry> {
+    this.get(id);
+    await this.#reread(id);
+    const entry = this.#entries.get(id);
+    if (!entry) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
+    return entry;
+  }
+
+  // Rereads one file; returns whether anything the list shows changed.
+  async #reread(id: string): Promise<boolean> {
+    const file = this.#path(id);
+    const [raw, stat] = await Promise.all([fs.readFile(file, 'utf8').catch(() => null), fs.stat(file).catch(() => null)]);
+    const before = this.#entries.get(id);
+    if (raw === null || !stat?.isFile()) {
+      if (!before) return false;
+      this.#entries.delete(id);
+      this.#revision += 1;
+      return true;
+    }
+    if (!before && this.#entries.size >= MAX_NOTES) {
+      this.#truncated = true;
+      return false;
+    }
+    const entry = toEntry(id, raw, stat);
+    if (before && before.meta.version === entry.meta.version && before.meta.updatedAt === entry.meta.updatedAt) return false;
+    this.#entries.set(id, entry);
+    this.#revision += 1;
+    return true;
+  }
+
+  async #relink(from: string, to: string, skipId: string): Promise<number> {
+    const key = markdown.titleKey(from);
+    let count = 0;
+    for (const entry of [...this.#entries.values()]) {
+      if (entry.meta.id === skipId || entry.meta.frontmatterError || !entry.meta.links.some((link) => markdown.titleKey(link) === key)) continue;
+      const current = await this.#fresh(entry.meta.id);
+      const nextBody = markdown.renameLinks(current.body, from, to);
+      if (nextBody === current.body) continue;
+      // Only the body changes; the frontmatter is written back as it was.
+      await this.#writeFile(entry.meta.id, `${current.head}${nextBody}`);
+      await this.#reread(entry.meta.id);
+      count += 1;
+    }
+    return count;
+  }
+
+  // Every top-level .md file; past MAX_NOTES the newest are kept.
+  async #scan() {
+    const names = (await fs.readdir(this.#directory, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md') && !entry.name.startsWith('.'))
+      .map((entry) => entry.name);
+    const stats = await Promise.all(names.map(async (name) => ({ name, stat: await fs.stat(this.#path(name)).catch(() => null) })));
+    const kept = stats.filter((item) => item.stat).sort((a, b) => b.stat!.mtimeMs - a.stat!.mtimeMs);
+    this.#truncated = kept.length > MAX_NOTES;
+    this.#entries.clear();
+    // Reads in slices so a large vault does not open thousands of files at once.
+    const slice = 64;
+    const chosen = kept.slice(0, MAX_NOTES);
+    for (let start = 0; start < chosen.length; start += slice) {
+      const batch = await Promise.all(
+        chosen.slice(start, start + slice).map(async (item) => ({ item, raw: await fs.readFile(this.#path(item.name), 'utf8').catch(() => null) })),
+      );
+      for (const { item, raw } of batch) if (raw !== null) this.#entries.set(item.name, toEntry(item.name, raw, item.stat!));
+    }
+    this.#revision += 1;
+  }
+
+  #startWatching() {
+    try {
+      this.#watcher = fsSync.watch(this.#directory, (_event, name) => {
+        if (name && (name.startsWith('.') || !name.toLowerCase().endsWith('.md'))) return;
+        if (name) this.#pending.add(name);
+        else this.#rescanAll = true;
+        if (this.#timer) clearTimeout(this.#timer);
+        this.#timer = setTimeout(() => {
+          this.#timer = null;
+          this.#refreshing = this.#refreshing.then(() => this.#applyPending()).catch((error) => console.error('[notes] refresh failed', error));
+        }, WATCH_DEBOUNCE_MS);
+      });
+      this.#watcher.on('error', (error) => console.error('[notes] watcher failed', error));
+      // Watching never keeps the process alive on its own.
+      this.#watcher.unref();
+    } catch (error) {
+      console.error('[notes] cannot watch the notes folder', error);
+    }
+  }
+
+  async #applyPending() {
+    await this.#writes;
+    if (this.#rescanAll) {
+      this.#rescanAll = false;
+      this.#pending.clear();
+      await this.#scan();
+      return;
+    }
+    const names = [...this.#pending];
+    this.#pending.clear();
+    for (const name of names) await this.#reread(name);
   }
 }

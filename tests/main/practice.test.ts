@@ -62,7 +62,7 @@ test('reference patches are kept per package, with the id made safe for a file n
 
 test('grading reads notes on the changed files first, then categorized ones, at most ten', () => {
   const note = (id: string, overrides: object = {}) =>
-    ({ id, title: id, body: '', category: null, tags: [], source: null, createdAt: '', updatedAt: '', ...overrides }) as never;
+    ({ id, title: id, category: null, tags: [], source: null, summary: null, excerpt: `${id} 正文`, ...overrides }) as never;
   const notes = [
     note('plain'),
     note('style', { category: 'style' }),
@@ -75,6 +75,8 @@ test('grading reads notes on the changed files first, then categorized ones, at 
     picked.slice(0, 3).map((item) => item.title),
     ['file', 'style', 'thinking-0'],
   );
+  assert.equal(picked[0].summary, 'file 正文', 'a note without a summary stands in with its excerpt');
+  assert.equal(practice.notesForGrade([note('s', { category: 'style', summary: '总结' })], [])[0].summary, '总结');
   assert.equal(
     picked.some((item) => item.title === 'plain'),
     false,

@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted } from 'vue';
 
 import TopBar from './components/TopBar.vue';
 import SideBar from './components/SideBar.vue';
+import SidebarResizer from './components/SidebarResizer.vue';
 import QueueView from './views/QueueView.vue';
 import ExecutionView from './views/ExecutionView.vue';
 import RequirementsView from './views/RequirementsView.vue';
@@ -93,8 +94,12 @@ onBeforeUnmount(() => {
 
   <div class="window-shell">
     <TopBar />
-    <div class="app-grid" :class="{ 'sidebar-collapsed': app.sidebarCollapsed }">
-      <SideBar />
+    <!-- :style goes through the CSSOM, which the page CSP allows (unlike style attributes). -->
+    <div class="app-grid" :class="{ 'sidebar-collapsed': app.sidebarCollapsed }" :style="{ '--sidebar-width': `${app.sidebarWidth}px` }">
+      <div class="sidebar-slot">
+        <SideBar />
+        <SidebarResizer />
+      </div>
       <!-- Settings and the requirement center lay out their own columns edge to edge. -->
       <main class="main-content" :class="{ 'full-bleed': app.view === 'settings' || app.view === 'requirements' }">
         <!-- Keyed on the repository switch, so each view remounts and reloads its own state. -->

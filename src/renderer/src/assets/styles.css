@@ -69,17 +69,19 @@
   --sidebar-width: 236px;
   --sidebar-collapsed: 64px;
   --topbar-height: 56px;
-  /* Type scale, desktop sizes for Chinese UI text (13px body, as in Feishu
-   * and VS Code). Hierarchy below body comes from weight and colour.
-   * [人工决策-2026-10-07 17:24:33] 用户反馈中文字体太大：正文 13、辅助 12、小标题 14、面板标题 15、页面标题 24，取代原「不小于 14px」规则。 */
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 15px;
-  --text-xl: 17px;
-  --text-2xl: 20px;
-  --text-3xl: 22px;
-  --text-4xl: 24px;
+  /* Type scale, desktop sizes for Chinese UI text (12px body, as in macOS
+   * apps and Linear). Hierarchy below body comes from weight and colour.
+   * [人工决策-2026-10-24 20:01:56] 用户反馈全部字体偏大：整体小一号，辅助 11、正文 12、小标题 13、面板标题 14、页面标题 22，笔记正文 15；取代 2026-10-07 的「正文 13 / 辅助 12 / 小标题 14 / 面板标题 15 / 页面标题 24」。 */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 20px;
+  --text-4xl: 22px;
+  /* Long-form reading (note articles) stays a little larger than the UI. */
+  --text-read: 15px;
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -125,6 +127,29 @@
 html,
 body {
   min-height: 100%;
+}
+
+/* Scrollbars: a thin rounded thumb with no track, darker while hovered,
+ * like macOS overlay scrollbars. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  /* The transparent border insets the thumb: 4px wide in a 10px gutter. */
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 22%, transparent) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 38%, transparent) padding-box;
+}
+::-webkit-scrollbar-button {
+  display: none;
 }
 body {
   margin: 0;
@@ -212,6 +237,20 @@ code {
   background: var(--glass-bg-strong);
 }
 
+/* Panels docked to a window edge are divided by one hairline in the line
+ * colour: the glass's white border and top highlight would draw a second,
+ * white line beside it. */
+.full-screen .topbar {
+  padding-left: var(--space-5);
+}
+.topbar.glass,
+.sidebar.glass,
+.settings-nav.glass,
+.req-list-pane.glass {
+  border-color: var(--line-soft);
+  box-shadow: none;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .glass,
   .glass-strong {
@@ -236,13 +275,11 @@ code {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  /* Room for the window buttons (trafficLightPosition), gone in full screen. */
   padding: 0 var(--space-5) 0 88px;
   border-width: 0 0 1px;
   border-radius: 0;
   -webkit-app-region: drag;
-}
-.topbar.glass {
-  box-shadow: inset 0 -1px 0 var(--line-soft);
 }
 .brand-area {
   width: 176px;
@@ -437,6 +474,56 @@ code {
 .app-grid.sidebar-collapsed {
   --sidebar-current: var(--sidebar-collapsed);
 }
+/* Dragging follows the pointer at once; the eased transition is for toggles. */
+.resizing-sidebar .app-grid {
+  transition: none;
+}
+.resizing-sidebar,
+.resizing-sidebar * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+/* The slot sticks under the top bar; the sidebar fills it. */
+.sidebar-slot {
+  position: sticky;
+  top: var(--topbar-height);
+  align-self: start;
+  height: calc(100vh - var(--topbar-height));
+  min-width: 0;
+}
+.sidebar-slot > .sidebar {
+  position: static;
+  height: 100%;
+}
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  z-index: 6;
+  width: 6px;
+  cursor: col-resize;
+}
+/* A thin accent line shows where the edge is while hovering or dragging. */
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease) 0.1s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after,
+.sidebar-resizer:focus-visible::after {
+  opacity: 0.6;
+}
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
 .sidebar {
   position: sticky;
   top: var(--topbar-height);
@@ -446,7 +533,12 @@ code {
   padding: 22px 12px 16px;
   border-width: 0 1px 0 0;
   border-radius: 0;
+  /* Still scrolls on a short window, but never shows a scrollbar. */
   overflow: hidden auto;
+  scrollbar-width: none;
+}
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 /* Collapsed to an icon rail: labels leave the layout but stay readable to screen readers. */
 .sidebar.collapsed .nav-label,
@@ -488,9 +580,6 @@ code {
 }
 .sidebar.collapsed .team-list {
   margin-top: var(--space-6);
-}
-.sidebar.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
 }
 .side-section-label {
   color: var(--text-tertiary);
@@ -2501,9 +2590,6 @@ button.avatar:hover {
   border-width: 0 1px 0 0;
   border-radius: 0;
 }
-.settings-nav.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
-}
 .settings-nav-title {
   margin: 0 8px 14px;
   color: var(--text);
@@ -3421,9 +3507,6 @@ body.vibrancy .glass {
   padding: 22px 12px;
   border-width: 0 1px 0 0;
   border-radius: 0;
-}
-.req-list-pane.glass {
-  box-shadow: inset -1px 0 0 var(--line-soft);
 }
 .req-list-header {
   display: flex;

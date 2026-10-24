@@ -84,6 +84,15 @@ export const CHANNELS = {
   notesCreate: 'notes:create',
   notesUpdate: 'notes:update',
   notesDelete: 'notes:delete',
+  notesGet: 'notes:get',
+  notesSearch: 'notes:search',
+  notesSummarize: 'notes:summarize',
+  notesSetDirectory: 'notes:set-directory',
+  notesPickDirectory: 'notes:pick-directory',
+  notesReveal: 'notes:reveal',
+  notesOpenUrl: 'notes:open-url',
+  // main → renderer: the window entered or left full screen.
+  windowFullScreen: 'window:full-screen',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];

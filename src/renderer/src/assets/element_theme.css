@@ -27,10 +27,12 @@ html.dark {
   --el-overlay-color-lighter: rgba(10, 12, 20, 0.28);
   --el-border-radius-base: var(--radius-sm);
   --el-font-family: var(--font-sans);
-  --el-font-size-base: 14px;
-  /* Small controls keep the 14px floor too. */
-  --el-font-size-small: 14px;
-  --el-font-size-extra-small: 14px;
+  /* Controls follow the app's type scale (see styles.css). */
+  --el-font-size-base: var(--text-md);
+  --el-font-size-small: var(--text-sm);
+  --el-font-size-extra-small: var(--text-sm);
+  --el-font-size-medium: var(--text-md);
+  --el-font-size-large: var(--text-lg);
 }
 
 /* A checked box marks the state; its label keeps the text colour so it does
@@ -77,4 +79,125 @@ html.dark {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
+}
+
+/* ========== Select and dropdown menus ==========
+ * One look for every el-select and el-dropdown: a glass panel with a
+ * hairline edge (no white border or arrow), rounded options inset from the
+ * edge, accent tint on hover and on the chosen option. */
+.el-select__popper.el-popper,
+.el-dropdown__popper.el-popper {
+  --el-popper-border-radius: var(--radius-lg);
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--glass-bg-strong);
+  box-shadow:
+    0 0 0 0.5px var(--glass-edge),
+    0 12px 32px -10px rgba(15, 23, 42, 0.28);
+}
+.el-select__popper .el-popper__arrow,
+.el-dropdown__popper .el-popper__arrow {
+  display: none;
+}
+.el-select-dropdown,
+.el-dropdown-menu {
+  background: transparent;
+}
+.el-select-dropdown__list,
+.el-dropdown-menu {
+  padding: var(--space-1);
+}
+.el-select-dropdown__item,
+.el-dropdown-menu__item {
+  height: auto;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 1px 0;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 400;
+  line-height: 20px;
+}
+.el-select-dropdown__item.is-hovering,
+.el-select-dropdown__item:hover,
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-dropdown-menu__item:not(.is-disabled):focus {
+  background: var(--fill-hover);
+  color: var(--text);
+}
+.el-select-dropdown__item.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+/* Multiple selection marks the chosen options with a check, not bold text. */
+.el-select-dropdown.is-multiple .el-select-dropdown__item.is-selected::after {
+  right: var(--space-3);
+  background-color: var(--accent);
+}
+.el-select-dropdown__item.is-disabled,
+.el-dropdown-menu__item.is-disabled {
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.el-dropdown-menu__item--divided {
+  position: relative;
+  margin-top: var(--space-2);
+  border-top: 0;
+}
+/* The divider is one hairline inset from the edges, centred in the gap. */
+.el-dropdown-menu__item--divided::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 1px;
+  margin: 0;
+  background: var(--line-soft);
+}
+.el-select-dropdown__empty {
+  padding: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+/* The field itself: a quiet hairline box, accent ring when open or focused. */
+.el-select__wrapper {
+  min-height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--fill);
+  box-shadow: 0 0 0 1px var(--line-soft) inset;
+  transition:
+    box-shadow 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.el-select__wrapper:hover {
+  background: var(--fill-hover);
+  box-shadow: 0 0 0 1px var(--line-soft) inset;
+}
+.el-select__wrapper.is-focused {
+  box-shadow:
+    0 0 0 1px var(--accent) inset,
+    0 0 0 3px var(--accent-soft);
+}
+.el-select__placeholder.is-transparent {
+  color: var(--text-tertiary);
+}
+.el-select__caret {
+  color: var(--text-tertiary);
+}
+.el-select .el-tag {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.el-select .el-tag__close {
+  color: var(--accent-strong);
 }

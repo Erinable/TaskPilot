@@ -50,6 +50,13 @@ test('renderer never renders markup from strings', () => {
   }
 });
 
+// KaTeX builds formulas as DOM nodes; trusted mode would let \\href and \\html… through.
+test('note formulas render with KaTeX untrusted', () => {
+  const source = read('src/renderer/src/components/notes/NoteMath.vue');
+  assert.match(source, /trust: false/);
+  assert.doesNotMatch(source, /renderToString|trust: true/);
+});
+
 test('main-process source never contains CommonJS markers', () => {
   // electron-vite injects a CommonJS shim after the last import whenever the
   // bundle mentions these, and a match inside a string literal breaks the build.
