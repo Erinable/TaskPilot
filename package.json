@@ -5,7 +5,9 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
+    "prestart": "bash scripts/check_electron.sh",
     "start": "electron-vite preview",
+    "predev": "bash scripts/check_electron.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "electron-vite build && electron-builder --mac",
