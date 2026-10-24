@@ -42,7 +42,9 @@ const runStatus: StatusRunner = (command, args, envPath) =>
       if (error && typeof error.code !== 'number') return resolve(null);
       resolve({ code: error ? (error.code as number) : 0, stdout });
     });
-    // Status commands never need input; an open stdin could hang one.
+    // Status commands never need input; an open stdin could hang one. A CLI
+    // that exits first makes the close fail with EPIPE, which is harmless.
+    child.stdin?.on('error', () => {});
     child.stdin?.end();
   });
 

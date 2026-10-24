@@ -58,6 +58,9 @@ const runGit = (root: string, args: string[], { index, input }: { index?: string
         resolve({ code, stdout, stderr: stderr.toString('utf8').slice(0, 64 * 1024) });
       },
     );
+    // git may exit before reading all of stdin (a patch it rejects early);
+    // the write then fails with EPIPE, and the exit code already says why.
+    child.stdin?.on('error', () => {});
     child.stdin?.end(input ?? '');
   });
 
