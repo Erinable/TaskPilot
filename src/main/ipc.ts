@@ -2561,6 +2561,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     tutorFailures.clear();
   };
 
+  // Waits for every queued store write, including the activity appends
+  // that are not awaited where they are recorded.
+  const flushStores = () => Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush()]);
+
   const repositoryList = async (): Promise<ipc.RepositoryList> => {
     const current = repositories.current?.id ?? null;
     const entries = repositories.list();
@@ -2590,7 +2594,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // work package store loads, or saved progress is dropped as unknown ids.
   const openRepository = async (id: string) => {
     await cancelAll();
-    await Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush()]);
+    await flushStores();
     await repositories.open(id);
     const dir = repositories.dataDir();
     setConfig(await repositories.loadConfig());
@@ -2653,6 +2657,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   return {
     // Cancels running agents and waits for their final writes.
-    shutdown: cancelAll,
+    // On quit: nothing may still be writing once this resolves.
+    shutdown: async () => {
+      await cancelAll();
+      await flushStores();
+    },
   };
 };
