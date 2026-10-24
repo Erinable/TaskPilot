@@ -26,7 +26,7 @@ test('check_electron passes when the binary path.txt names exists', async () => 
 });
 
 test('check_electron explains a missing binary and a missing package', async () => {
-  for (const files of [{ 'index.js': '' }, { 'path.txt': 'Electron.app/Contents/MacOS/Electron' }]) {
+  for (const files of [{ 'index.js': '' }, { 'path.txt': 'Electron.app/Contents/MacOS/Electron' }] as Record<string, string>[]) {
     const result = await fakeRepo(files);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /npm rebuild electron/);
