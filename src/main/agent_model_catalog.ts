@@ -109,13 +109,16 @@ export const catalogFromNative = (native: NativeCliConfig, scope: agentRuntime.C
   issues: [...native.issues],
 });
 
+// separateUser: Coding Agent runs as the dedicated OS user, so its models come
+// from that account's config. In sandbox mode it runs the developer's own CLI
+// and reads the developer's config, like analysis.
 export const readModelCatalog = async (
   cli: agentRuntime.CliId,
   scope: agentRuntime.CliModelScope,
-  options: NativeConfigOptions = {},
+  { separateUser = false, ...options }: NativeConfigOptions & { separateUser?: boolean } = {},
 ): Promise<agentRuntime.CliModelCatalog> => {
   const source =
-    scope === 'coding' && !options.home && !options.readObject
+    scope === 'coding' && separateUser && !options.home && !options.readObject
       ? { ...options, home: CODING_HOME, environment: {}, readObject: codingModelConfigReader(cli) }
       : options;
   const native = await loadNativeConfig(cli, source);
