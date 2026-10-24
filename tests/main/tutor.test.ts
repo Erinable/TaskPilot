@@ -33,7 +33,7 @@ test('a saved answer is dropped once the step is reworded, and survives a reload
 
 test('validateGrade keeps comments, drops locations outside the submission, and refuses bad output', async () => {
   const { validateGrade } = await import('../../src/main/agents/tutor.ts');
-  const comment = { category: 'thinking', file: 'a.ts', line: 2, observation: '先写了实现再写测试。', betterWay: '先写一个会失败的测试。' };
+  const comment = { category: 'thinking', file: 'a.ts', line: 2, observation: '先写了实现再写测试。', betterWay: '先写一个会失败的测试。', repeated: false };
   const report = validateGrade(
     { summary: '不错', strengths: ['命名清楚'], comments: [comment, { ...comment, file: 'other.ts' }, { ...comment, line: 0 }] },
     { changedPaths: ['a.ts'] },

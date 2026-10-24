@@ -105,6 +105,12 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       ),
       create: vi.fn((_id: string, _message: string, files: string[]) => ok<ipc.CommitResult>({ commit: 'c0ffee1234', files })),
     },
+    notes: {
+      list: vi.fn(() => ok<ipc.Note[]>([])),
+      create: vi.fn((input: ipc.NoteInput) => ok<ipc.Note>({ ...input, id: 'note-1', createdAt: '', updatedAt: '' })),
+      update: vi.fn(),
+      remove: vi.fn(() => ok(true)),
+    },
     practice: {
       reference: vi.fn(() => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n')),
       grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),

@@ -59,3 +59,25 @@ test('reference patches are kept per package, with the id made safe for a file n
   assert.equal(practice.referencePath('/data', 'req-1-wp1'), '/data/references/req-1-wp1.patch');
   assert.equal(practice.referencePath('/data', '../x'), '/data/references/..%2Fx.patch');
 });
+
+test('grading reads notes on the changed files first, then categorized ones, at most ten', () => {
+  const note = (id: string, overrides: object = {}) =>
+    ({ id, title: id, body: '', category: null, tags: [], source: null, createdAt: '', updatedAt: '', ...overrides }) as never;
+  const notes = [
+    note('plain'),
+    note('style', { category: 'style' }),
+    note('file', { source: { file: 'a.ts' } }),
+    ...Array.from({ length: 12 }, (_unused, index) => note(`thinking-${index}`, { category: 'thinking' })),
+  ];
+  const picked = practice.notesForGrade(notes, ['a.ts']);
+  assert.equal(picked.length, practice.MAX_GRADE_NOTES);
+  assert.deepEqual(
+    picked.slice(0, 3).map((item) => item.title),
+    ['file', 'style', 'thinking-0'],
+  );
+  assert.equal(
+    picked.some((item) => item.title === 'plain'),
+    false,
+    'an uncategorized note elsewhere is not relevant',
+  );
+});

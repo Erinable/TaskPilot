@@ -3,7 +3,7 @@
 // ready (its content stays locked until the first submission), Tutor's
 // grading of the submission, and the reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
-import { computed, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
@@ -11,11 +11,19 @@ import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import { useNotesStore } from '@/stores/notes.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ task: ipc.TaskView }>();
 
 const execution = useExecutionStore();
+const notes = useNotesStore();
+// Comments already saved while this page is open, so the button says so.
+const saved = ref(new Set<ipc.GradeComment>());
+
+const save = async (comment: ipc.GradeComment) => {
+  if (await notes.saveComment(props.task, comment)) saved.value = new Set([...saved.value, comment]);
+};
 
 type PracticeView = { text: string; tone: '' | 'success' | 'danger' };
 
@@ -121,11 +129,18 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
             <button v-if="comment.file" class="link-button practice-location" type="button" @click="openWorkspaceFile(comment.file, comment.line)">
               {{ comment.line ? `${comment.file}:${comment.line}` : comment.file }}
             </button>
-            <p>{{ comment.observation }}</p>
+            <p>
+              <span v-if="comment.repeated" class="tag practice-repeated" data-repeated>又出现了</span>
+              {{ comment.observation }}
+            </p>
             <p class="practice-better">
               <strong>下次可以：</strong>
               {{ comment.betterWay }}
             </p>
+            <button class="link-button practice-save" type="button" data-action="save-note" :disabled="saved.has(comment)" @click="save(comment)">
+              <AppIcon :name="saved.has(comment) ? 'check' : 'plus'" />
+              {{ saved.has(comment) ? '已存为笔记' : '存为笔记' }}
+            </button>
           </article>
         </div>
       </template>
@@ -195,6 +210,15 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 }
 .practice-better {
   color: var(--text-secondary);
+}
+.practice-repeated {
+  margin-right: var(--space-1);
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+.practice-save {
+  align-self: flex-start;
+  font-size: var(--text-sm);
 }
 .practice-reference {
   margin-top: var(--space-3);
