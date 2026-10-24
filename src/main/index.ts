@@ -15,6 +15,7 @@ import { ActivityLog } from './activity_log.ts';
 import { RepositoryRegistry } from './repositories.ts';
 import { TutorStore } from './tutor_store.ts';
 import { NoteStore } from './note_store.ts';
+import { CHANNELS } from '../shared/ipc_channels.ts';
 
 // Matches --canvas in styles.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -74,6 +75,12 @@ const createWindow = (appearance: Appearance) => {
   if (vibrant) vibrantWindows.add(window);
   nativeTheme.on('updated', syncBackground);
   window.on('closed', () => nativeTheme.off('updated', syncBackground));
+
+  // Full screen hides the traffic lights, so the top bar can use their space.
+  const sendFullScreen = () => window.webContents.send(CHANNELS.windowFullScreen, window.isFullScreen());
+  window.on('enter-full-screen', sendFullScreen);
+  window.on('leave-full-screen', sendFullScreen);
+  window.webContents.on('did-finish-load', sendFullScreen);
 
   if (env.rendererUrl) window.loadURL(env.rendererUrl);
   else window.loadFile(path.join(import.meta.dirname, '..', 'renderer', 'index.html'));

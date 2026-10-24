@@ -10,7 +10,9 @@ import type { PropType, VNode, VNodeArrayChildren } from 'vue';
 import type { ElementContent, RootContent as HastContent } from 'hast';
 import type { Nodes, Root } from 'mdast';
 
+import NoteChart from '@/components/notes/NoteChart.vue';
 import NoteMath from '@/components/notes/NoteMath.vue';
+import { isChartLanguage } from '@/lib/note_charts.ts';
 import * as markdown from '@shared/note_markdown.ts';
 
 const lowlight = createLowlight(common);
@@ -88,10 +90,31 @@ export default defineComponent({
 
     const children = (node: Nodes): VNodeArrayChildren => ('children' in node ? node.children.map((child) => render(child)) : []);
 
+    // A paragraph right after a chart that starts with 图 N / Figure N is its
+    // caption, as in a journal: the two render as one figure.
+    const CAPTION = /^(图|Fig\.?|Figure)\s*\d+/;
+    const isCaption = (node: Nodes | undefined) => node?.type === 'paragraph' && CAPTION.test(markdown.plainText(node).trim());
+    const blocks = (nodes: Nodes[]): VNodeArrayChildren => {
+      const out: VNodeArrayChildren = [];
+      for (let index = 0; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        if (node.type === 'code' && isChartLanguage(node.lang)) {
+          const caption = isCaption(nodes[index + 1]) ? nodes[(index += 1)] : null;
+          out.push(
+            h('figure', { class: 'note-figure' }, [
+              h(NoteChart, { lang: node.lang, source: node.value }),
+              caption && 'children' in caption ? h('figcaption', children(caption)) : null,
+            ]),
+          );
+        } else out.push(render(node));
+      }
+      return out;
+    };
+
     const render = (node: Nodes): VNode | string | VNodeArrayChildren => {
       switch (node.type) {
         case 'root':
-          return children(node);
+          return blocks(node.children);
         case 'paragraph':
           return h('p', children(node));
         case 'heading':

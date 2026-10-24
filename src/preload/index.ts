@@ -17,6 +17,10 @@ if (!timeZoneArg) throw new Error('The main process did not pass the business ti
 const api = {
   // IANA name; day boundaries and displayed times follow it.
   businessTimeZone: timeZoneArg.slice(TIME_ZONE_ARG.length),
+  // Calls back with whether the window is full screen, now and on each change.
+  onFullScreen: (listener: (fullScreen: boolean) => void) => {
+    ipcRenderer.on(CHANNELS.windowFullScreen, (_event, fullScreen: unknown) => listener(fullScreen === true));
+  },
   listTasks: () => invoke<ipc.TaskView[]>(CHANNELS.listTasks),
   getTask: (id: string) => invoke<ipc.TaskView>(CHANNELS.getTask, id),
 

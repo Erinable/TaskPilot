@@ -27,10 +27,12 @@ html.dark {
   --el-overlay-color-lighter: rgba(10, 12, 20, 0.28);
   --el-border-radius-base: var(--radius-sm);
   --el-font-family: var(--font-sans);
-  --el-font-size-base: 14px;
-  /* Small controls keep the 14px floor too. */
-  --el-font-size-small: 14px;
-  --el-font-size-extra-small: 14px;
+  /* Controls follow the app's type scale (see styles.css). */
+  --el-font-size-base: var(--text-md);
+  --el-font-size-small: var(--text-sm);
+  --el-font-size-extra-small: var(--text-sm);
+  --el-font-size-medium: var(--text-md);
+  --el-font-size-large: var(--text-lg);
 }
 
 /* A checked box marks the state; its label keeps the text colour so it does

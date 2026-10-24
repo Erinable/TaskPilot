@@ -69,17 +69,19 @@
   --sidebar-width: 236px;
   --sidebar-collapsed: 64px;
   --topbar-height: 56px;
-  /* Type scale, desktop sizes for Chinese UI text (13px body, as in Feishu
-   * and VS Code). Hierarchy below body comes from weight and colour.
-   * [人工决策-2026-10-07 17:24:33] 用户反馈中文字体太大：正文 13、辅助 12、小标题 14、面板标题 15、页面标题 24，取代原「不小于 14px」规则。 */
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 15px;
-  --text-xl: 17px;
-  --text-2xl: 20px;
-  --text-3xl: 22px;
-  --text-4xl: 24px;
+  /* Type scale, desktop sizes for Chinese UI text (12px body, as in macOS
+   * apps and Linear). Hierarchy below body comes from weight and colour.
+   * [人工决策-2026-10-24 20:01:56] 用户反馈全部字体偏大：整体小一号，辅助 11、正文 12、小标题 13、面板标题 14、页面标题 22，笔记正文 15；取代 2026-10-07 的「正文 13 / 辅助 12 / 小标题 14 / 面板标题 15 / 页面标题 24」。 */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 20px;
+  --text-4xl: 22px;
+  /* Long-form reading (note articles) stays a little larger than the UI. */
+  --text-read: 15px;
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -215,6 +217,9 @@ code {
 /* Panels docked to a window edge are divided by one hairline in the line
  * colour: the glass's white border and top highlight would draw a second,
  * white line beside it. */
+.full-screen .topbar {
+  padding-left: var(--space-5);
+}
 .topbar.glass,
 .sidebar.glass,
 .settings-nav.glass,
@@ -247,6 +252,7 @@ code {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  /* Room for the window buttons (trafficLightPosition), gone in full screen. */
   padding: 0 var(--space-5) 0 88px;
   border-width: 0 0 1px;
   border-radius: 0;
@@ -444,6 +450,56 @@ code {
 }
 .app-grid.sidebar-collapsed {
   --sidebar-current: var(--sidebar-collapsed);
+}
+/* Dragging follows the pointer at once; the eased transition is for toggles. */
+.resizing-sidebar .app-grid {
+  transition: none;
+}
+.resizing-sidebar,
+.resizing-sidebar * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+/* The slot sticks under the top bar; the sidebar fills it. */
+.sidebar-slot {
+  position: sticky;
+  top: var(--topbar-height);
+  align-self: start;
+  height: calc(100vh - var(--topbar-height));
+  min-width: 0;
+}
+.sidebar-slot > .sidebar {
+  position: static;
+  height: 100%;
+}
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  z-index: 6;
+  width: 6px;
+  cursor: col-resize;
+}
+/* A thin accent line shows where the edge is while hovering or dragging. */
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease) 0.1s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after,
+.sidebar-resizer:focus-visible::after {
+  opacity: 0.6;
+}
+.sidebar-resizer:focus-visible {
+  outline: none;
 }
 .sidebar {
   position: sticky;

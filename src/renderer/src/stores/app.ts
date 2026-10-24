@@ -3,11 +3,13 @@ import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
+import * as layout from '@/lib/sidebar_layout.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes';
 
 export const SIDEBAR_STORAGE_KEY = 'taskpilot.sidebar.collapsed';
+export const SIDEBAR_WIDTH_STORAGE_KEY = 'taskpilot.sidebar.width';
 
 export const useAppStore = defineStore('app', () => {
   // ========== Navigation ==========
@@ -38,6 +40,36 @@ export const useAppStore = defineStore('app', () => {
   } catch {
     // Keep the default.
   }
+
+  // Dragged by its edge; the width is stored per machine like the collapse.
+  const sidebarWidth = ref(layout.DEFAULT_SIDEBAR_WIDTH);
+  try {
+    sidebarWidth.value = layout.storedSidebarWidth(globalThis.localStorage?.getItem(SIDEBAR_WIDTH_STORAGE_KEY) ?? null);
+  } catch {
+    // Keep the default.
+  }
+
+  const saveSidebarLayout = () => {
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value));
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth.value));
+    } catch (error) {
+      console.error('[app] sidebar state not saved', error);
+    }
+  };
+
+  // While dragging: a width under the collapse threshold folds the sidebar
+  // to its icon rail; pulling it back out opens it again.
+  const resizeSidebar = (requested: number) => {
+    const next = layout.dragSidebar(requested);
+    sidebarCollapsed.value = next.collapsed;
+    if (next.width !== null) sidebarWidth.value = next.width;
+  };
+  const resetSidebarWidth = () => {
+    sidebarCollapsed.value = false;
+    sidebarWidth.value = layout.DEFAULT_SIDEBAR_WIDTH;
+    saveSidebarLayout();
+  };
 
   const toggleSidebar = () => {
     sidebarCollapsed.value = !sidebarCollapsed.value;
@@ -110,6 +142,10 @@ export const useAppStore = defineStore('app', () => {
     navigate,
     // Layout
     sidebarCollapsed,
+    sidebarWidth,
+    resizeSidebar,
+    resetSidebarWidth,
+    saveSidebarLayout,
     toggleSidebar,
     // Preferences
     preferences,

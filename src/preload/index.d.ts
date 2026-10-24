@@ -1,6 +1,7 @@
 import type * as ipc from '../shared/ipc_types.ts';
 declare const api: {
   businessTimeZone: string;
+  onFullScreen: (listener: (fullScreen: boolean) => void) => void;
   listTasks: () => Promise<ipc.IpcResult<ipc.TaskView[]>>;
   getTask: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
   transition: (id: string, name: ipc.HumanTransition, options?: ipc.TransitionOptions) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;

@@ -91,6 +91,8 @@ export const CHANNELS = {
   notesPickDirectory: 'notes:pick-directory',
   notesReveal: 'notes:reveal',
   notesOpenUrl: 'notes:open-url',
+  // main → renderer: the window entered or left full screen.
+  windowFullScreen: 'window:full-screen',
 } as const;
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS];
