@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import AcceptancePanel from '@/components/execution/AcceptancePanel.vue';
+import ClaimDialog from '@/components/execution/ClaimDialog.vue';
 import CommitPanel from '@/components/execution/CommitPanel.vue';
 import DeviationDialog from '@/components/execution/DeviationDialog.vue';
 import DeviationPanel from '@/components/execution/DeviationPanel.vue';
@@ -16,6 +17,7 @@ import DependencyList from '@/components/queue/DependencyList.vue';
 import DifficultyChip from '@/components/DifficultyChip.vue';
 import TermHint from '@/components/TermHint.vue';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
+import { modeLabel } from '@/lib/execution_mode.ts';
 import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useCodingStore } from '@/stores/coding.ts';
@@ -41,8 +43,10 @@ const advice = computed(() => (task.value ? nextStep(task.value) : null));
 const leading = computed(() => actions.value.find((action) => action.name === advice.value?.action) ?? null);
 const others = computed(() => actions.value.filter((action) => action !== leading.value));
 const elapsed = computed(() => elapsedSince(advice.value?.since, now.value));
+// A practice package is the developer's exercise: no Coding Agent panel.
+const practising = computed(() => task.value?.mode === 'practice');
 // While a package is being worked on, the Coding Agent leads the page.
-const codingFirst = computed(() => task.value?.status === 'in_progress');
+const codingFirst = computed(() => task.value?.status === 'in_progress' && !practising.value);
 
 const back = () => {
   app
@@ -88,6 +92,10 @@ onBeforeUnmount(() => execution.close());
             <span>{{ task.estimate }}</span>
           </span>
           <DifficultyChip :difficulty="task.difficulty" />
+          <span v-if="task.claimedAt" class="meta-chip" data-mode-chip>
+            <AppIcon :name="practising ? 'flask' : 'sparkle'" />
+            <span>{{ modeLabel(task.mode) }}</span>
+          </span>
           <span class="meta-chip">
             <AppIcon name="commit" />
             <TermHint v-if="task.baseline" term="baseline">基线 {{ task.baseline.slice(0, 8) }}</TermHint>
@@ -166,13 +174,14 @@ onBeforeUnmount(() => execution.close());
         </div>
         <div class="exec-column">
           <ScopePanel :task="task" />
-          <CodingPanel v-if="!codingFirst && task.codingRun" :task="task" />
+          <CodingPanel v-if="!codingFirst && !practising && task.codingRun" :task="task" />
           <VerifyPanel :task="task" />
           <DiffPanel :task="task" />
         </div>
       </div>
 
       <DeviationDialog :task="task" />
+      <ClaimDialog :task="task" />
     </template>
   </div>
 </template>

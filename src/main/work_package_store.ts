@@ -13,6 +13,7 @@ import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from
 import type { CheckKind } from './workspace.ts';
 
 import type { CodingRun } from '../shared/coding_types.ts';
+import type { ExecutionMode } from '../shared/ipc_types.ts';
 export const STATE_FILENAME = 'work-packages.json';
 
 // Why an agent run failed.
@@ -138,6 +139,8 @@ export interface ReplanUndo {
   completedSteps: number[];
   baselineChecks: BaselineChecks | null;
   review: Review | null;
+  // Absent on undo records saved before modes existed.
+  mode?: ExecutionMode | null;
 }
 
 // Runtime state of one work package.
@@ -153,6 +156,9 @@ export interface WorkPackageState {
   adjudication: Adjudication | null;
   replanUndo: ReplanUndo | null;
   codingRun: CodingRun | null;
+  // Who writes the code, chosen at claim. Null before a claim, after a
+  // release or replan, and on packages claimed before modes existed.
+  mode: ExecutionMode | null;
   // When the package reached done, for estimate-vs-actual; null before.
   completedAt: string | null;
   // Dependencies the developer chose to skip; they no longer block claiming.
@@ -199,6 +205,7 @@ const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState =>
   adjudication: null, // Architect's latest run on a deviation
   replanUndo: null,
   codingRun: null,
+  mode: null,
   completedAt: null,
   waivedDependencies: [],
 });
@@ -369,7 +376,7 @@ export class WorkPackageStore {
     id: string,
     name: TransitionName,
     actor?: Actor | null,
-    { baseline, deviation }: { baseline?: string | null; deviation?: DeviationInput | null } = {},
+    { baseline, deviation, mode }: { baseline?: string | null; deviation?: DeviationInput | null; mode?: ExecutionMode | null } = {},
   ): Promise<WorkPackageState> {
     const entry = this.get(id);
     const next = status.apply(entry.status, name, actor);
@@ -382,6 +389,7 @@ export class WorkPackageStore {
       entry.baseline = baseline;
       entry.claimedAt = new Date().toISOString();
       entry.baselineChecks = null;
+      entry.mode = mode ?? null;
       // Claiming accepts the replanned package; the old plan is gone.
       entry.replanUndo = null;
     }
@@ -391,6 +399,7 @@ export class WorkPackageStore {
       entry.completedSteps = [];
       entry.review = null;
       entry.baselineChecks = null;
+      entry.mode = null;
     }
     if (name === 'report_deviation') {
       if (!deviation?.note?.trim()) {
@@ -421,6 +430,7 @@ export class WorkPackageStore {
       entry.completedSteps = undo.completedSteps;
       entry.baselineChecks = undo.baselineChecks;
       entry.review = undo.review;
+      entry.mode = undo.mode ?? null;
       entry.replanUndo = null;
     }
     if (name === 'accepted' || name === 'acceptance_rejected') {
@@ -593,6 +603,7 @@ export class WorkPackageStore {
         completedSteps: entry.completedSteps,
         baselineChecks: entry.baselineChecks,
         review: entry.review,
+        mode: entry.mode,
       };
       entry.revision = {
         version: (entry.revision?.version ?? 0) + 1,
@@ -608,6 +619,7 @@ export class WorkPackageStore {
       entry.completedSteps = [];
       entry.baselineChecks = null;
       entry.review = null;
+      entry.mode = null;
     }
     entry.adjudication = {
       ...entry.adjudication,
