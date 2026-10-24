@@ -2,6 +2,7 @@
 import { computed, nextTick } from 'vue';
 
 import AppIcon from './AppIcon.vue';
+import ProjectList from './ProjectList.vue';
 import { useAppStore } from '@/stores/app.ts';
 import type { ViewName } from '@/stores/app.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
@@ -89,6 +90,7 @@ const team = computed(() =>
         <span class="nav-label">发布</span>
       </button>
     </nav>
+    <ProjectList />
     <div class="side-section-label team-label">AI 团队</div>
     <div class="team-list">
       <!-- Members, activity and cost are tabs of one page. -->

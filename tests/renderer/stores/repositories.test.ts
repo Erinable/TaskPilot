@@ -23,6 +23,7 @@ const repo = (id: string, overrides: Partial<ipc.Repository> = {}): ipc.Reposito
   lastOpenedAt: '',
   current: false,
   missing: false,
+  counts: null,
   ...overrides,
 });
 
@@ -120,7 +121,7 @@ describe('repositories store', () => {
     expect(store.current?.id).toBe('a');
   });
 
-  test('adding picks a folder and opens it; a dismissed picker does nothing', async () => {
+  test('adding the first repository picks a folder and opens it; a dismissed picker does nothing', async () => {
     const store = useRepositoriesStore();
     expect(await store.add()).toBe(true);
     expect(api.repositories.add).toHaveBeenCalledWith('/work/c', true);
@@ -129,6 +130,22 @@ describe('repositories store', () => {
     api.workspace.pickRoot.mockResolvedValueOnce({ ok: true, data: null });
     expect(await store.add()).toBe(false);
     expect(api.repositories.add).toHaveBeenCalledTimes(1);
+  });
+
+  test('adding another repository lists it and keeps the open one, cancelling nothing', async () => {
+    busy = [{ kind: 'review', label: '邮箱登录' }];
+    api.repositories.add.mockImplementationOnce((root: string) => ok({ current: 'a', repositories: [...listOf('a').repositories, repo('c', { root })] }));
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const before = store.generation;
+    expect(await store.add()).toBe(true);
+    expect(api.repositories.add).toHaveBeenCalledWith('/work/c', false);
+    expect(store.current?.id).toBe('a');
+    expect(store.repositories.map((entry) => entry.id)).toEqual(['a', 'b', 'c']);
+    expect(store.generation).toBe(before);
+    expect(api.repositories.busy).not.toHaveBeenCalled();
+    expect(feedback.confirmAction).not.toHaveBeenCalled();
+    expect(feedback.showToast).toHaveBeenCalledWith('已添加 c，在侧栏「项目」里点它就能切换。');
   });
 
   test('relocating needs no confirmation and keeps the repository open', async () => {

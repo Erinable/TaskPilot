@@ -1065,6 +1065,22 @@ test('repositories:add registers nothing for a rejected root', async () => {
   assert.deepEqual((await call(CHANNELS.repositoriesList)).data, { current: null, repositories: [] });
 });
 
+test('repositories: adding without opening keeps the open repository, and the list counts work in each', async () => {
+  const h = await harness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  const other = await gitRepo();
+  const added = await h.call(CHANNELS.repositoriesAdd, other, false);
+  assert.equal(added.ok, true);
+  const open = added.data.repositories.find((entry) => entry.current);
+  assert.equal(await fs.realpath(open.root), await fs.realpath(h.root));
+  assert.equal((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'in_progress', 'nothing was reloaded');
+  // The open repository counts from memory: the sample packages, one claimed.
+  assert.equal(open.counts.active, 1);
+  assert.equal(open.counts.pending, SAMPLE_TASKS.filter((task) => task.status === 'pending').length - 1);
+  // The new one has no saved data yet.
+  assert.deepEqual(added.data.repositories.find((entry) => !entry.current).counts, { pending: 0, active: 0, accepting: 0 });
+});
+
 test('repositories:add normalizes a subdirectory to the repository root', async () => {
   // git reports diff paths from the top level, so a subdirectory root would
   // make every file scope miss.
