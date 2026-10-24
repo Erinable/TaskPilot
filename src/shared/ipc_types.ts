@@ -526,8 +526,18 @@ export type Requirement = {
   updatedAt: string;
 };
 
-// Whether the Claude Code CLI is on the command PATH.
-export type AgentStatus = { available: boolean; command: string | null };
+// Whether a CLI has credentials, checked offline. `unknown`: the CLI has no
+// offline check and no credential file was found; it may still work.
+export type CliSignIn = { state: 'signed_in' | 'signed_out' | 'unknown'; source: string | null };
+
+// The analysis CLI (Product Lead and Architect) and the coding CLI: installed
+// and usable, and signed in. Sign-in is null when the CLI is not installed.
+export type AgentStatus = {
+  available: boolean;
+  command: string | null;
+  signIn: CliSignIn | null;
+  coding: { cli: CliId; installed: boolean; signIn: CliSignIn | null };
+};
 
 // ========== activity ==========
 

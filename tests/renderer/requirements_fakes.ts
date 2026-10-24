@@ -59,7 +59,7 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
     release: {
       get: vi.fn(() => ok<ipc.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false })),
     },
-    agent: { status: vi.fn(() => ok<ipc.AgentStatus>({ available: true, command: 'claude' })) },
+    agent: { status: vi.fn(() => ok<ipc.AgentStatus>(agentStatus())) },
     workspace: {
       info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)),
       get: vi.fn(() => ok({ lines: { test: '' } } as ipc.WorkspaceView)),
@@ -70,3 +70,12 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
   Object.assign(window, { taskpilot: api });
   return api;
 };
+
+// agent:status for a ready machine: analysis CLI signed in, coding CLI installed and signed in.
+export const agentStatus = (overrides: Partial<ipc.AgentStatus> = {}): ipc.AgentStatus => ({
+  available: true,
+  command: 'claude',
+  signIn: { state: 'signed_in', source: 'claude auth status' },
+  coding: { cli: 'codex', installed: true, signIn: { state: 'signed_in', source: 'codex login status' } },
+  ...overrides,
+});

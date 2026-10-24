@@ -49,6 +49,7 @@ import { businessDay, computeAgentCosts, computeMetrics, recentByAgent, RETENTIO
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from './engineering_map.ts';
 import { openWorkspaceFile } from './open_file.ts';
+import * as cliSignIn from './cli_sign_in.ts';
 import { indexEntries, looksSecret, readTracked } from './repo_reader.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as ipc from '../shared/ipc_types.ts';
@@ -226,6 +227,8 @@ export type IpcDeps = {
   // Replaces claude-cli.runStructured (tests).
   runAgent?: RunAgent;
   probeAgent?: typeof cliRunner.probeCli;
+  // Offline sign-in check for a CLI; injectable so tests never run a real CLI.
+  checkSignIn?: typeof cliSignIn.checkSignIn;
   modelCatalog?: typeof readModelCatalog;
   // Called after generated packages are added to the queue.
   onPackagesPublished?: (definitions: TaskDefinition[]) => void;
@@ -273,6 +276,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     requirements = null,
     runAgent,
     probeAgent = cliRunner.probeCli,
+    checkSignIn = cliSignIn.checkSignIn,
     modelCatalog = readModelCatalog,
     onPackagesPublished,
     activity = null,
@@ -1616,8 +1620,26 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (): Promise<ipc.AgentStatus> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await commandPath();
-      const [product, architect] = await Promise.all([probeAgent(settings['product-lead'], envPath), probeAgent(settings.architect, envPath)]);
-      return { available: product.available && architect.available, command: product.available ? product.command : null };
+      const codingCli = settings['coding-agent'].cli;
+      const [product, architect, codingInstalled] = await Promise.all([
+        probeAgent(settings['product-lead'], envPath),
+        probeAgent(settings.architect, envPath),
+        workspace.resolveExecutable(codingCli, { envPath }).then(Boolean),
+      ]);
+      const available = product.available && architect.available;
+      // One check per CLI, shared when analysis and coding use the same one.
+      const signIns = new Map<string, Promise<ipc.CliSignIn>>();
+      const signInOf = (cli: typeof codingCli) => signIns.get(cli) ?? signIns.set(cli, checkSignIn(cli, { envPath })).get(cli)!;
+      const [analysisSignIn, codingSignIn] = await Promise.all([
+        available ? signInOf(settings['product-lead'].cli) : null,
+        codingInstalled ? signInOf(codingCli) : null,
+      ]);
+      return {
+        available,
+        command: product.available ? product.command : null,
+        signIn: analysisSignIn,
+        coding: { cli: codingCli, installed: codingInstalled, signIn: codingSignIn },
+      };
     }),
   );
   ipcMain.handle(
