@@ -111,8 +111,8 @@ const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJ
   const answers = clarify.questions.map((question) => answerFor(testCase, question));
 
   const questions = clarify.questions.map((text, i) => ({ text, answer: answers[i] }));
-  const p = await call(productLead.planPrompt({ ...base, questions }), productLead.PLAN_SCHEMA);
-  const plan = productLead.validatePlan(p.output);
+  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true }), productLead.PLAN_SCHEMA);
+  const plan = productLead.validatePlan(p.output, { linkTests: true });
 
   const run: CaseRun = {
     clarify,

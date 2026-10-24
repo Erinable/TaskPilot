@@ -552,6 +552,25 @@ test('requirements: create clarifies, plan publishes into the work queue', async
   assert.equal(claimed.data.status, 'in_progress');
 });
 
+test('requirements: without a submit test check, planning links no tests', async () => {
+  const { call, agentCalls, setCommands } = await harness({ agent: fakeAgent() });
+  const plan = async () => {
+    const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+    await settle(call, data.id);
+    await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+    return settle(call, data.id);
+  };
+  setCommands({ lint: { command: 'npm', args: ['run', 'lint'] } });
+  const unlinked = await plan();
+  assert.match(agentCalls.filter((c) => stepOf(c.schema) === 'plan').at(-1)!.prompt, /leave `test` out of every criterion/);
+  // The fake plan links 'login succeeds'; it is dropped, not left to go missing.
+  assert.deepEqual(unlinked.plan.packages[0].acceptance, [{ text: '成功返回 token' }]);
+
+  setCommands({ test: EDGE_TESTS_PASS });
+  const linked = await plan();
+  assert.deepEqual(linked.plan.packages[0].acceptance, [{ text: '成功返回 token', test: 'login succeeds' }]);
+});
+
 test('requirements: an invalid agent plan fails the run instead of reaching the queue', async () => {
   const evil = { ...PLAN_OUTPUT, packages: [{ ...PLAN_OUTPUT.packages[0], fileScope: ['../../.ssh/id_rsa'] }] };
   const { call } = await harness({ agent: fakeAgent({ plan: evil }) });

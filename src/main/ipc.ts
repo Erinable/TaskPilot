@@ -1492,8 +1492,15 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const rid = requireString(id, 'id');
       // Answers submitted with the plan request are saved first, in one step.
       if (answers !== undefined) await requireRequirements().setAnswers(rid, answers);
-      return startRun(rid, 'planning', productLead.planPrompt, productLead.PLAN_SCHEMA, productLead.validatePlan, (r, output, cost) =>
-        requireRequirements().finishPlan(r, output, cost),
+      // Linked tests are checked against the submit-stage test run only.
+      const linkTests = getConfig().checks?.test?.stage === 'submit';
+      return startRun(
+        rid,
+        'planning',
+        (input) => productLead.planPrompt({ ...input, linkTests }),
+        productLead.PLAN_SCHEMA,
+        (raw) => productLead.validatePlan(raw, { linkTests }),
+        (r, output, cost) => requireRequirements().finishPlan(r, output, cost),
       );
     }),
   );
