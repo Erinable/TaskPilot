@@ -1,6 +1,5 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 
 import * as model from '../../src/renderer/src/lib/review_model.ts';
 import { describeErrorInfo } from '../../src/renderer/src/lib/errors.ts';
@@ -62,13 +61,29 @@ test('attentionText() covers every attention code evidence.ts emits', () => {
 });
 
 test('every evidence reason has wording', () => {
-  const source = fs.readFileSync(new URL('../../src/main/evidence.ts', import.meta.url), 'utf8');
-  const reasons = [...source.matchAll(/done\('(?:fail|unverifiable|pass)', '([a-z_]+)'/g)].map((m) => m[1]);
-  assert.ok(reasons.length >= 6);
-  assert.ok(evidence.evaluate);
-  for (const reason of reasons) assert.ok(model.REASONS[reason], `missing wording for ${reason}`);
-  for (const problem of ['missing', 'stale', 'not_a_file', 'outside', 'too_large', 'invalid']) {
-    assert.ok(model.REASONS[`report_${problem}`], `missing wording for report_${problem}`);
+  const check: evidence.EvidenceCheck = { kind: 'test', stage: 'submit', blocking: true };
+  const run = { results: [], exitCode: 0, timedOut: false };
+  const failed = { ...run, exitCode: 1, results: [{ name: 'test', passed: false, skipped: false, todo: false }] };
+  const crashed = { ...run, exitCode: 1 };
+  const timedOut = { ...crashed, timedOut: true };
+  const cases: [Parameters<typeof evidence.evaluate>[1], evidence.BaselineRecord | null, string][] = [
+    [failed, null, 'no_baseline'],
+    [failed, evidence.baselineRecord(run, 'npm test'), 'new_failures'],
+    [failed, evidence.baselineRecord(failed, 'npm test'), 'preexisting_only'],
+    [crashed, null, 'crashed'],
+    [crashed, evidence.baselineRecord(crashed, 'npm test'), 'broken_at_baseline'],
+    [timedOut, null, 'timed_out'],
+    [timedOut, evidence.baselineRecord(timedOut, 'npm test'), 'timed_out_at_baseline'],
+    [{ error: { code: 'command_missing' } }, null, 'command_missing'],
+  ];
+  for (const problem of ['missing', 'stale', 'not_a_file', 'outside', 'too_large', 'invalid'] as const) {
+    cases.push([{ ...run, report: { format: 'junit', trusted: false, problem } }, null, `report_${problem}`]);
+  }
+  for (const [outcome, baseline, reason] of cases) {
+    const item = evidence.evaluate(check, outcome, baseline);
+    assert.equal(item.reason, reason);
+    assert.ok(model.REASONS[reason], `missing wording for ${reason}`);
+    assert.ok(model.evidenceLine(item).text.includes(model.REASONS[reason]), `missing rendered wording for ${reason}`);
   }
 });
 

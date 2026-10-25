@@ -69,15 +69,12 @@ test('save() does not write a rejected value', async () => {
   await assert.rejects(() => fs.access(path.join(dir, preferences.PREFERENCES_FILENAME)));
 });
 
-test('initials() picks one CJK character or up to two Latin initials', () => {
-  assert.equal(preferences.initials(''), '');
-  assert.equal(preferences.initials('   '), '');
-  assert.equal(preferences.initials('ada'), 'A');
-  assert.equal(preferences.initials('Ada Lovelace'), 'AL');
-  assert.equal(preferences.initials('ada byron lovelace'), 'AL');
-  assert.equal(preferences.initials('han.guoliang'), 'HG');
-  assert.equal(preferences.initials('韩国梁'), '韩');
-  assert.equal(preferences.initials('😀 smile'), '😀S');
+test('separator-only names survive save and reload with empty avatar initials', async () => {
+  const dir = await tempDir();
+  await preferences.save(dir, valid({ profile: { displayName: '---' } }));
+  const loaded = await preferences.load(dir);
+  assert.equal(loaded.profile.displayName, '---');
+  assert.equal(preferences.toView(loaded).profile.initials, '');
 });
 
 test('toView() adds initials without changing the stored shape', () => {

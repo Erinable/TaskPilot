@@ -50,6 +50,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/**/*.{ts,vue}'],
+    rules: { complexity: ['warn', { max: 20, variant: 'classic' }] },
+  },
+  {
     // The config module, scripts and tests may read the environment directly.
     files: ['src/main/env.ts', 'evals/**', 'tests/**', '*.config.ts'],
     rules: { 'no-restricted-properties': 'off' },

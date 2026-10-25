@@ -4,12 +4,14 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
 import type { LooseJson } from './loose_json.ts';
 import * as agentRuntime from '../shared/agent_runtime.ts';
+import * as avatar from '../shared/avatar.ts';
 
 export const PREFERENCES_FILENAME = 'preferences.json';
 export const THEMES = ['system', 'light', 'dark'] as const;
-export const AVATAR_COLORS = ['sunset', 'ocean', 'violet', 'forest', 'graphite'] as const;
+export const AVATAR_COLORS = avatar.AVATAR_COLORS;
 export const PATH_SOURCES = ['inherit', 'login-shell'] as const;
 export const MAX_NAME_LENGTH = 40;
 // C0/C1 controls, plus bidi overrides that could visually reorder a name.
@@ -18,7 +20,7 @@ export const MAX_NAME_LENGTH = 40;
 const DISALLOWED_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/;
 
 export type Theme = (typeof THEMES)[number];
-export type AvatarColor = (typeof AVATAR_COLORS)[number];
+export type AvatarColor = avatar.AvatarColor;
 // Where verification commands get their PATH.
 export type PathSource = (typeof PATH_SOURCES)[number];
 
@@ -207,15 +209,7 @@ export const validate = (input: unknown): Preferences => {
 };
 
 // Avatar text: one CJK character, or up to two Latin initials.
-export const initials = (name: string | null | undefined): string => {
-  const trimmed = (name ?? '').trim();
-  if (!trimmed) return '';
-  const words = trimmed.split(/[\s._-]+/).filter(Boolean);
-  const first = [...words[0]][0];
-  if (/[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(first)) return first;
-  const last = words.length > 1 ? [...words[words.length - 1]][0] : '';
-  return (first + last).toUpperCase();
-};
+export const initials = avatar.initialsOf;
 
 // Preferences as the renderer sees them, with derived display values.
 export const toView = (preferences: Preferences): PreferencesView => ({

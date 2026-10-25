@@ -72,10 +72,25 @@ export const readNativeObject = async (file: string, format: 'json' | 'toml'): P
   return parseNativeContent(content, file, format);
 };
 
+const nativeConfigRoot = (cli: CliId, home: string, environment: NodeJS.ProcessEnv, useEnvironmentPaths: boolean) => {
+  const roots = {
+    pi: ['PI_CODING_AGENT_DIR', '.pi/agent'],
+    opencode: ['OPENCODE_CONFIG_DIR', '.config/opencode'],
+    grok: ['GROK_HOME', '.grok'],
+    codex: ['CODEX_HOME', '.codex'],
+    claude: ['CLAUDE_CONFIG_DIR', '.claude'],
+  } as const;
+  const [variable, relative] = roots[cli];
+  if (useEnvironmentPaths && environment[variable]) return environment[variable]!;
+  if (cli === 'opencode' && useEnvironmentPaths && environment.XDG_CONFIG_HOME) return path.join(environment.XDG_CONFIG_HOME, 'opencode');
+  return path.join(home, relative);
+};
+
 export const loadNativeConfig = async (cli: CliId, options: NativeConfigOptions = {}): Promise<NativeCliConfig> => {
   const environment = options.environment ?? processEnv();
   const home = options.home ?? environment.HOME ?? os.homedir();
   const useEnvironmentPaths = !options.home;
+  const root = nativeConfigRoot(cli, home, environment, useEnvironmentPaths);
   const files: string[] = [];
   const issues: string[] = [];
   const load = async (file: string, format: 'json' | 'toml') => {
@@ -89,7 +104,6 @@ export const loadNativeConfig = async (cli: CliId, options: NativeConfigOptions 
   let defaultModel: string | null = null;
   let defaultThinking: ThinkingLevel | null = null;
   if (cli === 'pi') {
-    const root = useEnvironmentPaths && environment.PI_CODING_AGENT_DIR ? environment.PI_CODING_AGENT_DIR : path.join(home, '.pi', 'agent');
     data = await load(path.join(root, 'models.json'), 'json');
     auxiliary = await load(path.join(root, 'settings.json'), 'json');
     const provider = text(auxiliary.defaultProvider);
@@ -97,15 +111,12 @@ export const loadNativeConfig = async (cli: CliId, options: NativeConfigOptions 
     defaultModel = provider && model ? `${provider}/${model}` : model;
     defaultThinking = thinking(auxiliary.defaultThinkingLevel ?? auxiliary.thinkingLevel);
   } else if (cli === 'opencode') {
-    const configHome = useEnvironmentPaths && environment.XDG_CONFIG_HOME ? environment.XDG_CONFIG_HOME : path.join(home, '.config');
-    const root = useEnvironmentPaths && environment.OPENCODE_CONFIG_DIR ? environment.OPENCODE_CONFIG_DIR : path.join(configHome, 'opencode');
     const json = await load(path.join(root, 'opencode.json'), 'json');
     const jsonc = await load(path.join(root, 'opencode.jsonc'), 'json');
     data = mergeConfig(json, jsonc);
     if (useEnvironmentPaths && environment.OPENCODE_CONFIG) data = mergeConfig(data, await load(environment.OPENCODE_CONFIG, 'json'));
     defaultModel = text(data.model);
   } else if (cli === 'grok') {
-    const root = useEnvironmentPaths && environment.GROK_HOME ? environment.GROK_HOME : path.join(home, '.grok');
     const managed = await load(path.join(root, 'managed_config.toml'), 'toml');
     const local = await load(path.join(root, 'config.toml'), 'toml');
     data = mergeConfig(managed, local);
@@ -113,13 +124,11 @@ export const loadNativeConfig = async (cli: CliId, options: NativeConfigOptions 
     defaultModel = text(models.default);
     defaultThinking = thinking(models.default_reasoning_effort);
   } else if (cli === 'codex') {
-    const root = useEnvironmentPaths && environment.CODEX_HOME ? environment.CODEX_HOME : path.join(home, '.codex');
     data = await load(path.join(root, 'config.toml'), 'toml');
     auxiliary = await load(path.join(root, 'models_cache.json'), 'json');
     defaultModel = text(data.model);
     defaultThinking = thinking(data.model_reasoning_effort);
   } else {
-    const root = useEnvironmentPaths && environment.CLAUDE_CONFIG_DIR ? environment.CLAUDE_CONFIG_DIR : path.join(home, '.claude');
     data = await load(path.join(root, 'settings.json'), 'json');
     const env = isObject(data.env) ? data.env : {};
     defaultModel = text(environment.ANTHROPIC_MODEL) ?? text(data.model) ?? text(env.ANTHROPIC_MODEL);

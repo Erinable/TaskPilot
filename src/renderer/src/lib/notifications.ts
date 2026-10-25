@@ -23,6 +23,19 @@ const cancelled = (error: ipc.ErrorInfo) => error.code === 'agent_cancelled';
 
 const DECISION_TEXT: Record<ipc.DeviationResolution['decision'], string> = { dismiss: 'Architect 已裁决（驳回）', replan: 'Architect 已裁决（重新规划）' };
 
+type TaskNotification = (key: string, text: string, at: string | null, tone: NotificationItem['tone']) => NotificationItem;
+
+const failedAgentNotification = (
+  run: ipc.TaskView['review'] | ipc.TaskView['adjudication'],
+  kind: string,
+  label: string,
+  item: TaskNotification,
+): NotificationItem[] => {
+  if (run?.status !== 'failed' || cancelled(run.error)) return [];
+  const at = run.finishedAt ?? run.startedAt;
+  return [item(`${kind}-failed:${at}`, `${label}：${describeErrorInfo(run.error)}`, at, 'danger')];
+};
+
 const fromTask = (task: ipc.TaskView): NotificationItem[] => {
   const target: NotificationTarget = { kind: 'package', id: task.id };
   const item = (key: string, text: string, at: string | null, tone: NotificationItem['tone']): NotificationItem => ({
@@ -41,26 +54,8 @@ const fromTask = (task: ipc.TaskView): NotificationItem[] => {
   if (task.status === 'done') return items;
   if (review?.status === 'rejected' && task.status === 'in_progress')
     items.push(item(`review:${review.finishedAt}`, 'QA 退回了修改', review.finishedAt, 'danger'));
-  if (review?.status === 'failed' && !cancelled(review.error)) {
-    items.push(
-      item(
-        `review-failed:${review.finishedAt ?? review.startedAt}`,
-        `QA 审查没有完成：${describeErrorInfo(review.error)}`,
-        review.finishedAt ?? review.startedAt,
-        'danger',
-      ),
-    );
-  }
-  if (adjudication?.status === 'failed' && !cancelled(adjudication.error)) {
-    items.push(
-      item(
-        `adjudication-failed:${adjudication.finishedAt ?? adjudication.startedAt}`,
-        `裁决没有完成：${describeErrorInfo(adjudication.error)}`,
-        adjudication.finishedAt ?? adjudication.startedAt,
-        'danger',
-      ),
-    );
-  }
+  items.push(...failedAgentNotification(review, 'review', 'QA 审查没有完成', item));
+  items.push(...failedAgentNotification(adjudication, 'adjudication', '裁决没有完成', item));
   const resolution = task.deviations[task.deviations.length - 1]?.resolution;
   if (adjudication?.status === 'done' && resolution && !resolution.reverted) {
     const at = adjudication.finishedAt ?? resolution.decidedAt;

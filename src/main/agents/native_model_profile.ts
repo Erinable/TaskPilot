@@ -246,6 +246,18 @@ const GROK_ENV_AUTH: Record<string, true> = {
   DEEPINFRA_API_KEY: true,
 };
 
+const grokAuthEnvironment = (data: Record<string, unknown>): NodeJS.ProcessEnv => {
+  const environment: NodeJS.ProcessEnv = {};
+  const source = processEnv();
+  for (const table of [object(data.models), object(data.model), object(data.model_providers)])
+    for (const value of Object.values(table)) {
+      const envKey = object(value).env_key;
+      const envKeys = typeof envKey === 'string' ? [envKey] : Array.isArray(envKey) ? envKey : [];
+      for (const key of envKeys) if (typeof key === 'string' && Object.hasOwn(GROK_ENV_AUTH, key) && source[key]) environment[key] = source[key];
+    }
+  return environment;
+};
+
 export const loadNativeModelProfile = async (cli: CliId, privateRoot: string): Promise<NativeModelProfile> => {
   const native = await loadNativeConfig(cli);
   if (native.issues.length) throw new Error(native.issues.join('; '));
@@ -265,16 +277,7 @@ export const loadNativeModelProfile = async (cli: CliId, privateRoot: string): P
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.writeFile(path.join(directory, 'config.toml'), stringifyToml(grokProjection(data)), { mode: 0o600 });
   }
-  const grokEnvironment: NodeJS.ProcessEnv = {};
-  if (cli === 'grok') {
-    const source = processEnv();
-    for (const table of [object(data.models), object(data.model), object(data.model_providers)])
-      for (const value of Object.values(table)) {
-        const envKey = object(value).env_key;
-        const envKeys = typeof envKey === 'string' ? [envKey] : Array.isArray(envKey) ? envKey : [];
-        for (const key of envKeys) if (typeof key === 'string' && Object.hasOwn(GROK_ENV_AUTH, key) && source[key]) grokEnvironment[key] = source[key];
-      }
-  }
+  const grokEnvironment = cli === 'grok' ? grokAuthEnvironment(data) : {};
   const claude = cli === 'claude' ? object(data.env) : {};
   const claudeEnv: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(claude)) if (CLAUDE_INFERENCE_ENV[key] && typeof value === 'string') claudeEnv[key] = value;

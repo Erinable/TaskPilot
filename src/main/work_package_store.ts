@@ -244,6 +244,59 @@ export const humanTransitions = (entry: WorkPackageState): TransitionName[] =>
 // The task fields the store needs: its id and seed status.
 type StoreTask = Pick<TaskDefinition, 'id' | 'status'>;
 
+const recoverCodingRun = (state: WorkPackageState) => {
+  if (state.codingRun && !state.codingRun.cli) state.codingRun = { ...state.codingRun, cli: 'codex', model: '', thinking: 'default' };
+  if (state.codingRun && state.codingRun.attempt === undefined)
+    state.codingRun = { ...state.codingRun, attempt: 1, trigger: 'human', feedback: null, halt: null, rounds: [] };
+  if (state.codingRun?.status === 'verifying') {
+    state.codingRun = {
+      ...state.codingRun,
+      status: 'applied',
+      halt: 'stopped',
+      error: { code: 'coding_interrupted', message: 'Checks were interrupted when the app closed' },
+    };
+  }
+  if (state.codingRun && ['preparing', 'running', 'checking', 'applying'].includes(state.codingRun.status)) {
+    state.codingRun = {
+      ...state.codingRun,
+      status: 'failed',
+      finishedAt: null,
+      error: { code: 'coding_interrupted', message: 'Coding Agent was interrupted when the app closed' },
+    };
+  }
+};
+
+const recoverInterruptedAgents = (state: WorkPackageState) => {
+  if (state.review?.status === 'running') {
+    state.review = {
+      ...state.review,
+      status: 'failed',
+      finishedAt: null,
+      error: { code: 'agent_interrupted', message: 'The review was interrupted when the app closed' },
+    };
+  }
+  if (state.baselineChecks?.status === 'measuring')
+    state.baselineChecks = { ...state.baselineChecks, status: 'unavailable', reason: 'interrupted', finishedAt: null };
+  if (state.adjudication?.status === 'running') {
+    state.adjudication = {
+      ...state.adjudication,
+      status: 'failed',
+      finishedAt: null,
+      error: { code: 'agent_interrupted', message: 'The adjudication was interrupted when the app closed' },
+    };
+  }
+  if (state.referenceRun?.status === 'running') {
+    state.referenceRun = {
+      ...state.referenceRun,
+      status: 'failed',
+      error: { code: 'coding_interrupted', message: 'The reference run was interrupted when the app closed' },
+    };
+  }
+  if (state.grade && ['waiting', 'running'].includes(state.grade.status)) {
+    state.grade = { ...state.grade, status: 'failed', error: { code: 'agent_interrupted', message: 'Grading was interrupted when the app closed' } };
+  }
+};
+
 export class WorkPackageStore {
   #file: string;
   #state = new Map<string, WorkPackageState>();
@@ -273,64 +326,8 @@ export class WorkPackageStore {
         // the definitions are the authority on what a package is.
         if (!this.#state.has(id) || !status.isStatus(entry?.status)) continue;
         const merged = { ...this.#state.get(id), ...entry } as WorkPackageState;
-        // A review still running when the app closed will never finish.
-        if (merged.review?.status === 'running') {
-          merged.review = {
-            ...merged.review,
-            status: 'failed',
-            finishedAt: null,
-            error: { code: 'agent_interrupted', message: 'The review was interrupted when the app closed' },
-          };
-        }
-        // Nor will a baseline measurement.
-        if (merged.baselineChecks?.status === 'measuring') {
-          merged.baselineChecks = { ...merged.baselineChecks, status: 'unavailable', reason: 'interrupted', finishedAt: null };
-        }
-        // Nor an adjudication; the package stays in deviation for a retry.
-        if (merged.adjudication?.status === 'running') {
-          merged.adjudication = {
-            ...merged.adjudication,
-            status: 'failed',
-            finishedAt: null,
-            error: { code: 'agent_interrupted', message: 'The adjudication was interrupted when the app closed' },
-          };
-        }
-        // Runs saved before per-role runtimes always used the Codex default.
-        if (merged.codingRun && !merged.codingRun.cli) {
-          merged.codingRun = { ...merged.codingRun, cli: 'codex', model: '', thinking: 'default' };
-        }
-        // Runs saved before the automatic loop were a single developer round.
-        if (merged.codingRun && merged.codingRun.attempt === undefined) {
-          merged.codingRun = { ...merged.codingRun, attempt: 1, trigger: 'human', feedback: null, halt: null, rounds: [] };
-        }
-        // The patch is already in the working tree; only the checks were cut short.
-        if (merged.codingRun?.status === 'verifying') {
-          merged.codingRun = {
-            ...merged.codingRun,
-            status: 'applied',
-            halt: 'stopped',
-            error: { code: 'coding_interrupted', message: 'Checks were interrupted when the app closed' },
-          };
-        }
-        // Nor a reference run or a grading; grading can be asked again.
-        if (merged.referenceRun?.status === 'running') {
-          merged.referenceRun = {
-            ...merged.referenceRun,
-            status: 'failed',
-            error: { code: 'coding_interrupted', message: 'The reference run was interrupted when the app closed' },
-          };
-        }
-        if (merged.grade && ['waiting', 'running'].includes(merged.grade.status)) {
-          merged.grade = { ...merged.grade, status: 'failed', error: { code: 'agent_interrupted', message: 'Grading was interrupted when the app closed' } };
-        }
-        if (merged.codingRun && ['preparing', 'running', 'checking', 'applying'].includes(merged.codingRun.status)) {
-          merged.codingRun = {
-            ...merged.codingRun,
-            status: 'failed',
-            finishedAt: null,
-            error: { code: 'coding_interrupted', message: 'Coding Agent was interrupted when the app closed' },
-          };
-        }
+        recoverInterruptedAgents(merged);
+        recoverCodingRun(merged);
         this.#state.set(id, merged);
       }
     } catch (error) {

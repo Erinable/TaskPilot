@@ -27,6 +27,14 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 const rate = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null);
 const lastSegment = (model: string) => model.toLowerCase().split('/').pop() as string;
 
+const modelPrice = (model: Record<string, unknown>): Price | null => {
+  const cost = isObject(model.cost) ? model.cost : null;
+  const input = rate(cost?.input);
+  const output = rate(cost?.output);
+  if (!cost || !((input ?? 0) > 0 || (output ?? 0) > 0)) return null;
+  return [input ?? 0, output ?? 0, rate(cost.cache_read), rate(cost.cache_write)];
+};
+
 // The compact table from models.dev's api.json; `providers` limits `exact`.
 export const buildTable = (raw: unknown, providers: ReadonlySet<string>, syncedAt: string): PriceTable => {
   const table: PriceTable = { syncedAt, exact: {}, firstParty: {} };
@@ -35,11 +43,8 @@ export const buildTable = (raw: unknown, providers: ReadonlySet<string>, syncedA
     const models = isObject(entry) && isObject(entry.models) ? entry.models : {};
     for (const [id, model] of Object.entries(models)) {
       if (!isObject(model)) continue;
-      const cost = isObject(model.cost) ? model.cost : null;
-      const input = rate(cost?.input);
-      const output = rate(cost?.output);
-      if (!cost || !((input ?? 0) > 0 || (output ?? 0) > 0)) continue;
-      const price: Price = [input ?? 0, output ?? 0, rate(cost.cache_read), rate(cost.cache_write)];
+      const price = modelPrice(model);
+      if (!price) continue;
       const providerKey = provider.toLowerCase();
       if (providers.has(providerKey)) (table.exact[providerKey] ??= {})[id.toLowerCase()] = price;
       const canonical = typeof model.canonical_model_id === 'string' ? model.canonical_model_id.toLowerCase() : '';

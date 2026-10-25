@@ -137,6 +137,20 @@ export const normalizeReportPath = (value: unknown, kind: string): string => {
 const isStage = (value: unknown): value is CheckStage => STAGES.includes(value as CheckStage);
 const isReportFormat = (value: unknown): value is ReportFormat => REPORT_FORMATS.includes(value as ReportFormat);
 
+const normalizeCheckEnv = (value: unknown, kind: CheckKind): Record<string, string> => {
+  const variables: Record<string, string> = {};
+  if (value === undefined || value === null) return variables;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new WorkspaceError(`${kind} env must be an object`, 'invalid_check', kind);
+  const pairs = Object.entries(value);
+  if (pairs.length > MAX_ENV) throw new WorkspaceError(`${kind} sets too many environment variables`, 'invalid_check', kind);
+  for (const [name, text] of pairs) {
+    if (!ENV_NAME.test(name) || name === 'PATH' || name.startsWith('NODE_OPTIONS') || typeof text !== 'string' || text.length > 500)
+      throw new WorkspaceError(`${kind} env ${name} is not allowed`, 'invalid_check', kind);
+    variables[name] = text;
+  }
+  return variables;
+};
+
 // A check is a verification command plus when it runs and whether it can
 // reject a review on its own. Like a bare command it is user configuration
 // only; nothing here ever comes from a work package or an agent.
@@ -156,19 +170,7 @@ export const normalizeCheck = (value: unknown, kind: CheckKind): Check | null =>
   if (!isReportFormat(format)) throw new WorkspaceError(`${kind} report format is not supported`, 'invalid_report', kind);
   const report: CheckReport = format === 'junit' ? { format, path: normalizeReportPath(raw.report.path, kind) } : { format };
 
-  const env: Record<string, string> = {};
-  if (raw.env !== undefined && raw.env !== null) {
-    if (typeof raw.env !== 'object' || Array.isArray(raw.env)) throw new WorkspaceError(`${kind} env must be an object`, 'invalid_check', kind);
-    const pairs = Object.entries(raw.env);
-    if (pairs.length > MAX_ENV) throw new WorkspaceError(`${kind} sets too many environment variables`, 'invalid_check', kind);
-    for (const [name, text] of pairs) {
-      // PATH and friends stay under TaskPilot's control (see shell_env.js).
-      if (!ENV_NAME.test(name) || name === 'PATH' || name.startsWith('NODE_OPTIONS') || typeof text !== 'string' || text.length > 500) {
-        throw new WorkspaceError(`${kind} env ${name} is not allowed`, 'invalid_check', kind);
-      }
-      env[name] = text;
-    }
-  }
+  const env = normalizeCheckEnv(raw.env, kind);
 
   const check: Check = { ...entry, stage, blocking, report, env };
   if (raw.timeoutMs !== undefined && raw.timeoutMs !== null) {
@@ -203,13 +205,23 @@ export const normalizeCommand = (value: unknown, kind: string): CommandEntry | n
 // This is a tokenizer, not a shell: quotes group words and backslashes escape,
 // but nothing is expanded, substituted, or executed. Returns null for a blank
 // line, which means "not configured".
+type CommandToken = { value: string; quoted: boolean };
+
+const commandFromTokens = (tokens: CommandToken[], kind: string): CommandEntry | null => {
+  if (tokens.length === 0) return null;
+  const operator = tokens.find((token) => !token.quoted && SHELL_OPERATORS.has(token.value));
+  if (operator) throw new WorkspaceError(`${kind} command uses shell syntax "${operator.value}"`, 'shell_syntax', kind);
+  const [command, ...args] = tokens.map((token) => token.value);
+  return normalizeCommand({ command, args }, kind);
+};
+
 export const parseCommandLine = (text: unknown, kind: string): CommandEntry | null => {
   if (text === null || text === undefined) return null;
   if (typeof text !== 'string') {
     throw new WorkspaceError(`${kind} command must be text`, 'invalid_command', kind);
   }
 
-  const tokens: { value: string; quoted: boolean }[] = [];
+  const tokens: CommandToken[] = [];
   let value = '';
   let inToken = false;
   let quoted = false; // any part of the current token was quoted or escaped
@@ -247,14 +259,7 @@ export const parseCommandLine = (text: unknown, kind: string): CommandEntry | nu
     throw new WorkspaceError(`${kind} command has an unterminated ${quote} quote`, 'unterminated_quote', kind);
   }
   if (inToken) tokens.push({ value, quoted });
-  if (tokens.length === 0) return null;
-
-  const operator = tokens.find((token) => !token.quoted && SHELL_OPERATORS.has(token.value));
-  if (operator) {
-    throw new WorkspaceError(`${kind} command uses shell syntax "${operator.value}"`, 'shell_syntax', kind);
-  }
-  const [command, ...args] = tokens.map((token) => token.value);
-  return normalizeCommand({ command, args }, kind);
+  return commandFromTokens(tokens, kind);
 };
 
 // Inverse of parseCommandLine(), quoting only where needed.
@@ -268,6 +273,12 @@ export const formatCommandLine = (entry: CommandEntry | null | undefined): strin
 // Turns the settings form into a config. `commands` holds one typed line per
 // kind; `options` (optional) holds {stage, blocking, reportPath} per kind.
 // Settings the form does not show (env, timeout) are kept from `previous`.
+const reportFromForm = (value: unknown, previous: CheckReport | undefined): CheckReport | undefined => {
+  const reportPath = typeof value === 'string' ? value.trim() : null;
+  if (reportPath === null) return previous;
+  return reportPath ? { format: 'junit', path: reportPath } : { format: 'stdout' };
+};
+
 export const fromForm = (form: WorkspaceFormInput | null | undefined, previous: WorkspaceConfig | null = null): WorkspaceConfig => {
   const checks: Record<string, unknown> = {};
   for (const kind of COMMAND_KINDS) {
@@ -278,12 +289,11 @@ export const fromForm = (form: WorkspaceFormInput | null | undefined, previous: 
     }
     const options = form?.options?.[kind] ?? {};
     const kept = previous?.checks?.[kind];
-    const reportPath = typeof options.reportPath === 'string' ? options.reportPath.trim() : null;
     checks[kind] = {
       ...entry,
       stage: options.stage ?? kept?.stage,
       blocking: options.blocking ?? kept?.blocking,
-      report: reportPath === null ? kept?.report : reportPath ? { format: 'junit', path: reportPath } : { format: 'stdout' },
+      report: reportFromForm(options.reportPath, kept?.report),
       env: kept?.env,
       timeoutMs: kept?.timeoutMs,
     };

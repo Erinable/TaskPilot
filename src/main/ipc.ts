@@ -272,6 +272,35 @@ type CodingRuntime = {
   workspace: codingWorkspace.PreparedCodingWorkspace;
 };
 
+const codingDependencies = ({
+  codingProbe = codingExec.probeRuntime,
+  codingPrepare = codingWorkspace.prepare,
+  codingRun = codingExec.runCoding,
+  codingReadPatch = codingWorkspace.readPatch,
+  codingPreviewMerge = patchMerge.previewMerge,
+  codingApplyPatch = codingWorkspace.applyPatch,
+  codingClean = codingWorkspace.clean,
+  codingSnapshot = codingWorkspace.snapshotBaseline,
+}: IpcDeps) => ({ codingProbe, codingPrepare, codingRun, codingReadPatch, codingPreviewMerge, codingApplyPatch, codingClean, codingSnapshot });
+
+const codingCancelled = (error: unknown, signal: AbortSignal) =>
+  signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+
+const billableCodingUsage = (error: unknown) => {
+  const spent = error instanceof codingExec.CodingExecError ? error.usage : null;
+  return spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null) ? spent : null;
+};
+
+const releaseNotesPath = (root: string, requested: string) => {
+  if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) throw codedError('Use a path relative to the workspace', 'path_not_relative', 'path');
+  if (!workspace.isInside(root, requested)) throw codedError(`Path is outside the workspace: ${requested}`, 'path_outside_workspace', 'path');
+  const relative = path.relative(root, path.resolve(root, requested)).split(path.sep).join('/');
+  if (!relative.toLowerCase().endsWith('.md')) throw codedError('Release notes go in a .md file', 'path_not_markdown', 'path');
+  if (relative.split('/').some((segment) => segment.toLowerCase() === '.git')) throw codedError('Paths inside .git are refused', 'path_in_git', 'path');
+  if (looksSecret(relative)) throw codedError('That path looks like it holds secrets', 'path_secret', 'path');
+  return relative;
+};
+
 export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHandle => {
   const {
     store,
@@ -300,15 +329,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     releases = null,
     tutor = null,
     notes = null,
-    codingProbe = codingExec.probeRuntime,
-    codingPrepare = codingWorkspace.prepare,
-    codingRun = codingExec.runCoding,
-    codingReadPatch = codingWorkspace.readPatch,
-    codingPreviewMerge = patchMerge.previewMerge,
-    codingApplyPatch = codingWorkspace.applyPatch,
-    codingClean = codingWorkspace.clean,
-    codingSnapshot = codingWorkspace.snapshotBaseline,
   } = deps;
+  const { codingProbe, codingPrepare, codingRun, codingReadPatch, codingPreviewMerge, codingApplyPatch, codingClean, codingSnapshot } =
+    codingDependencies(deps);
 
   // The PATH verification commands run with, per the user's preference.
   const commandPath = () => pathResolver.resolve(getPreferences().environment.pathSource);
@@ -631,6 +654,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     };
     codingRuns.set(id, runtime);
     codingEventHistory.set(id, []);
+    const timeoutPatch = async (error: unknown, prepared: codingWorkspace.PreparedCodingWorkspace | null, cancelled: boolean) => {
+      if (cancelled || !prepared || errorCode(error) !== 'coding_timeout') return undefined;
+      return codingReadPatch(prepared.runName, task.fileScope, { sandbox, cli: runtimeConfig.cli }).catch((failure) => void console.error(failure));
+    };
     const settled = (async () => {
       let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
       try {
@@ -664,19 +691,16 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         record({ kind: 'coding_run', packageId: id, title: task.title, status: 'finished', costUsd: result.usage.costUsd });
         recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, result.usage), { kind: 'package', id });
       } catch (error) {
-        const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        const cancelled = codingCancelled(error, controller.signal);
         // A failed, timed-out or cancelled round can still have been billed.
-        const spent = error instanceof codingExec.CodingExecError ? error.usage : null;
-        if (spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null)) {
+        const spent = billableCodingUsage(error);
+        if (spent) {
           recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, spent), { kind: 'package', id });
           await updateCoding(id, { usage: spent }).catch((failure) => console.error(failure));
         }
         // A timed-out round keeps what it wrote so far for the developer to
         // review; it is never applied automatically.
-        const partial =
-          !cancelled && prepared && errorCode(error) === 'coding_timeout'
-            ? await codingReadPatch(prepared.runName, task.fileScope, { sandbox, cli: runtimeConfig.cli }).catch((failure) => void console.error(failure))
-            : undefined;
+        const partial = await timeoutPatch(error, prepared, cancelled);
         if (partial?.files.length) {
           await updateCoding(id, {
             status: 'ready',
@@ -1086,11 +1110,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           costUsd: result.usage.costUsd,
         };
       } catch (error) {
-        const cancelled = controller.signal.aborted || errorCode(error) === 'coding_aborted' || errorCode(error) === 'workspace_aborted';
+        const cancelled = codingCancelled(error, controller.signal);
         if (!cancelled) console.error('[reference] run failed', error);
-        const spent = error instanceof codingExec.CodingExecError ? error.usage : null;
-        if (spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null))
-          recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, spent), { kind: 'package', id });
+        const spent = billableCodingUsage(error);
+        if (spent) recordCall('coding-agent', codingCall(runtimeConfig.cli, runtimeConfig.model, spent), { kind: 'package', id });
         finished = { status: cancelled ? 'cancelled' : 'failed', error: codingFailure(error), costUsd: spent?.costUsd ?? null };
       } finally {
         if (prepared) await cleanRun(prepared.runName).catch((error) => console.error('[reference] clean failed', error));
@@ -2555,12 +2578,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const store = requireReleases();
       const root = requireRoot();
       const requested = requireString((raw as { path?: unknown } | null | undefined)?.path, 'path').trim();
-      if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) failWith('Use a path relative to the workspace', 'path_not_relative', 'path');
-      if (!workspace.isInside(root, requested)) failWith(`Path is outside the workspace: ${requested}`, 'path_outside_workspace', 'path');
-      const relative = path.relative(root, path.resolve(root, requested)).split(path.sep).join('/');
-      if (!relative.toLowerCase().endsWith('.md')) failWith('Release notes go in a .md file', 'path_not_markdown', 'path');
-      if (relative.split('/').some((segment) => segment.toLowerCase() === '.git')) failWith('Paths inside .git are refused', 'path_in_git', 'path');
-      if (looksSecret(relative)) failWith('That path looks like it holds secrets', 'path_secret', 'path');
+      const relative = releaseNotesPath(root, requested);
 
       const draft = store.draft();
       const latest = store.latest();

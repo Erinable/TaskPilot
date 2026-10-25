@@ -1,0 +1,10 @@
+{
+  "$schema": "https://knip.dev/schema.json",
+  "rules": { "cycles": "error" },
+  "entry": ["evals/*/run.ts"],
+  "project": ["src/**/*.{ts,vue}", "tests/**/*.ts", "evals/**/*.ts", "*.config.ts"],
+  "paths": {
+    "@/*": ["./src/renderer/src/*"],
+    "@shared/*": ["./src/shared/*"]
+  }
+}

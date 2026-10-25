@@ -46,6 +46,30 @@ export const claudeCall = (envelope: { total_cost_usd?: unknown; usage?: unknown
 };
 
 // The JSONL stream of an analysis call through pi, grok or opencode.
+const updatePiCall = (call: ModelCall, type: string, message: Json) => {
+  if ((type !== 'message_end' && type !== 'turn_end') || message.role !== 'assistant' || !isObject(message.usage)) return;
+  const usage = message.usage;
+  call.provider = text(message.provider) ?? call.provider;
+  call.model = text(message.model) ?? call.model;
+  call.tokens = { input: count(usage.input), output: count(usage.output), cacheRead: count(usage.cacheRead), cacheWrite: count(usage.cacheWrite) };
+  call.costUsd = paid(isObject(usage.cost) ? usage.cost.total : null);
+};
+
+const updateOpenCodeCall = (call: ModelCall, type: string, event: Json): number => {
+  const part = isObject(event.part) ? event.part : {};
+  call.provider = text(part.providerID) ?? text(event.providerID) ?? call.provider;
+  call.model = text(part.modelID) ?? text(event.modelID) ?? call.model;
+  if (type !== 'step_finish' || !isObject(part.tokens)) return 0;
+  const cache = isObject(part.tokens.cache) ? part.tokens.cache : {};
+  call.tokens = addTokens(call.tokens, {
+    input: count(part.tokens.input),
+    output: count(part.tokens.output),
+    cacheRead: count(cache.read),
+    cacheWrite: count(cache.write),
+  });
+  return count(part.cost);
+};
+
 export const streamCall = (cli: Exclude<CliId, 'claude' | 'codex'>, stdout: string): ModelCall => {
   const call: ModelCall = { cli, provider: cli === 'grok' ? 'xai' : null, model: null, costUsd: null, tokens: null };
   let opencodeCost = 0;
@@ -60,34 +84,12 @@ export const streamCall = (cli: Exclude<CliId, 'claude' | 'codex'>, stdout: stri
     if (!isObject(event)) continue;
     const type = typeof event.type === 'string' ? event.type : '';
     const message = isObject(event.message) ? event.message : event;
-    if (cli === 'pi' && (type === 'message_end' || type === 'turn_end') && message.role === 'assistant' && isObject(message.usage)) {
-      // Cumulative for the turn; the last one wins.
-      const usage = message.usage;
-      call.provider = text(message.provider) ?? call.provider;
-      call.model = text(message.model) ?? call.model;
-      call.tokens = { input: count(usage.input), output: count(usage.output), cacheRead: count(usage.cacheRead), cacheWrite: count(usage.cacheWrite) };
-      call.costUsd = paid(isObject(usage.cost) ? usage.cost.total : null);
-    }
+    if (cli === 'pi') updatePiCall(call, type, message);
     if (cli === 'grok') {
       call.model = text(message.model) ?? text(event.model) ?? call.model;
       if (type === 'result') call.tokens = anthropicTokens(event.usage) ?? call.tokens;
     }
-    if (cli === 'opencode') {
-      const part = isObject(event.part) ? event.part : {};
-      call.provider = text(part.providerID) ?? text(event.providerID) ?? call.provider;
-      call.model = text(part.modelID) ?? text(event.modelID) ?? call.model;
-      // One event per step; a run is the sum of its steps.
-      if (type === 'step_finish' && isObject(part.tokens)) {
-        const cache = isObject(part.tokens.cache) ? part.tokens.cache : {};
-        call.tokens = addTokens(call.tokens, {
-          input: count(part.tokens.input),
-          output: count(part.tokens.output),
-          cacheRead: count(cache.read),
-          cacheWrite: count(cache.write),
-        });
-        opencodeCost += count(part.cost);
-      }
-    }
+    if (cli === 'opencode') opencodeCost += updateOpenCodeCall(call, type, event);
   }
   if (cli === 'opencode') call.costUsd = paid(opencodeCost);
   return call;

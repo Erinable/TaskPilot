@@ -5,6 +5,7 @@
 
 import type { CodingRun } from './coding_types.ts';
 import type { AgentId, AgentSettings, CliId } from './agent_runtime.ts';
+import type { AvatarColor as SharedAvatarColor } from './avatar.ts';
 export type { AgentId, AgentRuntimeConfig, AgentRuntimeStatus, AgentSettings, CliId, ThinkingLevel } from './agent_runtime.ts';
 export type { CliModelCatalog, CliModelOption, CliModelScope, CliModelsRequest } from './agent_runtime.ts';
 export type {
@@ -543,7 +544,7 @@ export type OpenedWith = 'vscode' | 'text_editor' | 'folder';
 // ========== preferences, environment, data ==========
 
 export type Theme = 'system' | 'light' | 'dark';
-export type AvatarColor = 'sunset' | 'ocean' | 'violet' | 'forest' | 'graphite';
+export type AvatarColor = SharedAvatarColor;
 export type PathSource = 'inherit' | 'login-shell';
 
 // What preferences:set accepts.

@@ -63,6 +63,21 @@ const nonEmpty = (value: unknown) => typeof value === 'string' && value.trim() !
 
 export type SignInOptions = { envPath?: string | null; home?: string; env?: NodeJS.ProcessEnv; run?: StatusRunner };
 
+const claudeSignIn = async (home: string, envPath: string | null, run: StatusRunner): Promise<CliSignIn> => {
+  const settings = await readJsonObject(path.join(home, '.claude', 'settings.json'));
+  const settingsEnv = (settings?.env ?? {}) as Record<string, unknown>;
+  const settingsKey = ENV_KEYS.claude.find((key) => nonEmpty(settingsEnv[key]));
+  if (settingsKey) return { state: 'signed_in', source: `settings:${settingsKey}` };
+  if (nonEmpty(settings?.apiKeyHelper)) return { state: 'signed_in', source: 'settings:apiKeyHelper' };
+  const result = await run('claude', ['auth', 'status'], envPath);
+  if (!result) return { state: 'unknown', source: null };
+  try {
+    return JSON.parse(result.stdout).loggedIn === true ? { state: 'signed_in', source: 'claude auth status' } : { state: 'signed_out', source: null };
+  } catch {
+    return { state: 'unknown', source: null };
+  }
+};
+
 export const checkSignIn = async (
   cli: CliId,
   { envPath = null, home = os.homedir(), env = processEnv(), run = runStatus }: SignInOptions = {},
@@ -77,19 +92,7 @@ export const checkSignIn = async (
 
   switch (cli) {
     case 'claude': {
-      // A key or helper in settings.json is how API-key and proxy users sign in.
-      const settings = await readJsonObject(path.join(home, '.claude', 'settings.json'));
-      const settingsEnv = (settings?.env ?? {}) as Record<string, unknown>;
-      const settingsKey = ENV_KEYS.claude.find((key) => nonEmpty(settingsEnv[key]));
-      if (settingsKey) return { state: 'signed_in', source: `settings:${settingsKey}` };
-      if (nonEmpty(settings?.apiKeyHelper)) return { state: 'signed_in', source: 'settings:apiKeyHelper' };
-      const result = await run('claude', ['auth', 'status'], envPath);
-      if (!result) return { state: 'unknown', source: null };
-      try {
-        return JSON.parse(result.stdout).loggedIn === true ? { state: 'signed_in', source: 'claude auth status' } : { state: 'signed_out', source: null };
-      } catch {
-        return { state: 'unknown', source: null };
-      }
+      return claudeSignIn(home, envPath, run);
     }
     case 'codex': {
       const result = await run('codex', ['login', 'status'], envPath);

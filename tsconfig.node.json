@@ -19,6 +19,7 @@
     "vitest.config.ts",
     "uno.config.ts",
     "eslint.config.ts",
+    "scripts/**/*.ts",
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",

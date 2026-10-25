@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import * as feedback from '@/lib/feedback.ts';
+import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { resultText, useSetupStore } from '@/stores/setup.ts';
 import { envState, fail, installApi, ok } from '../settings_fakes.ts';
@@ -33,6 +34,31 @@ test('opening the page only reads the session; no step runs on its own', async (
   expect(api.env.runStep).not.toHaveBeenCalled();
   expect(api.env.plan).not.toHaveBeenCalled();
   expect(setup.statusText).toBe('先安装依赖再跑测试。');
+});
+
+test('an existing setup store loads on page entry and reloads when returning from another page', async () => {
+  const setup = useSetupStore();
+  const settings = useSettingsStore();
+  expect(api.env.get).not.toHaveBeenCalled();
+  await settings.open('setup');
+  await vi.waitFor(() => expect(setup.view).not.toBeNull());
+  expect(api.env.get).toHaveBeenCalledTimes(1);
+
+  settings.openPage('data');
+  await settings.open('setup');
+  await vi.waitFor(() => expect(api.env.get).toHaveBeenCalledTimes(2));
+  expect(api.env.plan).not.toHaveBeenCalled();
+  expect(api.env.runStep).not.toHaveBeenCalled();
+});
+
+test('returning to settings reloads setup even when its selected page is unchanged', async () => {
+  await onSetupPage();
+  expect(api.env.get).toHaveBeenCalledTimes(1);
+  await useAppStore().navigate('queue');
+  await useSettingsStore().open('setup');
+  await vi.waitFor(() => expect(api.env.get).toHaveBeenCalledTimes(2));
+  expect(api.env.plan).not.toHaveBeenCalled();
+  expect(api.env.runStep).not.toHaveBeenCalled();
 });
 
 test('a step runs by id when clicked', async () => {
@@ -108,12 +134,13 @@ test('a failed action toasts, but a cancelled one stays quiet', async () => {
 test('planning polls while the page is visible', async () => {
   vi.useFakeTimers();
   api.env.get.mockReturnValue(ok(envState({ status: 'planning' })));
+  const setup = useSetupStore();
   await useSettingsStore().open('setup');
   await vi.advanceTimersByTimeAsync(0);
   const calls = api.env.get.mock.calls.length;
   await vi.advanceTimersByTimeAsync(800);
   expect(api.env.get.mock.calls.length).toBe(calls + 1);
-  expect(useSetupStore().statusText).toBe('环境管家正在读取仓库并制定步骤…');
+  expect(setup.statusText).toBe('环境管家正在读取仓库并制定步骤…');
   // Leaving the page stops the polling.
   useSettingsStore().openPage('data');
   await vi.advanceTimersByTimeAsync(1600);

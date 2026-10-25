@@ -47,6 +47,29 @@ const attributes = (source: string): Record<string, string> => {
 // {name, fullName, passed, skipped, todo}. `fullName` joins the enclosing
 // suites and the classname with " › " so baseline comparison has a stable key.
 // Throws on input that has no <testsuite>/<testsuites> root.
+const parseTestcase = (
+  rest: string,
+  suites: string[],
+  current: TestResult | null,
+  results: TestResult[],
+  closing: string,
+  selfClosing: string,
+): TestResult | null => {
+  if (closing) {
+    if (current) results.push(current);
+    return null;
+  }
+  if (current) results.push(current);
+  const attrs = attributes(rest);
+  const name = attrs.name ?? '';
+  const scope = [...suites.filter(Boolean)];
+  if (attrs.classname && scope[scope.length - 1] !== attrs.classname) scope.push(attrs.classname);
+  const next = { name, fullName: [...scope, name].join(' › '), passed: true, skipped: false, todo: false };
+  if (!selfClosing) return next;
+  results.push(next);
+  return null;
+};
+
 export const parseJunit = (xml: string): TestResult[] => {
   // Comments, CDATA and processing instructions carry no results; dropping
   // them keeps a "<testcase" inside a failure message from being tokenized.
@@ -65,21 +88,8 @@ export const parseJunit = (xml: string): TestResult[] => {
       if (closing) suites.pop();
       else if (!selfClosing) suites.push(attributes(rest).name ?? '');
     } else if (tag === 'testcase') {
-      if (closing) {
-        if (current) results.push(current);
-        current = null;
-        continue;
-      }
-      if (current) results.push(current);
-      const attrs = attributes(rest);
-      const name = attrs.name ?? '';
-      const scope = [...suites.filter(Boolean)];
-      if (attrs.classname && scope[scope.length - 1] !== attrs.classname) scope.push(attrs.classname);
-      current = { name, fullName: [...scope, name].join(' › '), passed: true, skipped: false, todo: false };
-      if (selfClosing) {
-        results.push(current);
-        current = null;
-      }
+      current = parseTestcase(rest, suites, current, results, closing, selfClosing);
+      if (closing) continue;
     } else if (current && !closing && (tag === 'failure' || tag === 'error')) {
       current.passed = false;
     } else if (current && !closing && tag === 'skipped') {

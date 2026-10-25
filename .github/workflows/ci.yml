@@ -36,3 +36,41 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run build
+
+  analyze:
+    name: Code analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run analyze:duplicates
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: duplicate-code-report
+          path: .taskpilot/analysis/duplicates/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+      - run: npm run check:complexity -- --base "$COMPLEXITY_BASE"
+        env:
+          COMPLEXITY_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: complexity-report
+          path: .taskpilot/analysis/complexity/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+      - run: npm run analyze:cycles
+        if: ${{ !cancelled() }}

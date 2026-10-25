@@ -19,6 +19,15 @@ const lowlight = createLowlight(common);
 // Highlighting a huge block would stall typing in the split view.
 const MAX_HIGHLIGHT = 20_000;
 const SAFE_PROTOCOLS = /^(https?:|mailto:)/i;
+const ELEMENT_TAGS: Partial<Record<Nodes['type'], string>> = {
+  paragraph: 'p',
+  emphasis: 'em',
+  strong: 'strong',
+  delete: 'del',
+  blockquote: 'blockquote',
+  tableRow: 'tr',
+  tableCell: 'td',
+};
 
 // A heading's anchor, by its line, so the outline can scroll to it.
 export const headingAnchor = (line: number) => `note-heading-${line}`;
@@ -90,6 +99,72 @@ export default defineComponent({
 
     const children = (node: Nodes): VNodeArrayChildren => ('children' in node ? node.children.map((child) => render(child)) : []);
 
+    const renderLeaf = (node: Nodes): VNode | string | VNodeArrayChildren | null => {
+      switch (node.type) {
+        case 'text':
+          return inline(node.value);
+        case 'inlineCode':
+          return h('code', node.value);
+        case 'inlineMath':
+          return h(NoteMath, { tex: node.value });
+        case 'math':
+          return h(NoteMath, { tex: node.value, display: true });
+        case 'thematicBreak':
+          return h('hr');
+        case 'break':
+          return h('br');
+        case 'image':
+          return h('span', { class: 'note-image', title: node.url }, `🖼 ${node.alt || node.url}`);
+        case 'footnoteReference':
+          return h('sup', `[${node.label ?? node.identifier}]`);
+        case 'html':
+          return h('code', { class: 'note-raw' }, node.value);
+        default:
+          return null;
+      }
+    };
+
+    const renderLink = (node: Extract<Nodes, { type: 'link' }>) => {
+      const url = node.url;
+      const safe = SAFE_PROTOCOLS.test(url);
+      return h(
+        'a',
+        {
+          class: ['external-link', { unsafe: !safe }],
+          role: 'link',
+          tabindex: 0,
+          title: url,
+          onClick: () => safe && emit('open-url', url),
+          onKeydown: (event: KeyboardEvent) => event.key === 'Enter' && safe && emit('open-url', url),
+        },
+        children(node),
+      );
+    };
+
+    const renderListItem = (node: Extract<Nodes, { type: 'listItem' }>) => {
+      if (node.checked === null || node.checked === undefined) return h('li', children(node));
+      const offset = node.position?.start.offset ?? 0;
+      return h('li', { class: 'note-task' }, [
+        h('input', {
+          type: 'checkbox',
+          checked: node.checked,
+          'aria-label': node.checked ? '标记为未完成' : '标记为完成',
+          onChange: () => emit('toggle-task', offset),
+        }),
+        ...children(node),
+      ]);
+    };
+
+    const renderList = (node: Extract<Nodes, { type: 'list' }>) =>
+      h(
+        node.ordered ? 'ol' : 'ul',
+        {
+          start: node.ordered && node.start !== 1 ? node.start : undefined,
+          class: { 'task-list': node.children.some((item) => item.checked !== null && item.checked !== undefined) },
+        },
+        children(node),
+      );
+
     // A paragraph right after a chart that starts with 图 N / Figure N is its
     // caption, as in a journal: the two render as one figure.
     const CAPTION = /^(图|Fig\.?|Figure)\s*\d+/;
@@ -112,78 +187,25 @@ export default defineComponent({
     };
 
     const render = (node: Nodes): VNode | string | VNodeArrayChildren => {
+      const leaf = renderLeaf(node);
+      if (leaf !== null) return leaf;
+      const tag = ELEMENT_TAGS[node.type];
+      if (tag) return h(tag, children(node));
       switch (node.type) {
         case 'root':
           return blocks(node.children);
-        case 'paragraph':
-          return h('p', children(node));
         case 'heading':
           return h(`h${node.depth}`, { id: headingAnchor(node.position?.start.line ?? 0) }, children(node));
-        case 'text':
-          return inline(node.value);
-        case 'emphasis':
-          return h('em', children(node));
-        case 'strong':
-          return h('strong', children(node));
-        case 'delete':
-          return h('del', children(node));
-        case 'inlineCode':
-          return h('code', node.value);
-        case 'inlineMath':
-          return h(NoteMath, { tex: node.value });
-        case 'math':
-          return h(NoteMath, { tex: node.value, display: true });
         case 'code':
           return h('pre', { class: 'note-code' }, [
             h('code', { class: node.lang ? `hljs language-${node.lang}` : 'hljs' }, highlighted(node.value, node.lang)),
           ]);
-        case 'blockquote':
-          return h('blockquote', children(node));
         case 'list':
-          return h(
-            node.ordered ? 'ol' : 'ul',
-            {
-              start: node.ordered && node.start !== 1 ? node.start : undefined,
-              class: { 'task-list': node.children.some((item) => item.checked !== null && item.checked !== undefined) },
-            },
-            children(node),
-          );
-        case 'listItem': {
-          if (node.checked === null || node.checked === undefined) return h('li', children(node));
-          const offset = node.position?.start.offset ?? 0;
-          return h('li', { class: 'note-task' }, [
-            h('input', {
-              type: 'checkbox',
-              checked: node.checked,
-              'aria-label': node.checked ? '标记为未完成' : '标记为完成',
-              onChange: () => emit('toggle-task', offset),
-            }),
-            ...children(node),
-          ]);
-        }
-        case 'thematicBreak':
-          return h('hr');
-        case 'break':
-          return h('br');
-        case 'link': {
-          const url = node.url;
-          const safe = SAFE_PROTOCOLS.test(url);
-          return h(
-            'a',
-            {
-              class: ['external-link', { unsafe: !safe }],
-              role: 'link',
-              tabindex: 0,
-              title: url,
-              onClick: () => safe && emit('open-url', url),
-              onKeydown: (event: KeyboardEvent) => event.key === 'Enter' && safe && emit('open-url', url),
-            },
-            children(node),
-          );
-        }
-        case 'image':
-          // The page loads no outside images; the alt text stands in.
-          return h('span', { class: 'note-image', title: node.url }, `🖼 ${node.alt || node.url}`);
+          return renderList(node);
+        case 'listItem':
+          return renderListItem(node);
+        case 'link':
+          return renderLink(node);
         case 'table':
           return h('div', { class: 'note-table' }, [
             h('table', [
@@ -194,17 +216,8 @@ export default defineComponent({
               ),
             ]),
           ]);
-        case 'tableRow':
-          return h('tr', children(node));
-        case 'tableCell':
-          return h('td', children(node));
-        case 'footnoteReference':
-          return h('sup', `[${node.label ?? node.identifier}]`);
         case 'footnoteDefinition':
           return h('div', { class: 'note-footnote' }, [h('sup', `[${node.label ?? node.identifier}]`), ...children(node)]);
-        case 'html':
-          // Raw HTML in a note is shown as the text it is.
-          return h('code', { class: 'note-raw' }, node.value);
         default:
           return 'value' in node && typeof node.value === 'string' ? node.value : children(node);
       }

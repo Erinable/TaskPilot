@@ -138,6 +138,13 @@ const splitGitHeader = (value: string): string[] => {
   return parts;
 };
 
+const checkPatchPath = (candidate: string, fileScope: FileScope, blocked: BlockedPatch[]) => {
+  if (candidate === '/dev/null') return;
+  const reason = pathReason(candidate);
+  if (reason) blocked.push({ path: candidate, reason });
+  if (!inScope(candidate, fileScope)) blocked.push({ path: candidate, reason: 'outside requested file scope' });
+};
+
 const parsePatchFiles = (patch: string, fileScope: FileScope): { files: CodingPatchFile[]; blocked: BlockedPatch[] } => {
   if (Buffer.byteLength(patch) > MAX_PATCH_BYTES) throw new CodingWorkspaceError('Patch exceeds the size limit', 'workspace_invalid_patch');
   const files: CodingPatchFile[] = [];
@@ -166,16 +173,8 @@ const parsePatchFiles = (patch: string, fileScope: FileScope): { files: CodingPa
       if (parts.length !== 2) throw new CodingWorkspaceError('Malformed git patch header', 'workspace_invalid_patch');
       const oldPath = parseGitPath(parts[0].replace(/^a\//, ''));
       const newPath = parseGitPath(parts[1].replace(/^b\//, ''));
-      if (oldPath !== '/dev/null') {
-        const oldReason = pathReason(oldPath);
-        if (oldReason) blocked.push({ path: oldPath, reason: oldReason });
-        if (!inScope(oldPath, fileScope)) blocked.push({ path: oldPath, reason: 'outside requested file scope' });
-      }
-      if (newPath !== '/dev/null') {
-        const newReason = pathReason(newPath);
-        if (newReason) blocked.push({ path: newPath, reason: newReason });
-        if (!inScope(newPath, fileScope)) blocked.push({ path: newPath, reason: 'outside requested file scope' });
-      }
+      checkPatchPath(oldPath, fileScope, blocked);
+      checkPatchPath(newPath, fileScope, blocked);
       const candidate = newPath === '/dev/null' ? oldPath : newPath;
       const reason = pathReason(candidate);
       if (reason) blocked.push({ path: candidate, reason });

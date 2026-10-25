@@ -260,15 +260,9 @@ export const useCodingStore = defineStore('coding', () => {
     selectedFiles.value = accepted ? [...others, filePath] : others;
   };
 
-  const apply = async (allowHighRisk: boolean) => {
-    const id = selectedId.value;
-    // The merge digest also covers how the files merge with the working tree.
-    const digest = patch.value?.mergeDigest ?? patch.value?.digest ?? run.value?.patchDigest;
-    const files = [...selectedFiles.value];
-    if (!id || !digest || operation.value || run.value?.status !== 'ready' || !files.length) return false;
-    if (highRisk.value && !allowHighRisk) return false;
-    if (unresolved.value.length) return false;
-    const chosen = Object.fromEntries(Object.entries(resolutions.value).filter(([filePath]) => files.includes(filePath)));
+  const applicationDigest = computed(() => patch.value?.mergeDigest ?? patch.value?.digest ?? run.value?.patchDigest);
+
+  const confirmPatchApplication = async (files: string[], chosen: Partial<Record<string, ipc.CodingResolution>>) => {
     const overwrites = Object.entries(chosen)
       .filter(([, choice]) => choice === 'theirs')
       .map(([filePath]) => filePath);
@@ -284,7 +278,7 @@ export const useCodingStore = defineStore('coding', () => {
     }
     const withMarkers = Object.values(chosen).filter((choice) => choice === 'markers').length;
     const skipped = (patch.value?.files.length ?? files.length) - files.length;
-    const confirmed = await confirmAction({
+    return confirmAction({
       title: highRisk.value ? `应用 ${files.length} 个文件？（含高风险文件）` : `应用 ${files.length} 个文件？`,
       body: [
         '应用后会用你的账号权限自动跑提交前检查。检查通过就由 Coding Agent 提交 QA 审查；没通过或 QA 驳回时，会把问题交回 AI 自动重试，最多 3 轮。',
@@ -297,7 +291,17 @@ export const useCodingStore = defineStore('coding', () => {
       accept: highRisk.value ? '同意高风险并应用' : '应用并自动检查',
       danger: highRisk.value,
     });
-    if (!confirmed) return false;
+  };
+
+  const apply = async (allowHighRisk: boolean) => {
+    const id = selectedId.value;
+    const digest = applicationDigest.value;
+    const files = [...selectedFiles.value];
+    if (!id || !digest || operation.value || run.value?.status !== 'ready' || !files.length) return false;
+    if (highRisk.value && !allowHighRisk) return false;
+    if (unresolved.value.length) return false;
+    const chosen = Object.fromEntries(Object.entries(resolutions.value).filter(([filePath]) => files.includes(filePath)));
+    if (!(await confirmPatchApplication(files, chosen))) return false;
     operation.value = 'apply';
     const token = generation;
     try {

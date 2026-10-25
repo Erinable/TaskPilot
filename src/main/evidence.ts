@@ -129,6 +129,21 @@ export const baselineRecord = (run: RunLike, line: string, at = new Date().toISO
 export const usableBaseline = (baseline: BaselineCheck | null | undefined, line: string): BaselineRecord | null =>
   baseline?.status === 'measured' && baseline.line === line ? baseline : null;
 
+const executionProblem = (run: RunLike, baseline: BaselineRecord | null, failing: string[]): Pick<EvidenceItem, 'status' | 'reason'> | null => {
+  const untrusted = Boolean(run.report && !run.report.trusted);
+  const crashed = !run.timedOut && run.exitCode !== 0 && (failing.length === 0 || untrusted);
+  if (run.timedOut) return baseline?.timedOut ? { status: 'unverifiable', reason: 'timed_out_at_baseline' } : { status: 'fail', reason: 'timed_out' };
+  if (untrusted) {
+    if (run.exitCode === 0) return { status: 'unverifiable', reason: `report_${run.report?.problem}` };
+    if (baseline?.crashed) return { status: 'unverifiable', reason: 'broken_at_baseline' };
+    return { status: 'fail', reason: `report_${run.report?.problem}` };
+  }
+  if (!crashed) return null;
+  return baseline?.crashed && baseline.exitCode === run.exitCode
+    ? { status: 'unverifiable', reason: 'broken_at_baseline' }
+    : { status: 'fail', reason: 'crashed' };
+};
+
 // Evidence for one check.
 // check: {kind, stage, blocking}
 // run: runCheck() result, or {error: {code, message}} when it could not start
@@ -149,25 +164,8 @@ export const evaluate = (check: EvidenceCheck, outcome: RunLike | RunFailure, ba
   const run = outcome as RunLike;
 
   const failing = failingNames(run.results);
-  const untrusted = Boolean(run.report && !run.report.trusted);
-  const crashed = !run.timedOut && run.exitCode !== 0 && (failing.length === 0 || untrusted);
-
-  if (run.timedOut) {
-    return baseline?.timedOut ? done('unverifiable', 'timed_out_at_baseline') : done('fail', 'timed_out');
-  }
-
-  if (untrusted) {
-    // A clean exit with an unreadable report proves nothing either way; a
-    // failing exit is a failure we cannot narrow down.
-    if (run.exitCode === 0) return done('unverifiable', `report_${run.report?.problem}`);
-    if (baseline?.crashed) return done('unverifiable', 'broken_at_baseline');
-    return done('fail', `report_${run.report?.problem}`);
-  }
-
-  if (crashed) {
-    if (baseline?.crashed && baseline.exitCode === run.exitCode) return done('unverifiable', 'broken_at_baseline');
-    return done('fail', 'crashed');
-  }
+  const problem = executionProblem(run, baseline, failing);
+  if (problem) return done(problem.status, problem.reason);
 
   const before = new Set(baseline?.failing ?? []);
   const now = new Set(failing);
