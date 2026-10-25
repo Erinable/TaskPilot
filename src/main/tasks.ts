@@ -42,6 +42,9 @@ export interface TaskDefinition {
   dependsOn?: string[];
   // The plan's estimate as a number; older packages only have `estimate`.
   estimateHours?: number;
+  // The requirement it was planned from (see ./agents/product_lead.ts).
+  // Absent on packages planned before it was recorded.
+  requirementId?: string;
 }
 
 // The part of a definition Architect can replan.
@@ -53,25 +56,17 @@ export interface FileScopeCheck {
   untouched: string[];
 }
 
-// Work packages Product Lead generated and the user published. Set by the
-// main process from the requirement store; every caller of
-// listTasks()/getTask() reads them from here.
-let generated: TaskDefinition[] = [];
+// The published work package definitions, read-only. RequirementStore is the
+// one implementation (see ./requirement_store.ts): it rebuilds the view when
+// requirements are opened, published or removed. Entries are frozen and shared,
+// so reads never copy; spread one to change it.
+export interface TaskCatalog {
+  listTasks(): readonly TaskDefinition[];
+  getTask(id: string): TaskDefinition | null;
+}
 
-// Replaces the generated package list (see ./requirement_store.js).
-export const setGeneratedTasks = (definitions: TaskDefinition[] | null | undefined) => {
-  generated = structuredClone(definitions ?? []);
-};
-
-export const listTasks = (): TaskDefinition[] => {
-  // Return a copy so callers can't mutate the shared data.
-  return structuredClone(generated);
-};
-
-export const getTask = (id: string): TaskDefinition | null => {
-  const task = generated.find((candidate) => candidate.id === id);
-  return task ? structuredClone(task) : null;
-};
+// For an app run without requirements.
+export const EMPTY_CATALOG: TaskCatalog = { listTasks: () => [], getTask: () => null };
 
 // Compares changed paths against a work package's file scope.
 // Paths outside the scope are not an error — they are a signal that the

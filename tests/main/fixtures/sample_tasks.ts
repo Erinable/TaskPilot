@@ -1,6 +1,7 @@
 // The four work packages TaskPilot used to ship as built-in samples. The app
-// now serves only published packages; tests install these with
-// setGeneratedTasks(SAMPLE_TASKS) to exercise a populated queue.
+// now serves only published packages; tests publish these through
+// SAMPLE_REQUIREMENT to exercise a populated queue.
+import type { Requirement } from '../../../src/main/requirement_store.ts';
 import type { TaskDefinition } from '../../../src/main/tasks.ts';
 
 export const SAMPLE_TASKS: TaskDefinition[] = [
@@ -88,3 +89,22 @@ export const SAMPLE_TASKS: TaskDefinition[] = [
     acceptance: [{ text: '迁移、监控、回滚三项均已勾选' }, { text: 'Release Manager 确认清单完整' }],
   },
 ];
+
+// A published requirement carrying the samples, as saved in requirements.json.
+export const SAMPLE_REQUIREMENT: Requirement = {
+  id: 'req-samples',
+  status: 'published',
+  title: '示例工作包',
+  text: '示例工作包',
+  summary: null,
+  questions: [],
+  plan: null,
+  packages: SAMPLE_TASKS,
+  interfaces: null,
+  phase: null,
+  error: null,
+  failedStep: null,
+  costUsd: 0,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};

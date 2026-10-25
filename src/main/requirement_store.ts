@@ -7,13 +7,13 @@
 // and `failed` when an agent run fails, keeping the step it failed in so the
 // user can retry that step.
 //
-// Published packages are stored here as task definitions; ../tasks.js merges
-// them with the hand-written samples.
+// Published packages are stored here as task definitions; the store is also
+// the work queue's TaskCatalog (see ./tasks.ts).
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import type { TaskDefinition } from './tasks.ts';
+import type { TaskCatalog, TaskDefinition } from './tasks.ts';
 import type { Plan } from './agents/product_lead.ts';
 import type { InterfaceSummary, SkippedFile } from './agents/architect.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
@@ -96,9 +96,23 @@ const userText = (value: unknown, field: string, max: number, { optional = false
   return trimmed;
 };
 
-export class RequirementStore {
+// Freezes a definition and everything in it, so the catalog can hand out the
+// same objects on every read.
+const deepFreeze = <T>(value: T): T => {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+};
+
+export class RequirementStore implements TaskCatalog {
   #file: string;
   #items = new Map<string, Requirement>();
+  // Published packages, oldest requirement first; rebuilt whenever a
+  // requirement is loaded, published or removed.
+  #published: readonly TaskDefinition[] = [];
+  #publishedById = new Map<string, TaskDefinition>();
   #newId: () => string;
   #now: () => Date;
 
@@ -137,6 +151,7 @@ export class RequirementStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
     }
+    this.#rebuildCatalog();
     return this;
   }
 
@@ -273,21 +288,35 @@ export class RequirementStore {
   async publish(id: string, definitions: TaskDefinition[]): Promise<Requirement> {
     const item = this.#mustGet(id);
     this.#expect(item, ['reviewing']);
-    return this.#update(id, { status: 'published', packages: definitions });
+    const published = await this.#update(id, { status: 'published', packages: definitions });
+    this.#rebuildCatalog();
+    return published;
   }
 
   async remove(id: string): Promise<void> {
     const item = this.#mustGet(id);
     if (item.status === 'clarifying' || item.status === 'planning') fail('Wait for Product Lead to finish', 'invalid_state');
     this.#items.delete(id);
+    this.#rebuildCatalog();
     await this.#persist();
   }
 
+  #rebuildCatalog() {
+    this.#published = deepFreeze(
+      [...this.#items.values()]
+        .filter((item) => item.status === 'published')
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .flatMap((item) => structuredClone(item.packages)),
+    );
+    this.#publishedById = new Map(this.#published.map((task) => [task.id, task]));
+  }
+
   // Every published package, for the work queue.
-  publishedPackages(): TaskDefinition[] {
-    return [...this.#items.values()]
-      .filter((item) => item.status === 'published')
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .flatMap((item) => structuredClone(item.packages));
+  listTasks(): readonly TaskDefinition[] {
+    return this.#published;
+  }
+
+  getTask(id: string): TaskDefinition | null {
+    return this.#publishedById.get(id) ?? null;
   }
 }

@@ -309,7 +309,7 @@ export class WorkPackageStore {
 
   // Rebinds the store to another data directory (a repository switch) and
   // loads it. Pending writes land in the old directory first.
-  async open(configDir: string, tasks: StoreTask[]): Promise<this> {
+  async open(configDir: string, tasks: readonly StoreTask[]): Promise<this> {
     await this.flush();
     this.#file = path.join(configDir, STATE_FILENAME);
     this.#state = new Map();
@@ -317,7 +317,7 @@ export class WorkPackageStore {
   }
 
   // Seeds from task definitions, then overlays anything already on disk.
-  async load(tasks: StoreTask[]): Promise<this> {
+  async load(tasks: readonly StoreTask[]): Promise<this> {
     this.#tasks = [...tasks];
     for (const task of tasks) this.#state.set(task.id, initialState(task));
     try {
