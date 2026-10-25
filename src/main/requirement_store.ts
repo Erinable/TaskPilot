@@ -17,6 +17,7 @@ import type { TaskDefinition } from './tasks.ts';
 import type { Plan } from './agents/product_lead.ts';
 import type { InterfaceSummary, SkippedFile } from './agents/architect.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
+import { JsonWriteQueue } from './atomic_json_file.ts';
 
 export const REQUIREMENTS_FILENAME = 'requirements.json';
 export const STATUSES = ['draft', 'clarifying', 'answering', 'planning', 'reviewing', 'published', 'failed'] as const;
@@ -139,27 +140,13 @@ export class RequirementStore {
     return this;
   }
 
-  // Writes are chained so they never overlap. An agent run finishing in the
-  // background can save at the same moment as a user edit; without the chain
-  // both would share the temp file and one rename would fail.
-  #writes: Promise<void> = Promise.resolve();
+  #writes = new JsonWriteQueue();
 
-  #persist(): Promise<void> {
-    const write = this.#writes.then(async () => {
-      await fs.mkdir(path.dirname(this.#file), { recursive: true });
-      const tmp = `${this.#file}.tmp`;
-      // Snapshot at write time, so the file always reflects the latest state.
-      await fs.writeFile(tmp, `${JSON.stringify([...this.#items.values()], null, 2)}\n`);
-      await fs.rename(tmp, this.#file);
-    });
-    // Keep the chain alive after a failed write; the caller still sees the error.
-    this.#writes = write.catch(() => {});
-    return write;
-  }
+  #persist = () => this.#writes.write(() => ({ file: this.#file, value: [...this.#items.values()] }));
 
   // Resolves once every write so far has landed.
   flush(): Promise<void> {
-    return this.#writes;
+    return this.#writes.flush();
   }
 
   // Not named #require: electron-vite treats any "require" call text in the bundle as CommonJS and injects a shim at the wrong spot.

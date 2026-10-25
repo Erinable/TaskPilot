@@ -20,6 +20,7 @@ import YAML from 'yaml';
 
 import * as markdown from '../shared/note_markdown.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
+import { writeFileAtomic } from './atomic_json_file.ts';
 import type { GradeCategory, Note, NoteInput, NoteList, NoteMeta, NoteSaved, NoteSource } from '../shared/ipc_types.ts';
 
 export const DEFAULT_DIRNAME = 'notes';
@@ -451,9 +452,7 @@ export class NoteStore {
   async #writeFile(id: string, content: string, { exclusive = false } = {}) {
     const target = this.#path(id);
     if (exclusive && (await fs.stat(target).catch(() => null))) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
-    const tmp = path.join(this.#directory, `.${randomUUID()}.tmp`);
-    await fs.writeFile(tmp, content);
-    await fs.rename(tmp, target);
+    await writeFileAtomic(target, content, { tmp: path.join(this.#directory, `.${randomUUID()}.tmp`) });
   }
 
   // The note as it is on disk now, for checks that must not trust the cache.

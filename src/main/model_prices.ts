@@ -13,6 +13,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { TokenUsage } from '../shared/ipc_types.ts';
+import { writeFileAtomic } from './atomic_json_file.ts';
 
 export const PRICES_FILENAME = 'model_prices.json';
 export const PRICES_URL = 'https://models.dev/api.json';
@@ -99,7 +100,6 @@ export const syncPrices = async (
   const table = buildTable(raw, providers, now().toISOString());
   const file = path.join(configDir, PRICES_FILENAME);
   // Written whole, then renamed, so a crash never leaves half a table.
-  await fs.writeFile(`${file}.tmp`, JSON.stringify(table));
-  await fs.rename(`${file}.tmp`, file);
+  await writeFileAtomic(file, JSON.stringify(table));
   return table;
 };
