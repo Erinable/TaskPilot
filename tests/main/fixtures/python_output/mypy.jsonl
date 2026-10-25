@@ -1,0 +1,1 @@
+{"file": "demo/__init__.py", "line": 12, "column": 11, "end_line": 12, "end_column": 14, "message": "Incompatible return value type (got \"str\", expected \"int\")", "hint": null, "code": "return-value", "severity": "error"}

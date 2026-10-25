@@ -305,10 +305,106 @@ export const parseCargo = (output: string, root: string, cwd: string): Diagnosti
   return messages ? [...found.values()] : null;
 };
 
+// Ruff's `check --output-format=json`: [{filename, location: {row, column},
+// code, message, severity?}] with absolute file names. Older Ruff has no
+// severity; every finding fails `ruff check`, so it is an error.
+const parseRuff = (value: unknown, root: string, cwd: string): Diagnostic[] | null => {
+  if (!Array.isArray(value)) return null;
+  return (value as LooseJson[])
+    .flatMap(
+      (entry) =>
+        diagnostic(
+          {
+            file: entry?.filename,
+            line: entry?.location?.row,
+            column: entry?.location?.column,
+            severity: entry?.severity,
+            message: entry?.message,
+            rule: entry?.code ?? entry?.name,
+          },
+          'error',
+          root,
+          cwd,
+        ) ?? [],
+    )
+    .slice(0, MAX_DIAGNOSTICS);
+};
+
+// Pyright's `--outputjson`: {generalDiagnostics: [{file, severity, message,
+// range: {start: {line, character}}, rule}]}, positions counted from 0.
+const parsePyright = (value: unknown, root: string, cwd: string): Diagnostic[] | null => {
+  const list = (value as LooseJson | null)?.generalDiagnostics;
+  if (!Array.isArray(list)) return null;
+  return (list as LooseJson[])
+    .flatMap((entry) => {
+      const start = entry?.range?.start;
+      return (
+        diagnostic(
+          {
+            file: entry?.file,
+            line: Number.isInteger(start?.line) ? start.line + 1 : null,
+            column: Number.isInteger(start?.character) ? start.character + 1 : null,
+            severity: entry?.severity,
+            message: entry?.message,
+            rule: entry?.rule,
+          },
+          'error',
+          root,
+          cwd,
+        ) ?? []
+      );
+    })
+    .slice(0, MAX_DIAGNOSTICS);
+};
+
+// mypy's `--output json`: one {file, line, column, message, code, severity}
+// per line, files relative to where it ran, columns counted from 0. A clean
+// run prints nothing; output with no mypy line at all is unparseable.
+export const parseMypy = (output: string, root: string, cwd: string): Diagnostic[] | null => {
+  const found: Diagnostic[] = [];
+  let other = false;
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue;
+    let value: LooseJson | null;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      value = null;
+    }
+    if (typeof value?.message !== 'string') {
+      other = true;
+      continue;
+    }
+    const item = diagnostic(
+      {
+        file: value.file,
+        line: value.line,
+        column: Number.isInteger(value.column) && value.column >= 0 ? value.column + 1 : null,
+        severity: value.severity,
+        message: value.message,
+        rule: value.code,
+      },
+      'error',
+      root,
+      cwd,
+    );
+    if (item) found.push(item);
+    if (found.length >= MAX_DIAGNOSTICS) break;
+  }
+  return found.length || !other ? found : null;
+};
+
+const JSON_PARSERS: Record<Exclude<JsonDialect, 'cargo' | 'mypy'>, (value: unknown, root: string, cwd: string) => Diagnostic[] | null> = {
+  eslint: parseEslint,
+  ruff: parseRuff,
+  pyright: parsePyright,
+  diagnostics: parseOwn,
+};
+
 export const parseJson = (output: string, dialect: JsonDialect, root: string, cwd: string): Diagnostic[] | null => {
   if (dialect === 'cargo') return parseCargo(output, root, cwd);
-  const value = extractJson(output);
-  return dialect === 'eslint' ? parseEslint(value, root, cwd) : parseOwn(value, root, cwd);
+  if (dialect === 'mypy') return parseMypy(output, root, cwd);
+  return JSON_PARSERS[dialect](extractJson(output), root, cwd);
 };
 
 const SARIF_LEVEL: Record<string, Severity> = { error: 'error', warning: 'warning', note: 'info', none: 'info' };
