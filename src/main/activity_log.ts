@@ -9,7 +9,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ActivityEvent, ActivityRecord, AgentId, CostSubject, ModelCall } from '../shared/ipc_types.ts';
+import type { ActivityEvent, ActivityRecord, CostSubject, ModelCall } from '../shared/ipc/activity.ts';
+import type { AgentId } from '../shared/agent_runtime.ts';
 import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME } from './cost_rollup.ts';
 import type { CostRow } from './cost_rollup.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';

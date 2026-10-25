@@ -2,9 +2,9 @@ import { describe, expect, test } from 'vitest';
 
 import * as model from '../../src/renderer/src/lib/notes_model.ts';
 import * as markdown from '../../src/shared/note_markdown.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as noteTypes from '../../src/shared/ipc/notes.ts';
 
-const note = (id: string, overrides: Partial<ipc.NoteMeta> = {}): ipc.NoteMeta => ({
+const note = (id: string, overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta => ({
   id,
   title: id,
   category: null,
@@ -28,7 +28,7 @@ describe('notes model', () => {
     note('b', { excerpt: 'Use FULL names', category: 'style', inlineTags: ['命名'] }),
     note('c', { source: { repositoryId: null, repositoryName: 'api', packageId: null, packageTitle: '登录', file: 'src/login.ts', line: null } }),
   ];
-  const ids = (list: ipc.NoteMeta[]) => list.map((entry) => entry.id);
+  const ids = (list: noteTypes.NoteMeta[]) => list.map((entry) => entry.id);
   const all = { query: '', category: null, tag: null };
 
   test('filters by category, frontmatter or body tags, and a search over text, tags, source and body matches', () => {

@@ -10,7 +10,7 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import * as model from '../../../src/renderer/src/lib/release_model.ts';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
 import * as fakes from '../release_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -19,7 +19,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
 });
 
 describe('ReleaseView', () => {
-  let state: { current: ipc.ReleaseState };
+  let state: { current: releaseTypes.ReleaseState };
   let api: ReturnType<typeof fakes.installReleaseApi>;
   let wrapper: ReturnType<typeof mount> | null = null;
 
@@ -203,7 +203,7 @@ describe('ReleaseView', () => {
     expect(view.find('.release-history .view-all-button').exists()).toBe(false);
   });
 
-  const milestone = (overrides: Partial<ipc.MilestoneView> = {}): ipc.MilestoneView => ({
+  const milestone = (overrides: Partial<releaseTypes.MilestoneView> = {}): releaseTypes.MilestoneView => ({
     id: 'ms1',
     version: '0.3.0',
     targetDate: null,

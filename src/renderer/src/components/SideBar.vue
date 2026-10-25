@@ -10,7 +10,7 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import * as activity from '@/lib/activity.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -41,7 +41,7 @@ const openView = async (view: 'map' | 'release' | 'team' | 'notes') => {
 };
 
 // Opens the team page with that member's card focused.
-const openMember = async (agent: ipc.ActivityAgent) => {
+const openMember = async (agent: activityTypes.ActivityAgent) => {
   if (!(await app.navigate('team'))) return;
   execution.close();
   await nextTick();

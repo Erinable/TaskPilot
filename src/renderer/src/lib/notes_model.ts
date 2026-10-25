@@ -2,17 +2,18 @@
 // [[ completion and the labels it shows.
 import { businessDay, businessTimeZone } from '@/lib/time_zone.ts';
 import * as markdown from '@shared/note_markdown.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as noteTypes from '@shared/ipc/notes.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-export type NoteFilter = { query: string; category: ipc.GradeCategory | null; tag: string | null };
+export type NoteFilter = { query: string; category: packageTypes.GradeCategory | null; tag: string | null };
 
-export const CATEGORY_LABELS: Record<ipc.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
+export const CATEGORY_LABELS: Record<packageTypes.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
 
-export const allTags = (note: ipc.NoteMeta) => [...new Set([...note.tags, ...note.inlineTags])];
+export const allTags = (note: noteTypes.NoteMeta) => [...new Set([...note.tags, ...note.inlineTags])];
 
 // Search matches the title, tags, excerpt and source here, plus the bodies
 // the main process found (bodyMatches), case-insensitively.
-export const filterNotes = (notes: ipc.NoteMeta[], { query, category, tag }: NoteFilter, bodyMatches: Set<string> = new Set()): ipc.NoteMeta[] => {
+export const filterNotes = (notes: noteTypes.NoteMeta[], { query, category, tag }: NoteFilter, bodyMatches: Set<string> = new Set()): noteTypes.NoteMeta[] => {
   const needle = query.trim().toLowerCase();
   return notes.filter((note) => {
     if (category && note.category !== category) return false;
@@ -26,7 +27,7 @@ export const filterNotes = (notes: ipc.NoteMeta[], { query, category, tag }: Not
 };
 
 // "项目 · 工作包 · 文件:行", leaving out what is unknown.
-export const sourceLabel = (source: ipc.NoteSource | null): string | null => {
+export const sourceLabel = (source: noteTypes.NoteSource | null): string | null => {
   if (!source) return null;
   const location = source.file ? (source.line ? `${source.file}:${source.line}` : source.file) : null;
   const parts = [source.repositoryName, source.packageTitle, location].filter(Boolean);
@@ -34,16 +35,16 @@ export const sourceLabel = (source: ipc.NoteSource | null): string | null => {
 };
 
 // Title (any case) → note, for resolving [[links]].
-export const titleIndex = (notes: ipc.NoteMeta[]) => new Map(notes.map((note) => [markdown.titleKey(note.title), note]));
+export const titleIndex = (notes: noteTypes.NoteMeta[]) => new Map(notes.map((note) => [markdown.titleKey(note.title), note]));
 
 // Notes that link to this one, newest first.
-export const backlinks = (notes: ipc.NoteMeta[], note: ipc.NoteMeta): ipc.NoteMeta[] => {
+export const backlinks = (notes: noteTypes.NoteMeta[], note: noteTypes.NoteMeta): noteTypes.NoteMeta[] => {
   const key = markdown.titleKey(note.title);
   return notes.filter((other) => other.id !== note.id && other.links.some((link) => markdown.titleKey(link) === key));
 };
 
 // Notes that link to a title, for the rename dialog.
-export const linkingCount = (notes: ipc.NoteMeta[], title: string, selfId: string) => {
+export const linkingCount = (notes: noteTypes.NoteMeta[], title: string, selfId: string) => {
   const key = markdown.titleKey(title);
   return notes.filter((other) => other.id !== selfId && other.links.some((link) => markdown.titleKey(link) === key)).length;
 };
@@ -59,7 +60,7 @@ export const linkQueryAt = (text: string, cursor: number): { start: number; quer
 };
 
 // Up to `limit` titles for [[ completion: prefix matches first, then the rest.
-export const linkSuggestions = (notes: ipc.NoteMeta[], query: string, selfId: string | null, limit = 8): ipc.NoteMeta[] => {
+export const linkSuggestions = (notes: noteTypes.NoteMeta[], query: string, selfId: string | null, limit = 8): noteTypes.NoteMeta[] => {
   const needle = query.trim().toLowerCase();
   const candidates = notes.filter((note) => note.id !== selfId && note.title.toLowerCase().includes(needle));
   const prefix = candidates.filter((note) => note.title.toLowerCase().startsWith(needle));
@@ -79,8 +80,8 @@ export const formatDay = (iso: string, timeZone = businessTimeZone()) => busines
 
 // Notes by the month they were written, newest first, as a blog archive
 // lists posts.
-export const groupByMonth = (notes: ipc.NoteMeta[], timeZone = businessTimeZone()) => {
-  const groups = new Map<string, ipc.NoteMeta[]>();
+export const groupByMonth = (notes: noteTypes.NoteMeta[], timeZone = businessTimeZone()) => {
+  const groups = new Map<string, noteTypes.NoteMeta[]>();
   for (const note of [...notes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
     const month = formatDay(note.createdAt, timeZone).slice(0, 7);
     groups.set(month, [...(groups.get(month) ?? []), note]);
@@ -89,14 +90,14 @@ export const groupByMonth = (notes: ipc.NoteMeta[], timeZone = businessTimeZone(
 };
 
 // Tags with how many notes carry them, most used first.
-export const tagCounts = (notes: ipc.NoteMeta[]) => {
+export const tagCounts = (notes: noteTypes.NoteMeta[]) => {
   const counts = new Map<string, number>();
   for (const note of notes) for (const tag of allTags(note)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 };
 
-export const categoryCounts = (notes: ipc.NoteMeta[]) => {
-  const counts: Partial<Record<ipc.GradeCategory, number>> = {};
+export const categoryCounts = (notes: noteTypes.NoteMeta[]) => {
+  const counts: Partial<Record<packageTypes.GradeCategory, number>> = {};
   for (const note of notes) if (note.category) counts[note.category] = (counts[note.category] ?? 0) + 1;
   return counts;
 };

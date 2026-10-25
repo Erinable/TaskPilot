@@ -7,7 +7,8 @@
 //   opencode step_finish per step: part.{tokens{input, output, cache{read, write}}, cost}, providerID/modelID
 // A reported cost of 0 is treated as unknown: CLIs report 0 for providers
 // they have no price for, not only for free ones.
-import type { CliId, ModelCall, TokenUsage } from '../../shared/ipc_types.ts';
+import type { ModelCall, TokenUsage } from '../../shared/ipc/activity.ts';
+import type { CliId } from '../../shared/agent_runtime.ts';
 
 type Json = Record<string, unknown>;
 

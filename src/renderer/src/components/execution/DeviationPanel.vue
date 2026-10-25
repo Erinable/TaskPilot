@@ -8,9 +8,9 @@ import { describeErrorInfo } from '@/lib/errors.ts';
 import { resolutionTitle } from '@/lib/review_model.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 

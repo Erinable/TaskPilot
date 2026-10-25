@@ -1,7 +1,8 @@
 // Pure ranking for the command palette: work packages, requirements and
 // settings pages, filtered in memory. No Vue or IPC, so tests call it directly.
 import { needsAttention } from '@/components/requirements/requirement_model.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type { SettingsPage } from './settings_model.ts';
 
 export type SearchKind = 'task' | 'requirement' | 'setting';
@@ -42,9 +43,9 @@ export type SettingsNavEntry = { page: SettingsPage; label: string; keywords: st
 const lower = (text: string) => text.toLowerCase();
 
 // A requirement without a title is named by its first line.
-const requirementTitle = (item: Pick<ipc.Requirement, 'title' | 'text'>) => item.title.trim() || item.text.trim().split('\n')[0] || '未命名需求';
+const requirementTitle = (item: Pick<requirementTypes.Requirement, 'title' | 'text'>) => item.title.trim() || item.text.trim().split('\n')[0] || '未命名需求';
 
-export const taskEntry = (task: Pick<ipc.TaskView, 'id' | 'title' | 'description' | 'module' | 'tags' | 'status' | 'statusLabel'>): SearchEntry => ({
+export const taskEntry = (task: Pick<packageTypes.TaskView, 'id' | 'title' | 'description' | 'module' | 'tags' | 'status' | 'statusLabel'>): SearchEntry => ({
   key: `task:${task.id}`,
   kind: 'task',
   target: { kind: 'task', id: task.id },
@@ -56,7 +57,7 @@ export const taskEntry = (task: Pick<ipc.TaskView, 'id' | 'title' | 'description
   bodyText: lower(task.description),
 });
 
-export const requirementEntry = (item: Pick<ipc.Requirement, 'id' | 'title' | 'text' | 'status'>, statusLabel: string): SearchEntry => {
+export const requirementEntry = (item: Pick<requirementTypes.Requirement, 'id' | 'title' | 'text' | 'status'>, statusLabel: string): SearchEntry => {
   const title = requirementTitle(item);
   return {
     key: `requirement:${item.id}`,

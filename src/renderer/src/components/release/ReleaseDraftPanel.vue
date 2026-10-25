@@ -8,9 +8,9 @@ import InlineCode from '@/components/InlineCode.vue';
 import * as model from '@/lib/release_model.ts';
 import { useReleaseStore } from '@/stores/release.ts';
 import WriteNotesDialog from './WriteNotesDialog.vue';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as releaseTypes from '@shared/ipc/release.ts';
 
-const props = defineProps<{ draft: ipc.ReleaseDraft & { plan: ipc.ReleasePlan } }>();
+const props = defineProps<{ draft: releaseTypes.ReleaseDraft & { plan: releaseTypes.ReleasePlan } }>();
 
 const store = useReleaseStore();
 const writeOpen = ref(false);

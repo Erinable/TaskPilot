@@ -6,7 +6,7 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import * as model from '../../../src/renderer/src/lib/release_model.ts';
 import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
 import * as fakes from '../release_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -15,7 +15,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
 });
 
 describe('release store', () => {
-  let state: { current: ipc.ReleaseState };
+  let state: { current: releaseTypes.ReleaseState };
   let api: ReturnType<typeof fakes.installReleaseApi>;
 
   beforeEach(() => {

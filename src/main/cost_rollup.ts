@@ -5,7 +5,8 @@
 // prices them.
 //
 // [人工决策-2026-10-13 16:52:32] 原始记录保留 30 天；「天 × 成员 × 模型」汇总保留 1 年，存 events/cost_rollup.json。
-import type { AgentId, CliId, TokenUsage } from '../shared/ipc_types.ts';
+import type { TokenUsage } from '../shared/ipc/activity.ts';
+import type { AgentId, CliId } from '../shared/agent_runtime.ts';
 import type { LoggedRecord } from './activity_log.ts';
 
 export const ROLLUP_FILENAME = 'cost_rollup.json';

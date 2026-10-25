@@ -1,6 +1,7 @@
 // Typed coding-run contract. Coding executors never share the restricted
 // analysis runner or its transition authority.
-import type { CheckKind, CheckRun, ErrorInfo } from './ipc_types.ts';
+import type { ErrorInfo } from './ipc/envelope.ts';
+import type { CheckKind, CheckRun } from './ipc/workspace.ts';
 import type { AgentRuntimeConfig, CliId, ThinkingLevel } from './agent_runtime.ts';
 
 export type CodingConfig = AgentRuntimeConfig & { user: string; timeoutMinutes: number };

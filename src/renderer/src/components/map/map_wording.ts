@@ -1,9 +1,9 @@
 // Wording shared by the engineering map components.
 import { businessDay } from '@/lib/time_zone.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 // Tones reuse the .status-pill colour classes.
-export const FRESHNESS: Record<ipc.MapFreshness, { label: string; tone: string }> = {
+export const FRESHNESS: Record<activityTypes.MapFreshness, { label: string; tone: string }> = {
   current: { label: '最新', tone: 'done' },
   stale: { label: '可能过时（文件已改动）', tone: 'in_review' },
   removed: { label: '文件已删除', tone: 'deviation' },

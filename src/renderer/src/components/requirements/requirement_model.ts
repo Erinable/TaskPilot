@@ -1,8 +1,9 @@
 // Pure rules for the requirement center: status wording, the stepper, limits
 // and validation. Kept free of Vue and IPC so tests can call them directly.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
-export const STATUS_LABELS: Record<ipc.RequirementStatus, string> = {
+export const STATUS_LABELS: Record<requirementTypes.RequirementStatus, string> = {
   draft: '草稿',
   clarifying: '澄清中',
   answering: '待回答',
@@ -13,7 +14,7 @@ export const STATUS_LABELS: Record<ipc.RequirementStatus, string> = {
 };
 
 // Pill colours reuse the work package status classes.
-export const STATUS_TONES: Record<ipc.RequirementStatus, string> = {
+export const STATUS_TONES: Record<requirementTypes.RequirementStatus, string> = {
   draft: 'pending',
   clarifying: 'in_progress',
   answering: 'in_review',
@@ -34,7 +35,7 @@ export const STEPS: { step: StepName; label: string }[] = [
 ];
 
 // Which stepper steps are done / current for each status.
-const STEPPER: Record<Exclude<ipc.RequirementStatus, 'failed'>, StepperState> = {
+const STEPPER: Record<Exclude<requirementTypes.RequirementStatus, 'failed'>, StepperState> = {
   draft: { current: 'clarify', done: [] },
   clarifying: { current: 'clarify', done: [] },
   answering: { current: 'answer', done: ['clarify'] },
@@ -43,28 +44,29 @@ const STEPPER: Record<Exclude<ipc.RequirementStatus, 'failed'>, StepperState> = 
   published: { current: null, done: ['clarify', 'answer', 'plan', 'publish'] },
 };
 
-export const stepperState = (item: Pick<ipc.Requirement, 'status' | 'failedStep'>): StepperState => {
+export const stepperState = (item: Pick<requirementTypes.Requirement, 'status' | 'failedStep'>): StepperState => {
   if (item.status !== 'failed') return STEPPER[item.status];
   return item.failedStep === 'planning' ? { current: 'plan', done: ['clarify', 'answer'] } : { current: 'clarify', done: [] };
 };
 
 // The classes each stepper step carries: done / current / failed.
-export const stepClasses = (item: Pick<ipc.Requirement, 'status' | 'failedStep'>, step: StepName) => {
+export const stepClasses = (item: Pick<requirementTypes.Requirement, 'status' | 'failedStep'>, step: StepName) => {
   const state = stepperState(item);
   return { done: state.done.includes(step), current: state.current === step, failed: item.status === 'failed' && state.current === step };
 };
 
-export const RUNNING = new Set<ipc.RequirementStatus>(['clarifying', 'planning']);
-export const isRunning = (item: Pick<ipc.Requirement, 'status'>) => RUNNING.has(item.status);
-export const needsAttention = (item: Pick<ipc.Requirement, 'status'>) => item.status === 'answering' || item.status === 'reviewing' || item.status === 'failed';
+export const RUNNING = new Set<requirementTypes.RequirementStatus>(['clarifying', 'planning']);
+export const isRunning = (item: Pick<requirementTypes.Requirement, 'status'>) => RUNNING.has(item.status);
+export const needsAttention = (item: Pick<requirementTypes.Requirement, 'status'>) =>
+  item.status === 'answering' || item.status === 'reviewing' || item.status === 'failed';
 
 export const POLL_MS = 1200;
 export const MAX_TEXT = 4000;
 export const MAX_ANSWER = 1000;
 
-export const PRIORITY_LABELS: Record<ipc.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
+export const PRIORITY_LABELS: Record<packageTypes.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
 
-export const SKIP_LABELS: Record<ipc.ReadSkipReason, string> = {
+export const SKIP_LABELS: Record<packageTypes.ReadSkipReason, string> = {
   secret: '可能含密钥',
   binary: '二进制',
   too_large: '过大',
@@ -84,9 +86,9 @@ export const validateText = (text: string) => {
 };
 
 // The list row title: the given title, else the start of the text.
-export const rowTitle = (item: Pick<ipc.Requirement, 'title' | 'text'>) => item.title || item.text.slice(0, 40);
+export const rowTitle = (item: Pick<requirementTypes.Requirement, 'title' | 'text'>) => item.title || item.text.slice(0, 40);
 
 export const rowDate = (updatedAt: string) => new Date(updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 
 // Status plus phase, so the Architect -> Product Lead handoff re-renders too.
-export const pollKey = (item: Pick<ipc.Requirement, 'status' | 'phase'>) => `${item.status}:${item.phase ?? ''}`;
+export const pollKey = (item: Pick<requirementTypes.Requirement, 'status' | 'phase'>) => `${item.status}:${item.phase ?? ''}`;

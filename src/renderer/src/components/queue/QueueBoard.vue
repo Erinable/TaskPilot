@@ -4,11 +4,11 @@ import { computed } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import BoardCard from './BoardCard.vue';
 import { COLUMNS, groupByColumn, inProgressCount } from '@/lib/board.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 // One column per stage. On a narrow window the columns stack and read as a
 // list grouped by stage; nothing scrolls sideways.
-const props = defineProps<{ tasks: ipc.TaskView[] }>();
+const props = defineProps<{ tasks: packageTypes.TaskView[] }>();
 const columns = computed(() => groupByColumn(props.tasks));
 const busy = computed(() => inProgressCount(props.tasks));
 </script>

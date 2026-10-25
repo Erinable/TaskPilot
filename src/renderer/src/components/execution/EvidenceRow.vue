@@ -2,9 +2,9 @@
 import { computed } from 'vue';
 
 import * as reviewModel from '@/lib/review_model.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
-const props = defineProps<{ item: ipc.Evidence }>();
+const props = defineProps<{ item: workspaceTypes.Evidence }>();
 
 const line = computed(() => reviewModel.evidenceLine(props.item));
 const label = computed(() => reviewModel.EVIDENCE_STATUS[props.item.status]?.label ?? props.item.status);

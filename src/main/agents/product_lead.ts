@@ -10,7 +10,7 @@
 //   - packages never carry commands. Verification commands come only from
 //     workspace settings (see ../workspace.ts).
 
-import type { ModeRecommendation, PackageDifficulty } from '../../shared/ipc_types.ts';
+import type { ModeRecommendation, PackageDifficulty } from '../../shared/ipc/packages.ts';
 import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 

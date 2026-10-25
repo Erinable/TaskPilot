@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'vitest';
 
 import { buildSteps, isComplete } from '../../src/renderer/src/lib/onboarding.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { agentStatus } from './requirements_fakes.ts';
 
-const repo = { configured: true, root: '/work/app', commit: 'abc', branch: 'main', dirty: false, changedFiles: 0 } as ipc.WorkspaceInfo;
+const repo = { configured: true, root: '/work/app', commit: 'abc', branch: 'main', dirty: false, changedFiles: 0 } as workspaceTypes.WorkspaceInfo;
 const facts = (overrides = {}) => ({
   agent: agentStatus(),
   workspace: repo,

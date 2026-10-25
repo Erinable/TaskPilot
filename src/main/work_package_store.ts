@@ -14,7 +14,7 @@ import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from
 import type { CheckKind } from './workspace.ts';
 
 import type { CodingRun } from '../shared/coding_types.ts';
-import type { ExecutionMode, Grade, ReferenceRun } from '../shared/ipc_types.ts';
+import type { ExecutionMode, Grade, ReferenceRun } from '../shared/ipc/packages.ts';
 export const STATE_FILENAME = 'work-packages.json';
 
 // Why an agent run failed.

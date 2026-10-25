@@ -2,9 +2,10 @@
 // window.taskpilot.release stub whose calls resolve {ok: true, data}.
 import { vi } from 'vitest';
 
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as releaseTypes from '../../src/shared/ipc/release.ts';
+import type * as requirementTypes from '../../src/shared/ipc/requirements.ts';
 
-export const plan = (overrides: Partial<ipc.ReleasePlan> = {}): ipc.ReleasePlan => ({
+export const plan = (overrides: Partial<releaseTypes.ReleasePlan> = {}): releaseTypes.ReleasePlan => ({
   bump: 'minor',
   reason: '新增了 `release` 页面',
   currentVersion: '0.1.0',
@@ -17,7 +18,7 @@ export const plan = (overrides: Partial<ipc.ReleasePlan> = {}): ipc.ReleasePlan 
   ...overrides,
 });
 
-export const draft = (overrides: Partial<ipc.ReleaseDraft> = {}): ipc.ReleaseDraft => ({
+export const draft = (overrides: Partial<releaseTypes.ReleaseDraft> = {}): releaseTypes.ReleaseDraft => ({
   status: 'ready',
   error: null,
   startCommit: 'aaaaaaa1',
@@ -32,7 +33,7 @@ export const draft = (overrides: Partial<ipc.ReleaseDraft> = {}): ipc.ReleaseDra
   ...overrides,
 });
 
-export const release = (overrides: Partial<ipc.Release> = {}): ipc.Release => ({
+export const release = (overrides: Partial<releaseTypes.Release> = {}): releaseTypes.Release => ({
   id: 'rel1',
   version: '0.1.0',
   startCommit: 'a',
@@ -44,7 +45,7 @@ export const release = (overrides: Partial<ipc.Release> = {}): ipc.Release => ({
   ...overrides,
 });
 
-export const releaseState = (overrides: Partial<ipc.ReleaseState> = {}): ipc.ReleaseState => ({
+export const releaseState = (overrides: Partial<releaseTypes.ReleaseState> = {}): releaseTypes.ReleaseState => ({
   configured: true,
   draft: null,
   milestones: [],
@@ -58,11 +59,11 @@ export const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 export const fail = (code: string, message: string, field?: string) => Promise.resolve({ ok: false as const, error: { code, message, field } });
 
 // `state.current` is what release.get() returns; generate/updateDraft merge into it.
-export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
+export const installReleaseApi = (state: { current: releaseTypes.ReleaseState }) => {
   const release = {
     get: vi.fn(() => ok(state.current)),
     recentCommits: vi.fn(() =>
-      ok<ipc.ReleaseCommit[]>([
+      ok<releaseTypes.ReleaseCommit[]>([
         { sha: 'c0ffee1234', subject: '<b>初始提交</b>', date: '2026-09-30T16:30:00.000Z' },
         { sha: 'deadbeef99', subject: '第二个提交', date: '2026-10-02T03:00:00.000Z' },
       ]),
@@ -71,16 +72,16 @@ export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
       state.current = { ...state.current, running: true, draft: draft({ status: 'generating', plan: null, input: null, notesText: '' }) };
       return ok(state.current);
     }),
-    updateDraft: vi.fn((input: ipc.ReleaseDraftInput) => {
+    updateDraft: vi.fn((input: releaseTypes.ReleaseDraftInput) => {
       const current = state.current.draft!;
       state.current = { ...state.current, draft: { ...current, notesText: input.notes ?? current.notesText, checked: input.checked ?? current.checked } };
       return ok(state.current);
     }),
     finish: vi.fn(() => ok(finishedRelease(state))),
-    writeNotes: vi.fn((input: ipc.ReleaseWriteInput) => ok<ipc.ReleaseWriteResult>({ path: input.path })),
+    writeNotes: vi.fn((input: releaseTypes.ReleaseWriteInput) => ok<releaseTypes.ReleaseWriteResult>({ path: input.path })),
     cancel: vi.fn(() => ok(true)),
-    createMilestone: vi.fn((input: ipc.MilestoneInput) => {
-      const milestone: ipc.MilestoneView = {
+    createMilestone: vi.fn((input: releaseTypes.MilestoneInput) => {
+      const milestone: releaseTypes.MilestoneView = {
         id: `ms${state.current.milestones.length + 1}`,
         ...input,
         createdAt: '',
@@ -93,7 +94,7 @@ export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
       state.current = { ...state.current, milestones: [...state.current.milestones, milestone] };
       return ok(state.current);
     }),
-    updateMilestone: vi.fn((_id: string, _input: ipc.MilestoneInput) => ok(state.current)),
+    updateMilestone: vi.fn((_id: string, _input: releaseTypes.MilestoneInput) => ok(state.current)),
     deleteMilestone: vi.fn((id: string) => {
       state.current = { ...state.current, milestones: state.current.milestones.filter((item) => item.id !== id) };
       return ok(state.current);
@@ -101,9 +102,9 @@ export const installReleaseApi = (state: { current: ipc.ReleaseState }) => {
     assignMilestone: vi.fn((_requirementId: string, _milestoneId: string | null) => ok(state.current)),
   };
   // The milestone form lists published requirements.
-  const requirements = { list: vi.fn(() => ok<ipc.Requirement[]>([])) };
+  const requirements = { list: vi.fn(() => ok<requirementTypes.Requirement[]>([])) };
   (window as unknown as { taskpilot: unknown }).taskpilot = { release, requirements };
   return release;
 };
 
-const finishedRelease = (state: { current: ipc.ReleaseState }) => release({ id: 'rel2', version: state.current.draft?.plan?.nextVersion ?? '0.2.0' });
+const finishedRelease = (state: { current: releaseTypes.ReleaseState }) => release({ id: 'rel2', version: state.current.draft?.plan?.nextVersion ?? '0.2.0' });

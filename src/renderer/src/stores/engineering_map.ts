@@ -6,11 +6,11 @@ import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 export const useEngineeringMapStore = defineStore('engineeringMap', () => {
   // ========== Map ==========
-  const map = ref<ipc.EngineeringMap | null>(null);
+  const map = ref<activityTypes.EngineeringMap | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   let session = 0;

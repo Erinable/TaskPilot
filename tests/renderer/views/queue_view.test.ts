@@ -9,7 +9,7 @@ import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -56,7 +56,7 @@ describe('QueueView', () => {
         tags: ['auth'],
         estimate: '预计 1 小时',
         icon: 'key',
-      } as ipc.TaskView,
+      } as packageTypes.TaskView,
     ];
     const wrapper = render();
     await flushPromises();
@@ -119,7 +119,7 @@ describe('QueueView', () => {
       { ...base, id: 'low', title: '低', status: 'pending', priority: 'low' },
       { ...base, id: 'done', title: '完成', status: 'done', priority: 'high' },
       { ...base, id: 'high', title: '高', status: 'in_progress', priority: 'high' },
-    ] as unknown as ipc.TaskView[];
+    ] as unknown as packageTypes.TaskView[];
     const wrapper = mount(QueueView, { global: { plugins: [pinia, ElementPlus] } });
     await flushPromises();
     expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['高', '低']);
@@ -136,7 +136,7 @@ describe('QueueView', () => {
     useTasksStore().tasks = [
       { ...base, id: 'run', title: '执行中', status: 'in_progress', completedSteps: [0, 2] },
       { ...base, id: 'new', title: '待执行', status: 'pending', completedSteps: [] },
-    ] as unknown as ipc.TaskView[];
+    ] as unknown as packageTypes.TaskView[];
     const wrapper = render();
     await flushPromises();
     const items = wrapper.findAll('.task-item');
@@ -147,7 +147,7 @@ describe('QueueView', () => {
 
   test('an empty filter offers to show every package', async () => {
     const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key', priority: 'high', steps: [], completedSteps: [] };
-    useTasksStore().tasks = [{ ...base, id: 'done', title: '完成', status: 'done' }] as unknown as ipc.TaskView[];
+    useTasksStore().tasks = [{ ...base, id: 'done', title: '完成', status: 'done' }] as unknown as packageTypes.TaskView[];
     const wrapper = render();
     await flushPromises();
     await wrapper.find('[data-empty="filter"] .empty-action').trigger('click');
@@ -181,7 +181,7 @@ describe('QueueView', () => {
 
 describe('QueueView board', () => {
   let pinia: ReturnType<typeof createPinia>;
-  const pkg = (overrides: Partial<ipc.TaskView>) =>
+  const pkg = (overrides: Partial<packageTypes.TaskView>) =>
     ({
       title: '包',
       description: 'd',
@@ -199,7 +199,7 @@ describe('QueueView board', () => {
       review: null,
       codingRun: null,
       ...overrides,
-    }) as ipc.TaskView;
+    }) as packageTypes.TaskView;
 
   beforeEach(() => {
     pinia = createPinia();

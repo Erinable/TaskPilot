@@ -3,12 +3,18 @@ import assert from 'node:assert/strict';
 
 import * as board from '../../src/renderer/src/lib/board.ts';
 import { taskView } from './execution_fakes.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 
-const waitingOn = (blocking: boolean): ipc.PackageDependency => ({ id: 'r1-wp1', title: '实现用例', status: 'in_progress', waived: !blocking, blocking });
+const waitingOn = (blocking: boolean): packageTypes.PackageDependency => ({
+  id: 'r1-wp1',
+  title: '实现用例',
+  status: 'in_progress',
+  waived: !blocking,
+  blocking,
+});
 
 test('every status lands in one column; deviation and blocked stay with the developer', () => {
-  const statuses: ipc.WorkPackageStatus[] = ['clarifying', 'pending', 'in_progress', 'deviation', 'blocked', 'in_review', 'accepting', 'done'];
+  const statuses: packageTypes.WorkPackageStatus[] = ['clarifying', 'pending', 'in_progress', 'deviation', 'blocked', 'in_review', 'accepting', 'done'];
   assert.deepEqual(
     statuses.map((status) => board.columnOf({ status })),
     ['todo', 'todo', 'doing', 'doing', 'doing', 'review', 'accept', 'done'],
@@ -38,7 +44,7 @@ test('flags name the waited-for package and the agents at work', () => {
 });
 
 test('estimate versus actual: wall-clock from claim to done, overrun past 1.5x', () => {
-  const finished = (estimate: string, hours: number, extra: Partial<ipc.TaskView> = {}) =>
+  const finished = (estimate: string, hours: number, extra: Partial<packageTypes.TaskView> = {}) =>
     taskView({
       status: 'done',
       estimate,

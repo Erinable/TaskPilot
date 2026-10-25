@@ -7,7 +7,7 @@ import ProjectList from '../../../src/renderer/src/components/ProjectList.vue';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { taskView } from '../execution_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as repositoryTypes from '../../../src/shared/ipc/repositories.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-const repo = (id: string, overrides: Partial<ipc.Repository> = {}): ipc.Repository => ({
+const repo = (id: string, overrides: Partial<repositoryTypes.Repository> = {}): repositoryTypes.Repository => ({
   id,
   root: `/work/${id}`,
   name: id,
@@ -27,7 +27,7 @@ const repo = (id: string, overrides: Partial<ipc.Repository> = {}): ipc.Reposito
   ...overrides,
 });
 
-const mountList = (repositories: ipc.Repository[]) => {
+const mountList = (repositories: repositoryTypes.Repository[]) => {
   const store = useRepositoriesStore();
   store.repositories = repositories;
   store.currentId = repositories.find((entry) => entry.current)?.id ?? null;

@@ -6,7 +6,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import type { Grade, GradeCategory, NoteMeta, Review } from '../shared/ipc_types.ts';
+import type { NoteMeta } from '../shared/ipc/notes.ts';
+import type { Grade, GradeCategory, Review } from '../shared/ipc/packages.ts';
 
 export const REFERENCES_DIRNAME = 'references';
 // What of the reference Tutor reads; the submission is capped by review_diff.

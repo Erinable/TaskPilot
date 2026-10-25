@@ -7,7 +7,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 
 import type { CodingDeps } from '../../../src/main/coding_runtime.ts';
-import type { TaskView } from '../../../src/shared/ipc_types.ts';
+import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../../src/shared/coding_types.ts';
 import { applyPatch, parsePatchPreview } from '../../../src/main/coding_workspace.ts';
 import { previewMerge } from '../../../src/main/patch_merge.ts';

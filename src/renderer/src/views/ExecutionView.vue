@@ -23,9 +23,9 @@ import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useCodingStore } from '@/stores/coding.ts';
 import { ACTIONS, useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const PRIORITY_LABELS: Record<ipc.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
+const PRIORITY_LABELS: Record<packageTypes.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
 
 const app = useAppStore();
 const execution = useExecutionStore();
@@ -56,7 +56,7 @@ const back = () => {
     .catch((error) => console.error(error));
 };
 const handOff = () => coding.start().catch((error) => console.error(error));
-const transition = (name: ipc.HumanTransition) => {
+const transition = (name: packageTypes.HumanTransition) => {
   execution.runTransition(name).catch((error) => console.error(error));
 };
 

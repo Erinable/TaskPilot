@@ -10,14 +10,16 @@ import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
 import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as codingTypes from '@shared/coding_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 const coding = useCodingStore();
 const highRiskConsent = ref(false);
 const now = useNow();
 
-const STATUS_LABELS: Record<ipc.CodingRun['status'], string> = {
+const STATUS_LABELS: Record<codingTypes.CodingRun['status'], string> = {
   preparing: '准备中',
   running: '编码中',
   checking: '检查中',
@@ -31,9 +33,9 @@ const STATUS_LABELS: Record<ipc.CodingRun['status'], string> = {
   discarded: '已丢弃',
 };
 // The transcript in plain words; the CLI's raw event kinds mean nothing to a beginner.
-const EVENT_LABELS: Record<ipc.CodingEvent['type'], string> = { status: '进度', text: '说明', thinking: '思考', tool: '操作', error: '出错' };
-const TRIGGER_LABELS: Record<ipc.CodingTrigger, string> = { human: '你发起', checks_failed: '检查失败后重试', qa_rejected: 'QA 驳回后重试' };
-const HALT_TEXT: Record<ipc.CodingHalt, string> = {
+const EVENT_LABELS: Record<codingTypes.CodingEvent['type'], string> = { status: '进度', text: '说明', thinking: '思考', tool: '操作', error: '出错' };
+const TRIGGER_LABELS: Record<codingTypes.CodingTrigger, string> = { human: '你发起', checks_failed: '检查失败后重试', qa_rejected: 'QA 驳回后重试' };
+const HALT_TEXT: Record<codingTypes.CodingHalt, string> = {
   attempts_exhausted: '已自动重试 3 轮仍未通过，交给你处理：可以自己修改，或补充说明后重新开始。',
   high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
   no_changes: '这一轮 AI 没有产生可以应用的改动，自动流程已停止。',
@@ -44,7 +46,7 @@ const HALT_TEXT: Record<ipc.CodingHalt, string> = {
     '这一轮超过了时间上限，AI 被停下了。下面是它停下前写好的部分，可能没写完，请逐个文件检查后再决定是否应用；也可以到「设置 → 模型与智能体 → 编码隔离」调长上限。',
 };
 // Rounds the loop can restart from: a finished chain or a stopped one.
-const RESTARTABLE: ipc.CodingRun['status'][] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
+const RESTARTABLE: codingTypes.CodingRun['status'][] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
 
 const runError = computed(() => coding.run?.error);
 // The plain explanation, with the CLI's own message folded below when it adds something.
@@ -58,9 +60,9 @@ const applyDisabled = computed(
   () =>
     !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.unresolved.length > 0 || coding.operation !== null,
 );
-const MERGE_LABELS: Record<ipc.CodingMergeFile['state'], string> = { clean: '', merged: '已和你的改动合并', conflict: '和你的改动冲突' };
+const MERGE_LABELS: Record<codingTypes.CodingMergeFile['state'], string> = { clean: '', merged: '已和你的改动合并', conflict: '和你的改动冲突' };
 // The choices for one conflict; markers only where the file can carry them.
-const choicesFor = (merge: ipc.CodingMergeFile) => [
+const choicesFor = (merge: codingTypes.CodingMergeFile) => [
   ...(merge.markers ? [{ value: 'markers' as const, label: '写入冲突标记，我来改' }] : []),
   { value: 'mine' as const, label: '保留我的，跳过 AI 的改动' },
   { value: 'theirs' as const, label: '用 AI 的版本覆盖' },
@@ -90,7 +92,9 @@ const tokenText = computed(() => {
   return `${input} 输入 / ${output} 输出`;
 });
 
-const checks = computed(() => Object.entries(coding.run?.checks ?? {}).flatMap(([kind, check]) => (check ? [{ kind: kind as ipc.CheckKind, check }] : [])));
+const checks = computed(() =>
+  Object.entries(coding.run?.checks ?? {}).flatMap(([kind, check]) => (check ? [{ kind: kind as workspaceTypes.CheckKind, check }] : [])),
+);
 const select = (id: string) => {
   highRiskConsent.value = false;
   coding.select(id).catch((error) => console.error(error));

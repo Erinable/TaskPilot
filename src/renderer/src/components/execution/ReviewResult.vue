@@ -6,13 +6,13 @@ import InlineCode from '@/components/InlineCode.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import * as reviewModel from '@/lib/review_model.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 import EvidenceRow from './EvidenceRow.vue';
 import FailureExplain from './FailureExplain.vue';
 
-export type ReviewOutcome = Extract<ipc.Review, { status: 'passed' | 'rejected' }>;
+export type ReviewOutcome = Extract<packageTypes.Review, { status: 'passed' | 'rejected' }>;
 
-const props = defineProps<{ task: ipc.TaskView; review: ReviewOutcome }>();
+const props = defineProps<{ task: packageTypes.TaskView; review: ReviewOutcome }>();
 
 const report = computed(() => props.review.report);
 const verification = computed(() => props.review.verification);
@@ -32,7 +32,7 @@ const failedRun = computed(() => {
 });
 const finishedAt = computed(() => (props.review.finishedAt ? new Date(props.review.finishedAt).toLocaleString('zh-CN') : ''));
 const criterionText = (index: number) => props.task.acceptance[index]?.text ?? `条件 ${index + 1}`;
-const issueLocation = (issue: ipc.QaReport['issues'][number]) => (issue.line ? `${issue.file}:${issue.line}` : issue.file);
+const issueLocation = (issue: packageTypes.QaReport['issues'][number]) => (issue.line ? `${issue.file}:${issue.line}` : issue.file);
 </script>
 
 <template>

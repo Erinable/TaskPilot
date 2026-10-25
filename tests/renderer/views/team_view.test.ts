@@ -10,7 +10,7 @@ import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
 import { installApi } from '../requirements_fakes.ts';
 import { installApi as installSettingsApi } from '../settings_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as activityTypes from '../../../src/shared/ipc/activity.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
 
 const MARKUP = '<img src=x onerror=alert(1)>';
 
-const REVIEW: ipc.ActivityRecord = {
+const REVIEW: activityTypes.ActivityRecord = {
   kind: 'package_transition',
   packageId: 'p1',
   title: '登录接口',
@@ -32,7 +32,7 @@ const REVIEW: ipc.ActivityRecord = {
   at: new Date().toISOString(),
 };
 
-const overview = (overrides: Partial<ipc.ActivityOverview> = {}): ipc.ActivityOverview => ({
+const overview = (overrides: Partial<activityTypes.ActivityOverview> = {}): activityTypes.ActivityOverview => ({
   // The shared feed holds only the human's step; QA's review is older than its 20 newest.
   recent: [{ kind: 'requirement_created', requirementId: 'r1', title: '邮箱登录', at: new Date().toISOString() }],
   metrics: { doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null },

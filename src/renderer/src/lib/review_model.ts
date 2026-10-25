@@ -1,13 +1,14 @@
 // Pure wording for evidence, baselines, reviews and diffs on the execution
 // page. Kept free of Vue and the DOM so it can be tested directly.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { IconName } from './icons.ts';
 
-export const KIND_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
+export const KIND_LABELS: Record<workspaceTypes.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
 
 export type EvidenceTone = 'done' | 'blocked' | 'in_review' | '';
 
-export const EVIDENCE_STATUS: Record<ipc.EvidenceStatus, { label: string; tone: EvidenceTone; icon: IconName }> = {
+export const EVIDENCE_STATUS: Record<workspaceTypes.EvidenceStatus, { label: string; tone: EvidenceTone; icon: IconName }> = {
   pass: { label: '通过', tone: 'done', icon: 'check-circle' },
   fail: { label: '失败', tone: 'blocked', icon: 'x-circle' },
   unverifiable: { label: '无法验证', tone: 'in_review', icon: 'alert' },
@@ -39,10 +40,10 @@ const UNAVAILABLE: Record<string, string> = {
   cancelled: '基线测量已取消。',
 };
 
-const failingCount = (baseline: ipc.BaselineChecks) =>
+const failingCount = (baseline: workspaceTypes.BaselineChecks) =>
   Object.values(baseline.checks ?? {}).reduce((sum, check) => sum + (check && 'failing' in check ? check.failing.length : 0), 0);
 
-const BASELINE: Record<ipc.BaselineStatus, (baseline: ipc.BaselineChecks) => string> = {
+const BASELINE: Record<workspaceTypes.BaselineStatus, (baseline: workspaceTypes.BaselineChecks) => string> = {
   measuring: () => '正在基线上运行提交前检查…',
   measured: (baseline) =>
     `基线已测量${failingCount(baseline) ? `：${failingCount(baseline)} 个测试在基线上就失败，不会算作这次改动引入` : '，所有检查在基线上都通过'}`,
@@ -51,14 +52,14 @@ const BASELINE: Record<ipc.BaselineStatus, (baseline: ipc.BaselineChecks) => str
 };
 
 // One line for the execution page; `canRemeasure` drives the button.
-export const baselineText = (baseline: ipc.BaselineChecks | null) => {
+export const baselineText = (baseline: workspaceTypes.BaselineChecks | null) => {
   if (!baseline) return { text: '', canRemeasure: false };
   const text = BASELINE[baseline.status]?.(baseline) ?? '';
   const canRemeasure = baseline.status === 'contaminated' || (baseline.status === 'unavailable' && baseline.reason !== 'no_checks');
   return { text, canRemeasure };
 };
 
-export const evidenceLine = (item: Pick<ipc.Evidence, 'kind' | 'status' | 'reason' | 'blocking'>) => {
+export const evidenceLine = (item: Pick<workspaceTypes.Evidence, 'kind' | 'status' | 'reason' | 'blocking'>) => {
   const status = EVIDENCE_STATUS[item.status] ?? EVIDENCE_STATUS.skipped;
   const parts = [`${KIND_LABELS[item.kind] ?? item.kind} ${status.label}`];
   if (item.reason && REASONS[item.reason]) parts.push(REASONS[item.reason]);
@@ -66,7 +67,7 @@ export const evidenceLine = (item: Pick<ipc.Evidence, 'kind' | 'status' | 'reaso
   return { text: parts.join(' · '), tone: status.tone, icon: status.icon };
 };
 
-export const CRITERION_EVIDENCE: Record<ipc.CriterionStatus, string> = {
+export const CRITERION_EVIDENCE: Record<workspaceTypes.CriterionStatus, string> = {
   verified: '关联测试通过',
   failed: '关联测试失败',
   missing: '没有找到关联测试',
@@ -74,7 +75,7 @@ export const CRITERION_EVIDENCE: Record<ipc.CriterionStatus, string> = {
   manual: '无关联测试，需人工确认',
 };
 
-export const attentionText = (item: ipc.AttentionItem, acceptance: ipc.AcceptanceCriterion[] = []) => {
+export const attentionText = (item: workspaceTypes.AttentionItem, acceptance: workspaceTypes.AcceptanceCriterion[] = []) => {
   const criterion = (index: number) => `「${acceptance[index]?.text ?? `条件 ${index + 1}`}」`;
   switch (item.code) {
     case 'check_unverifiable':
@@ -99,20 +100,20 @@ export const attentionText = (item: ipc.AttentionItem, acceptance: ipc.Acceptanc
 export type CriterionRow = {
   text: string;
   test: string | null;
-  status: ipc.CriterionStatus | null;
+  status: workspaceTypes.CriterionStatus | null;
   tone: string;
   icon: IconName;
   note: string;
   alreadyPassing: boolean;
 };
 
-const CRITERION_TONES: Partial<Record<ipc.CriterionStatus, string>> = {
+const CRITERION_TONES: Partial<Record<workspaceTypes.CriterionStatus, string>> = {
   verified: 'verified',
   failed: 'failed',
   missing: 'failed',
   unverifiable: 'unverifiable',
 };
-const CRITERION_MARKS: Partial<Record<ipc.CriterionStatus, IconName>> = {
+const CRITERION_MARKS: Partial<Record<workspaceTypes.CriterionStatus, IconName>> = {
   verified: 'check-circle',
   failed: 'x-circle',
   missing: 'x-circle',
@@ -120,12 +121,15 @@ const CRITERION_MARKS: Partial<Record<ipc.CriterionStatus, IconName>> = {
 };
 
 // Acceptance rows; `matched` comes from the last verification run or review, if any.
-export const criterionRows = (acceptance: ipc.AcceptanceCriterion[], matched: ipc.CriterionEvidence[] | null | undefined): CriterionRow[] => {
+export const criterionRows = (
+  acceptance: workspaceTypes.AcceptanceCriterion[],
+  matched: workspaceTypes.CriterionEvidence[] | null | undefined,
+): CriterionRow[] => {
   const byText = new Map((matched ?? []).map((entry) => [entry.text, entry]));
   return acceptance.map((criterion) => {
     const result = byText.get(criterion.text);
     // Reviews stored before evidence statuses existed carry only the flags.
-    const legacy: ipc.CriterionStatus | undefined = result
+    const legacy: workspaceTypes.CriterionStatus | undefined = result
       ? result.manual
         ? 'manual'
         : result.verified
@@ -134,7 +138,7 @@ export const criterionRows = (acceptance: ipc.AcceptanceCriterion[], matched: ip
             ? 'missing'
             : 'failed'
       : undefined;
-    const status: ipc.CriterionStatus | null = result?.status ?? legacy ?? (criterion.test ? null : 'manual');
+    const status: workspaceTypes.CriterionStatus | null = result?.status ?? legacy ?? (criterion.test ? null : 'manual');
     return {
       text: criterion.text,
       test: criterion.test ?? null,
@@ -147,7 +151,7 @@ export const criterionRows = (acceptance: ipc.AcceptanceCriterion[], matched: ip
   });
 };
 
-export const REVIEW_REASONS: Record<ipc.ReviewReason, string> = {
+export const REVIEW_REASONS: Record<packageTypes.ReviewReason, string> = {
   no_changes: '相对基线没有任何改动',
   tests_failed: '测试未通过',
   acceptance_tests: '有验收条件的关联测试未通过',
@@ -155,10 +159,14 @@ export const REVIEW_REASONS: Record<ipc.ReviewReason, string> = {
   blocker: 'QA 发现了阻断问题',
   criteria_unmet: '有验收条件未满足',
 };
-export const SEVERITY_LABELS: Record<ipc.QaReport['issues'][number]['severity'], string> = { blocker: '阻断', major: '重要', minor: '次要' };
-export const CRITERION_LABELS: Record<ipc.QaReport['criteria'][number]['status'], string> = { met: '满足', unmet: '未满足', unclear: '无法判断' };
-export const CRITERION_ICONS: Record<ipc.QaReport['criteria'][number]['status'], IconName> = { met: 'check-circle', unmet: 'x-circle', unclear: 'circle' };
-export const SKIP_LABELS: Record<ipc.DiffSkipReason, string> = {
+export const SEVERITY_LABELS: Record<packageTypes.QaReport['issues'][number]['severity'], string> = { blocker: '阻断', major: '重要', minor: '次要' };
+export const CRITERION_LABELS: Record<packageTypes.QaReport['criteria'][number]['status'], string> = { met: '满足', unmet: '未满足', unclear: '无法判断' };
+export const CRITERION_ICONS: Record<packageTypes.QaReport['criteria'][number]['status'], IconName> = {
+  met: 'check-circle',
+  unmet: 'x-circle',
+  unclear: 'circle',
+};
+export const SKIP_LABELS: Record<packageTypes.DiffSkipReason, string> = {
   rename: '重命名',
   outside_workspace: '在工作区外',
   secret: '疑似敏感文件',
@@ -168,9 +176,12 @@ export const SKIP_LABELS: Record<ipc.DiffSkipReason, string> = {
   too_large: '改动过大',
   budget: '超出审查总量',
 };
-export const DECISION_LABELS: Record<ipc.DeviationResolution['decision'], string> = { dismiss: 'Architect 驳回：按原计划继续', replan: 'Architect 已重新规划' };
+export const DECISION_LABELS: Record<packageTypes.DeviationResolution['decision'], string> = {
+  dismiss: 'Architect 驳回：按原计划继续',
+  replan: 'Architect 已重新规划',
+};
 
-export const resolutionTitle = (resolution: ipc.DeviationResolution) =>
+export const resolutionTitle = (resolution: packageTypes.DeviationResolution) =>
   DECISION_LABELS[resolution.decision] +
   (resolution.afterContest ? '（应你的异议）' : '') +
   (resolution.contested ? ' · 你已提出异议' : '') +

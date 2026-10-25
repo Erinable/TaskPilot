@@ -10,11 +10,12 @@ import { defaultMode } from '@/lib/execution_mode.ts';
 import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import type { ConfirmOptions } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
 
-export type ActionSpec = { name: ipc.HumanTransition; label: string; icon: IconName; primary?: boolean; danger?: boolean };
+export type ActionSpec = { name: packageTypes.HumanTransition; label: string; icon: IconName; primary?: boolean; danger?: boolean };
 
 // Human-triggerable transitions, in the order they should appear.
 export const ACTIONS: ActionSpec[] = [
@@ -30,7 +31,7 @@ export const ACTIONS: ActionSpec[] = [
   { name: 'release', label: '放回队列', icon: 'undo' },
 ];
 
-export const TRANSITION_TOASTS: Partial<Record<ipc.HumanTransition, string>> = {
+export const TRANSITION_TOASTS: Partial<Record<packageTypes.HumanTransition, string>> = {
   claim: '已领取，基线已记录。',
   submit_for_review: '已提交，QA 正在审查。',
   block: '已标记为阻塞。',
@@ -43,18 +44,18 @@ export const TRANSITION_TOASTS: Partial<Record<ipc.HumanTransition, string>> = {
 };
 
 // Transitions that need a confirmation first.
-export const TRANSITION_CONFIRMS: Partial<Record<ipc.HumanTransition, ConfirmOptions>> = {
+export const TRANSITION_CONFIRMS: Partial<Record<packageTypes.HumanTransition, ConfirmOptions>> = {
   acceptance_rejected: { title: '打回这个工作包？', body: '工作包会回到执行中，你需要修改后重新提交审查。', accept: '打回', danger: true },
   revert_replan: { title: '撤销重新规划？', body: '恢复 Architect 修订前的计划和执行进度，偏差记录会保留。', accept: '撤销' },
 };
 
-export const VERIFY_LABELS: Record<ipc.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
+export const VERIFY_LABELS: Record<workspaceTypes.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
 
 export const REVIEW_POLL_MS = 1500;
 export const BASELINE_POLL_MS = 1000;
 
 // Practice runs count too: the reference and the grade land in the open page.
-const agentRunning = (task: ipc.TaskView | null) =>
+const agentRunning = (task: packageTypes.TaskView | null) =>
   task?.review?.status === 'running' ||
   task?.adjudication?.status === 'running' ||
   task?.referenceRun?.status === 'running' ||
@@ -65,9 +66,9 @@ export type DeviationForm = { note: string; stepIndex: number | null; filePath: 
 
 export const useExecutionStore = defineStore('execution', () => {
   // ========== Current package ==========
-  const current = ref<ipc.TaskView | null>(null);
+  const current = ref<packageTypes.TaskView | null>(null);
   // Acceptance evidence from the last verification run; falls back to the review's.
-  const acceptanceOverride = ref<ipc.CriterionEvidence[] | null>(null);
+  const acceptanceOverride = ref<workspaceTypes.CriterionEvidence[] | null>(null);
 
   // Re-reads the open package and the queue after a state change.
   const reloadCurrent = async () => {
@@ -81,7 +82,7 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   const open = async (id: string) => {
-    let task: ipc.TaskView;
+    let task: packageTypes.TaskView;
     try {
       task = await call(window.taskpilot.getTask(id));
     } catch (error) {
@@ -114,7 +115,7 @@ export const useExecutionStore = defineStore('execution', () => {
 
   // Replace the open task after a coding or other background IPC action. The
   // queue entry is updated in place so the sidebar never lags behind the view.
-  const adoptTask = (task: ipc.TaskView) => {
+  const adoptTask = (task: packageTypes.TaskView) => {
     if (current.value?.id !== task.id) return false;
     current.value = task;
     useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === task.id ? task : entry));
@@ -179,7 +180,7 @@ export const useExecutionStore = defineStore('execution', () => {
     try {
       const task = await call(window.taskpilot.measureBaseline(current.value.id));
       // The new measurement replaces the old record once it starts.
-      const measuring: ipc.BaselineChecks = {
+      const measuring: workspaceTypes.BaselineChecks = {
         status: 'measuring',
         reason: null,
         commit: task.baseline ?? '',
@@ -203,7 +204,7 @@ export const useExecutionStore = defineStore('execution', () => {
     reviewTimer = null;
   };
 
-  const announceReview = (task: ipc.TaskView) => {
+  const announceReview = (task: packageTypes.TaskView) => {
     const review = task.review;
     if (!review) return;
     if (review.status === 'passed') announceAgent(task.status === 'done' ? 'QA 审查通过，工作包已完成。' : 'QA 审查通过，有几项需要你确认后验收。');
@@ -211,7 +212,7 @@ export const useExecutionStore = defineStore('execution', () => {
     else if (review.status === 'failed' && review.error.code !== 'agent_cancelled') announceAgent(`QA 审查失败：${describeErrorInfo(review.error)}`);
   };
 
-  const announceAdjudication = (task: ipc.TaskView) => {
+  const announceAdjudication = (task: packageTypes.TaskView) => {
     const adjudication = task.adjudication;
     if (adjudication?.status === 'failed') {
       if (adjudication.error.code !== 'agent_cancelled') announceAgent(`Architect 裁决失败：${describeErrorInfo(adjudication.error)}`);
@@ -233,9 +234,9 @@ export const useExecutionStore = defineStore('execution', () => {
     }, REVIEW_POLL_MS);
   };
 
-  const pollReview = async (before: ipc.TaskView) => {
+  const pollReview = async (before: packageTypes.TaskView) => {
     const id = before.id;
-    let task: ipc.TaskView;
+    let task: packageTypes.TaskView;
     try {
       task = await call(window.taskpilot.getTask(id));
     } catch (error) {
@@ -289,7 +290,7 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Diff ==========
-  const diff = ref<ipc.DiffStat | null>(null);
+  const diff = ref<workspaceTypes.DiffStat | null>(null);
   const diffHint = ref('相对领取时的基线');
   // Bumped on every refresh so expanded file patches reload.
   const diffVersion = ref(0);
@@ -319,12 +320,12 @@ export const useExecutionStore = defineStore('execution', () => {
   const diffFile = (taskId: string, path: string) => call(window.taskpilot.diff.file(taskId, path));
 
   // ========== Verification ==========
-  const verifyKind = ref<ipc.CheckKind | null>(null);
+  const verifyKind = ref<workspaceTypes.CheckKind | null>(null);
   const verifyRunning = ref(false);
-  const verifyResult = ref<ipc.VerifyRun | null>(null);
+  const verifyResult = ref<workspaceTypes.VerifyRun | null>(null);
   const verifyError = ref<string | null>(null);
 
-  const runVerification = async (kind: ipc.CheckKind) => {
+  const runVerification = async (kind: workspaceTypes.CheckKind) => {
     const task = current.value;
     if (!task || verifyRunning.value) return;
     verifyKind.value = kind;
@@ -358,7 +359,7 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // The transition in flight; its button spins and the others wait.
-  const transitioning = ref<ipc.HumanTransition | null>(null);
+  const transitioning = ref<packageTypes.HumanTransition | null>(null);
 
   // [人工决策-2026-10-14] 同时只做 1 个是软提示：已有执行中的包时，确认后仍可领取。
   const confirmBusyClaim = async (id: string) => {
@@ -371,7 +372,7 @@ export const useExecutionStore = defineStore('execution', () => {
     });
   };
 
-  const runTransition = async (name: ipc.HumanTransition) => {
+  const runTransition = async (name: packageTypes.HumanTransition) => {
     if (!current.value || transitioning.value) return;
     if (name === 'report_deviation') {
       openDeviationForm();
@@ -397,7 +398,7 @@ export const useExecutionStore = defineStore('execution', () => {
     await sendTransition(name);
   };
 
-  const sendTransition = async (name: ipc.HumanTransition, options?: ipc.TransitionOptions) => {
+  const sendTransition = async (name: packageTypes.HumanTransition, options?: packageTypes.TransitionOptions) => {
     if (!current.value) return;
     transitioning.value = name;
     try {
@@ -442,7 +443,7 @@ export const useExecutionStore = defineStore('execution', () => {
   // ========== Claim dialog ==========
   // Open while the developer picks who writes the code.
   const claimOpen = ref(false);
-  const claimMode = ref<ipc.ExecutionMode>('self');
+  const claimMode = ref<packageTypes.ExecutionMode>('self');
 
   const closeClaim = () => {
     claimOpen.value = false;
@@ -495,7 +496,7 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // Lets a pending package start before one of its dependencies is done.
-  const waiveDependency = async (task: ipc.TaskView, dependency: ipc.PackageDependency) => {
+  const waiveDependency = async (task: packageTypes.TaskView, dependency: packageTypes.PackageDependency) => {
     const confirmed = await confirmAction({
       title: '不等前置，直接开始？',
       body: `「${task.title}」原计划等「${dependency.title ?? dependency.id}」完成后再做，因为它可能要用到前置包写的代码。不等的话，你可能要自己补上缺的部分。`,

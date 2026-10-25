@@ -5,7 +5,8 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useCodingStore } from '../../../src/renderer/src/stores/coding.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as codingTypes from '../../../src/shared/coding_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import { codingRun, installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
@@ -15,10 +16,10 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-const readyRun = (status: ipc.CodingRun['status']) => codingRun({ status });
+const readyRun = (status: codingTypes.CodingRun['status']) => codingRun({ status });
 
-const file = (path: string, highRisk = false): ipc.CodingPatchFile => ({ path, added: 1, removed: 0, binary: false, highRisk });
-const twoFilePatch: ipc.CodingPatchPreview = {
+const file = (path: string, highRisk = false): codingTypes.CodingPatchFile => ({ path, added: 1, removed: 0, binary: false, highRisk });
+const twoFilePatch: codingTypes.CodingPatchPreview = {
   digest: 'test-digest',
   files: [file('src/a.ts'), file('package.json', true), file('.env')],
   patch: '',
@@ -28,7 +29,7 @@ const twoFilePatch: ipc.CodingPatchPreview = {
   ],
 };
 
-let current: { task: ipc.TaskView };
+let current: { task: packageTypes.TaskView };
 let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
@@ -91,7 +92,7 @@ describe('coding store', () => {
     expect(api.coding.apply).toHaveBeenCalledWith('t1', { digest: 'test-digest', allowHighRisk: true, files: ['package.json'], resolutions: {} });
   });
 
-  const conflictPatch: ipc.CodingPatchPreview = {
+  const conflictPatch: codingTypes.CodingPatchPreview = {
     digest: 'patch-digest',
     mergeDigest: 'merge-digest',
     files: [file('src/a.ts'), file('src/b.ts')],
@@ -165,7 +166,7 @@ describe('coding store', () => {
     const execution = useExecutionStore();
     execution.current = current.task;
     const coding = useCodingStore();
-    const deferred = Promise.withResolvers<{ ok: true; data: ipc.TaskView }>();
+    const deferred = Promise.withResolvers<{ ok: true; data: packageTypes.TaskView }>();
     let markGetStarted: (() => void) | null = null;
     const getStarted = new Promise<void>((resolve) => {
       markGetStarted = resolve;

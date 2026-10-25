@@ -7,12 +7,12 @@ import { computed, ref } from 'vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as commitTypes from '@shared/ipc/commit.ts';
 
 export const useCommitStore = defineStore('commit', () => {
   // ========== Preview ==========
   const taskId = ref<string | null>(null);
-  const preview = ref<ipc.CommitPreview | null>(null);
+  const preview = ref<commitTypes.CommitPreview | null>(null);
   const message = ref('');
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -39,7 +39,7 @@ export const useCommitStore = defineStore('commit', () => {
 
   // ========== Commit ==========
   const committing = ref(false);
-  const committed = ref<ipc.CommitResult | null>(null);
+  const committed = ref<commitTypes.CommitResult | null>(null);
 
   const canCommit = computed(() => Boolean(preview.value?.files.length) && message.value.trim().length > 0 && !committing.value);
 

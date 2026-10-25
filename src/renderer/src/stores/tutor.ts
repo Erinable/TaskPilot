@@ -7,7 +7,7 @@ import { ref } from 'vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as tutorTypes from '@shared/ipc/tutor.ts';
 
 export const TUTOR_POLL_MS = 1200;
 
@@ -15,7 +15,7 @@ const stepKey = (taskId: string, stepIndex: number) => `${taskId}:${stepIndex}`;
 
 export const useTutorStore = defineStore('tutor', () => {
   // ========== Answers ==========
-  const states = ref<Record<string, ipc.TutorState>>({});
+  const states = ref<Record<string, tutorTypes.TutorState>>({});
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let session = 0;
 
@@ -28,7 +28,7 @@ export const useTutorStore = defineStore('tutor', () => {
     timers.delete(key);
   };
 
-  const apply = (taskId: string, stepIndex: number, next: ipc.TutorState) => {
+  const apply = (taskId: string, stepIndex: number, next: tutorTypes.TutorState) => {
     states.value = { ...states.value, [stepKey(taskId, stepIndex)]: next };
     stop(taskId, stepIndex);
     if (next.status === 'running') {

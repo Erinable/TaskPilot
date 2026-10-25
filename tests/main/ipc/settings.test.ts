@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { AgentDeps } from '../../../src/main/app_context.ts';
-import type { CliModelCatalog } from '../../../src/shared/ipc_types.ts';
+import type { CliModelCatalog } from '../../../src/shared/agent_runtime.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as workspace from '../../../src/main/workspace.ts';
 import * as preferences from '../../../src/main/preferences.ts';

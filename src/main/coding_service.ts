@@ -14,15 +14,15 @@ import * as verification from './verification.ts';
 import { billableCodingUsage, codingCancelled, codingFailure } from './coding_runtime.ts';
 import { submitChecks } from './submit_checks.ts';
 import { codingCall } from './agents/model_usage.ts';
-import type * as ipc from '../shared/ipc_types.ts';
-import type { CodingEventPage, CodingRun } from '../shared/coding_types.ts';
+import type * as codingTypes from '../shared/coding_types.ts';
+import type * as packageTypes from '../shared/ipc/packages.ts';
 import type { AppContext } from './app_context.ts';
 import type { CodingRuntime } from './coding_runtime.ts';
 
 type ActiveRound = {
-  run: ipc.CodingRun;
+  run: codingTypes.CodingRun;
   controller: AbortController;
-  events: ipc.CodingEvent[];
+  events: codingTypes.CodingEvent[];
   workspace: codingWorkspace.PreparedCodingWorkspace;
 };
 
@@ -30,14 +30,14 @@ const MAX_CODING_EVENTS = 200;
 
 // A new round may start once the previous one has finished or handed its
 // patch over; ready (unapplied) and in-flight rounds block it.
-const CODING_STARTABLE: ipc.CodingRunStatus[] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
+const CODING_STARTABLE: codingTypes.CodingRunStatus[] = ['failed', 'cancelled', 'discarded', 'applied', 'submitted'];
 
 // `startReview` hands a submitted package to QA.
 export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { startReview }: { startReview: (id: string) => Promise<unknown> }) => {
   const { store, backgroundRuns, getPreferences, requireTask, requireRoot, record, recordCall } = ctx;
 
   const activeRounds = new Map<string, ActiveRound>();
-  const eventHistory = new Map<string, ipc.CodingEvent[]>();
+  const eventHistory = new Map<string, codingTypes.CodingEvent[]>();
   ctx.onCancelAll(() => eventHistory.clear());
 
   const codingRunOf = (id: string) => {
@@ -46,23 +46,23 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     if (!run) throw codedError('No coding run exists', 'coding_not_running');
     return { task, run };
   };
-  const workspaceOf = (id: string, run: CodingRun) => activeRounds.get(id)?.workspace ?? { runName: run.runName, directory: run.runName };
-  const updateCoding = async (id: string, patch: Partial<CodingRun>) => {
+  const workspaceOf = (id: string, run: codingTypes.CodingRun) => activeRounds.get(id)?.workspace ?? { runName: run.runName, directory: run.runName };
+  const updateCoding = async (id: string, patch: Partial<codingTypes.CodingRun>) => {
     const state = await store.updateCodingRun(id, patch);
     const active = activeRounds.get(id);
-    if (active?.run) active.run = state.codingRun as CodingRun;
+    if (active?.run) active.run = state.codingRun as codingTypes.CodingRun;
     return state;
   };
 
   // How each file of `patch` would merge into the working tree now.
-  const previewOf = (run: CodingRun, patch: string) => runtime.previewMerge(requireRoot(), run.baseline, codingWorkspace.filePatches(patch));
+  const previewOf = (run: codingTypes.CodingRun, patch: string) => runtime.previewMerge(requireRoot(), run.baseline, codingWorkspace.filePatches(patch));
 
   // One coding round. The developer's round starts a chain at attempt 1;
   // automatic rounds continue it with feedback, from the current working tree.
   const startRound = async (
     id: string,
-    { instruction, trigger, feedback }: { instruction: string; trigger: ipc.CodingTrigger; feedback: string | null },
-  ): Promise<ipc.TaskView> => {
+    { instruction, trigger, feedback }: { instruction: string; trigger: codingTypes.CodingTrigger; feedback: string | null },
+  ): Promise<packageTypes.TaskView> => {
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
     const task = requireTask(id);
@@ -79,7 +79,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     const chained = trigger !== 'human' && previous;
     const runId = codingExec.codingRunId();
     const sandbox = await runtime.startSandbox();
-    const initial: CodingRun = {
+    const initial: codingTypes.CodingRun = {
       id: runId,
       packageId: id,
       runName: runtime.runNameFor(sandbox, runId),
@@ -221,11 +221,11 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
   // Applies the chosen files of a ready patch to the working tree.
   const applyRound = async (
     id: string,
-    preview: ipc.CodingPatchPreview,
+    preview: codingTypes.CodingPatchPreview,
     files: string[],
     allowHighRisk: boolean,
-    resolutions: Partial<Record<string, ipc.CodingResolution>>,
-  ): Promise<ipc.CodingApplyResult> => {
+    resolutions: Partial<Record<string, codingTypes.CodingResolution>>,
+  ): Promise<codingTypes.CodingApplyResult> => {
     const { task, run } = codingRunOf(id);
     const selected = codingWorkspace.parsePatchPreview(codingWorkspace.selectPatch(preview.patch, files), task.fileScope);
     const blocked = allowHighRisk ? selected.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : selected.blocked;
@@ -257,7 +257,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     const config = ctx.getConfig();
     const baselines = store.get(id).baselineChecks?.checks ?? {};
     const failures: Parameters<typeof codingLoop.checksFeedback>[0] = [];
-    const runs: ipc.CodingRun['checks'] = {};
+    const runs: codingTypes.CodingRun['checks'] = {};
     try {
       const { path: envPath } = await ctx.commandPath();
       for (const check of submitChecks(config)) {
@@ -278,7 +278,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
       backgroundRuns.finish('coding-checks', id, controller);
     }
     if (controller.signal.aborted) return void (await updateCoding(id, { status: 'applied', checks: runs, halt: 'stopped' }));
-    const run = (await updateCoding(id, { checks: runs })).codingRun as CodingRun;
+    const run = (await updateCoding(id, { checks: runs })).codingRun as codingTypes.CodingRun;
     if (failures.length) {
       if (!codingLoop.canRetry(run)) return void (await updateCoding(id, { status: 'applied', halt: 'attempts_exhausted' }));
       await updateCoding(id, { status: 'applied' });
@@ -314,7 +314,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
       if (state.status !== 'in_progress' || run?.status !== 'submitted' || state.review?.status !== 'rejected') return;
       if (!codingLoop.canRetry(run)) return void (await updateCoding(id, { halt: 'attempts_exhausted' }));
       const { reasons = [], report = null, checks = [] } = state.review;
-      const feedback = codingLoop.reviewFeedback({ reasons, report: report as ipc.QaReport | null, checks });
+      const feedback = codingLoop.reviewFeedback({ reasons, report: report as packageTypes.QaReport | null, checks });
       await startRound(id, { instruction: run.instruction, trigger: 'qa_rejected', feedback });
     });
 
@@ -322,7 +322,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
   const start = (id: string, instruction: string) => startRound(id, { instruction, trigger: 'human', feedback: null });
 
   // A page of the round's events after sequence `after`.
-  const events = (id: string, after: number): CodingEventPage => {
+  const events = (id: string, after: number): codingTypes.CodingEventPage => {
     const all = activeRounds.get(id)?.events ?? eventHistory.get(id) ?? [];
     const page = all.filter((event) => event.sequence > after).slice(0, 200);
     const next = page.at(-1)?.sequence ?? after;
@@ -350,14 +350,14 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
   };
 
   // The packages with a round or its checks in flight. Read from memory.
-  const activeRuns = (): ipc.CodingActiveRun[] =>
+  const activeRuns = (): codingTypes.CodingActiveRun[] =>
     [...new Set([...backgroundRuns.keys('coding'), ...backgroundRuns.keys('coding-checks')])].map((packageId) => ({
       packageId,
       title: ctx.catalog.getTask(packageId)?.title ?? packageId,
     }));
 
   // The patch of a ready or applied round; a ready one with how it merges now.
-  const patch = async (id: string): Promise<ipc.CodingPatchPreview> => {
+  const patch = async (id: string): Promise<codingTypes.CodingPatchPreview> => {
     const { task, run } = codingRunOf(id);
     if (!['ready', 'applied'].includes(run.status)) failWith('Coding patch is not ready', 'coding_not_ready');
     const preview = await runtime.readRunPatch(workspaceOf(id, run).runName, task.fileScope);
@@ -375,8 +375,8 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
       allowHighRisk,
       files,
       resolutions,
-    }: { digest: string; allowHighRisk: boolean; files: string[]; resolutions: Partial<Record<string, ipc.CodingResolution>> },
-  ): Promise<ipc.CodingApplyResult> => {
+    }: { digest: string; allowHighRisk: boolean; files: string[]; resolutions: Partial<Record<string, codingTypes.CodingResolution>> },
+  ): Promise<codingTypes.CodingApplyResult> => {
     const { task, run } = codingRunOf(id);
     if (run.status !== 'ready') failWith('Coding patch is not ready to apply', 'coding_not_ready');
     const preview = await runtime.readRunPatch(workspaceOf(id, run).runName, task.fileScope);
@@ -397,7 +397,7 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
 
   // After the developer cleared the conflict markers an apply left, the
   // automatic flow goes on: checks, then QA. Refused while a marker remains.
-  const resume = async (id: string): Promise<ipc.TaskView> => {
+  const resume = async (id: string): Promise<packageTypes.TaskView> => {
     const { task, run } = codingRunOf(id);
     if (run.status !== 'applied' || run.halt !== 'markers') failWith('Nothing is waiting on conflict markers', 'coding_not_ready');
     const left = await patchMerge.filesWithMarkers(

@@ -1,6 +1,7 @@
 // Pure helpers for the settings page: which pages have unsaved edits, and
 // which nav entries match a search. No DOM access, so tests import it directly.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 export type SettingsStore = 'preferences' | 'workspace';
 
@@ -21,10 +22,10 @@ export type SettingsPage = keyof typeof PAGE_STORES;
 export const isSettingsPage = (page: string): page is SettingsPage => Object.hasOwn(PAGE_STORES, page);
 
 // Preferences in the shape the form edits; extra fields (initials) are ignored.
-export type PreferencesDraft = ipc.PreferencesInput;
+export type PreferencesDraft = settingsTypes.PreferencesInput;
 
 // Workspace form values; options may be partial, as the form holds them.
-export type WorkspaceDraft = ipc.WorkspaceForm;
+export type WorkspaceDraft = workspaceTypes.WorkspaceForm;
 
 export type DraftPair = { preferences: PreferencesDraft; workspace: WorkspaceDraft };
 
@@ -49,7 +50,7 @@ export const workspaceDraft = (form: WorkspaceDraft) => {
   const commands: Record<string, string> = {};
   for (const [kind, line] of Object.entries(form.commands ?? {})) commands[kind] = (line ?? '').trim();
   // Options only matter for a configured command; an empty line ignores them.
-  const options: Record<string, { stage: ipc.CheckStage | undefined; blocking: boolean; reportPath: string }> = {};
+  const options: Record<string, { stage: workspaceTypes.CheckStage | undefined; blocking: boolean; reportPath: string }> = {};
   for (const [kind, value] of Object.entries(form.options ?? {})) {
     if (!commands[kind] || !value) continue;
     options[kind] = { stage: value.stage, blocking: value.blocking === true, reportPath: (value.reportPath ?? '').trim() };

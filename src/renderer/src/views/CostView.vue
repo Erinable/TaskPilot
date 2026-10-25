@@ -5,13 +5,13 @@ import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';
 import { useCostsStore } from '@/stores/costs.ts';
 import * as view from '@/lib/cost_view.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 const costs = useCostsStore();
 const report = computed(() => costs.report);
 const total = computed(() => (report.value ? view.spendText(report.value.total) : null));
 const bars = computed(() => (report.value ? view.barHeights(report.value.byDay) : []));
-const range = computed({ get: () => costs.days, set: (value: ipc.CostRange) => costs.setDays(value) });
+const range = computed({ get: () => costs.days, set: (value: activityTypes.CostRange) => costs.setDays(value) });
 const syncedAt = computed(() => (report.value?.prices ? report.value.prices.syncedAt.slice(0, 10) : null));
 
 onMounted(() => costs.load().catch((error) => console.error(error)));

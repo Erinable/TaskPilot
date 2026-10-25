@@ -19,7 +19,9 @@ import { humanTransitions } from './work_package_store.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import { supportsAgentConfig } from '../shared/agent_runtime.ts';
 import type { AgentId } from '../shared/agent_runtime.ts';
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
+import type * as packageTypes from '../shared/ipc/packages.ts';
+import type * as requirementTypes from '../shared/ipc/requirements.ts';
 import type * as workspace from './workspace.ts';
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import type { WorkPackageStore } from './work_package_store.ts';
@@ -95,12 +97,12 @@ export type PackageState = ReturnType<WorkPackageStore['get']>;
 // The stores type some persisted fields more loosely than the wire contract
 // (QA's report and diff as unknown, reason codes as strings). These casts are
 // the one place their state becomes the contract.
-export const toWireState = (state: PackageState) => state as ipc.WorkPackageState;
-export const toWireRequirement = (item: Requirement) => item as ipc.Requirement;
+export const toWireState = (state: PackageState) => state as packageTypes.WorkPackageState;
+export const toWireRequirement = (item: Requirement) => item as requirementTypes.Requirement;
 
 // `task` is the effective definition (WorkPackageStore.effective()).
 // `dependencies` comes from the caller, which can see the other packages.
-export const buildTaskView = (task: TaskDefinition, packageState: PackageState, dependencies: ipc.PackageDependency[] = []): ipc.TaskView => {
+export const buildTaskView = (task: TaskDefinition, packageState: PackageState, dependencies: packageTypes.PackageDependency[] = []): packageTypes.TaskView => {
   const state = toWireState(packageState);
   return {
     ...task,
@@ -126,14 +128,14 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState, 
       revisedAt: state.revision.revisedAt,
     },
     // Filtered to the human actor, so only human transitions remain.
-    humanTransitions: humanTransitions(packageState) as ipc.HumanTransition[],
+    humanTransitions: humanTransitions(packageState) as packageTypes.HumanTransition[],
   };
 };
 
 // The agent transition that moved a package from `from` to `to`; the store
 // picks it, so it is looked up rather than passed back.
-export const agentTransitionOf = (from: ipc.WorkPackageStatus, to: ipc.WorkPackageStatus) =>
-  TRANSITIONS.find((transition) => transition.actor === 'agent' && transition.from === from && transition.to === to)?.name as ipc.AgentTransition;
+export const agentTransitionOf = (from: packageTypes.WorkPackageStatus, to: packageTypes.WorkPackageStatus) =>
+  TRANSITIONS.find((transition) => transition.actor === 'agent' && transition.from === from && transition.to === to)?.name as packageTypes.AgentTransition;
 
 export const createAppContext = (deps: AppDeps) => {
   const {
@@ -171,13 +173,13 @@ export const createAppContext = (deps: AppDeps) => {
   // One model call's spend and usage, for the cost page and the team page's
   // weekly total. Every call is kept, priced or not, so unknown spend is
   // counted rather than silently missing.
-  const recordCall = (agent: AgentId, call: ipc.ModelCall, subject: ipc.CostSubject) =>
+  const recordCall = (agent: AgentId, call: activityTypes.ModelCall, subject: activityTypes.CostSubject) =>
     record({ kind: 'agent_cost', agent, costUsd: call.costUsd, call, subject });
 
   // Freeze a role's runtime at the start of its background action. Saving the
   // next settings must not change an Architect step halfway through a run.
   // Each model call is recorded here, so agents never handle cost themselves.
-  const runnerFor = (agent: Exclude<AgentId, 'coding-agent'>, subject: ipc.CostSubject = null): RunAgent => {
+  const runnerFor = (agent: Exclude<AgentId, 'coding-agent'>, subject: activityTypes.CostSubject = null): RunAgent => {
     const config = { ...getPreferences().agents[agent] };
     return async (options) => {
       if (!supportsAgentConfig(agent, config)) throw codedError('The selected CLI cannot safely run this analysis agent', 'agent_unavailable');
@@ -245,9 +247,9 @@ export const createAppContext = (deps: AppDeps) => {
   // Records a package moving between statuses.
   const recordTransition = (
     id: string,
-    before: ipc.WorkPackageStatus,
-    after: { status: ipc.WorkPackageStatus },
-    transition: ipc.HumanTransition | ipc.AgentTransition | ipc.CodingTransition,
+    before: packageTypes.WorkPackageStatus,
+    after: { status: packageTypes.WorkPackageStatus },
+    transition: packageTypes.HumanTransition | packageTypes.AgentTransition | packageTypes.CodingTransition,
     actor: 'human' | 'agent' | 'coding-agent',
   ) => {
     if (before === after.status) return;
@@ -257,7 +259,7 @@ export const createAppContext = (deps: AppDeps) => {
   // Where each of a package's dependencies stands. One blocks claiming
   // until it is done, unless the developer waived it; a dependency whose
   // package no longer exists cannot be finished, so it never blocks.
-  const dependenciesOf = (task: TaskDefinition, state: PackageState): ipc.PackageDependency[] =>
+  const dependenciesOf = (task: TaskDefinition, state: PackageState): packageTypes.PackageDependency[] =>
     (task.dependsOn ?? []).map((id) => {
       const dependency = catalog.getTask(id);
       const status = dependency ? store.get(id).status : null;

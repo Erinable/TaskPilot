@@ -7,11 +7,12 @@ import { storeToRefs } from 'pinia';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { useCommitStore } from '@/stores/commit.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as commitTypes from '@shared/ipc/commit.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
-const SKIP_LABELS: Record<ipc.CommitSkipReason, string> = {
+const SKIP_LABELS: Record<commitTypes.CommitSkipReason, string> = {
   out_of_scope: '不在这个工作包的文件范围内',
   secret: '可能含有密钥，不会自动提交',
   rename: '改名的文件请自己提交',

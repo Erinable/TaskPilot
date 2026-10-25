@@ -5,11 +5,11 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
 
 export const useOnboardingStore = defineStore('onboarding', () => {
   // ========== Checks ==========
-  const agent = ref<ipc.AgentStatus | null>(null);
+  const agent = ref<settingsTypes.AgentStatus | null>(null);
   const testCommand = ref<string | null>(null);
   const checking = ref(false);
   let session = 0;

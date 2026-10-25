@@ -10,7 +10,7 @@ import { useActivityFeedStore } from '@/stores/activity_feed.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 type Who = 'all' | 'you' | 'agents';
 
@@ -54,7 +54,7 @@ const groups = computed(() =>
 );
 
 // Where clicking an event goes: the package if it still exists, else the requirement.
-const targetOf = (record: ipc.ActivityRecord) => {
+const targetOf = (record: activityTypes.ActivityRecord) => {
   if (record.kind === 'package_transition') {
     return tasks.tasks.some((task) => task.id === record.packageId) ? { kind: 'package' as const, id: record.packageId } : null;
   }

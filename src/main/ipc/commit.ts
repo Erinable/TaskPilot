@@ -3,14 +3,15 @@ import { failWith, requireString } from '../coded_error.ts';
 import * as gitCommit from '../git_commit.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as commitTypes from '../../shared/ipc/commit.ts';
+import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app_context.ts';
 import type { TaskDefinition } from '../tasks.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // Only once the work is accepted: committing earlier would put unreviewed
 // code in history, and claiming the next package wants a clean tree.
-const COMMITTABLE: ipc.WorkPackageStatus[] = ['accepting', 'done'];
+const COMMITTABLE: packageTypes.WorkPackageStatus[] = ['accepting', 'done'];
 
 // The package title as the subject (git's 72-column habit), its id below.
 const suggestedMessage = (task: TaskDefinition) => {
@@ -27,7 +28,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.commitPreview,
-    wrap(async (_event, rawId): Promise<ipc.CommitPreview> => {
+    wrap(async (_event, rawId): Promise<commitTypes.CommitPreview> => {
       const task = requireCommittable(requireString(rawId, 'id'));
       const { committable, skipped } = await gitCommit.preview(ctx.requireRoot(), task.fileScope);
       return { files: committable, skipped, message: suggestedMessage(task) };
@@ -36,7 +37,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.commitCreate,
-    wrap(async (_event, rawId, rawMessage, rawFiles): Promise<ipc.CommitResult> => {
+    wrap(async (_event, rawId, rawMessage, rawFiles): Promise<commitTypes.CommitResult> => {
       const task = requireCommittable(requireString(rawId, 'id'));
       const message = gitCommit.validateMessage(rawMessage);
       if (!Array.isArray(rawFiles) || rawFiles.some((file) => typeof file !== 'string')) failWith('files must be a list of paths', 'invalid_argument');

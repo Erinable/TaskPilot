@@ -9,7 +9,8 @@ import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/lib/release_model.ts';
 import type { IpcError } from '@/lib/ipc.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
+import type * as releaseTypes from '@shared/ipc/release.ts';
 
 export type NotesStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -18,7 +19,7 @@ const NOTES_DEBOUNCE_MS = 800;
 
 export const useReleaseStore = defineStore('release', () => {
   // ========== State ==========
-  const state = ref<ipc.ReleaseState | null>(null);
+  const state = ref<releaseTypes.ReleaseState | null>(null);
   const loadError = ref<string | null>(null);
   const draft = computed(() => state.value?.draft ?? null);
   const generating = computed(() => draft.value?.status === 'generating');
@@ -28,7 +29,7 @@ export const useReleaseStore = defineStore('release', () => {
   const notesText = ref('');
   let notesSource: string | null = null;
 
-  const apply = (next: ipc.ReleaseState) => {
+  const apply = (next: releaseTypes.ReleaseState) => {
     state.value = next;
     const nextDraft = next.draft;
     const source = nextDraft?.status === 'ready' ? nextDraft.startedAt : null;
@@ -82,7 +83,7 @@ export const useReleaseStore = defineStore('release', () => {
 
   // ========== Start point ==========
   // Recent commits to pick from when there is no release or tag yet.
-  const commits = ref<ipc.ReleaseCommit[] | null>(null);
+  const commits = ref<releaseTypes.ReleaseCommit[] | null>(null);
   const selectedStart = ref<string | null>(null);
   const startError = ref<string | null>(null);
 
@@ -135,7 +136,7 @@ export const useReleaseStore = defineStore('release', () => {
   const notesStatus = ref<NotesStatus>('idle');
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const update = async (input: ipc.ReleaseDraftInput) => apply(await call(window.taskpilot.release.updateDraft(input)));
+  const update = async (input: releaseTypes.ReleaseDraftInput) => apply(await call(window.taskpilot.release.updateDraft(input)));
 
   const saveNotes = async () => {
     if (notesTimer !== null) clearTimeout(notesTimer);
@@ -254,7 +255,7 @@ export const useReleaseStore = defineStore('release', () => {
   const milestoneBusy = ref(false);
   const milestoneError = ref<string | null>(null);
   // Runs one milestone call; the reply is the whole release state.
-  const milestoneCall = async (request: () => Promise<ipc.IpcResult<ipc.ReleaseState>>, done?: string) => {
+  const milestoneCall = async (request: () => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>, done?: string) => {
     if (milestoneBusy.value) return false;
     milestoneBusy.value = true;
     milestoneError.value = null;
@@ -269,11 +270,11 @@ export const useReleaseStore = defineStore('release', () => {
       milestoneBusy.value = false;
     }
   };
-  const createMilestone = (input: ipc.MilestoneInput) =>
+  const createMilestone = (input: releaseTypes.MilestoneInput) =>
     milestoneCall(() => window.taskpilot.release.createMilestone(input), `已创建 ${input.version} 的版本计划。`);
-  const updateMilestone = (id: string, input: ipc.MilestoneInput) =>
+  const updateMilestone = (id: string, input: releaseTypes.MilestoneInput) =>
     milestoneCall(() => window.taskpilot.release.updateMilestone(id, input), '版本计划已更新。');
-  const deleteMilestone = async (milestone: ipc.MilestoneView) => {
+  const deleteMilestone = async (milestone: releaseTypes.MilestoneView) => {
     const confirmed = await confirmAction({
       title: `删除 ${milestone.version} 的版本计划？`,
       body: '只删除这个计划，里面的需求和工作包都不受影响。',

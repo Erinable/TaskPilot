@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import type { OpenedWith } from '../shared/ipc_types.ts';
+import type { OpenedWith } from '../shared/ipc/workspace.ts';
 import { isInside, resolveExecutable } from './workspace.ts';
 
 const execFileAsync = promisify(execFile);

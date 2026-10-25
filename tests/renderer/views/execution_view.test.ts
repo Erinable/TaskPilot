@@ -6,7 +6,8 @@ import ElementPlus from 'element-plus';
 
 import ExecutionView from '../../../src/renderer/src/views/ExecutionView.vue';
 import { ACTIONS, useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
+import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -15,7 +16,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
 });
 
-let current: { task: ipc.TaskView };
+let current: { task: packageTypes.TaskView };
 let api: ReturnType<typeof installApi>;
 
 const mountOpen = async () => {
@@ -209,7 +210,7 @@ describe('ExecutionView', () => {
     current.task = taskView({ completedSteps: [1] });
     const { wrapper } = await mountOpen();
     expect(wrapper.findAll('[data-tutor]').map((node) => node.attributes('data-tutor'))).toEqual(['0']);
-    const answer: ipc.TutorAnswer = {
+    const answer: tutorTypes.TutorAnswer = {
       explanation: '新增 `login()` <img src=x>',
       hints: ['打开 src/auth.ts'],
       snippet: { language: 'ts', code: 'export const login = () => {};' },

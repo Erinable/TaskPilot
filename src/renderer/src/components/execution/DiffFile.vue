@@ -7,9 +7,9 @@ import { diffLineKind } from '@/lib/review_model.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
 import type { DiffLineKind } from '@/lib/review_model.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
-const props = defineProps<{ taskId: string; change: ipc.FileChange }>();
+const props = defineProps<{ taskId: string; change: workspaceTypes.FileChange }>();
 
 const execution = useExecutionStore();
 const expanded = ref(false);

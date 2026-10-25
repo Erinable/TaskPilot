@@ -5,7 +5,7 @@ import * as git from '../git.ts';
 import { toWireState } from '../app_context.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app_context.ts';
 import type { PracticeService } from '../practice_service.ts';
 import type { ReviewService } from '../review_service.ts';
@@ -13,7 +13,7 @@ import type { TransitionName } from '../work_package_status.ts';
 import type { DeviationInput } from '../work_package_store.ts';
 import type { IpcMainLike } from './handler.ts';
 
-const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies ipc.ExecutionMode[];
+const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies packageTypes.ExecutionMode[];
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practice }: { review: ReviewService; practice: PracticeService }) => {
   const { store, backgroundRuns, requireTask } = ctx;
@@ -29,7 +29,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
   // The developer starts a package before one of its dependencies is done.
   ipcMain.handle(
     CHANNELS.waiveDependency,
-    wrap(async (_event, rawId, rawDependency): Promise<ipc.TaskView> => {
+    wrap(async (_event, rawId, rawDependency): Promise<packageTypes.TaskView> => {
       const id = requireString(rawId, 'id');
       const dependency = requireString(rawDependency, 'dependency');
       const task = requireTask(id);
@@ -40,7 +40,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
 
   ipcMain.handle(
     CHANNELS.listTasks,
-    wrap((): ipc.TaskView[] => {
+    wrap((): packageTypes.TaskView[] => {
       const state = store.all();
       return ctx.catalog.listTasks().map((task) => ctx.viewOf(store.effective(task), state[task.id]));
     }),
@@ -48,7 +48,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
 
   ipcMain.handle(
     CHANNELS.getTask,
-    wrap((_event, id): ipc.TaskView => {
+    wrap((_event, id): packageTypes.TaskView => {
       const checked = requireString(id, 'id');
       return ctx.viewOf(requireTask(checked), store.get(checked));
     }),
@@ -58,7 +58,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
   // It is only allowed before the developer has submitted anything.
   ipcMain.handle(
     CHANNELS.baselineMeasure,
-    wrap(async (_event, rawId): Promise<ipc.TaskView> => {
+    wrap(async (_event, rawId): Promise<packageTypes.TaskView> => {
       const id = requireString(rawId, 'id');
       ctx.requireBaseline(id);
       const state = store.get(id);
@@ -73,12 +73,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
   // human action by definition, so the renderer cannot claim to be an agent.
   ipcMain.handle(
     CHANNELS.transition,
-    wrap(async (_event, rawId, rawName, options): Promise<ipc.WorkPackageState> => {
+    wrap(async (_event, rawId, rawName, options): Promise<packageTypes.WorkPackageState> => {
       const id = requireString(rawId, 'id');
       const name = requireString(rawName, 'name');
-      const extra: { baseline?: string; deviation?: DeviationInput; mode?: ipc.ExecutionMode } = {};
+      const extra: { baseline?: string; deviation?: DeviationInput; mode?: packageTypes.ExecutionMode } = {};
       if (name === 'claim') {
-        const mode = (options as ipc.TransitionOptions | null | undefined)?.mode;
+        const mode = (options as packageTypes.TransitionOptions | null | undefined)?.mode;
         if (mode !== undefined && !EXECUTION_MODES.includes(mode)) failWith('Unknown execution mode', 'invalid_argument', 'mode');
         extra.mode = mode;
         // [人工决策-2026-10-14] 前置包没完成就不能领取；解除依赖要人明确操作。
@@ -96,7 +96,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
       // store.transition() rejects names that are not transitions.
       const before = store.get(id).status;
       const entry = await store.transition(id, name as TransitionName, 'human', extra);
-      ctx.recordTransition(id, before, entry, name as ipc.HumanTransition, 'human');
+      ctx.recordTransition(id, before, entry, name as packageTypes.HumanTransition, 'human');
       if (name === 'claim') {
         review.measureBaseline(id);
         if (entry.mode === 'practice') practice.startReference(id);
@@ -131,7 +131,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
 
   ipcMain.handle(
     CHANNELS.reviewRetry,
-    wrap((_event, id): Promise<ipc.WorkPackageState> => review.startReview(requireString(id, 'id'))),
+    wrap((_event, id): Promise<packageTypes.WorkPackageState> => review.startReview(requireString(id, 'id'))),
   );
 
   ipcMain.handle(
@@ -141,7 +141,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
 
   ipcMain.handle(
     CHANNELS.deviationRetry,
-    wrap((_event, id): Promise<ipc.WorkPackageState> => review.startAdjudication(requireString(id, 'id'))),
+    wrap((_event, id): Promise<packageTypes.WorkPackageState> => review.startAdjudication(requireString(id, 'id'))),
   );
 
   ipcMain.handle(
@@ -152,7 +152,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
   // The store rejects a stepIndex that is not a non-negative integer.
   ipcMain.handle(
     CHANNELS.setStepDone,
-    wrap((_event, id, stepIndex, done): Promise<ipc.WorkPackageState> =>
+    wrap((_event, id, stepIndex, done): Promise<packageTypes.WorkPackageState> =>
       store.setStepDone(requireString(id, 'id'), stepIndex as number, done === true).then(toWireState),
     ),
   );
@@ -166,7 +166,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
 
   ipcMain.handle(
     CHANNELS.gradeStart,
-    wrap((_event, rawId, skipReference): Promise<ipc.TaskView> => {
+    wrap((_event, rawId, skipReference): Promise<packageTypes.TaskView> => {
       if (typeof skipReference !== 'boolean') failWith('skipReference must be boolean', 'invalid_argument', 'skipReference');
       return practice.startGrade(requireString(rawId, 'id'), { force: true, skipReference });
     }),

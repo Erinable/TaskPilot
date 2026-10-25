@@ -6,19 +6,19 @@
 // marked stale once the file has changed in the index since.
 //
 // [人工决策-2026-10-06 15:10:42] 工程地图只汇总已有需求里 Architect 的摘要 + 已跟踪文件树，不额外调用模型生成全仓地图。
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
 import type { Requirement } from './requirement_store.ts';
 import type { IndexEntry } from './repo_reader.ts';
 
 // Tracked paths sent to the renderer; deeper repositories are cut off and say so.
 export const MAX_TREE_FILES = 5000;
 
-export const buildEngineeringMap = (requirements: Requirement[], index: Map<string, IndexEntry> | null, paths: string[]): ipc.EngineeringMap => {
+export const buildEngineeringMap = (requirements: Requirement[], index: Map<string, IndexEntry> | null, paths: string[]): activityTypes.EngineeringMap => {
   // Oldest first, so a later summary of the same file replaces an earlier one.
   const ordered = [...requirements].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-  const modules = new Map<string, ipc.MapModule>();
-  const conventions = new Map<string, ipc.MapNote>();
-  const gaps = new Map<string, ipc.MapNote>();
+  const modules = new Map<string, activityTypes.MapModule>();
+  const conventions = new Map<string, activityTypes.MapNote>();
+  const gaps = new Map<string, activityTypes.MapNote>();
   for (const requirement of ordered) {
     const interfaces = requirement.interfaces;
     if (!interfaces?.summary) continue;

@@ -4,7 +4,7 @@ import { nextTick, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { KIND_LABEL, resultText, useSetupStore } from '@/stores/setup.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as envTypes from '@shared/ipc/environment.ts';
 
 const setup = useSetupStore();
 const now = useNow();
@@ -19,7 +19,7 @@ const run = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
 };
 const onAllowScripts = (value: string | number | boolean) => run(setup.setAllowScripts(value === true));
-const stepState = (step: ipc.EnvStep) => {
+const stepState = (step: envTypes.EnvStep) => {
   if (setup.view?.running === step.id) {
     const elapsed = elapsedSince(setup.view.live?.startedAt, now.value);
     return { text: elapsed ? `运行中 · ${elapsed}` : '运行中', tone: 'in_progress' };

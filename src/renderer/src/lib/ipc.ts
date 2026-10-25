@@ -1,5 +1,5 @@
 // Unwraps the {ok, data} | {ok, error} envelope every IPC call returns.
-import type { IpcResult } from '@shared/ipc_types.ts';
+import type { IpcResult } from '@shared/ipc/envelope.ts';
 
 export class IpcError extends Error {
   code: string;

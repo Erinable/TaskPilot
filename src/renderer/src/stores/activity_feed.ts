@@ -6,11 +6,11 @@ import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 export const useActivityFeedStore = defineStore('activityFeed', () => {
   // ========== Feed ==========
-  const days = ref<ipc.ActivityPage['days']>([]);
+  const days = ref<activityTypes.ActivityPage['days']>([]);
   const nextBefore = ref<string | null>(null);
   const retentionDays = ref(0);
   const loading = ref(false);

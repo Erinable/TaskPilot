@@ -7,9 +7,9 @@ import { computed } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { SKIP_LABELS } from './requirement_model.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
-const props = defineProps<{ info: ipc.RequirementInterfaces }>();
+const props = defineProps<{ info: requirementTypes.RequirementInterfaces }>();
 
 const headline = computed(() => {
   const info = props.info;

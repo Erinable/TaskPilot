@@ -6,7 +6,8 @@ import { BASELINE_POLL_MS, REVIEW_POLL_MS, useExecutionStore } from '../../../sr
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
+import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -15,9 +16,9 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
 });
 
-const running: ipc.Review = { status: 'running', error: null, startedAt: '', finishedAt: null };
+const running: packageTypes.Review = { status: 'running', error: null, startedAt: '', finishedAt: null };
 
-let current: { task: ipc.TaskView };
+let current: { task: packageTypes.TaskView };
 let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
@@ -168,7 +169,7 @@ describe('execution store', () => {
 
   test('baseline polling merges the measurement until it settles; close() stops it', async () => {
     vi.useFakeTimers();
-    const measuring: ipc.BaselineChecks = { status: 'measuring', reason: null, commit: 'abc', checks: {}, startedAt: '', finishedAt: null };
+    const measuring: workspaceTypes.BaselineChecks = { status: 'measuring', reason: null, commit: 'abc', checks: {}, startedAt: '', finishedAt: null };
     current.task = taskView({ baselineChecks: measuring });
     const execution = useExecutionStore();
     await execution.open('t1');
@@ -208,7 +209,7 @@ describe('execution store', () => {
   test('verification acceptance evidence overrides the review until the next reload', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');
-    const acceptance = [{ text: '登录成功', test: 'login works', status: 'verified', verified: true, manual: false }] as ipc.CriterionEvidence[];
+    const acceptance = [{ text: '登录成功', test: 'login works', status: 'verified', verified: true, manual: false }] as workspaceTypes.CriterionEvidence[];
     api.verify.run.mockResolvedValueOnce({
       ok: true,
       data: {

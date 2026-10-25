@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import { processEnv } from './env.ts';
 import type { CliId } from '../shared/agent_runtime.ts';
-import type { CliSignIn } from '../shared/ipc_types.ts';
+import type { CliSignIn } from '../shared/ipc/settings.ts';
 
 // The keys each CLI reads from the environment. Any one of them counts.
 const ENV_KEYS: Record<CliId, string[]> = {

@@ -12,7 +12,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TokenUsage } from '../shared/ipc_types.ts';
+import type { TokenUsage } from '../shared/ipc/activity.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 
 export const PRICES_FILENAME = 'model_prices.json';

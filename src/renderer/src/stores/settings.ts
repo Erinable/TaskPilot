@@ -10,12 +10,14 @@ import type { IconName } from '@/lib/icons.ts';
 import * as model from '@/lib/settings_model.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 import { AGENT_IDS, CLI_OPTIONS } from '@shared/agent_runtime.ts';
 export type SettingsPage = model.SettingsPage;
 
-export const CHECK_KINDS = ['test', 'lint', 'build', 'smoke'] as const satisfies readonly ipc.CheckKind[];
+export const CHECK_KINDS = ['test', 'lint', 'build', 'smoke'] as const satisfies readonly workspaceTypes.CheckKind[];
 export const MAX_NAME_LENGTH = 40;
 export type AgentFieldError = { field: 'cli' | 'model' | 'thinking'; message: string };
 
@@ -80,8 +82,12 @@ const PATH_ERROR_HINTS: Record<string, string> = {
 
 export type FieldTone = 'ok' | 'warn' | 'error';
 export type FieldStatus = { tone: FieldTone | null; message: string };
-export type StatusKey = 'root' | ipc.CheckKind | 'displayName';
-export type WorkspaceDraft = { root: string; commands: Record<ipc.CheckKind, string>; options: Record<ipc.CheckKind, ipc.CheckOptions> };
+export type StatusKey = 'root' | workspaceTypes.CheckKind | 'displayName';
+export type WorkspaceDraft = {
+  root: string;
+  commands: Record<workspaceTypes.CheckKind, string>;
+  options: Record<workspaceTypes.CheckKind, workspaceTypes.CheckOptions>;
+};
 export type Fact = { term: string; value: string };
 
 // Drafts are reactive proxies, which structuredClone rejects; they are plain JSON.
@@ -90,10 +96,14 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const emptyStatus = (): FieldStatus => ({ tone: null, message: '' });
 
 // The form shape of a saved workspace.
-const workspaceForm = (view: ipc.WorkspaceView): WorkspaceDraft => ({ root: view.root ?? '', commands: { ...view.lines }, options: clone(view.options) });
+const workspaceForm = (view: workspaceTypes.WorkspaceView): WorkspaceDraft => ({
+  root: view.root ?? '',
+  commands: { ...view.lines },
+  options: clone(view.options),
+});
 
 // The form shape of saved preferences, dropping derived fields.
-const preferencesForm = (prefs: ipc.Preferences): ipc.PreferencesInput => ({
+const preferencesForm = (prefs: settingsTypes.Preferences): settingsTypes.PreferencesInput => ({
   profile: { displayName: prefs.profile.displayName, avatarColor: prefs.profile.avatarColor },
   appearance: { ...prefs.appearance },
   environment: { ...prefs.environment },
@@ -105,12 +115,12 @@ const preferencesForm = (prefs: ipc.Preferences): ipc.PreferencesInput => ({
 export const useSettingsStore = defineStore('settings', () => {
   // ========== Drafts ==========
   // Last saved values, in form shape; null until the first load.
-  const savedPreferences = ref<ipc.PreferencesInput | null>(null);
+  const savedPreferences = ref<settingsTypes.PreferencesInput | null>(null);
   const savedWorkspace = ref<WorkspaceDraft | null>(null);
-  const preferencesDraft = ref<ipc.PreferencesInput | null>(null);
+  const preferencesDraft = ref<settingsTypes.PreferencesInput | null>(null);
   const workspaceDraft = ref<WorkspaceDraft | null>(null);
 
-  const fillPreferences = (prefs: ipc.PreferencesInput) => {
+  const fillPreferences = (prefs: settingsTypes.PreferencesInput) => {
     preferencesDraft.value = clone(prefs);
     agentFieldErrors.value = {};
     agentConfigNotices.value = {};
@@ -118,26 +128,26 @@ export const useSettingsStore = defineStore('settings', () => {
   const fillWorkspace = (form: WorkspaceDraft) => {
     workspaceDraft.value = clone(form);
   };
-  const agentRuntimes = ref<ipc.AgentRuntimeStatus[]>([]);
+  const agentRuntimes = ref<agentRuntimeTypes.AgentRuntimeStatus[]>([]);
   const agentRuntimeLoading = ref(false);
   const agentRuntimeError = ref<string | null>(null);
-  const agentConfigNotices = ref<Partial<Record<ipc.AgentId, string>>>({});
-  const agentFieldErrors = ref<Partial<Record<ipc.AgentId, AgentFieldError>>>({});
+  const agentConfigNotices = ref<Partial<Record<agentRuntimeTypes.AgentId, string>>>({});
+  const agentFieldErrors = ref<Partial<Record<agentRuntimeTypes.AgentId, AgentFieldError>>>({});
   let agentRuntimeGeneration = 0;
-  const modelCatalogs = ref<Record<string, ipc.CliModelCatalog>>({});
+  const modelCatalogs = ref<Record<string, agentRuntimeTypes.CliModelCatalog>>({});
   const modelCatalogLoading = ref<Record<string, boolean>>({});
   const modelCatalogRequests = new Map<string, Promise<void>>();
   const modelCatalogGenerations = new Map<string, number>();
-  const modelScope = (agent: ipc.AgentId): ipc.CliModelScope => (agent === 'coding-agent' ? 'coding' : 'analysis');
-  const modelsForAgent = (agent: ipc.AgentId) => {
+  const modelScope = (agent: agentRuntimeTypes.AgentId): agentRuntimeTypes.CliModelScope => (agent === 'coding-agent' ? 'coding' : 'analysis');
+  const modelsForAgent = (agent: agentRuntimeTypes.AgentId) => {
     const cli = preferencesDraft.value?.agents[agent].cli;
     return cli ? modelCatalogs.value[`${modelScope(agent)}:${cli}`] : undefined;
   };
-  const modelsLoadingForAgent = (agent: ipc.AgentId) => {
+  const modelsLoadingForAgent = (agent: agentRuntimeTypes.AgentId) => {
     const cli = preferencesDraft.value?.agents[agent].cli;
     return cli ? modelCatalogLoading.value[`${modelScope(agent)}:${cli}`] === true : false;
   };
-  const loadAgentModels = async (agent: ipc.AgentId, refresh = false) => {
+  const loadAgentModels = async (agent: agentRuntimeTypes.AgentId, refresh = false) => {
     const cli = preferencesDraft.value?.agents[agent].cli;
     if (!cli) return;
     const scope = modelScope(agent);
@@ -181,7 +191,7 @@ export const useSettingsStore = defineStore('settings', () => {
       if (generation === agentRuntimeGeneration) agentRuntimeLoading.value = false;
     }
   };
-  const setAgentCli = (agent: ipc.AgentId, cli: ipc.CliId) => {
+  const setAgentCli = (agent: agentRuntimeTypes.AgentId, cli: agentRuntimeTypes.CliId) => {
     const current = preferencesDraft.value?.agents[agent];
     const option = CLI_OPTIONS.find((entry) => entry.id === cli);
     if (!current || !option || (agent !== 'coding-agent' && !option.analysis)) return;
@@ -191,12 +201,12 @@ export const useSettingsStore = defineStore('settings', () => {
     agentConfigNotices.value[agent] = thinking === current.thinking ? '' : `切换到 ${option.label} 后不支持原思考强度，已重置为默认。`;
     loadAgentModels(agent).catch((error) => console.error(error));
   };
-  const setAgentModel = (agent: ipc.AgentId, modelName: string) => {
+  const setAgentModel = (agent: agentRuntimeTypes.AgentId, modelName: string) => {
     if (!preferencesDraft.value) return;
     preferencesDraft.value.agents[agent].model = modelName;
     delete agentFieldErrors.value[agent];
   };
-  const setAgentThinking = (agent: ipc.AgentId, thinking: ipc.ThinkingLevel) => {
+  const setAgentThinking = (agent: agentRuntimeTypes.AgentId, thinking: agentRuntimeTypes.ThinkingLevel) => {
     const current = preferencesDraft.value?.agents[agent];
     const option = current && CLI_OPTIONS.find((entry) => entry.id === current.cli);
     if (!current || !option?.thinking.includes(thinking)) return;
@@ -204,7 +214,7 @@ export const useSettingsStore = defineStore('settings', () => {
     preferencesDraft.value!.agents[agent] = { ...current, thinking };
     agentConfigNotices.value[agent] = '';
   };
-  const agentStatus = (agent: ipc.AgentId) => {
+  const agentStatus = (agent: agentRuntimeTypes.AgentId) => {
     const status = agentRuntimes.value.find((entry) => entry.agent === agent);
     const draft = preferencesDraft.value?.agents[agent];
     return status && draft && model.sameValue(status.config, draft) ? status : undefined;
@@ -279,7 +289,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const message = modelProblem ? '模型 ID 格式无效，请使用 sonnet 或 provider/model 这类名称（最多 200 字符）。' : describeError(error);
       showToast(`智能体配置无效：${message}`);
       const [, agent, key = 'cli'] = field.split('.');
-      if (AGENT_IDS.includes(agent as ipc.AgentId)) {
+      if (AGENT_IDS.includes(agent as agentRuntimeTypes.AgentId)) {
         const input = key === 'model' || key === 'thinking' ? key : 'cli';
         agentFieldErrors.value = { ...agentFieldErrors.value, [agent]: { field: input, message } };
         focusById(`agent-${agent}-${input}`).catch((focusError) => console.error(focusError));
@@ -299,7 +309,7 @@ export const useSettingsStore = defineStore('settings', () => {
   };
 
   // ========== Repository ==========
-  const renderWorkspaceCheck = (result: ipc.WorkspaceCheck) => {
+  const renderWorkspaceCheck = (result: workspaceTypes.WorkspaceCheck) => {
     clearWorkspaceStatus();
     if (!result.root) {
       setStatus('root', 'warn', '还没有添加仓库，diff 和验证不可用。');
@@ -341,7 +351,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== Environment ==========
   const environmentLoading = ref(false);
   const environmentError = ref<string | null>(null);
-  const environment = ref<ipc.EnvironmentInfo | null>(null);
+  const environment = ref<settingsTypes.EnvironmentInfo | null>(null);
   // Entries of the inherited PATH, to mark what the login shell added.
   const inheritedEntries = ref<Set<string>>(new Set());
 
@@ -377,7 +387,7 @@ export const useSettingsStore = defineStore('settings', () => {
   });
 
   // ========== Data ==========
-  const dataInfo = ref<ipc.DataInfo | null>(null);
+  const dataInfo = ref<settingsTypes.DataInfo | null>(null);
 
   const renderData = async () => {
     try {

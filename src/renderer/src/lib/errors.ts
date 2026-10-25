@@ -1,6 +1,6 @@
 // User-facing wording for the error codes the main process returns.
 import type { IpcError } from './ipc.ts';
-import type { ErrorInfo } from '@shared/ipc_types.ts';
+import type { ErrorInfo } from '@shared/ipc/envelope.ts';
 
 export const ERROR_HINTS: Record<string, string> = {
   no_workspace: '还没有仓库，请先在顶栏的仓库菜单里添加。',

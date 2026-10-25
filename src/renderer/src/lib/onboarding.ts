@@ -2,32 +2,34 @@
 // before the AI team can work, in the order the steps depend on each other.
 // Every step is derived from state TaskPilot already has. The coding CLI is
 // optional: without it the user writes the code, so it never blocks a step.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { IconName } from './icons.ts';
 
 export type OnboardingStepId = 'cli' | 'coding' | 'repository' | 'checks' | 'requirement';
 
 // Commands to show; the CLI itself does the sign-in.
-export const SIGN_IN_COMMANDS: Record<ipc.CliId, string> = {
+export const SIGN_IN_COMMANDS: Record<agentRuntimeTypes.CliId, string> = {
   claude: 'claude',
   codex: 'codex login',
   pi: 'pi',
   grok: 'grok login',
   opencode: 'opencode auth login',
 };
-export const INSTALL_COMMANDS: Record<ipc.CliId, string> = {
+export const INSTALL_COMMANDS: Record<agentRuntimeTypes.CliId, string> = {
   claude: 'npm install -g @anthropic-ai/claude-code',
   codex: 'npm install -g @openai/codex',
   pi: 'npm install -g @earendil-works/pi-coding-agent',
   grok: 'npm install -g @xai-official/grok',
   opencode: 'npm install -g opencode-ai',
 };
-const CLI_NAMES: Record<ipc.CliId, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode' };
+const CLI_NAMES: Record<agentRuntimeTypes.CliId, string> = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode' };
 
 export type OnboardingFacts = {
   // Null until agent:status answers.
-  agent: ipc.AgentStatus | null;
-  workspace: ipc.WorkspaceInfo | null;
+  agent: settingsTypes.AgentStatus | null;
+  workspace: workspaceTypes.WorkspaceInfo | null;
   // Null until workspace:get answers.
   testCommand: string | null;
   requirementCount: number;
@@ -50,9 +52,9 @@ export type OnboardingStep = {
 };
 
 // "signed out" only when the CLI said so; unknown is given the benefit of the doubt.
-const signedOut = (signIn: ipc.CliSignIn | null | undefined) => signIn?.state === 'signed_out';
+const signedOut = (signIn: settingsTypes.CliSignIn | null | undefined) => signIn?.state === 'signed_out';
 
-const cliStep = (agent: ipc.AgentStatus | null): OnboardingStep => {
+const cliStep = (agent: settingsTypes.AgentStatus | null): OnboardingStep => {
   const installed = agent?.available === true;
   if (installed && signedOut(agent?.signIn))
     return {
@@ -78,7 +80,7 @@ const cliStep = (agent: ipc.AgentStatus | null): OnboardingStep => {
 };
 
 // Optional: lets the Coding Agent write the code.
-const codingStep = (agent: ipc.AgentStatus | null): OnboardingStep => {
+const codingStep = (agent: settingsTypes.AgentStatus | null): OnboardingStep => {
   const coding = agent?.coding;
   const cli = coding?.cli ?? 'codex';
   const name = CLI_NAMES[cli];

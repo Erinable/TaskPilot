@@ -3,11 +3,11 @@ import AppIcon from '@/components/AppIcon.vue';
 import type { IconName } from '@/lib/icons.ts';
 import { FIELD_INPUTS, useSettingsStore } from '@/stores/settings.ts';
 import FieldStatus from './FieldStatus.vue';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 const settings = useSettingsStore();
 
-const CHECKS: { kind: ipc.CheckKind; label: string; icon: IconName; hint: string | null; placeholder: string; statusId: string }[] = [
+const CHECKS: { kind: workspaceTypes.CheckKind; label: string; icon: IconName; hint: string | null; placeholder: string; statusId: string }[] = [
   {
     kind: 'test',
     label: '测试',
@@ -20,7 +20,7 @@ const CHECKS: { kind: ipc.CheckKind; label: string; icon: IconName; hint: string
   { kind: 'build', label: 'Build', icon: 'box', hint: null, placeholder: 'npm run build', statusId: 'statusBuild' },
   { kind: 'smoke', label: '冒烟测试', icon: 'rocket', hint: '构建后快速确认应用能启动、核心路径可用', placeholder: 'npm run smoke', statusId: 'statusSmoke' },
 ];
-const STAGES: { value: ipc.CheckStage; label: string }[] = [
+const STAGES: { value: workspaceTypes.CheckStage; label: string }[] = [
   { value: 'submit', label: '提交前运行' },
   { value: 'step', label: '仅手动运行' },
 ];

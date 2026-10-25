@@ -16,7 +16,7 @@ import { codingCall } from './agents/model_usage.ts';
 import { throwIfCancelled } from './agents/pipeline.ts';
 import { toWireState } from './app_context.ts';
 import type * as codingWorkspace from './coding_workspace.ts';
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as packageTypes from '../shared/ipc/packages.ts';
 import type { AppContext } from './app_context.ts';
 import type { CodingRuntime } from './coding_runtime.ts';
 
@@ -35,7 +35,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
     const controller = backgroundRuns.start({ kind: 'reference', key: id, busy: 'reference', label: ctx.packageLabel(id) });
     const runId = codingExec.codingRunId();
-    const initial: ipc.ReferenceRun = {
+    const initial: packageTypes.ReferenceRun = {
       id: runId,
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -51,7 +51,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       const sandbox = await runtime.startSandbox();
       const runName = runtime.runNameFor(sandbox, runId);
       let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
-      let finished: Partial<ipc.ReferenceRun>;
+      let finished: Partial<packageTypes.ReferenceRun>;
       try {
         prepared = await runtime.prepare(root, baseline, { runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         if (controller.signal.aborted) throw Object.assign(new Error('Reference run was cancelled'), { code: 'coding_aborted' });
@@ -111,7 +111,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     if (!force && practice.alreadyGraded(state.grade, diffDigest)) return ctx.viewOf(task, state);
     const reference = state.referenceRun;
     const gradeId = codingExec.codingRunId();
-    const base: ipc.Grade = {
+    const base: packageTypes.Grade = {
       id: gradeId,
       status: 'running',
       startedAt: new Date().toISOString(),
@@ -140,7 +140,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       : [];
     console.debug(`[grade] start package=${id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);
     const settled = (async () => {
-      let finished: Partial<ipc.Grade>;
+      let finished: Partial<packageTypes.Grade>;
       try {
         const { output, costUsd } = await tutorRunner({
           prompt: tutorAgent.gradePrompt({

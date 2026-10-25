@@ -8,7 +8,8 @@ import { useSettingsStore } from '@/stores/settings.ts';
 import { useSetupStore } from '@/stores/setup.ts';
 import { fail, installApi, ok } from '../settings_fakes.ts';
 import { defaultAgentSettings } from '@shared/agent_runtime.ts';
-import type { CliModelCatalog, IpcResult } from '@shared/ipc_types.ts';
+import type { CliModelCatalog } from '@shared/agent_runtime.ts';
+import type { IpcResult } from '@shared/ipc/envelope.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 

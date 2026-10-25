@@ -5,20 +5,21 @@ import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 type ScopeKind = 'touched' | 'untouched' | 'out';
 
 const LABELS: Record<ScopeKind, string> = { touched: '已改动', untouched: '未改动', out: '超出范围' };
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 
 const rows = computed(() => {
   const churnByPath = new Map((execution.diff?.changes ?? []).map((change) => [change.path, change]));
   const scope = execution.diff?.scope;
-  const row = (filePath: string, kind: ScopeKind, churn?: ipc.FileChange) => ({ filePath, kind, churn: churn ?? null });
+  const row = (filePath: string, kind: ScopeKind, churn?: workspaceTypes.FileChange) => ({ filePath, kind, churn: churn ?? null });
   // Not claimed yet: show the declared scope without churn.
   if (!scope) return props.task.fileScope.map((filePath) => row(filePath, 'untouched'));
   return [

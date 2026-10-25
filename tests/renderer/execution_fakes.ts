@@ -2,9 +2,14 @@
 // window.taskpilot stub whose calls resolve {ok: true, data}.
 import { vi } from 'vitest';
 
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as codingTypes from '../../src/shared/coding_types.ts';
+import type * as commitTypes from '../../src/shared/ipc/commit.ts';
+import type * as noteTypes from '../../src/shared/ipc/notes.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
+import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
+import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 
-export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView => ({
+export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
   id: 't1',
   status: 'in_progress',
   statusLabel: '执行中',
@@ -37,7 +42,7 @@ export const taskView = (overrides: Partial<ipc.TaskView> = {}): ipc.TaskView =>
   ...overrides,
 });
 
-export const state = (task: ipc.TaskView): ipc.WorkPackageState => ({
+export const state = (task: packageTypes.TaskView): packageTypes.WorkPackageState => ({
   status: task.status,
   baseline: task.baseline,
   claimedAt: task.claimedAt,
@@ -57,11 +62,11 @@ export const state = (task: ipc.TaskView): ipc.WorkPackageState => ({
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 // Installs window.taskpilot; `task` is what getTask() returns now.
-export const installApi = (current: { task: ipc.TaskView }) => {
+export const installApi = (current: { task: packageTypes.TaskView }) => {
   const api = {
     listTasks: vi.fn(() => ok([current.task])),
     getTask: vi.fn(() => ok(current.task)),
-    transition: vi.fn((_id: string, _name: ipc.HumanTransition, _options?: ipc.TransitionOptions) => ok(state(current.task))),
+    transition: vi.fn((_id: string, _name: packageTypes.HumanTransition, _options?: packageTypes.TransitionOptions) => ok(state(current.task))),
     waiveDependency: vi.fn((_id: string, dependency: string) =>
       ok({
         ...current.task,
@@ -73,13 +78,13 @@ export const installApi = (current: { task: ipc.TaskView }) => {
     review: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
     deviation: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
     diff: {
-      stat: vi.fn(() => ok<ipc.DiffStat>({ changes: [], scope: { inScope: [], outOfScope: [], untouched: current.task.fileScope } })),
+      stat: vi.fn(() => ok<workspaceTypes.DiffStat>({ changes: [], scope: { inScope: [], outOfScope: [], untouched: current.task.fileScope } })),
       file: vi.fn(() => ok('')),
     },
     verify: { run: vi.fn() },
     coding: {
       status: vi.fn(() =>
-        ok<ipc.CodingRuntimeStatus>({
+        ok<codingTypes.CodingRuntimeStatus>({
           backend: 'codex',
           protocol: 'codex-exec',
           boundary: 'separate-user',
@@ -89,26 +94,30 @@ export const installApi = (current: { task: ipc.TaskView }) => {
           config: { user: 'coding-agent', cli: 'codex', model: 'test-model', thinking: 'default', timeoutMinutes: 30 },
         }),
       ),
-      start: vi.fn((_id: string, _input: ipc.CodingStart) => ok(current.task)),
+      start: vi.fn((_id: string, _input: codingTypes.CodingStart) => ok(current.task)),
       get: vi.fn(() => ok(current.task)),
-      events: vi.fn((_id: string, _after: number) => ok<ipc.CodingEventPage>({ events: [], next: -1, truncated: false })),
+      events: vi.fn((_id: string, _after: number) => ok<codingTypes.CodingEventPage>({ events: [], next: -1, truncated: false })),
       cancel: vi.fn(() => ok(true)),
-      patch: vi.fn(() => ok<ipc.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
-      apply: vi.fn((_id: string, _input: ipc.CodingApply) => ok<ipc.CodingApplyResult>({ files: [], markers: [], kept: [] })),
-      active: vi.fn(() => ok<ipc.CodingActiveRun[]>([])),
+      patch: vi.fn(() => ok<codingTypes.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
+      apply: vi.fn((_id: string, _input: codingTypes.CodingApply) => ok<codingTypes.CodingApplyResult>({ files: [], markers: [], kept: [] })),
+      active: vi.fn(() => ok<codingTypes.CodingActiveRun[]>([])),
       resume: vi.fn((_id: string) => ok(current.task)),
     },
-    workspace: { info: vi.fn(() => ok<ipc.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<ipc.OpenedWith>('vscode')) },
+    workspace: { info: vi.fn(() => ok<workspaceTypes.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<workspaceTypes.OpenedWith>('vscode')) },
     commit: {
       preview: vi.fn(() =>
-        ok<ipc.CommitPreview>({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+        ok<commitTypes.CommitPreview>({
+          files: ['src/auth.ts'],
+          skipped: [{ path: 'notes.md', reason: 'out_of_scope' }],
+          message: '邮箱登录\n\nTaskPilot 工作包 t1',
+        }),
       ),
-      create: vi.fn((_id: string, _message: string, files: string[]) => ok<ipc.CommitResult>({ commit: 'c0ffee1234', files })),
+      create: vi.fn((_id: string, _message: string, files: string[]) => ok<commitTypes.CommitResult>({ commit: 'c0ffee1234', files })),
     },
     notes: {
-      list: vi.fn(() => ok<ipc.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
-      create: vi.fn((input: ipc.NoteInput) =>
-        ok<ipc.NoteSaved>({
+      list: vi.fn(() => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
+      create: vi.fn((input: noteTypes.NoteInput) =>
+        ok<noteTypes.NoteSaved>({
           revision: 2,
           relinked: 0,
           note: {
@@ -134,8 +143,8 @@ export const installApi = (current: { task: ipc.TaskView }) => {
       grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),
     },
     tutor: {
-      get: vi.fn(() => ok<ipc.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),
-      ask: vi.fn(() => ok<ipc.TutorState>({ status: 'running', answer: null, error: null, costUsd: 0 })),
+      get: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),
+      ask: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'running', answer: null, error: null, costUsd: 0 })),
       cancel: vi.fn(() => ok(true)),
     },
   };
@@ -144,7 +153,7 @@ export const installApi = (current: { task: ipc.TaskView }) => {
 };
 
 // A Coding Agent round, ready for review unless overridden.
-export const codingRun = (overrides: Partial<ipc.CodingRun> = {}): ipc.CodingRun => {
+export const codingRun = (overrides: Partial<codingTypes.CodingRun> = {}): codingTypes.CodingRun => {
   const status = overrides.status ?? 'ready';
   return {
     id: 'run-1',

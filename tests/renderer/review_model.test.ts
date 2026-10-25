@@ -5,9 +5,10 @@ import * as model from '../../src/renderer/src/lib/review_model.ts';
 import { describeErrorInfo } from '../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../src/renderer/src/lib/inline_code.ts';
 import * as evidence from '../../src/main/evidence.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
+import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 
-const baseline = (overrides: Partial<ipc.BaselineChecks>): ipc.BaselineChecks => ({
+const baseline = (overrides: Partial<workspaceTypes.BaselineChecks>): workspaceTypes.BaselineChecks => ({
   status: 'measured',
   reason: null,
   commit: 'abc',
@@ -19,7 +20,7 @@ const baseline = (overrides: Partial<ipc.BaselineChecks>): ipc.BaselineChecks =>
 
 test('baselineText() explains each state and when re-measuring helps', () => {
   assert.deepEqual(model.baselineText(null), { text: '', canRemeasure: false });
-  const record: ipc.BaselineCheckRecord = {
+  const record: workspaceTypes.BaselineCheckRecord = {
     status: 'measured',
     line: '',
     exitCode: 1,
@@ -48,7 +49,7 @@ test('evidenceLine() names the check, the reason, and advisory checks', () => {
 
 test('attentionText() covers every attention code evidence.ts emits', () => {
   const acceptance = [{ text: '成功返回 token' }];
-  const items: ipc.AttentionItem[] = [
+  const items: workspaceTypes.AttentionItem[] = [
     { code: 'check_unverifiable', kind: 'test', reason: 'report_missing', blocking: true },
     { code: 'preexisting_failures', kind: 'test', count: 3 },
     { code: 'no_baseline', kind: 'test' },
@@ -93,7 +94,7 @@ test('criterionRows() prefers evidence status, then legacy flags, then manual/pe
     { text: 'a', test: 'ta', status: 'verified', verified: true, manual: false, alreadyPassing: true },
     // Stored before statuses existed: only the flags.
     { text: 'b', test: 'tb', verified: false, manual: false, missing: true },
-  ] as ipc.CriterionEvidence[];
+  ] as workspaceTypes.CriterionEvidence[];
   const rows = model.criterionRows(acceptance, matched);
   assert.deepEqual(
     rows.map((row) => [row.status, row.tone, row.icon]),
@@ -128,7 +129,7 @@ test('diffLineKind() treats git headers as meta, not additions or deletions', ()
 });
 
 test('resolutionTitle() and describeErrorInfo() word plain IPC objects', () => {
-  const resolution: ipc.DeviationResolution = {
+  const resolution: packageTypes.DeviationResolution = {
     decision: 'replan',
     reason: '',
     changes: [],

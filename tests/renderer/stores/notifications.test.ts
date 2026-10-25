@@ -9,7 +9,7 @@ import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts
 import { MAX_NOTIFICATIONS } from '../../../src/renderer/src/lib/notifications.ts';
 import { taskView } from '../execution_fakes.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -20,7 +20,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
 const stored = () => JSON.parse(localStorage.getItem(READ_STORAGE_KEY) ?? 'null');
 
 describe('notifications store', () => {
-  let state: { list: ipc.Requirement[] };
+  let state: { list: requirementTypes.Requirement[] };
   let api: ReturnType<typeof installApi>;
 
   beforeEach(() => {
