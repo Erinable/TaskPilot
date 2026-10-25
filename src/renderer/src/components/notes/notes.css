@@ -431,12 +431,8 @@
 .note-title-input:focus {
   border-bottom-color: var(--accent);
 }
-.note-preview-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--text-secondary);
-  font-size: var(--text-md);
+.note-mode-switch {
+  flex-shrink: 0;
 }
 .note-conflict {
   display: flex;
@@ -523,6 +519,14 @@
   padding: var(--space-2) var(--space-4);
   overflow: auto;
   border-left: 1px solid var(--line-soft);
+}
+/* Preview mode reads like the article page: one centred column, no divider. */
+.note-preview-pane.alone {
+  width: 100%;
+  max-width: var(--blog-width);
+  min-height: calc(100vh - 380px);
+  margin: 0 auto;
+  border-left: 0;
 }
 .note-summary {
   display: flex;

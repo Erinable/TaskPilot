@@ -189,6 +189,36 @@ describe('NotesView', () => {
     expect(wrapper.get('.article-head h1').text()).toBe('断言');
   });
 
+  test('the editor switches between source, split and preview, and remembers the choice', async () => {
+    localStorage.removeItem('taskpilot.noteEditorMode');
+    const wrapper = await mountView([meta()]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    const editor = wrapper.get('[data-note-editor]');
+    expect(editor.find('.note-textarea').exists()).toBe(true);
+    expect(editor.find('[data-note-preview]').exists()).toBe(true);
+    const pick = async (label: string) => {
+      await wrapper
+        .findAll('[data-note-mode] .el-segmented__item')
+        .find((item) => item.text() === label)!
+        .trigger('click');
+      await flushPromises();
+    };
+    await pick('源码');
+    expect(editor.find('[data-note-preview]').exists()).toBe(false);
+    expect(localStorage.getItem('taskpilot.noteEditorMode')).toBe('source');
+    await pick('预览');
+    expect(editor.find('.note-textarea').exists()).toBe(false);
+    expect(editor.get('[data-note-preview]').classes()).toContain('alone');
+    await editor.trigger('keydown', { key: 'e', metaKey: true });
+    await flushPromises();
+    expect(editor.find('.note-textarea').exists()).toBe(true);
+    expect(editor.find('[data-note-preview]').exists()).toBe(false);
+    expect(localStorage.getItem('taskpilot.noteEditorMode')).toBe('source');
+    localStorage.removeItem('taskpilot.noteEditorMode');
+  });
+
   test('leaving unsaved edits asks first', async () => {
     const wrapper = await mountView([meta()]);
     await openFirst(wrapper);

@@ -101,3 +101,23 @@ export const categoryCounts = (notes: noteTypes.NoteMeta[]) => {
   for (const note of notes) if (note.category) counts[note.category] = (counts[note.category] ?? 0) + 1;
   return counts;
 };
+
+// How the editor lays out Markdown and its preview, as in Obsidian / VS Code:
+// source only, side by side, or the rendered page only.
+export type EditorMode = 'source' | 'split' | 'preview';
+export const EDITOR_MODES: { value: EditorMode; label: string }[] = [
+  { value: 'source', label: '源码' },
+  { value: 'split', label: '分栏' },
+  { value: 'preview', label: '预览' },
+];
+export const EDITOR_MODE_STORAGE_KEY = 'taskpilot.noteEditorMode';
+
+// The remembered mode; anything unreadable is side by side.
+export const readEditorMode = (storage: Pick<Storage, 'getItem'> | undefined): EditorMode => {
+  const stored = storage?.getItem(EDITOR_MODE_STORAGE_KEY);
+  return EDITOR_MODES.some((mode) => mode.value === stored) ? (stored as EditorMode) : 'split';
+};
+
+// ⌘E steps source → split → preview → source.
+export const nextEditorMode = (mode: EditorMode): EditorMode =>
+  EDITOR_MODES[(EDITOR_MODES.findIndex((entry) => entry.value === mode) + 1) % EDITOR_MODES.length].value;
