@@ -1,0 +1,35 @@
+Decide on deviation D2, the last one below.
+Choose "dismiss" or "replan".
+For "dismiss": omit revision; reason says how the developer should proceed under the current plan.
+For "replan": revision is the complete new steps (at most 10), fileScope (at most 15 relative paths) and acceptance criteria (at most 8); reason says what was wrong; changes lists what you changed, one item each.
+An acceptance criterion may name the exact test that proves it.
+The files below are as of the last commit; the developer's uncommitted work is not included.
+
+<work_package>
+Title: 实现登录锁定
+Description: 在 login 里记录失败次数并锁定。
+Steps:
+1. 在 `src/auth/login.ts` 记录失败次数。
+2. 在 `tests/auth/login.test.ts` 加测试。
+File scope:
+- src/auth/login.ts
+- tests/auth/login.test.ts
+Acceptance:
+1. 第 5 次失败后锁定 (test: locks after five failures)
+2. 锁定提示不泄露账户是否存在
+</work_package>
+
+<deviations>
+D1 [step 1, file src/auth/login.ts]: 已有 RateLimiter，不需要新计数器
+  resolution: dismiss (contested by developer): 按原计划
+D2: 仍然冲突
+  resolution: pending
+</deviations>
+
+<unread_files>
+(none)
+</unread_files>
+
+<sources>
+(none)
+</sources>

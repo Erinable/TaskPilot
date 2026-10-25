@@ -1,0 +1,35 @@
+Describe the code below at the interface level, for a planner who will not see it.
+
+For each file you were given that matters to the requirement, write a module entry:
+- path, and a one-line purpose
+- members: exported classes, functions, types and constants, each with its signature exactly as written (for a class, list its public methods as separate members with `Class.method` names)
+- dependsOn: other repository files it imports
+- notes: facts a change must respect, e.g. "all methods are async", "uses parameterized SQL via db.query", "throws NotFoundError instead of returning null". Only facts visible in the code.
+Then list repository-wide conventions you can see (test layout and style, error handling, naming, module structure), and anything a planner should know is missing or unclear.
+Files you could not read are listed below; do not describe their contents.
+
+<requirement>
+Title: 登录失败锁定
+连续 5 次密码错误后锁定账户 15 分钟。
+</requirement>
+
+<repository_files>
+package.json
+src/auth/login.ts
+src/auth/session.ts
+tests/auth/login.test.ts
+</repository_files>
+
+<unread_files>
+.env (secret)
+</unread_files>
+
+<sources>
+<file path="src/auth/login.ts">
+export const login = async (email: string, password: string) => {};
+</file>
+
+<file path="tests/auth/login.test.ts">
+test('login succeeds', () => {});
+</file>
+</sources>
