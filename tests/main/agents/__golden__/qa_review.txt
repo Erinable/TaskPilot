@@ -22,7 +22,7 @@ File scope:
 ## Unit tests (blocking)
 Command: npm test
 Exit code 1; tests 1/2 passed, 0 skipped
-TaskPilot verdict: failed (new_failures); baseline measured on the claimed commit
+TaskPilot verdict: fail (new_failures); baseline measured on the claimed commit
 Failing now but passing at the baseline (caused by this change):
 - locks after five failures
 Already failing at the baseline (not caused by this change):

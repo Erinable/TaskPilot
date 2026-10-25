@@ -73,7 +73,7 @@ const CHECK_EVIDENCE = {
   stage: 'submit',
   blocking: true,
   baseline: 'measured',
-  status: 'failed',
+  status: 'fail',
   reason: 'new_failures',
   newFailures: ['locks after five failures'],
   preexisting: ['legacy flake'],
@@ -101,9 +101,7 @@ test('system prompts', async () => {
 describe.each(PROFILES)('%s', (_name, profile) => {
   test('Product Lead clarify', async () => {
     await expect(productLead.clarifyPrompt({ ...REQUIREMENT, interfaces: null, profile })).toMatchFileSnapshot(golden('product_lead_clarify'));
-    await expect(productLead.clarifyPrompt({ ...REQUIREMENT, interfaces: INTERFACES, profile })).toMatchFileSnapshot(
-      golden('product_lead_clarify_interfaces'),
-    );
+    await expect(productLead.clarifyPrompt({ ...REQUIREMENT, interfaces: INTERFACES, profile })).toMatchFileSnapshot(golden('product_lead_clarify_interfaces'));
     await expect(productLead.clarifyPrompt({ text: REQUIREMENT.text, files: [], profile })).toMatchFileSnapshot(golden('product_lead_clarify_no_repo'));
   });
 
@@ -119,9 +117,7 @@ describe.each(PROFILES)('%s', (_name, profile) => {
 
   test('Architect select and summarize', async () => {
     await expect(architect.selectPrompt({ ...REQUIREMENT, profile })).toMatchFileSnapshot(golden('architect_select'));
-    await expect(architect.summarizePrompt({ ...REQUIREMENT, sources: SOURCES, skipped: SKIPPED, profile })).toMatchFileSnapshot(
-      golden('architect_summarize'),
-    );
+    await expect(architect.summarizePrompt({ ...REQUIREMENT, sources: SOURCES, skipped: SKIPPED, profile })).toMatchFileSnapshot(golden('architect_summarize'));
     await expect(architect.summarizePrompt({ ...REQUIREMENT, sources: SOURCES, skipped: [], profile })).toMatchFileSnapshot(
       golden('architect_summarize_all_read'),
     );
@@ -129,7 +125,12 @@ describe.each(PROFILES)('%s', (_name, profile) => {
 
   test('Architect adjudicate', async () => {
     const deviations = [
-      { note: '已有 RateLimiter，不需要新计数器', stepIndex: 0, filePath: 'src/auth/login.ts', resolution: { decision: 'dismiss', reason: '按原计划', contested: true } },
+      {
+        note: '已有 RateLimiter，不需要新计数器',
+        stepIndex: 0,
+        filePath: 'src/auth/login.ts',
+        resolution: { decision: 'dismiss', reason: '按原计划', contested: true },
+      },
       { note: '仍然冲突', stepIndex: null },
     ];
     const input = { task: PACKAGE, deviations, interfaces: INTERFACES, sources: SOURCES, skipped: SKIPPED, profile };
@@ -157,7 +158,10 @@ describe.each(PROFILES)('%s', (_name, profile) => {
     await expect(tutor.tutorPrompt({ task, stepIndex: 0, sources: [], missing: [], profile })).toMatchFileSnapshot(golden('tutor_step_no_sources'));
     const submission = [{ path: 'src/auth/login.ts', patch: '+let failures = 0;' }];
     const review = { passed: false, summary: '没有锁定', issues: ['缺少计数重置'] };
-    const notes = [{ category: 'thinking' as const, title: '边界', summary: '先列出边界情况' }, { category: null, title: '命名', summary: '' }];
+    const notes = [
+      { category: 'thinking' as const, title: '边界', summary: '先列出边界情况' },
+      { category: null, title: '命名', summary: '' },
+    ];
     await expect(tutor.gradePrompt({ task, submission, reference: '+const MAX = 5;', review, notes, profile })).toMatchFileSnapshot(golden('tutor_grade'));
     await expect(tutor.gradePrompt({ task, submission, reference: null, review: null, profile })).toMatchFileSnapshot(golden('tutor_grade_no_reference'));
   });
