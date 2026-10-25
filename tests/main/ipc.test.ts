@@ -3061,3 +3061,44 @@ test('practice: grading reads the developer notes and keeps repeated only when t
   const prompt = h.agentCalls.filter((c) => stepOf(c.schema) === 'grade').at(-1)!.prompt;
   assert.match(prompt, /<developer_notes>\n- \[writing\] 用例要有断言: 测试必须有断言\n/, 'Tutor reads the summary, not the body');
 });
+
+test('repositories: a switch drops the coding events and tutor failures of the repository it leaves', async () => {
+  const events = [{ sequence: 0, at: new Date().toISOString(), type: 'text' as const, text: 'done' }];
+  const agent: FakeAgent = async () => ({ output: { explanation: '', hints: [], snippet: null, terms: [] }, costUsd: 0 });
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => errors.mockRestore());
+  const { call, store, repoDir } = await harness({
+    agent,
+    seedState: {
+      'auth-edge-tests': { status: 'in_progress', baseline: 'HEAD', claimedAt: new Date().toISOString(), completedSteps: [], deviations: [], review: null },
+    },
+    coding: {
+      codingProbe: async () => codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async () => ({
+        output: 'done',
+        usage: { inputTokens: 1, outputTokens: 2, cachedInputTokens: null, reasoningTokens: null, costUsd: null },
+        events,
+        sessionId: null,
+      }),
+      codingReadPatch: async () => filePatch('tests/auth/login-user.test.ts', 'test("x", () => {});'),
+      codingClean: async () => {},
+      codingSnapshot: async (_root, baseline) => baseline,
+    },
+  });
+  await call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '实现边界测试' });
+  assert.equal((await settleCoding(call, 'auth-edge-tests')).codingRun?.status, 'ready');
+  assert.equal((await call(CHANNELS.codingEvents, 'auth-edge-tests', -1)).data.events.length, 1);
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  assert.equal((await settleTutor(call, 'auth-edge-tests', 0)).status, 'failed');
+
+  const first = (await call(CHANNELS.repositoriesList)).data.current;
+  await call(CHANNELS.repositoriesAdd, await gitRepo(), true);
+  await call(CHANNELS.repositoriesSwitch, first);
+  // The sample packages are not published from a requirement, so the switch dropped them.
+  setGeneratedTasks(SAMPLE_TASKS);
+  await store.open(repoDir, listTasks());
+  assert.equal((await call(CHANNELS.codingGet, 'auth-edge-tests')).data.codingRun?.status, 'ready');
+  assert.deepEqual((await call(CHANNELS.codingEvents, 'auth-edge-tests', -1)).data.events, []);
+  assert.equal((await call(CHANNELS.tutorGet, 'auth-edge-tests', 0)).data.status, 'idle');
+});

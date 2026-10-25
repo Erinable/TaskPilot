@@ -27,6 +27,7 @@ import * as codingSandbox from './coding_sandbox.ts';
 import * as codingLoop from './coding_loop.ts';
 import * as practice from './practice.ts';
 import { collectChanges } from './review_diff.ts';
+import { BackgroundRuns } from './background_runs.ts';
 import { codingCall } from './agents/model_usage.ts';
 import { buildCostReport } from './cost_report.ts';
 import { estimateMicros, loadPrices, priceFor, syncPrices } from './model_prices.ts';
@@ -500,16 +501,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
 
-  // Background run promises, so shutdown (and tests) can wait for writes.
-  const pendingRuns = new Set<Promise<unknown>>();
-  const track = (promise: Promise<unknown>) => {
-    pendingRuns.add(promise);
-    promise.finally(() => pendingRuns.delete(promise));
-  };
+  // Every background run and its promise, so a switch, a reset or shutdown
+  // (and tests) can cancel them and wait for their writes.
+  const backgroundRuns = new BackgroundRuns();
+  const packageLabel = (id: string) => () => tasks.getTask(id)?.title ?? id;
 
   const codingRuns = new Map<string, CodingRuntime>();
-  // Submit checks running on an applied patch, per package.
-  const codingVerifications = new Map<string, AbortController>();
   const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
   const MAX_CODING_EVENTS = 200;
   // ---------- Coding isolation ----------
@@ -605,7 +602,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
     // A practice package is the developer's exercise; release it to hand it over.
     if (state.mode === 'practice') failWith('This package is being practised; Coding Agent stays out', 'practice_mode');
-    if (codingRuns.has(id) || codingVerifications.has(id)) failWith('A Coding Agent run is already active', 'coding_running');
+    if (codingRuns.has(id) || backgroundRuns.has('coding-checks', id)) failWith('A Coding Agent run is already active', 'coding_running');
     const previous = state.codingRun;
     if (previous && !CODING_STARTABLE.includes(previous.status)) failWith('This package already has a Coding Agent result', 'coding_result_exists');
     const root = requireRoot();
@@ -645,7 +642,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     };
     await store.setCodingRun(id, initial);
     record({ kind: 'coding_run', packageId: id, title: task.title, status: 'started', costUsd: null });
-    const controller = new AbortController();
+    const controller = backgroundRuns.start({ kind: 'coding', key: id, busy: 'coding', agent: () => 'coding-agent', label: packageLabel(id) });
     const runtime: CodingRuntime = {
       run: initial,
       controller,
@@ -725,13 +722,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         const current = store.get(id).codingRun;
         if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await cleanRun(prepared.runName).catch(() => {});
         codingRuns.delete(id);
+        backgroundRuns.finish('coding', id, controller);
       }
       // Automatic rounds go on by themselves; the developer's round waits for
       // a per-file review.
       const settledRun = store.get(id).codingRun;
       if (trigger !== 'human' && settledRun?.status === 'ready' && !settledRun.halt) continueLoop(id, () => autoApplyRound(id));
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return viewOf(task, store.get(id));
   };
 
@@ -790,8 +788,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // permissions. A clean run hands the package to QA; a blocking failure
   // starts the next round while attempts remain.
   const verifyApplied = async (id: string) => {
-    const controller = new AbortController();
-    codingVerifications.set(id, controller);
+    // Submit checks running on an applied patch, per package.
+    const controller = backgroundRuns.start({ kind: 'coding-checks', key: id, busy: 'coding', label: packageLabel(id) });
     const config = getConfig();
     const baselines = store.get(id).baselineChecks?.checks ?? {};
     const failures: Parameters<typeof codingLoop.checksFeedback>[0] = [];
@@ -813,7 +811,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         if (item.status === 'fail' && check.blocking) failures.push({ evidence: item, run: runs[check.kind] ?? null });
       }
     } finally {
-      codingVerifications.delete(id);
+      backgroundRuns.finish('coding-checks', id, controller);
     }
     if (controller.signal.aborted) return void (await updateCoding(id, { status: 'applied', checks: runs, halt: 'stopped' }));
     const run = (await updateCoding(id, { checks: runs })).codingRun as CodingRun;
@@ -836,7 +834,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // Runs one automatic step of the loop in the background. A failure stops
   // the loop with the error on the run, never silently.
   const continueLoop = (id: string, step: () => Promise<void>) =>
-    track(
+    backgroundRuns.track(
       step().catch(async (error) => {
         console.error(error);
         if (store.get(id).codingRun) await updateCoding(id, { halt: 'stopped', error: codingFailure(error) }).catch((failure) => console.error(failure));
@@ -888,7 +886,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap(async (_event, rawId): Promise<boolean> => {
       const id = requireString(rawId, 'id');
       const runtime = codingRuns.get(id);
-      const verifying = codingVerifications.get(id);
+      const verifying = backgroundRuns.get('coding-checks', id);
       if (verifying) {
         verifying.abort();
         return true;
@@ -906,11 +904,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     }),
   );
   // The packages with a round or its checks in flight, for the app-wide
-  // indicator. Two in-memory maps, so it is cheap to poll.
+  // indicator. Read from memory, so it is cheap to poll.
   ipcMain.handle(
     CHANNELS.codingActive,
     wrap((): ipc.CodingActiveRun[] =>
-      [...new Set([...codingRuns.keys(), ...codingVerifications.keys()])].map((packageId) => ({
+      [...new Set([...backgroundRuns.keys('coding'), ...backgroundRuns.keys('coding-checks')])].map((packageId) => ({
         packageId,
         title: tasks.getTask(packageId)?.title ?? packageId,
       })),
@@ -982,9 +980,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // QA: reviews a package once it is submitted.
 
-  // One in-flight review per work package, so it can be cancelled.
-  const reviews = new Map<string, AbortController>();
-
   // The Architect summary of the requirement a package came from, if any.
   const interfacesFor = (task: TaskDefinition & { requirementId?: string }) => {
     if (!requirements || !task.requirementId) return null;
@@ -1003,8 +998,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const baseline = requireBaseline(id);
     const reviewRunner = runnerFor('qa', { kind: 'package', id });
     const entry = await store.beginReview(id);
-    const controller = new AbortController();
-    reviews.set(id, controller);
+    // One in-flight review per work package, so it can be cancelled.
+    const controller = backgroundRuns.start({ kind: 'review', key: id, busy: 'review', agent: () => 'qa', label: packageLabel(id) });
     const config = getConfig();
     const settled = (async () => {
       let outcome: { result: Awaited<ReturnType<typeof reviewWorkPackage>> } | { error: unknown };
@@ -1029,7 +1024,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       }
       // Drop the run first, so nobody sees a finished review that still
       // looks cancellable.
-      reviews.delete(id);
+      backgroundRuns.finish('review', id, controller);
       if ('error' in outcome) await store.failReview(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
@@ -1044,7 +1039,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           );
       }
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return toWireState(entry);
   };
 
@@ -1053,8 +1048,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // replan and a repository switch abort them, and a late write from a
   // replaced run is dropped by the store (setReferenceRun/setGrade `expect`).
 
-  const referenceRuns = new Map<string, AbortController>(); // package id -> AbortController
-  const gradeRuns = new Map<string, AbortController>(); // package id -> AbortController
   const referenceFile = (id: string) => practice.referencePath(repositories.dataDir(), id);
 
   // Coding Agent writes the reference in its own run directory, from the
@@ -1065,8 +1058,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const baseline = requireBaseline(id);
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
-    const controller = new AbortController();
-    referenceRuns.set(id, controller);
+    const controller = backgroundRuns.start({ kind: 'reference', key: id, busy: 'reference', label: packageLabel(id) });
     const runId = codingExec.codingRunId();
     const initial: ipc.ReferenceRun = {
       id: runId,
@@ -1117,14 +1109,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         finished = { status: cancelled ? 'cancelled' : 'failed', error: codingFailure(error), costUsd: spent?.costUsd ?? null };
       } finally {
         if (prepared) await cleanRun(prepared.runName).catch((error) => console.error('[reference] clean failed', error));
-        if (referenceRuns.get(id) === controller) referenceRuns.delete(id);
+        backgroundRuns.finish('reference', id, controller);
       }
       const written = await store.setReferenceRun(id, { ...initial, ...finished, finishedAt: new Date().toISOString() }, runId);
       console.debug(`[reference] done package=${id} run=${runId} status=${finished.status} kept=${Boolean(written)}`);
       // QA may have finished first; its grade waits for the reference.
       if (written?.grade?.status === 'waiting') startGrade(id, { force: true }).catch((error) => console.error('[grade] could not start', error));
     })();
-    track(settled);
+    backgroundRuns.track(settled);
   };
 
   // Tutor grades the current submission once QA has judged it. With the
@@ -1136,7 +1128,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     if (state.mode !== 'practice') failWith('Only practised packages are graded', 'not_practice');
     const review = practice.reviewForGrade(toWireState(state).review);
     if (!review) failWith('QA has not judged this submission yet', 'review_not_finished');
-    if (gradeRuns.has(id)) return viewOf(task, state);
+    if (backgroundRuns.has('grade', id)) return viewOf(task, state);
     const root = requireRoot();
     const collected = await collectChanges(root, requireBaseline(id), { ignore: reportIgnore(getConfig()) });
     const submission = collected.files.map((file) => ({ path: file.path, patch: file.patch }));
@@ -1161,8 +1153,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       return viewOf(task, store.get(id));
     }
     const referencePatch = reference?.status === 'ready' ? await fs.readFile(referenceFile(id), 'utf8').catch(() => null) : null;
-    const controller = new AbortController();
-    gradeRuns.set(id, controller);
+    const controller = backgroundRuns.start({ kind: 'grade', key: id, busy: 'grade', label: packageLabel(id) });
     await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = runnerFor('tutor', { kind: 'package', id });
     const { path: envPath } = await commandPath();
@@ -1204,12 +1195,12 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           error: cancelled ? { code: 'agent_cancelled', message: 'Grading was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
         };
       } finally {
-        if (gradeRuns.get(id) === controller) gradeRuns.delete(id);
+        backgroundRuns.finish('grade', id, controller);
       }
       await store.setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt: new Date().toISOString() }, gradeId);
       console.debug(`[grade] done package=${id} status=${finished.status}`);
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return viewOf(task, store.get(id));
   };
 
@@ -1238,8 +1229,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Architect: rules on a reported deviation.
 
-  const adjudications = new Map<string, AbortController>(); // package id -> AbortController
-
   // Starts Architect's ruling in the background. Like QA, it moves the
   // package on itself: back to the developer, or to the queue with a new plan.
   // Without a workspace it still runs, on the package text alone.
@@ -1250,8 +1239,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const { root } = getConfig();
     const architectRunner = runnerFor('architect', { kind: 'package', id });
     const entry = await store.beginAdjudication(id);
-    const controller = new AbortController();
-    adjudications.set(id, controller);
+    const controller = backgroundRuns.start({ kind: 'adjudication', key: id, busy: 'adjudication', agent: () => 'architect', label: packageLabel(id) });
     const settled = (async () => {
       let outcome: { result: Awaited<ReturnType<typeof adjudicateDeviation>> } | { error: unknown };
       try {
@@ -1271,7 +1259,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       } catch (error) {
         outcome = { error: controller.signal.aborted ? Object.assign(new Error('The adjudication was cancelled'), { code: 'agent_cancelled' }) : error };
       }
-      adjudications.delete(id);
+      backgroundRuns.finish('adjudication', id, controller);
       if ('error' in outcome) await store.failAdjudication(id, asAgentError(outcome.error)).catch(() => {});
       else {
         const before = store.get(id).status;
@@ -1280,21 +1268,19 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           .then((after) => {
             // A replan drops the reference and grade; stop the runs writing them.
             if (after.status === 'pending') {
-              referenceRuns.get(id)?.abort();
-              gradeRuns.get(id)?.abort();
+              backgroundRuns.get('reference', id)?.abort();
+              backgroundRuns.get('grade', id)?.abort();
             }
             return recordTransition(id, before, after, agentTransitionOf(before, after.status), 'agent');
           })
           .catch((error) => store.failAdjudication(id, error).catch(() => {}));
       }
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return toWireState(entry);
   };
 
   // Baselines: the submit-stage checks run on the claimed commit.
-
-  const baselineRuns = new Map<string, AbortController>(); // package id -> AbortController
 
   // Tracked files and HEAD; untracked files (build output) are allowed to appear.
   const treeState = async (root: string) => {
@@ -1316,9 +1302,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const root = config.root;
     const commit = store.get(id).baseline;
     if (!root || !commit) return;
-    baselineRuns.get(id)?.abort();
-    const controller = new AbortController();
-    baselineRuns.set(id, controller);
+    backgroundRuns.get('baseline', id)?.abort();
+    const controller = backgroundRuns.start({ kind: 'baseline', key: id, busy: 'baseline', label: packageLabel(id) });
     const checks = submitChecks(config);
     const startedAt = new Date().toISOString();
     const record = (status: BaselineChecksStatus, extra: Partial<BaselineChecks> = {}) =>
@@ -1362,10 +1347,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       } catch (error) {
         await record('unavailable', { reason: errorCode(error) ?? 'failed' });
       } finally {
-        if (baselineRuns.get(id) === controller) baselineRuns.delete(id);
+        backgroundRuns.finish('baseline', id, controller);
       }
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return settled;
   };
 
@@ -1378,7 +1363,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       requireBaseline(id);
       const state = store.get(id);
       if (state.status !== 'in_progress') failWith('Baselines can only be measured while the package is in progress', 'invalid_state');
-      if (baselineRuns.has(id)) failWith('The baseline is already being measured', 'baseline_running');
+      if (backgroundRuns.has('baseline', id)) failWith('The baseline is already being measured', 'baseline_running');
       measureBaseline(id);
       return viewOf(requireTask(id), store.get(id));
     }),
@@ -1404,9 +1389,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       // The store validates the deviation it is given.
       if (name === 'report_deviation') extra.deviation = (options as { deviation?: DeviationInput } | null | undefined)?.deviation;
       if (name === 'release') {
-        baselineRuns.get(id)?.abort();
-        referenceRuns.get(id)?.abort();
-        gradeRuns.get(id)?.abort();
+        backgroundRuns.get('baseline', id)?.abort();
+        backgroundRuns.get('reference', id)?.abort();
+        backgroundRuns.get('grade', id)?.abort();
       }
       // store.transition() rejects names that are not transitions.
       const before = store.get(id).status;
@@ -1452,7 +1437,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.reviewCancel,
     wrap((_event, id): boolean => {
-      const controller = reviews.get(requireString(id, 'id'));
+      const controller = backgroundRuns.get('review', requireString(id, 'id'));
       if (!controller) return false;
       controller.abort();
       return true;
@@ -1467,7 +1452,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.deviationCancel,
     wrap((_event, id): boolean => {
-      const controller = adjudications.get(requireString(id, 'id'));
+      const controller = backgroundRuns.get('adjudication', requireString(id, 'id'));
       if (!controller) return false;
       controller.abort();
       return true;
@@ -1599,9 +1584,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // The handlers below use a local `store` for requirements, so keep a
   // separate name for the work package store.
   const workPackages = store;
-  // One in-flight run per requirement, so it can be cancelled.
-  const runs = new Map<string, AbortController>();
-
   const requireRequirements = () => {
     if (!requirements) return failWith('Requirements are unavailable', 'unsupported');
     return requirements;
@@ -1634,8 +1616,14 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     const architectRunner = runnerFor('architect', { kind: 'requirement', id });
     const productRunner = runnerFor('product-lead', { kind: 'requirement', id });
     const item = await store.begin(id, step);
-    const controller = new AbortController();
-    runs.set(id, controller);
+    // One in-flight run per requirement, so it can be cancelled.
+    const controller = backgroundRuns.start({
+      kind: 'requirement',
+      key: id,
+      busy: 'requirement',
+      agent: () => (store.get(id).phase === 'architect' ? 'architect' : 'product-lead'),
+      label: () => store.get(id).title || id,
+    });
     const { root } = getConfig();
     const files = await repositoryFiles(root);
     const { path: envPath } = await commandPath();
@@ -1680,7 +1668,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       }
       // Drop the run before recording the result, so nobody sees a settled
       // requirement that still looks cancellable.
-      runs.delete(id);
+      backgroundRuns.finish('requirement', id, controller);
       const title = store.get(id).title || item.text.slice(0, 40);
       const fail = (error: unknown) => {
         const agentError = asAgentError(error);
@@ -1695,7 +1683,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           .catch(fail);
       }
     })();
-    track(settled);
+    backgroundRuns.track(settled);
     return toWireRequirement(item);
   };
 
@@ -1760,7 +1748,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.requirementsCancel,
     wrap((_event, id): boolean => {
-      const controller = runs.get(requireString(id, 'id'));
+      const controller = backgroundRuns.get('requirement', requireString(id, 'id'));
       if (!controller) return false;
       controller.abort();
       return true;
@@ -1819,16 +1807,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         ),
       ]);
       const availableByAgent = { ...Object.fromEntries(analysis), 'coding-agent': coding.available } as ipc.TeamStatus['availableByAgent'];
-      const work: ipc.AgentWork[] = [
-        ...[...runs.keys()].map((id): ipc.AgentWork => {
-          const item = requirements?.get(id);
-          return { agent: item?.phase === 'architect' ? 'architect' : 'product-lead', kind: 'requirement', label: item?.title || id };
-        }),
-        ...[...reviews.keys()].map((id): ipc.AgentWork => ({ agent: 'qa', kind: 'review', label: tasks.getTask(id)?.title ?? id })),
-        ...[...adjudications.keys()].map((id): ipc.AgentWork => ({ agent: 'architect', kind: 'adjudication', label: tasks.getTask(id)?.title ?? id })),
-        ...(releaseController ? [{ agent: 'release-manager', kind: 'release', label: '发布说明' } satisfies ipc.AgentWork] : []),
-        ...[...codingRuns.keys()].map((id): ipc.AgentWork => ({ agent: 'coding-agent', kind: 'coding', label: tasks.getTask(id)?.title ?? id })),
-      ];
+      const work = backgroundRuns.work();
       const now = new Date();
       return {
         recent,
@@ -2119,7 +2098,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     running: null,
     live: null,
   };
-  let envController: AbortController | null = null;
   const ENV_OUTPUT_CHARS = 4000;
 
   // A plan only exists alongside the facts it was made from.
@@ -2203,10 +2181,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         live: null,
       };
       const session = env;
-      const controller = new AbortController();
-      envController = controller;
+      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
       const { path: envPath } = await commandPath();
-      track(
+      backgroundRuns.track(
         (async () => {
           try {
             const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure });
@@ -2219,7 +2196,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           } catch (error) {
             Object.assign(session, { status: 'failed', error: toFailure(error).error });
           } finally {
-            if (envController === controller) envController = null;
+            backgroundRuns.finish('environment', '', controller);
           }
         })(),
       );
@@ -2250,8 +2227,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (blocking.length) failWith(`Setup is blocked: ${blocking.join(', ')}`, 'env_blocked');
 
       const session = env;
-      const controller = new AbortController();
-      envController = controller;
+      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
       session.running = step.id;
       session.live = { output: '', startedAt: new Date().toISOString() };
       const line = workspace.formatCommandLine(step);
@@ -2278,10 +2254,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         } finally {
           session.running = null;
           session.live = null;
-          if (envController === controller) envController = null;
+          backgroundRuns.finish('environment', '', controller);
         }
       })();
-      track(run.catch(() => {}));
+      backgroundRuns.track(run.catch(() => {}));
       try {
         await run;
       } catch (error) {
@@ -2320,8 +2296,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.envCancel,
     wrap((): boolean => {
-      if (!envController) return false;
-      envController.abort();
+      const controller = backgroundRuns.get('environment', '');
+      if (!controller) return false;
+      controller.abort();
       return true;
     }),
   );
@@ -2329,7 +2306,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // Release Manager: proposes a version, notes and a checklist. TaskPilot
   // never tags, commits or pushes; release:write-notes is the only write.
 
-  let releaseController: AbortController | null = null;
   const RECENT_COMMITS = 30;
   const MAX_RELEASE_PACKAGES = 50;
   const MAX_PACKAGE_TEXT = 500;
@@ -2400,7 +2376,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       milestones: milestoneViews(store),
       history: store.history(),
       startPoint: root ? await releaseStartPoint(root, store) : null,
-      running: releaseController !== null,
+      running: backgroundRuns.has('release', ''),
     };
   };
 
@@ -2479,7 +2455,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const store = requireReleases();
       const root = requireRoot();
       const releaseRunner = runnerFor('release-manager');
-      if (releaseController) failWith('Release Manager is already running', 'release_busy');
+      if (backgroundRuns.has('release', '')) failWith('Release Manager is already running', 'release_busy');
       const endCommit = await git.resolveCommit(root, 'HEAD');
       if (!endCommit) return failWith('The repository has no commits', 'release_no_changes');
       const point = await findStart(root, store);
@@ -2499,12 +2475,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
       const packages = unreleasedPackages(store);
       await store.begin({ startCommit, endCommit });
-      const controller = new AbortController();
-      releaseController = controller;
+      const controller = backgroundRuns.start({ kind: 'release', key: '', busy: 'release', agent: () => 'release-manager', label: () => '发布说明' });
       const { path: envPath } = await commandPath();
       const fixedStart = startCommit;
       const fixedLabel = startLabel;
-      track(
+      backgroundRuns.track(
         (async () => {
           let outcome: { result: Awaited<ReturnType<typeof planRelease>> } | { error: unknown };
           try {
@@ -2524,7 +2499,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
             outcome = { error: controller.signal.aborted ? Object.assign(new Error('Release Manager was cancelled'), { code: 'agent_cancelled' }) : error };
           }
           // Drop the run first, so nobody sees a settled draft that still looks cancellable.
-          if (releaseController === controller) releaseController = null;
+          backgroundRuns.finish('release', '', controller);
           if ('error' in outcome) {
             await store.failRun(asAgentError(outcome.error)).catch((error) => console.error('[release] failRun failed', error));
             return;
@@ -2614,8 +2589,9 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   ipcMain.handle(
     CHANNELS.releaseCancel,
     wrap((): boolean => {
-      if (!releaseController) return false;
-      releaseController.abort();
+      const controller = backgroundRuns.get('release', '');
+      if (!controller) return false;
+      controller.abort();
       return true;
     }),
   );
@@ -2663,7 +2639,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // Tutor (src/main/agents/tutor.ts): one step explained, on request.
 
   // One in-flight answer per package step; failures are kept until retried.
-  const tutorRuns = new Map<string, AbortController>();
   const tutorFailures = new Map<string, ipc.ErrorInfo>();
   const tutorKey = (id: string, stepIndex: number) => `${id}#${stepIndex}`;
 
@@ -2682,7 +2657,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   const tutorState = (id: string, stepIndex: number, step: string): ipc.TutorState => {
     const key = tutorKey(id, stepIndex);
-    if (tutorRuns.has(key)) return { status: 'running', answer: null, error: null, costUsd: 0 };
+    if (backgroundRuns.has('tutor', key)) return { status: 'running', answer: null, error: null, costUsd: 0 };
     const saved = requireTutor().get(id, stepIndex, step);
     if (saved) return { status: 'done', answer: saved.answer, error: null, costUsd: saved.costUsd };
     const error = tutorFailures.get(key);
@@ -2709,12 +2684,11 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (current.status === 'running' || current.status === 'done') return current;
       // Fixed at the start, like the other runs.
       const { root } = getConfig();
-      const controller = new AbortController();
-      tutorRuns.set(key, controller);
+      const controller = backgroundRuns.start({ kind: 'tutor', key, busy: 'tutor', label: packageLabel(task.id) });
       tutorFailures.delete(key);
       const { path: envPath } = await commandPath();
       console.debug(`[tutor] ask package=${task.id} step=${stepIndex}`);
-      track(
+      backgroundRuns.track(
         (async () => {
           try {
             // Scope files as committed; ones the step creates are missing.
@@ -2740,7 +2714,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
               cancelled ? { code: 'agent_cancelled', message: 'Tutor was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
             );
           } finally {
-            tutorRuns.delete(key);
+            backgroundRuns.finish('tutor', key, controller);
           }
         })(),
       );
@@ -2752,7 +2726,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.tutorCancel,
     wrap((_event, rawId, rawIndex): boolean => {
       const { task, stepIndex } = requireStep(rawId, rawIndex);
-      const controller = tutorRuns.get(tutorKey(task.id, stepIndex));
+      const controller = backgroundRuns.get('tutor', tutorKey(task.id, stepIndex));
       controller?.abort();
       return Boolean(controller);
     }),
@@ -2764,7 +2738,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // The last folder the developer picked in the native dialog: the only
   // folder notes:set-directory accepts besides the default (null).
   let pickedNotesDirectory: string | null = null;
-  const noteSummaries = new Map<string, AbortController>();
 
   ipcMain.handle(
     CHANNELS.notesList,
@@ -2807,9 +2780,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       const baseVersion = requireString(rawVersion, 'baseVersion');
       const note = store.get(id);
       if (note.version !== baseVersion) return failWith('The note changed on disk since it was opened', 'note_conflict');
-      if (noteSummaries.has(id)) return failWith('A summary of this note is already being written', 'invalid_state');
-      const controller = new AbortController();
-      noteSummaries.set(id, controller);
+      if (backgroundRuns.has('note-summary', id)) return failWith('A summary of this note is already being written', 'invalid_state');
+      const controller = backgroundRuns.start({ kind: 'note-summary', key: id, busy: 'tutor', label: () => '笔记总结', once: true });
       const { path: envPath } = await commandPath();
       console.debug(`[notes] summarize id=${id} length=${note.body.length}`);
       const run = (async () => {
@@ -2824,10 +2796,10 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
           throwIfCancelled(controller.signal);
           return await store.setSummary(id, tutorAgent.validateSummary(output), baseVersion);
         } finally {
-          noteSummaries.delete(id);
+          backgroundRuns.finish('note-summary', id, controller);
         }
       })();
-      track(run);
+      backgroundRuns.track(run);
       return run;
     }),
   );
@@ -2876,43 +2848,13 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // Repositories
 
-  // What a switch would cancel, named for the confirmation dialog.
-  const busyRuns = (): ipc.BusyRun[] => {
-    const packageTitle = (id: string) => tasks.getTask(id)?.title ?? id;
-    return [
-      ...[...runs.keys()].map((id): ipc.BusyRun => ({ kind: 'requirement', label: requirements?.get(id).title || id })),
-      ...[...reviews.keys()].map((id): ipc.BusyRun => ({ kind: 'review', label: packageTitle(id) })),
-      ...[...adjudications.keys()].map((id): ipc.BusyRun => ({ kind: 'adjudication', label: packageTitle(id) })),
-      ...[...baselineRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'baseline', label: packageTitle(id) })),
-      ...(releaseController ? [{ kind: 'release', label: '发布说明' } as ipc.BusyRun] : []),
-      ...(envController ? [{ kind: 'environment', label: '环境初始化' } as ipc.BusyRun] : []),
-      ...[...tutorRuns.keys()].map((key): ipc.BusyRun => ({ kind: 'tutor', label: packageTitle(key.split('#')[0]) })),
-      ...[...codingRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
-      ...[...codingVerifications.keys()].map((id): ipc.BusyRun => ({ kind: 'coding', label: packageTitle(id) })),
-      ...[...referenceRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'reference', label: packageTitle(id) })),
-      ...[...gradeRuns.keys()].map((id): ipc.BusyRun => ({ kind: 'grade', label: packageTitle(id) })),
-      ...(noteSummaries.size ? [{ kind: 'tutor', label: '笔记总结' } as ipc.BusyRun] : []),
-    ];
-  };
-
   // Cancels every background run and waits for its final write, so nothing
-  // lands in the next repository's stores.
+  // lands in the next repository's stores. The runs' in-memory leftovers
+  // belong to the repository they ran in and go with them.
   const cancelAll = async () => {
-    envController?.abort();
-    releaseController?.abort();
-    for (const controller of baselineRuns.values()) controller.abort();
-    for (const controller of runs.values()) controller.abort();
-    for (const controller of reviews.values()) controller.abort();
-    for (const controller of adjudications.values()) controller.abort();
-    for (const runtime of codingRuns.values()) runtime.controller.abort();
-    for (const controller of codingVerifications.values()) controller.abort();
-    // A tutor answer finishing late would land in the next repository's store.
-    for (const controller of tutorRuns.values()) controller.abort();
-    for (const controller of referenceRuns.values()) controller.abort();
-    for (const controller of gradeRuns.values()) controller.abort();
-    for (const controller of noteSummaries.values()) controller.abort();
-    await Promise.allSettled([...pendingRuns]);
+    await backgroundRuns.cancelAll();
     tutorFailures.clear();
+    codingEventHistory.clear();
   };
 
   // Waits for every queued store write, including the activity appends
@@ -2973,7 +2915,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   ipcMain.handle(
     CHANNELS.repositoriesBusy,
-    wrap((): ipc.BusyRun[] => busyRuns()),
+    wrap((): ipc.BusyRun[] => backgroundRuns.busy()),
   );
 
   ipcMain.handle(
