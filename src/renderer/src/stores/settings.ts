@@ -9,7 +9,6 @@ import { confirmAction, confirmChoice, showToast } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
 import * as model from '@/lib/settings_model.ts';
 import { useAppStore } from './app.ts';
-import { useSetupStore } from './setup.ts';
 import { useTasksStore } from './tasks.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
@@ -496,10 +495,6 @@ export const useSettingsStore = defineStore('settings', () => {
     if (page === 'agents') refreshAgentRuntimes().catch((error) => console.error(error));
     if (page === 'environment') renderEnvironment().catch((error) => console.error(error));
     if (page === 'data') renderData().catch((error) => console.error(error));
-    if (page === 'setup')
-      useSetupStore()
-        .render()
-        .catch((error) => console.error(error));
   };
 
   const search = (query: string) => {

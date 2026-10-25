@@ -2,7 +2,7 @@
 // each step, and the main process runs commands it rebuilds itself. This store
 // only ever sends step ids and script kinds.
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import type { IpcError } from '@/lib/ipc.ts';
@@ -45,6 +45,9 @@ export const resultText = (result: ipc.EnvStepResult) => {
 };
 
 export const useSetupStore = defineStore('setup', () => {
+  const app = useAppStore();
+  const settings = useSettingsStore();
+
   // ========== Session ==========
   const view = ref<ipc.EnvState | null>(null);
   const loadError = ref<string | null>(null);
@@ -159,7 +162,7 @@ export const useSetupStore = defineStore('setup', () => {
     });
   };
 
-  const visible = () => useAppStore().view === 'settings' && useSettingsStore().activePage === 'setup';
+  const visible = () => app.view === 'settings' && settings.activePage === 'setup';
 
   const schedulePoll = () => {
     if (pollTimer) clearTimeout(pollTimer);
@@ -256,7 +259,6 @@ export const useSetupStore = defineStore('setup', () => {
       showToast('请先勾选要写入的命令。', 'info');
       return false;
     }
-    const settings = useSettingsStore();
     if (settings.hasUnsavedChanges()) {
       showToast('设置里还有未保存的修改，请先保存或放弃。', 'error');
       return false;
@@ -266,6 +268,14 @@ export const useSetupStore = defineStore('setup', () => {
     showToast('验证命令已写入工作区配置。');
     return true;
   };
+
+  watch(
+    visible,
+    (isVisible) => {
+      if (isVisible) render().catch((error) => console.error(error));
+    },
+    { immediate: true },
+  );
 
   return {
     // Session

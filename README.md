@@ -283,9 +283,35 @@ npm run format:check   # Prettier
 npm run build          # 打包主进程、preload 和界面到 out/
 ```
 
-CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、lint、format:check、test、build。
+CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、lint、format:check、test、build；另有一个 Ubuntu 任务运行 jscpd 重复检测、函数复杂度增量门禁和 Knip 循环依赖检查。
+
+打开 Actions 运行页面的 Summary，可直接查看 Code analysis 摘要：三项检查状态、重复率与代码位置、复杂度超限及新增问题、循环依赖诊断。表格最多显示 20 项，完整 JSON 报告和 Knip 日志位于该页面的 Artifacts，保留 14 天；失败或跳过的检查会单独标明。
 
 改应用图标：源文件是 `assets/icon/icon.svg`（128 px 及以上）和 `icon_small.svg`（64 px 及以下）。改完先 `brew install librsvg`，再运行 `scripts/build_icon.sh` 重新生成 `icon.icns`。
+
+### 代码分析
+
+下面的命令可以本地运行，也不会自动删除或改写代码。CI 自动运行重复检测、复杂度门禁和循环检查；未使用代码分析仍按需手动运行：
+
+```bash
+npm run analyze:cycles       # Knip：静态运行时循环依赖，以及无法解析的导入
+npm run analyze:unused       # Knip：未使用文件、导出、类型、依赖，以及未声明的依赖
+npm run analyze:duplicates   # jscpd：src/ 中至少 10 行、80 tokens 的重复代码块
+npm run analyze:complexity   # ESLint：报告 src/ 中圈复杂度超过 20 的函数
+npm run check:complexity     # 与 HEAD 比较，只阻断新增或加重的超限函数
+```
+
+Knip 通过 Electron Vite 和 Vitest 插件识别应用与测试入口；`knip.json` 补充独立评测入口和 `@`、`@shared` 别名，不会把全部源码都当作入口。检测到循环会返回非零退出码。循环检查默认不包含类型导入和动态导入，不代表模块分层规则已经通过检查。
+
+重复检测跳过类型声明，不扫描测试和生成目录；控制台之外的 JSON 报告写入已被 git 忽略的 `.taskpilot/analysis/duplicates/`。CI 将报告上传为 `duplicate-code-report`，保留 14 天，再运行循环检查，因此循环检查失败也不会丢失已生成的报告。目前不设置重复率失败阈值，只用于人工判断是否值得抽取公共实现；工具执行失败仍会使 CI 失败。
+
+未使用代码报告需要结合 Vue 模板、动态引用和脚本入口人工判断，不应直接据此批量删除。本地只运行与当前问题最相关的一项，不默认串联全部分析。
+
+复杂度使用 ESLint 的 classic 圈复杂度规则，包含 TypeScript 和 Vue 的 script 块，排除类型声明；普通 `npm run lint` 仅提示超过 20 的函数，不因历史复杂度警告失败。`analyze:complexity` 输出完整超限列表和 `.taskpilot/analysis/complexity/complexity-report.json`，不设置总代码行数限制。
+
+`check:complexity` 默认以 HEAD 为基线，也可以运行 `npm run check:complexity -- --base main` 指定 Git 提交或分支。旧函数超限但复杂度没有增加时通过；新增函数超过 20、原有函数从 20 以下跨过限制，或超限函数继续加重时失败。比较逐个函数进行，不能用删除其他复杂函数来抵消新增问题。基线从 Git 读取，不写入源码快照或源码哈希；无法读取基线、解析失败或无法识别诊断时直接失败。
+
+函数通过文件路径、命名作用域和调用位置识别，不依赖行号；Git 识别出的文件重命名沿用旧文件基线。函数改名、移动作用域或 Git 未识别出的文件重命名按新增处理；同一作用域的同类匿名回调通过出现顺序区分，调整其顺序可能需要人工判断。CI 对 PR 使用目标分支提交，对 main 的 push 使用 push 前的提交，报告上传为 `complexity-report` 并保留 14 天。该门禁控制新增复杂度，不证明代码不存在语义重复，也不自动认可某种重构方式。
 
 ### 评测
 
