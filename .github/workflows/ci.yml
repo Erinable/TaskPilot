@@ -50,9 +50,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+        id: install
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm run analyze:duplicates
+        id: duplicates
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
@@ -62,6 +64,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - run: npm run check:complexity -- --base "$COMPLEXITY_BASE"
+        id: complexity
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:
           COMPLEXITY_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
       - uses: actions/upload-artifact@v4
@@ -72,5 +76,26 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
-      - run: npm run analyze:cycles
+      - name: Check circular dependencies
+        id: cycles
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: bash
+        run: |
+          mkdir -p .taskpilot/analysis/cycles
+          npm run analyze:cycles 2>&1 | tee .taskpilot/analysis/cycles/knip.log
+      - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
+        with:
+          name: cycle-dependency-report
+          path: .taskpilot/analysis/cycles/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Write code analysis summary
+        if: ${{ !cancelled() }}
+        run: >-
+          npm run summarize:analysis --
+          --output "$GITHUB_STEP_SUMMARY"
+          --duplicates "${{ steps.duplicates.outcome }}"
+          --complexity "${{ steps.complexity.outcome }}"
+          --cycles "${{ steps.cycles.outcome }}"

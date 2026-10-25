@@ -21,6 +21,7 @@
     "analyze:duplicates": "jscpd src --config .jscpd.json",
     "analyze:complexity": "node scripts/analyze_complexity.ts",
     "check:complexity": "node scripts/analyze_complexity.ts --check",
+    "summarize:analysis": "node scripts/summarize_analysis.ts",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

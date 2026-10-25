@@ -285,6 +285,8 @@ npm run build          # 打包主进程、preload 和界面到 out/
 
 CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、lint、format:check、test、build；另有一个 Ubuntu 任务运行 jscpd 重复检测、函数复杂度增量门禁和 Knip 循环依赖检查。
 
+打开 Actions 运行页面的 Summary，可直接查看 Code analysis 摘要：三项检查状态、重复率与代码位置、复杂度超限及新增问题、循环依赖诊断。表格最多显示 20 项，完整 JSON 报告和 Knip 日志位于该页面的 Artifacts，保留 14 天；失败或跳过的检查会单独标明。
+
 改应用图标：源文件是 `assets/icon/icon.svg`（128 px 及以上）和 `icon_small.svg`（64 px 及以下）。改完先 `brew install librsvg`，再运行 `scripts/build_icon.sh` 重新生成 `icon.icns`。
 
 ### 代码分析
