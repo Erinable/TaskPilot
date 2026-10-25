@@ -1,32 +1,35 @@
-// The submit-stage checks of a workspace config, as reviews, baselines and
-// the coding loop run and compare them.
-import * as workspace from './workspace.ts';
+// The submit-stage steps of a repository, as reviews, baselines and the
+// coding loop run and compare them.
+import { formatCommandLine } from './command_line.ts';
+import type { StepId } from '../shared/check_steps.ts';
+import type { CheckStage, CheckStep } from './step_config.ts';
 
-// A submit-stage check, with the line its baseline is keyed by.
-export type SubmitCheck = { kind: workspace.CheckKind; stage: workspace.CheckStage; blocking: boolean; line: string };
+// A submit-stage step, with the line its baseline is keyed by.
+export type SubmitCheck = { kind: StepId; stage: CheckStage; blocking: boolean; line: string; step: CheckStep };
 
-// The command line plus whatever else changes what a check measures.
-export const checkLine = (check: workspace.Check) => {
+// The command lines plus whatever else changes what a step measures. A
+// single command with the default parser and directory keeps the line a v2
+// check had, so baselines recorded before steps still match.
+export const checkLine = (step: CheckStep) => {
   const extras: string[] = [];
-  if (check.report.format === 'junit') extras.push(`[junit ${check.report.path}]`);
-  const env = Object.entries(check.env ?? {})
+  if (step.cwd) extras.push(`[cwd ${step.cwd}]`);
+  const parser = step.parser;
+  if (parser.format === 'junit') extras.push(`[junit ${parser.path}]`);
+  else if (parser.format !== 'tests')
+    extras.push(`[${parser.format}${'dialect' in parser ? ` ${parser.dialect}` : ''}${'path' in parser && parser.path ? ` ${parser.path}` : ''}]`);
+  const env = Object.entries(step.env ?? {})
     .map(([k, v]) => `${k}=${v}`)
     .sort();
   if (env.length) extras.push(`[env ${env.join(' ')}]`);
-  return [workspace.formatCommandLine(check), ...extras].join(' ');
+  return [step.commands.map(formatCommandLine).join(' && '), ...extras].join(' ');
 };
 
-// Checks that run before review, with the line their baselines are keyed by.
-export const submitChecks = (config: workspace.WorkspaceConfig): SubmitCheck[] =>
-  workspace.COMMAND_KINDS.flatMap((kind) => {
-    const check = config.checks?.[kind];
-    return check?.stage === 'submit' ? [{ kind, stage: check.stage, blocking: check.blocking, line: checkLine(check) }] : [];
-  });
+// Steps that run before review, with the line their baselines are keyed by.
+export const submitChecks = (steps: CheckStep[]): SubmitCheck[] =>
+  steps.flatMap((step) => (step.stage === 'submit' ? [{ kind: step.id, stage: step.stage, blocking: step.blocking, line: checkLine(step), step }] : []));
 
-// Report files the checks write are not the package's changes.
-export const reportIgnore = (config: workspace.WorkspaceConfig) => {
-  const paths = new Set(
-    workspace.COMMAND_KINDS.map((kind) => config.checks?.[kind]?.report).flatMap((report) => (report?.format === 'junit' ? [report.path] : [])),
-  );
+// Report files the steps write are not the package's changes.
+export const reportIgnore = (steps: CheckStep[]) => {
+  const paths = new Set(steps.flatMap((step) => ('path' in step.parser && step.parser.path ? [[step.cwd, step.parser.path].filter(Boolean).join('/')] : [])));
   return (candidate: string) => paths.has(candidate) || candidate.startsWith('.taskpilot/');
 };

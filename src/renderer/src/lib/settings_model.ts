@@ -24,8 +24,52 @@ export const isSettingsPage = (page: string): page is SettingsPage => Object.has
 // Preferences in the shape the form edits; extra fields (initials) are ignored.
 export type PreferencesDraft = settingsTypes.PreferencesInput;
 
-// Workspace form values; options may be partial, as the form holds them.
-export type WorkspaceDraft = workspaceTypes.WorkspaceForm;
+// How this machine treats a step: `inherit` runs whatever taskpilot.toml or
+// the preset says, `override` runs the step as edited here, `off` turns it
+// off here.
+export type StepMode = 'inherit' | 'override' | 'off';
+
+// One step as the form edits it: the form fields plus the mode.
+export type StepDraft = workspaceTypes.StepForm & { mode: StepMode };
+
+export type WorkspaceDraft = { root: string; steps: Partial<Record<workspaceTypes.CheckKind, StepDraft>> };
+
+const DEFAULT_FORM: Omit<workspaceTypes.StepForm, 'stage' | 'blocking'> = {
+  enabled: true,
+  lines: [],
+  cwd: '',
+  parser: { format: 'tests' },
+  timeoutSeconds: null,
+};
+
+// The draft of a step view: what this machine sets, else the effective
+// values to start an override from.
+export const stepDraft = (view: workspaceTypes.StepView): StepDraft => {
+  if (view.local) return { ...view.local, lines: [...view.local.lines], mode: view.local.enabled ? 'override' : 'off' };
+  const base = view.effective ?? { ...DEFAULT_FORM, stage: view.id === 'test' ? 'submit' : 'step', blocking: view.id === 'test' };
+  return {
+    enabled: true,
+    lines: [...base.lines],
+    cwd: base.cwd,
+    stage: base.stage,
+    blocking: base.blocking,
+    parser: { ...base.parser },
+    timeoutSeconds: base.timeoutSeconds,
+    mode: 'inherit',
+  };
+};
+
+// What saving sends: only the steps this machine sets.
+export const workspaceForm = (draft: WorkspaceDraft): workspaceTypes.WorkspaceForm => {
+  const steps: workspaceTypes.WorkspaceForm['steps'] = {};
+  for (const [id, step] of Object.entries(draft.steps) as [workspaceTypes.CheckKind, StepDraft | undefined][]) {
+    if (!step || step.mode === 'inherit') continue;
+    const { mode, ...form } = step;
+    steps[id] =
+      mode === 'off' ? { ...form, enabled: false, lines: [] } : { ...form, enabled: true, lines: form.lines.map((line) => line.trim()).filter(Boolean) };
+  }
+  return { root: draft.root, steps };
+};
 
 export type DraftPair = { preferences: PreferencesDraft; workspace: WorkspaceDraft };
 
@@ -47,15 +91,8 @@ export const sameValue = (a: unknown, b: unknown) => JSON.stringify(canonical(a)
 
 // Workspace form values, trimmed the way saving will trim them.
 export const workspaceDraft = (form: WorkspaceDraft) => {
-  const commands: Record<string, string> = {};
-  for (const [kind, line] of Object.entries(form.commands ?? {})) commands[kind] = (line ?? '').trim();
-  // Options only matter for a configured command; an empty line ignores them.
-  const options: Record<string, { stage: workspaceTypes.CheckStage | undefined; blocking: boolean; reportPath: string }> = {};
-  for (const [kind, value] of Object.entries(form.options ?? {})) {
-    if (!commands[kind] || !value) continue;
-    options[kind] = { stage: value.stage, blocking: value.blocking === true, reportPath: (value.reportPath ?? '').trim() };
-  }
-  return { root: (form.root ?? '').trim(), commands, options };
+  const saved = workspaceForm(form);
+  return { root: (saved.root ?? '').trim(), steps: saved.steps };
 };
 
 export const preferencesDraft = (prefs: Partial<PreferencesDraft>) => ({
@@ -86,7 +123,7 @@ export const dirtyPages = (saved: DraftPair, draft: DraftPair): Partial<Record<S
     // Coding isolation lives on the agents page.
     agents: !sameValue(savedPrefs.agents, draftPrefs.agents) || !sameValue(savedPrefs.coding, draftPrefs.coding),
     repository: savedWorkspace.root !== draftWorkspace.root,
-    commands: !sameValue(savedWorkspace.commands, draftWorkspace.commands) || !sameValue(savedWorkspace.options, draftWorkspace.options),
+    commands: !sameValue(savedWorkspace.steps, draftWorkspace.steps),
     data: false,
   };
 };

@@ -70,48 +70,115 @@ test('git-backed channels refuse to run without a configured workspace', async (
   assert.equal((await call(CHANNELS.workspaceInfo)).data.configured, false);
 });
 
+const lines = (id: string, stepLines: string[], extra: Record<string, unknown> = {}) => ({
+  [id]: {
+    enabled: true,
+    lines: stepLines,
+    cwd: '',
+    stage: id === 'test' ? 'submit' : 'step',
+    blocking: id === 'test',
+    parser: { format: 'tests' },
+    timeoutSeconds: null,
+    ...extra,
+  },
+});
+
 test('workspace:set keeps the open repository root whatever the form says', async () => {
   const { call, root } = await fixtures.harness();
-  const response = await call(CHANNELS.workspaceSet, { root: '/somewhere/else', commands: { test: 'npm test' } });
-  assert.equal(response.ok, true);
+  const response = await call(CHANNELS.workspaceSet, { root: '/somewhere/else', steps: lines('test', ['npm test']) });
+  assert.equal(response.ok, true, JSON.stringify(response.error));
   assert.equal(response.data.root, root);
 });
 
-test('workspace:set saves command lines and workspace:get returns them as text', async () => {
+test('workspace:set saves step command lines and workspace:get returns every step', async () => {
   const { call, root, repoDir } = await fixtures.harness();
   const saved = await call(CHANNELS.workspaceSet, {
     root,
-    commands: { test: 'node --test "tests/a b.test.js"', lint: '', build: 'npm run build' },
+    steps: {
+      ...lines('test', ['node --test "tests/a b.test.js"']),
+      ...lines('build', ['npm run build', 'npm run bundle'], { timeoutSeconds: 90 }),
+      coverage: { enabled: false, lines: [] },
+    },
   });
-  assert.equal(saved.ok, true);
-  assert.deepEqual((await workspace.load(repoDir)).commands.test, { command: 'node', args: ['--test', 'tests/a b.test.js'] });
+  assert.equal(saved.ok, true, JSON.stringify(saved.error));
+  const config = await workspace.load(repoDir);
+  assert.deepEqual(config.steps.test?.commands, [{ command: 'node', args: ['--test', 'tests/a b.test.js'] }]);
+  assert.equal(config.steps.build?.commands.length, 2);
+  assert.equal(config.steps.build?.timeoutMs, 90000);
+  assert.equal(config.steps.coverage?.enabled, false);
 
   const { data } = await call(CHANNELS.workspaceGet);
-  assert.equal(data.lines.test, "node --test 'tests/a b.test.js'");
-  assert.equal(data.lines.lint, '');
-  assert.equal(data.lines.build, 'npm run build');
+  const byId = Object.fromEntries(data.steps.map((step) => [step.id, step]));
+  assert.deepEqual(
+    data.steps.map((step) => step.id),
+    ['setup', 'build', 'format', 'lint', 'typecheck', 'test', 'coverage'],
+  );
+  assert.deepEqual(byId.test.effective.lines, ["node --test 'tests/a b.test.js'"]);
+  assert.equal(byId.test.source, 'local');
+  assert.deepEqual(byId.build.local.lines, ['npm run build', 'npm run bundle']);
+  assert.equal(byId.lint.skipped, 'not_configured');
+  assert.equal(byId.coverage.skipped, 'disabled');
+  assert.deepEqual(data.project, { status: 'missing' });
 });
 
-test('workspace:set reports shell syntax against the right field', async () => {
+test('workspace:set reports shell syntax against the step and command at fault', async () => {
   const { call, root, repoDir } = await fixtures.harness();
-  const response = await call(CHANNELS.workspaceSet, { root, commands: { lint: 'eslint . && prettier --check .' } });
+  const response = await call(CHANNELS.workspaceSet, { root, steps: lines('lint', ['eslint .', 'eslint . && prettier --check .']) });
   assert.equal(response.error.code, 'shell_syntax');
-  assert.equal(response.error.field, 'lint');
-  assert.equal((await workspace.load(repoDir)).commands.lint, null);
+  assert.equal(response.error.field, 'steps.lint.commands[1]');
+  assert.equal((await workspace.load(repoDir)).steps.lint, undefined);
 });
 
-test('workspace:check validates and resolves commands without saving', async () => {
+test('workspace:check validates and resolves each step without saving', async () => {
   const { call, root, repoDir } = await fixtures.harness();
-  const { data } = await call(CHANNELS.workspaceCheck, {
-    root,
-    commands: { test: 'git status', lint: 'taskpilot-no-such-tool', build: '' },
-  });
+  const { data } = await call(CHANNELS.workspaceCheck, { root, steps: { ...lines('test', ['git status']), ...lines('lint', ['taskpilot-no-such-tool']) } });
   assert.equal(data.repo.branch, 'main');
-  assert.ok(data.commands.test.resolved, 'git should resolve through PATH');
-  assert.equal(data.commands.lint.configured, true);
-  assert.equal(data.commands.lint.resolved, null);
-  assert.equal(data.commands.build.configured, false);
-  assert.equal((await workspace.load(repoDir)).commands.test, null);
+  assert.ok(data.steps.test.resolved, 'git should resolve through PATH');
+  assert.equal(data.steps.lint.configured, true);
+  assert.equal(data.steps.lint.resolved, null);
+  assert.equal(data.steps.build.configured, false);
+  assert.equal((await workspace.load(repoDir)).steps.test, undefined);
+});
+
+test('workspace:create-project writes taskpilot.toml once, and its steps then run', async () => {
+  const { call, root } = await fixtures.harness();
+  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { lint: 'node -e "process.exit(0)"' } }));
+  const created = await call(CHANNELS.workspaceCreateProject, 'typescript');
+  assert.equal(created.ok, true, JSON.stringify(created.error));
+  assert.deepEqual(created.data.project, { status: 'ok', preset: 'typescript' });
+  assert.match(await fs.readFile(path.join(root, 'taskpilot.toml'), 'utf8'), /^preset = "typescript"$/m);
+  assert.equal((await call(CHANNELS.workspaceCreateProject, 'none')).error.code, 'invalid_project');
+  assert.equal((await call(CHANNELS.workspaceCreateProject, 'cobol')).error.code, 'invalid_argument');
+});
+
+test('workspace:get reports a broken taskpilot.toml by field and keeps local steps', async () => {
+  const { call, root, setCommands } = await fixtures.harness();
+  setCommands({ test: { command: 'npm', args: ['test'] } });
+  await fs.writeFile(path.join(root, 'taskpilot.toml'), '[steps.lint]\ntimeout = "slow"\n');
+  const { data } = await call(CHANNELS.workspaceGet);
+  assert.equal(data.project.status, 'invalid');
+  assert.equal(data.project.error.field, 'steps.lint.timeout');
+  assert.deepEqual(data.steps.find((step) => step.id === 'test').effective.lines, ['npm test']);
+});
+
+test('verify:run runs a custom step from taskpilot.toml and returns its diagnostics', async () => {
+  const { call, root } = await fixtures.harness();
+  const report = JSON.stringify({
+    diagnostics: [{ file: 'src/auth/application/login-user.ts', line: 3, severity: 'error', message: 'too complex', rule: 'complexity' }],
+  });
+  await fs.writeFile(
+    path.join(root, 'taskpilot.toml'),
+    `[custom.static]\nlabel = "静态分析"\ncommands = [[${JSON.stringify(process.execPath)}, "-e", ${JSON.stringify(`console.log(${JSON.stringify(report)}); process.exit(1)`)}]]\nparser = { format = "json", dialect = "diagnostics" }\n`,
+  );
+  const { data, error } = await call(CHANNELS.verifyRun, 'custom:static');
+  assert.equal(error, undefined, JSON.stringify(error));
+  assert.equal(data.kind, 'custom:static');
+  assert.equal(data.exitCode, 1);
+  assert.deepEqual(data.diagnostics, [
+    { file: 'src/auth/application/login-user.ts', line: 3, column: null, severity: 'error', message: 'too complex', rule: 'complexity' },
+  ]);
+  assert.equal(data.summary.failed, 1);
+  assert.equal((await call(CHANNELS.verifyRun, 'custom:missing')).error.code, 'not_configured');
 });
 
 test('workspace:pick-root returns the picker result or reports unsupported', async () => {

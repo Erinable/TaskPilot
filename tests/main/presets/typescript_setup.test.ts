@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import * as envSetup from '../../src/main/env_setup.ts';
+import * as envSetup from '../../../src/main/presets/typescript_setup.ts';
 
 const run = promisify(execFile);
 

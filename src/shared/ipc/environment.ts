@@ -1,7 +1,7 @@
 // Environment Steward's setup session (env:*).
 
 import type { IpcFailure } from './envelope.ts';
-import type { CheckKind, RunSummary } from './workspace.ts';
+import type { RunSummary } from './workspace.ts';
 
 export type InstallMode = 'ci' | 'install' | 'skip';
 export type ScriptKind = 'test' | 'lint' | 'build';
@@ -15,7 +15,7 @@ export type EnvManifest = {
   packageManager: string | null;
 };
 
-// env_setup.probe() facts, with workflow files reduced to their paths.
+// presets/typescript_setup.probe() facts, with workflow files reduced to their paths.
 export type EnvFacts = {
   manifest: EnvManifest | null;
   lockfiles: string[];
@@ -86,8 +86,8 @@ export type EnvState = {
   // The running step's latest output and its start time; null when idle.
   live: { output: string; startedAt: string } | null;
   steps: EnvStep[];
-  // The workspace's current command line per kind ('' when not configured).
-  configured: Record<CheckKind, string>;
+  // This machine's current command line per kind ('' when not set here).
+  configured: Record<ScriptKind, string>;
 };
 
 // Re-planning after a failed step hands the steward that step's output.

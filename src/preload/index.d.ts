@@ -40,6 +40,7 @@ declare const api: {
     check: (form: workspaceTypes.WorkspaceForm) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceCheck>>;
     pickRoot: () => Promise<envelopeTypes.IpcResult<string | null>>;
     info: () => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceInfo>>;
+    createProject: (preset: string) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceView>>;
     openFile: (filePath: string, line?: number | null) => Promise<envelopeTypes.IpcResult<workspaceTypes.OpenedWith>>;
   };
   diff: {

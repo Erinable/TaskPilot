@@ -21,7 +21,7 @@ test('each common failure gets its own plain reading', () => {
     explainFailure(run({ output: 'something broke' })),
     explainFailure(run({ kind: 'lint', output: '3:1 error no-unused-vars' })),
     explainFailure(run({ kind: 'build', output: 'vite: error during build' })),
-    explainFailure(run({ kind: 'smoke', output: 'EADDRINUSE' })),
+    explainFailure(run({ kind: 'custom:smoke', output: 'EADDRINUSE' })),
   ].map((explanation) => explanation?.title);
   assert.deepEqual(titles, [
     '命令运行太久，被停掉了',

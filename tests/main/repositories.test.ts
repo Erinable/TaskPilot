@@ -42,7 +42,7 @@ test('legacy files move to the configured repository after a backup', async () =
   const dir = registry.dataDir();
   assert.equal(JSON.parse(await fs.readFile(path.join(dir, 'requirements.json'), 'utf8'))[0].id, 'req-1');
   assert.equal(await fs.readFile(path.join(dir, 'events', '2026-10-01.jsonl'), 'utf8'), '{}\n');
-  assert.equal((await registry.loadConfig()).commands.test?.command, 'npm');
+  assert.equal((await registry.loadConfig()).steps.test?.commands[0].command, 'npm');
   // Gone from userData, kept in the backup; preferences stay global.
   await assert.rejects(fs.access(path.join(configDir, 'requirements.json')));
   assert.ok(await fs.readFile(path.join(configDir, BACKUP_DIRNAME, 'requirements.json'), 'utf8'));
@@ -138,7 +138,7 @@ test('relocating keeps the id and data; the registry root wins over workspace.js
   assert.equal(registry.current?.id, entry.id);
   const config = await registry.loadConfig();
   assert.equal(config.root, '/work/new');
-  assert.equal(config.commands.test?.command, 'npm');
+  assert.equal(config.steps.test?.commands[0].command, 'npm');
   // A later repository at the old path gets a fresh directory, not this one.
   const reused = await registry.add('/work/old');
   assert.notEqual(reused.id, entry.id);

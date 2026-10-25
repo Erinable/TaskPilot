@@ -15,9 +15,9 @@ import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 import { AGENT_IDS, CLI_OPTIONS } from '@shared/agent_runtime.ts';
+import { isStepId } from '@shared/check_steps.ts';
 export type SettingsPage = model.SettingsPage;
 
-export const CHECK_KINDS = ['test', 'lint', 'build', 'smoke'] as const satisfies readonly workspaceTypes.CheckKind[];
 export const MAX_NAME_LENGTH = 40;
 export type AgentFieldError = { field: 'cli' | 'model' | 'thinking'; message: string };
 
@@ -36,7 +36,12 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'workspace',
     items: [
       { page: 'repository', label: '仓库', icon: 'folder', keywords: '仓库 路径 目录 git repo root' },
-      { page: 'commands', label: '验证命令', icon: 'terminal', keywords: '命令 测试 lint build npm test 验证' },
+      {
+        page: 'commands',
+        label: '检查步骤',
+        icon: 'terminal',
+        keywords: '命令 测试 lint build typecheck format coverage 格式 类型检查 覆盖率 npm test 验证 taskpilot.toml 预设 静态分析',
+      },
       { page: 'setup', label: '环境初始化', icon: 'wand', keywords: '环境初始化 环境管家 安装 依赖 npm install ci node_modules setup 配环境' },
     ],
   },
@@ -53,19 +58,14 @@ export const NAV_GROUPS: NavGroup[] = [
 // Inputs a validation error can point at, by the error's `field`.
 export const FIELD_INPUTS: Record<string, string> = {
   root: 'settingsRoot',
-  test: 'commandTest',
-  lint: 'commandLint',
-  build: 'commandBuild',
-  smoke: 'commandSmoke',
   displayName: 'profileName',
 };
+// The command input of a step, which its errors point at.
+export const stepInputId = (id: string) => `step-${id.replace(':', '-')}-command`;
+export const stepStatusId = (id: string) => `step-${id.replace(':', '-')}-status`;
 // Which page shows a validation error for a given field.
 const FIELD_PAGES: Record<string, SettingsPage> = {
   root: 'repository',
-  test: 'commands',
-  lint: 'commands',
-  build: 'commands',
-  smoke: 'commands',
   displayName: 'profile',
   avatarColor: 'profile',
   theme: 'preferences',
@@ -82,12 +82,8 @@ const PATH_ERROR_HINTS: Record<string, string> = {
 
 export type FieldTone = 'ok' | 'warn' | 'error';
 export type FieldStatus = { tone: FieldTone | null; message: string };
-export type StatusKey = 'root' | workspaceTypes.CheckKind | 'displayName';
-export type WorkspaceDraft = {
-  root: string;
-  commands: Record<workspaceTypes.CheckKind, string>;
-  options: Record<workspaceTypes.CheckKind, workspaceTypes.CheckOptions>;
-};
+export type StatusKey = 'root' | 'displayName' | workspaceTypes.CheckKind;
+export type WorkspaceDraft = model.WorkspaceDraft;
 export type Fact = { term: string; value: string };
 
 // Drafts are reactive proxies, which structuredClone rejects; they are plain JSON.
@@ -95,11 +91,10 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const emptyStatus = (): FieldStatus => ({ tone: null, message: '' });
 
-// The form shape of a saved workspace.
+// The form shape of a saved workspace: what this machine sets per step.
 const workspaceForm = (view: workspaceTypes.WorkspaceView): WorkspaceDraft => ({
   root: view.root ?? '',
-  commands: { ...view.lines },
-  options: clone(view.options),
+  steps: Object.fromEntries(view.steps.map((step) => [step.id, model.stepDraft(step)])),
 });
 
 // The form shape of saved preferences, dropping derived fields.
@@ -251,14 +246,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const hasUnsavedChanges = () => anyDirty.value;
 
   // ========== Field status ==========
-  const statuses = ref<Record<StatusKey, FieldStatus>>({
+  const statuses = ref<Record<'root' | 'displayName', FieldStatus> & Partial<Record<workspaceTypes.CheckKind, FieldStatus>>>({
     root: emptyStatus(),
-    test: emptyStatus(),
-    lint: emptyStatus(),
-    build: emptyStatus(),
-    smoke: emptyStatus(),
     displayName: emptyStatus(),
   });
+  const statusOf = (key: StatusKey) => statuses.value[key] ?? emptyStatus();
   const repoFacts = ref<Fact[] | null>(null);
 
   const setStatus = (key: StatusKey, tone: FieldTone | null, message: string) => {
@@ -267,7 +259,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const clearWorkspaceStatus = () => {
     setStatus('root', null, '');
-    for (const kind of CHECK_KINDS) setStatus(kind, null, '');
+    for (const id of Object.keys(workspaceDraft.value?.steps ?? {})) if (isStepId(id)) setStatus(id, null, '');
   };
 
   // Called on every name edit and after filling the form.
@@ -279,10 +271,27 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const focusById = (id: string) => nextTick(() => document.getElementById(id)?.focus());
 
+  // A step error names `steps.<id>.<field>`; it goes beside that step.
+  // False when `field` is not a step's.
+  const showStepError = (field: string | undefined, error: unknown) => {
+    const stepId = field?.startsWith('steps.')
+      ? field
+          .slice('steps.'.length)
+          .split('.')[0]
+          .replace(/\[\d+\]$/, '')
+      : null;
+    if (!stepId || !isStepId(stepId)) return false;
+    openPage('commands');
+    setStatus(stepId, 'error', (error as Error).message);
+    focusById(stepInputId(stepId)).catch((focusError) => console.error(focusError));
+    return true;
+  };
+
   // Puts a validation error beside its field and opens that field's page.
   const showFieldError = (error: unknown) => {
     console.error(error);
     const field = (error as IpcError).field;
+    if (showStepError(field, error)) return;
     if (field === 'agents' || field?.startsWith('agents.')) {
       openPage('agents');
       const modelProblem = field.endsWith('.model') && error instanceof IpcError && error.code === 'invalid_choice';
@@ -302,7 +311,7 @@ export const useSettingsStore = defineStore('settings', () => {
       return;
     }
     openPage(page);
-    const key = field === 'root' || field === 'displayName' || (CHECK_KINDS as readonly string[]).includes(field) ? (field as StatusKey) : null;
+    const key = field === 'root' || field === 'displayName' ? field : null;
     if (key) setStatus(key, 'error', describeError(error));
     else showToast(`设置无效：${describeError(error)}`);
     if (FIELD_INPUTS[field]) focusById(FIELD_INPUTS[field]).catch((focusError) => console.error(focusError));
@@ -325,19 +334,20 @@ export const useSettingsStore = defineStore('settings', () => {
           ]
         : null;
     }
-    for (const kind of CHECK_KINDS) {
-      const entry = result.commands[kind];
-      if (!entry.configured) setStatus(kind, null, '未配置');
-      else if (entry.resolved) setStatus(kind, 'ok', entry.resolved);
-      else setStatus(kind, 'warn', '在当前 PATH 中找不到这个可执行文件。可以改用绝对路径，或在「运行环境」里改为从登录 shell 读取 PATH。');
+    for (const [id, entry] of Object.entries(result.steps)) {
+      if (!isStepId(id) || !entry) continue;
+      if (!entry.configured) setStatus(id, null, '未配置，会跳过');
+      else if (entry.resolved) setStatus(id, 'ok', entry.resolved);
+      else setStatus(id, 'warn', '在当前 PATH 中找不到这个可执行文件。可以改用绝对路径，或在「运行环境」里改为从登录 shell 读取 PATH。');
     }
+    tools.value = result.tools;
   };
 
   const checkWorkspace = async () => {
     if (!workspaceDraft.value) return false;
     clearWorkspaceStatus();
     try {
-      renderWorkspaceCheck(await call(window.taskpilot.workspace.check(clone(workspaceDraft.value))));
+      renderWorkspaceCheck(await call(window.taskpilot.workspace.check(model.workspaceForm(clone(workspaceDraft.value)))));
       return true;
     } catch (error) {
       showFieldError(error);
@@ -426,6 +436,36 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   };
 
+  // ========== Check steps ==========
+  // The merged steps, taskpilot.toml's state and the recognised languages,
+  // as last read from the main process.
+  const workspaceView = ref<workspaceTypes.WorkspaceView | null>(null);
+  // The preset's tools on PATH, from the last check.
+  const tools = ref<workspaceTypes.ToolStatus[]>([]);
+  const stepView = (id: workspaceTypes.CheckKind) => workspaceView.value?.steps.find((step) => step.id === id) ?? null;
+
+  // Writes taskpilot.toml naming `preset`, after the user confirms. Local
+  // edits are kept; the steps re-merge on top of the new file.
+  const createProject = async (preset: string) => {
+    const label = workspaceView.value?.presets.find((entry) => entry.id === preset)?.label ?? preset;
+    const confirmed = await confirmAction({
+      title: '在仓库里创建 taskpilot.toml？',
+      body: `会在仓库根目录新建 taskpilot.toml，写入「${label}」预设。它是仓库的文件，要提交到 git 才对其他人生效。没在本机设置的步骤会用预设的默认命令。`,
+      accept: '创建',
+    });
+    if (!confirmed) return;
+    try {
+      workspaceView.value = await call(window.taskpilot.workspace.createProject(preset));
+      const draft = workspaceDraft.value;
+      savedWorkspace.value = workspaceForm(workspaceView.value);
+      fillWorkspace(draft ? { ...savedWorkspace.value, steps: { ...savedWorkspace.value.steps, ...draft.steps } } : savedWorkspace.value);
+      showToast('已创建 taskpilot.toml。');
+    } catch (error) {
+      console.error(error);
+      showToast(`创建失败：${describeError(error)}`);
+    }
+  };
+
   // ========== Saving ==========
   const saving = ref(false);
   // Shown beside the workspace group label in the nav.
@@ -443,7 +483,8 @@ export const useSettingsStore = defineStore('settings', () => {
       if (current.workspace && workspaceDraft.value) {
         // check first, so a failure is shown beside its field before anything is written
         if (!(await checkWorkspace())) return false;
-        const view = await call(window.taskpilot.workspace.set(clone(workspaceDraft.value)));
+        const view = await call(window.taskpilot.workspace.set(model.workspaceForm(clone(workspaceDraft.value))));
+        workspaceView.value = view;
         savedWorkspace.value = workspaceForm(view);
         fillWorkspace(savedWorkspace.value);
         await app.refreshWorkspaceStatus();
@@ -481,6 +522,7 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       const [prefs, view] = await Promise.all([call(window.taskpilot.preferences.get()), call(window.taskpilot.workspace.get())]);
       savedPreferences.value = preferencesForm(prefs);
+      workspaceView.value = view;
       savedWorkspace.value = workspaceForm(view);
       fillPreferences(savedPreferences.value);
       fillWorkspace(savedWorkspace.value);
@@ -568,12 +610,18 @@ export const useSettingsStore = defineStore('settings', () => {
     hasUnsavedChanges,
     // Field status
     statuses,
+    statusOf,
     repoFacts,
     nameLength,
     checkNameLength,
     // Repository
     checkWorkspace,
     pickFolder,
+    // Check steps
+    workspaceView,
+    tools,
+    stepView,
+    createProject,
     // Environment
     environmentLoading,
     environmentError,

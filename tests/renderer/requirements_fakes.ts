@@ -68,7 +68,7 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
     agent: { status: vi.fn(() => ok<settingsTypes.AgentStatus>(agentStatus())) },
     workspace: {
       info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
-      get: vi.fn(() => ok({ lines: { test: '' } } as workspaceTypes.WorkspaceView)),
+      get: vi.fn(() => ok({ root: null, steps: [], project: { status: 'missing' }, detected: [], presets: [] } as workspaceTypes.WorkspaceView)),
     },
     listTasks: vi.fn(() => ok([])),
   };

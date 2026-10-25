@@ -1,85 +1,88 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 import AppIcon from '@/components/AppIcon.vue';
-import type { IconName } from '@/lib/icons.ts';
-import { FIELD_INPUTS, useSettingsStore } from '@/stores/settings.ts';
-import FieldStatus from './FieldStatus.vue';
-import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
+import StepCard from './StepCard.vue';
 
 const settings = useSettingsStore();
 
-const CHECKS: { kind: workspaceTypes.CheckKind; label: string; icon: IconName; hint: string | null; placeholder: string; statusId: string }[] = [
-  {
-    kind: 'test',
-    label: '测试',
-    icon: 'flask',
-    hint: '单元测试。输出 TAP 或 node --test 格式，或配置 JUnit 报告时，结果会关联到验收条件',
-    placeholder: 'npm test',
-    statusId: 'statusTest',
-  },
-  { kind: 'lint', label: 'Lint', icon: 'wand', hint: null, placeholder: 'npm run lint', statusId: 'statusLint' },
-  { kind: 'build', label: 'Build', icon: 'box', hint: null, placeholder: 'npm run build', statusId: 'statusBuild' },
-  { kind: 'smoke', label: '冒烟测试', icon: 'rocket', hint: '构建后快速确认应用能启动、核心路径可用', placeholder: 'npm run smoke', statusId: 'statusSmoke' },
-];
-const STAGES: { value: workspaceTypes.CheckStage; label: string }[] = [
-  { value: 'submit', label: '提交前运行' },
-  { value: 'step', label: '仅手动运行' },
-];
+const view = computed(() => settings.workspaceView);
+const project = computed(() => view.value?.project ?? { status: 'missing' as const });
+const presetLabel = (id: string | null) => (id ? (view.value?.presets.find((preset) => preset.id === id)?.label ?? id) : '不用预设');
+// The first recognised language that has a preset is recommended.
+const recommended = computed(() => view.value?.detected.find((entry) => entry.preset) ?? null);
+const unsupported = computed(() => view.value?.detected.filter((entry) => !entry.preset) ?? []);
+const missingTools = computed(() => settings.tools.filter((tool) => !tool.version));
+
+const create = (preset: string) => {
+  settings.createProject(preset).catch((error) => console.error(error));
+};
 </script>
 
 <template>
   <header class="settings-page-header">
-    <h2>验证命令</h2>
+    <h2>检查步骤</h2>
     <span class="scope-badge">
       <AppIcon name="laptop" />
-      本机配置 · 不写入仓库
+      本机覆盖 · taskpilot.toml 随仓库
     </span>
   </header>
   <p class="settings-page-intro">
-    执行页的按钮运行这些命令；标为「提交前运行」的会在 QA 审查前自动运行，并在领取工作包时于基线上先跑一次，用来区分既有失败和新引入的失败。TaskPilot
-    只会运行这里配置的命令，从不执行工作包里出现的命令。
+    TaskPilot
+    只认这几个固定步骤：环境准备、构建、格式检查、代码检查、类型检查、测试、覆盖率，外加项目自定义的步骤。每步跑什么命令，先看本机设置，再看仓库根目录的
+    taskpilot.toml，最后用它指定的预设补齐；都没有就跳过。标为「提交前运行」的步骤会在 QA 审查前自动运行，并在领取工作包时先在基线上跑一次。TaskPilot
+    从不执行工作包里出现的命令。
   </p>
-  <div v-if="settings.workspaceDraft" class="settings-card glass">
-    <div v-for="check in CHECKS" :key="check.kind" class="setting-row stacked check-row">
-      <label class="setting-label" :for="FIELD_INPUTS[check.kind]">
-        <strong>
-          <AppIcon :name="check.icon" />
-          {{ check.label }}
-        </strong>
-        <small v-if="check.hint">{{ check.hint }}</small>
-      </label>
-      <el-input
-        :id="FIELD_INPUTS[check.kind]"
-        v-model="settings.workspaceDraft.commands[check.kind]"
-        class="mono-input command-line"
-        :data-kind="check.kind"
-        spellcheck="false"
-        autocomplete="off"
-        :placeholder="check.placeholder"
-        :aria-describedby="check.statusId"
-        :aria-invalid="String(settings.statuses[check.kind].tone === 'error')"
-      />
-      <FieldStatus :id="check.statusId" :status="settings.statuses[check.kind]" />
-      <div class="check-options" role="group" :aria-label="`${check.label}的运行方式`">
-        <label class="check-option">
-          <span>运行时机</span>
-          <el-select v-model="settings.workspaceDraft.options[check.kind].stage" class="stage-select" size="small" :aria-label="`${check.label}的运行时机`">
-            <el-option v-for="stage in STAGES" :key="stage.value" :value="stage.value" :label="stage.label" />
-          </el-select>
-        </label>
-        <el-checkbox v-model="settings.workspaceDraft.options[check.kind].blocking" class="check-option">失败时拒绝</el-checkbox>
-        <label class="check-option grow">
-          <span>JUnit 报告</span>
-          <el-input
-            v-model="settings.workspaceDraft.options[check.kind].reportPath"
-            class="mono-input"
-            size="small"
-            spellcheck="false"
-            autocomplete="off"
-            :placeholder="`留空则解析输出，如 .taskpilot/reports/${check.kind}.xml`"
-          />
-        </label>
-      </div>
+
+  <div v-if="view" id="projectFile" class="settings-card glass project-file">
+    <template v-if="project.status === 'ok'">
+      <p>
+        <AppIcon name="check-circle" />
+        仓库里有 taskpilot.toml，预设：
+        <strong>{{ presetLabel(project.preset) }}</strong>
+      </p>
+    </template>
+    <template v-else-if="project.status === 'invalid'">
+      <p class="warn-text" role="alert">
+        <AppIcon name="alert" />
+        taskpilot.toml 有错误，已忽略，只用本机设置：
+        <code>{{ project.error.message }}</code>
+      </p>
+    </template>
+    <template v-else>
+      <p>
+        <AppIcon name="info" />
+        仓库里还没有 taskpilot.toml。现在只运行本机设置的步骤。
+      </p>
+      <p v-if="recommended" class="project-recommend">
+        检测到 {{ recommended.manifest }}，推荐「{{ presetLabel(recommended.preset) }}」预设。
+        <button id="createProject" class="secondary-button small" type="button" @click="create(recommended.preset as string)">
+          <AppIcon name="plus" />
+          创建 taskpilot.toml
+        </button>
+      </p>
+      <p v-else class="project-recommend">
+        <button id="createProject" class="secondary-button small" type="button" @click="create('none')">
+          <AppIcon name="plus" />
+          创建空的 taskpilot.toml
+        </button>
+      </p>
+    </template>
+    <p v-for="entry in unsupported" :key="entry.manifest" class="project-note">
+      检测到 {{ entry.manifest }}（{{ entry.language }}），这个语言的预设还没有，可以在 taskpilot.toml 里手动写步骤。
+    </p>
+    <div v-if="missingTools.length" class="project-tools" role="status">
+      <p v-for="tool in missingTools" :key="tool.command">
+        <AppIcon name="alert" />
+        在当前 PATH 中找不到 {{ tool.command }}。TaskPilot 不会自动安装，可以运行：
+        <code>{{ tool.install }}</code>
+      </p>
     </div>
+  </div>
+
+  <div v-if="settings.workspaceDraft && view" class="settings-card glass">
+    <StepCard v-for="step in view.steps" :id="step.id" :key="step.id" />
   </div>
   <p class="settings-note">
     <AppIcon name="info" />
@@ -88,18 +91,31 @@ const STAGES: { value: workspaceTypes.CheckStage; label: string }[] = [
       <code>&amp;&amp;</code>
       、
       <code>|</code>
-      、重定向和环境变量展开都不可用。需要组合多个步骤时，请写成
-      <code>package.json</code>
-      里的脚本。留空表示不配置。
+      、重定向和环境变量展开都不可用。一步要跑多条命令时，逐条添加，按顺序运行、遇到失败就停。
     </span>
   </p>
 </template>
 
 <style scoped>
-.mono-input :deep(input) {
-  font-family: var(--font-mono);
+.project-file {
+  display: grid;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  font-size: var(--text-sm);
 }
-.stage-select {
-  width: 132px;
+.project-file p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.project-file code {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.project-note,
+.project-tools {
+  color: var(--text-muted);
 }
 </style>

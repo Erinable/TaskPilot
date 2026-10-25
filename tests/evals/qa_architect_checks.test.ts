@@ -146,7 +146,8 @@ test('QA cases reach the model with their diff when run through the real pipelin
           output: '',
           results: testCase.passingTests.map((name) => ({ name, passed: true, skipped: false, todo: false })),
           summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true },
-          report: { format: 'stdout', trusted: true, problem: null },
+          diagnostics: [],
+          report: { format: 'tests', trusted: true, problem: null },
           check: { stage: 'submit', blocking: true },
         }),
       });

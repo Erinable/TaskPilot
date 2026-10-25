@@ -12,10 +12,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 
-import { processEnv } from './env.ts';
-import { readTracked, indexEntries } from './repo_reader.ts';
-import type { CommandEntry } from './workspace.ts';
-import type { LooseJson } from './loose_json.ts';
+import { processEnv } from '../env.ts';
+import { readTracked, indexEntries } from '../repo_reader.ts';
+import type { CommandEntry } from '../command_line.ts';
+import type { LooseJson } from '../loose_json.ts';
 
 export const LOCKFILES: Record<string, string> = {
   'package-lock.json': 'npm',
@@ -100,7 +100,8 @@ export class EnvSetupError extends Error {
   }
 }
 
-const toolVersion: ToolVersion = (command, args, envPath) =>
+// The first line a tool prints for its version flag; null when it is missing.
+export const toolVersion: ToolVersion = (command, args, envPath) =>
   new Promise((resolve) => {
     execFile(
       command,

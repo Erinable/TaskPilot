@@ -4,6 +4,8 @@ import { vi } from 'vitest';
 import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import { STEP_KINDS } from '@shared/check_steps.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
 
@@ -20,28 +22,44 @@ export const preferences = (): settingsTypes.Preferences => ({
   coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
 });
 
-export const workspaceView = () => ({
+// A step this machine sets to `lines`, or one left to the project ([]).
+export const stepView = (id: workspaceTypes.CheckKind, lines: string[] = []): workspaceTypes.StepView => {
+  const form = {
+    enabled: true,
+    lines,
+    cwd: '',
+    stage: id === 'test' ? 'submit' : 'step',
+    blocking: id === 'test',
+    parser: { format: 'tests' },
+    timeoutSeconds: null,
+  } as const;
+  return {
+    id,
+    label: null,
+    effective: lines.length ? form : null,
+    source: lines.length ? 'local' : null,
+    skipped: lines.length ? null : 'not_configured',
+    local: lines.length ? form : null,
+    suggestions: id === 'lint' ? ['npm run lint'] : [],
+  };
+};
+
+export const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): workspaceTypes.WorkspaceView => ({
   root: '/repo',
-  commands: {},
-  checks: {},
-  lines: { test: 'npm test', lint: '', build: '', smoke: '' },
-  options: {
-    test: { stage: 'submit', blocking: true, reportPath: '' },
-    lint: { stage: 'step', blocking: false, reportPath: '' },
-    build: { stage: 'step', blocking: false, reportPath: '' },
-    smoke: { stage: 'step', blocking: false, reportPath: '' },
-  },
+  steps: STEP_KINDS.map((id) => stepView(id, id === 'test' ? ['npm test'] : [])),
+  project: { status: 'missing' },
+  detected: [{ manifest: 'package.json', language: 'TypeScript / JavaScript', preset: 'typescript' }],
+  presets: [{ id: 'typescript', label: 'TypeScript / JavaScript' }],
+  ...overrides,
 });
 
-export const workspaceCheck = () => ({
+export const workspaceCheck = (): workspaceTypes.WorkspaceCheck => ({
   root: '/repo',
   repo: { commit: 'abcdef1234567890', branch: 'main', dirty: false, changedFiles: 0 },
-  commands: {
-    test: { configured: true, resolved: '/usr/local/bin/npm' },
-    lint: { configured: false, resolved: null },
-    build: { configured: false, resolved: null },
-    smoke: { configured: false, resolved: null },
-  },
+  steps: Object.fromEntries(
+    STEP_KINDS.map((id) => [id, id === 'test' ? { configured: true, resolved: '/usr/local/bin/npm' } : { configured: false, resolved: null }]),
+  ),
+  tools: [],
 });
 
 export const envState = (overrides: Record<string, unknown> = {}) => ({
@@ -86,10 +104,19 @@ export const installApi = () => {
     listTasks: vi.fn(() => ok([])),
     workspace: {
       get: vi.fn(() => ok(workspaceView())),
-      set: vi.fn((form: { root: string; commands: Record<string, string>; options: unknown }) =>
-        ok({ ...workspaceView(), root: form.root, lines: { ...workspaceView().lines, ...form.commands } }),
+      set: vi.fn((form: workspaceTypes.WorkspaceForm) =>
+        ok(
+          workspaceView({
+            root: form.root,
+            steps: STEP_KINDS.map((id) => {
+              const step = form.steps[id];
+              return step ? { ...stepView(id, step.lines), local: step } : stepView(id);
+            }),
+          }),
+        ),
       ),
       check: vi.fn(() => ok(workspaceCheck())),
+      createProject: vi.fn((preset: string) => ok(workspaceView({ project: { status: 'ok', preset } }))),
       pickRoot: vi.fn(() => ok(null)),
       info: vi.fn(() => ok({ configured: false })),
     },

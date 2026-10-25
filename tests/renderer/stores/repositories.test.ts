@@ -101,7 +101,28 @@ describe('repositories store', () => {
       commit: { preview: vi.fn(() => ok(preview)) },
       engineeringMap: { get: vi.fn(() => ok(map)) },
       agent: { status: vi.fn(() => ok({ available: true } as settingsTypes.AgentStatus)) },
-      workspace: { ...api.workspace, get: vi.fn(() => ok({ lines: { test: 'npm test' } } as workspaceTypes.WorkspaceView)) },
+      workspace: {
+        ...api.workspace,
+        get: vi.fn(() =>
+          ok({
+            root: '/r',
+            steps: [
+              {
+                id: 'test',
+                label: null,
+                effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
+                source: 'local',
+                skipped: null,
+                local: null,
+                suggestions: [],
+              },
+            ],
+            project: { status: 'missing' },
+            detected: [],
+            presets: [],
+          } as workspaceTypes.WorkspaceView),
+        ),
+      },
       tutor: { get: vi.fn(() => ok(tutorState)) },
     });
     const feed = useActivityFeedStore();

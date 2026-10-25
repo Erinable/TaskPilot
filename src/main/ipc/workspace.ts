@@ -1,35 +1,46 @@
-// Workspace channels: the open repository's checks config, its git state and
-// diffs, manual check runs and opening files in the editor.
+// Workspace channels: the open repository's check steps (this machine's
+// settings, taskpilot.toml and its preset), its git state and diffs, manual
+// step runs and opening files in the editor.
 import { codedError, failWith, requireString } from '../coded_error.ts';
 import * as tasks from '../tasks.ts';
 import * as git from '../git.ts';
 import * as workspace from '../workspace.ts';
 import * as verification from '../verification.ts';
 import * as evidence from '../evidence.ts';
+import * as stepForm from '../step_form.ts';
+import * as projectConfig from '../project_config.ts';
+import * as presets from '../presets/index.ts';
 import { checkLine } from '../submit_checks.ts';
 import { openWorkspaceFile } from '../open_file.ts';
+import { toolVersion } from '../presets/typescript_setup.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { STEP_KINDS, isStepId } from '../../shared/check_steps.ts';
 import type * as workspaceTypes from '../../shared/ipc/workspace.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
-// Config plus the command lines and check options the settings form edits.
-export const toFormView = (config: workspace.WorkspaceConfig): workspaceTypes.WorkspaceView => {
-  const form = workspace.toForm(config);
-  return { root: config.root, commands: config.commands, checks: config.checks, lines: form.commands, options: form.options };
-};
-
-const isCommandKind = (value: unknown): value is workspace.CheckKind => workspace.COMMAND_KINDS.includes(value as workspace.CheckKind);
-
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const { getConfig, setConfig, requireRoot, requireTask, requireBaseline, shell } = ctx;
+
+  // Every step, merged, as the settings page shows it. The fixed steps are
+  // always listed, so one nobody configured reads as skipped.
+  const viewOf = async (config: workspace.WorkspaceConfig): Promise<workspaceTypes.WorkspaceView> => {
+    const resolution = await ctx.resolveSteps(config, { always: STEP_KINDS });
+    return {
+      root: config.root,
+      steps: stepForm.stepViews(config, resolution),
+      project: resolution.project,
+      detected: resolution.detected,
+      presets: presets.PRESETS.map((preset) => ({ id: preset.id, label: preset.label })),
+    };
+  };
 
   // Parses and checks a settings form. The root is the open repository's,
   // whatever the form says: repositories are added and moved through
   // repositories:add and repositories:relocate.
   const validateForm = async (form: unknown) => {
-    const config = workspace.fromForm(form as workspace.WorkspaceFormInput, getConfig());
+    const config = stepForm.fromForm(form, getConfig());
     config.root = getConfig().root;
     const info: { repo: workspaceTypes.RepoInfo | null } = { repo: null };
     if (!config.root) return { config, info };
@@ -48,7 +59,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.workspaceGet,
-    wrap((): workspaceTypes.WorkspaceView => toFormView(getConfig())),
+    wrap((): Promise<workspaceTypes.WorkspaceView> => viewOf(getConfig())),
   );
 
   // Validates everything before writing, so a bad path or command is never
@@ -59,26 +70,50 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const { config } = await validateForm(form);
       const saved = await ctx.repositories.saveConfig(config);
       setConfig(saved);
-      return toFormView(saved);
+      return viewOf(saved);
     }),
   );
 
-  // Same validation as saving, plus a PATH lookup for each command, without
-  // writing anything. Lets the settings page warn before the user commits.
+  // Same validation as saving, plus a PATH lookup for each step's first
+  // command and the preset's tools, without writing anything. Lets the
+  // settings page warn before the user commits; a missing tool is only
+  // reported with how to install it, never installed.
   ipcMain.handle(
     CHANNELS.workspaceCheck,
     wrap(async (_event, form): Promise<workspaceTypes.WorkspaceCheck> => {
       const { config, info } = await validateForm(form);
       const { path: envPath } = await ctx.commandPath();
-      const commands = {} as workspaceTypes.WorkspaceCheck['commands'];
-      for (const kind of workspace.COMMAND_KINDS) {
-        const entry = config.commands[kind];
-        commands[kind] = entry
-          ? // Resolve against the PATH commands will actually run with.
-            { configured: true, resolved: await workspace.resolveExecutable(entry.command, { cwd: config.root, envPath }) }
+      const resolution = await ctx.resolveSteps(config, { always: STEP_KINDS });
+      const steps: workspaceTypes.WorkspaceCheck['steps'] = {};
+      for (const entry of resolution.steps) {
+        const first = entry.step?.commands[0];
+        // Resolve against the PATH and directory commands will actually run with.
+        const cwd = config.root && entry.step ? `${config.root}/${entry.step.cwd}` : config.root;
+        steps[entry.id] = first
+          ? { configured: true, resolved: await workspace.resolveExecutable(first.command, { cwd, envPath }) }
           : { configured: false, resolved: null };
       }
-      return { root: config.root, repo: info.repo, commands };
+      const preset = presets.presetById(resolution.project.status === 'ok' ? resolution.project.preset : null);
+      const tools = await Promise.all(
+        (preset?.tools ?? []).map(async (tool) => ({
+          command: tool.command,
+          version: await toolVersion(tool.command, tool.versionArgs, envPath),
+          install: tool.install,
+        })),
+      );
+      return { root: config.root, repo: info.repo, steps, tools };
+    }),
+  );
+
+  // Writes taskpilot.toml naming the preset the user picked. Only on their
+  // click, and never over an existing file.
+  ipcMain.handle(
+    CHANNELS.workspaceCreateProject,
+    wrap(async (_event, rawPreset): Promise<workspaceTypes.WorkspaceView> => {
+      const preset = requireString(rawPreset, 'preset');
+      if (preset !== 'none' && !presets.PRESET_IDS.includes(preset)) failWith(`Unknown preset: ${preset}`, 'invalid_argument', 'preset');
+      await projectConfig.createProjectFile(requireRoot(), preset);
+      return viewOf(getConfig());
     }),
   );
 
@@ -142,16 +177,16 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   ipcMain.handle(
     CHANNELS.verifyRun,
     wrap(async (_event, kind, taskId): Promise<workspaceTypes.VerifyRun> => {
-      if (!isCommandKind(kind)) throw codedError(`Unknown verification kind: ${kind}`, 'invalid_argument');
+      if (!isStepId(kind)) throw codedError(`Unknown verification kind: ${kind}`, 'invalid_argument');
       const config = getConfig();
-      // runCheck() echoes the kind it ran, which is a CheckKind here.
-      const result = { ...(await verification.runCheck(config, kind, { envPath: (await ctx.commandPath()).path })), kind };
+      const step = (await ctx.runnableSteps(config)).find((candidate) => candidate.id === kind);
+      if (!step) throw new verification.VerificationError(`No ${kind} command is configured`, 'not_configured');
+      // runStep() echoes the step id it ran.
+      const result = { ...(await verification.runStep(config.root, step, { envPath: (await ctx.commandPath()).path })), kind };
       if (!taskId) return result;
       const task = requireTask(requireString(taskId, 'taskId'));
-      // runCheck() succeeded, so the check is configured.
-      const configured = config.checks[kind] as workspace.Check;
       // The same comparison a review makes, so a manual run reads the same way.
-      const check = { kind, stage: configured.stage, blocking: configured.blocking, line: checkLine(configured) };
+      const check = { kind, stage: step.stage, blocking: step.blocking, line: checkLine(step) };
       const baselines = ctx.store.get(task.id).baselineChecks?.checks ?? {};
       const item = evidence.evaluate(check, result, evidence.usableBaseline(baselines[kind], check.line));
       return {

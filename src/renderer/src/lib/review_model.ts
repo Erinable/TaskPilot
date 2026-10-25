@@ -3,8 +3,7 @@
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { IconName } from './icons.ts';
-
-export const KIND_LABELS: Record<workspaceTypes.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
+import { stepLabel } from './check_steps.ts';
 
 export type EvidenceTone = 'done' | 'blocked' | 'in_review' | '';
 
@@ -61,7 +60,7 @@ export const baselineText = (baseline: workspaceTypes.BaselineChecks | null) => 
 
 export const evidenceLine = (item: Pick<workspaceTypes.Evidence, 'kind' | 'status' | 'reason' | 'blocking'>) => {
   const status = EVIDENCE_STATUS[item.status] ?? EVIDENCE_STATUS.skipped;
-  const parts = [`${KIND_LABELS[item.kind] ?? item.kind} ${status.label}`];
+  const parts = [`${stepLabel(item.kind)} ${status.label}`];
   if (item.reason && REASONS[item.reason]) parts.push(REASONS[item.reason]);
   if (!item.blocking) parts.push('仅提示，不阻断');
   return { text: parts.join(' · '), tone: status.tone, icon: status.icon };
@@ -79,11 +78,11 @@ export const attentionText = (item: workspaceTypes.AttentionItem, acceptance: wo
   const criterion = (index: number) => `「${acceptance[index]?.text ?? `条件 ${index + 1}`}」`;
   switch (item.code) {
     case 'check_unverifiable':
-      return `${KIND_LABELS[item.kind] ?? item.kind}无法验证：${REASONS[item.reason ?? ''] ?? item.reason}`;
+      return `${stepLabel(item.kind)}无法验证：${REASONS[item.reason ?? ''] ?? item.reason}`;
     case 'preexisting_failures':
-      return `${KIND_LABELS[item.kind] ?? item.kind}有 ${item.count} 个测试在基线上就失败`;
+      return `${stepLabel(item.kind)}有 ${item.count} 个测试在基线上就失败`;
     case 'no_baseline':
-      return `${KIND_LABELS[item.kind] ?? item.kind}没有基线，无法区分既有失败`;
+      return `${stepLabel(item.kind)}没有基线，无法区分既有失败`;
     case 'criterion_unverifiable':
       return `${criterion(item.index)}的关联测试无法验证，请人工确认`;
     case 'criterion_manual':

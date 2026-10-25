@@ -67,8 +67,16 @@ test('env: plan, confirm steps one by one, then apply the scripts', async () => 
   assert.equal(applied.data.configured.test, 'npm test');
   assert.equal(applied.data.configured.lint, '');
   const saved = JSON.parse(await fs.readFile(path.join(repoDir, 'workspace.json'), 'utf8'));
-  assert.equal(saved.version, 2);
-  assert.deepEqual(saved.checks.test, { command: 'npm', args: ['test'], stage: 'submit', blocking: true, report: { format: 'stdout' }, env: {} });
+  assert.equal(saved.version, 3);
+  assert.deepEqual(saved.steps.test, {
+    enabled: true,
+    commands: [{ command: 'npm', args: ['test'] }],
+    cwd: '',
+    stage: 'submit',
+    blocking: true,
+    parser: { format: 'tests' },
+    env: {},
+  });
 });
 
 test('env: a running step shows its output and start time, and a step reading stdin still finishes', async () => {

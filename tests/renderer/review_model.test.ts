@@ -41,7 +41,7 @@ test('baselineText() explains each state and when re-measuring helps', () => {
 });
 
 test('evidenceLine() names the check, the reason, and advisory checks', () => {
-  const line = model.evidenceLine({ kind: 'smoke', status: 'fail', reason: 'crashed', blocking: false });
+  const line = model.evidenceLine({ kind: 'custom:smoke', status: 'fail', reason: 'crashed', blocking: false });
   assert.equal(line.text, '冒烟测试 失败 · 命令异常退出，没有解析到测试结果 · 仅提示，不阻断');
   assert.equal(line.tone, 'blocked');
   assert.equal(model.evidenceLine({ kind: 'test', status: 'pass', reason: null, blocking: true }).text, '测试 通过');

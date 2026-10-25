@@ -21,7 +21,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       const [status, view] = await Promise.all([call(window.taskpilot.agent.status()), call(window.taskpilot.workspace.get())]);
       if (opened !== session) return;
       agent.value = status;
-      testCommand.value = view.lines.test;
+      testCommand.value = view.steps.find((step) => step.id === 'test')?.effective?.lines.join(' && ') ?? '';
     } catch (error) {
       console.error('[onboarding] recheck failed', error);
     } finally {
