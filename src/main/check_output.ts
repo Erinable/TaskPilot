@@ -73,10 +73,83 @@ export const parseSpec = (output: string): TestResult[] => {
   return results;
 };
 
-// Picks the parser that matches the output, preferring TAP when both appear.
+// libtest, the runner behind `cargo test`: each test binary prints
+// `running N tests` and a `test <name> ... ok|FAILED|ignored` line per test
+// on stdout, while Cargo names the binary on stderr (`Running <file>
+// (target/.../deps/<binary>-<hash>)`, `Doc-tests <crate>`). The two streams
+// arrive apart, but both list binaries in run order, so the k-th block
+// belongs to the k-th binary, which scopes `fullName`: two crates can both
+// have `tests::it_works`. Without a name for every block, names stay bare.
+const LIBTEST_LINE = /^test (?<name>.+?) \.\.\. (?<verdict>ok|FAILED|ignored)(?:, .*)?$/;
+const LIBTEST_BLOCK = /^running \d+ tests?$/;
+const LIBTEST_BINARY = /^\s+Running .* \((?:.*[\\/])?(?<binary>[^\\/]+?)(?:-[0-9a-f]{16})?(?:\.exe)?\)$/;
+const LIBTEST_DOCTESTS = /^\s+Doc-tests (?<crate>\S+)$/;
+
+export const parseLibtest = (output: string): TestResult[] => {
+  const binaries: string[] = [];
+  const blocks: { name: string; verdict: string }[][] = [];
+  for (const raw of output.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    const binary = LIBTEST_BINARY.exec(line)?.groups?.binary;
+    const crate = LIBTEST_DOCTESTS.exec(line)?.groups?.crate;
+    if (binary || crate) binaries.push(binary ?? `${crate} (doc)`);
+    if (LIBTEST_BLOCK.test(line)) blocks.push([]);
+    const match = LIBTEST_LINE.exec(line);
+    // Both groups are mandatory in LIBTEST_LINE.
+    if (match) (blocks.at(-1) ?? (blocks[0] = [])).push(match.groups as { name: string; verdict: string });
+  }
+  const scoped = binaries.length === blocks.length;
+  return blocks.flatMap((tests, index) =>
+    tests.map(({ name, verdict }) => ({
+      name,
+      fullName: scoped ? `${binaries[index]} › ${name}` : name,
+      passed: verdict !== 'FAILED',
+      skipped: verdict === 'ignored',
+      todo: false,
+    })),
+  );
+};
+
+// libtest's JSON events, as `cargo nextest run --message-format libtest-json`
+// prints them: one {"type":"test","event":"ok"|"failed"|"ignored","name"}
+// per finished test. nextest names a test `<crate>::<binary>$<path>`; the
+// binary scopes `fullName` the way parseLibtest() does.
+const LIBTEST_EVENTS: Record<string, { passed: boolean; skipped: boolean }> = {
+  ok: { passed: true, skipped: false },
+  failed: { passed: false, skipped: false },
+  timeout: { passed: false, skipped: false },
+  ignored: { passed: true, skipped: true },
+};
+
+export const parseLibtestJson = (output: string): TestResult[] => {
+  const results: TestResult[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.startsWith('{"type":"test"')) continue;
+    let event: LooseJson;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const verdict = LIBTEST_EVENTS[event?.event];
+    if (!verdict || typeof event.name !== 'string' || !event.name) continue;
+    const split = event.name.indexOf('$');
+    const name = split < 0 ? event.name : event.name.slice(split + 1);
+    const binary = split < 0 ? null : event.name.slice(0, split).split('::').pop();
+    results.push({ name, fullName: binary ? `${binary} › ${name}` : name, ...verdict, todo: false });
+  }
+  return results;
+};
+
+// Picks the parser that matches the output: TAP first, then libtest's JSON
+// (nextest also prints libtest text for failures, on stderr), libtest text,
+// and spec lines last.
 export const parseResults = (output: string): TestResult[] => {
-  const tap = parseTap(output);
-  return tap.length > 0 ? tap : parseSpec(output);
+  for (const parse of [parseTap, parseLibtestJson, parseLibtest]) {
+    const results = parse(output);
+    if (results.length > 0) return results;
+  }
+  return parseSpec(output);
 };
 
 const SEVERITY_WORDS: Record<string, Severity> = {
@@ -189,7 +262,51 @@ const parseOwn = (value: unknown, root: string, cwd: string): Diagnostic[] | nul
   return list.flatMap((entry: LooseJson) => diagnostic(entry ?? {}, 'error', root, cwd) ?? []).slice(0, MAX_DIAGNOSTICS);
 };
 
+// Cargo's `--message-format=json`: one JSON message per line. Compiler
+// diagnostics are {"reason":"compiler-message","message":{level, message,
+// code: {code}, spans: [{file_name, line_start, column_start, is_primary}]}};
+// file names are relative to the workspace root. `--all-targets` reports a
+// library's lints once per target, so repeats are dropped. Null when no
+// line is a Cargo message.
+export const parseCargo = (output: string, root: string, cwd: string): Diagnostic[] | null => {
+  const found = new Map<string, Diagnostic>();
+  let messages = 0;
+  for (const line of output.split('\n')) {
+    if (!line.startsWith('{')) continue;
+    let value: LooseJson;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof value?.reason !== 'string') continue;
+    messages += 1;
+    const message = value.reason === 'compiler-message' ? value.message : null;
+    const spans: LooseJson[] = Array.isArray(message?.spans) ? message.spans : [];
+    const span = spans.find((entry) => entry?.is_primary === true) ?? spans[0];
+    const item =
+      message &&
+      diagnostic(
+        {
+          file: span?.file_name,
+          line: span?.line_start,
+          column: span?.column_start,
+          severity: message.level,
+          message: message.message,
+          rule: message.code?.code,
+        },
+        'info',
+        root,
+        cwd,
+      );
+    if (item) found.set(JSON.stringify(item), item);
+    if (found.size >= MAX_DIAGNOSTICS) break;
+  }
+  return messages ? [...found.values()] : null;
+};
+
 export const parseJson = (output: string, dialect: JsonDialect, root: string, cwd: string): Diagnostic[] | null => {
+  if (dialect === 'cargo') return parseCargo(output, root, cwd);
   const value = extractJson(output);
   return dialect === 'eslint' ? parseEslint(value, root, cwd) : parseOwn(value, root, cwd);
 };

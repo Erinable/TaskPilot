@@ -13,7 +13,8 @@ export const CUSTOM_PREFIX = 'custom:';
 export const CUSTOM_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 
 // How a step's output is read.
-//   tests     TAP or spec lines on stdout (node --test, vitest)
+//   tests     TAP, spec or libtest lines on stdout (node --test, vitest,
+//             cargo test, nextest's libtest-json)
 //   junit     a JUnit XML report file
 //   json      stdout or a report file in a named JSON dialect
 //   sarif     SARIF 2.1 on stdout or in a report file
@@ -23,9 +24,10 @@ export const PARSER_FORMATS = ['tests', 'junit', 'json', 'sarif', 'regex', 'exit
 
 export type ParserFormat = (typeof PARSER_FORMATS)[number];
 
-// JSON dialects: ESLint's `-f json`, or TaskPilot's own
-// {diagnostics: [{file, line, column, severity, message, rule}]}.
-export const JSON_DIALECTS = ['eslint', 'diagnostics'] as const;
+// JSON dialects: ESLint's `-f json`, Cargo's `--message-format=json` (one
+// JSON message per line, as cargo build / check / clippy print), or
+// TaskPilot's own {diagnostics: [{file, line, column, severity, message, rule}]}.
+export const JSON_DIALECTS = ['eslint', 'cargo', 'diagnostics'] as const;
 
 export type JsonDialect = (typeof JSON_DIALECTS)[number];
 

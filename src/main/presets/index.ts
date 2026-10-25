@@ -2,9 +2,10 @@
 // looks like it wants. Recognised languages without a preset yet are
 // reported so the user knows why none is offered.
 import { typescriptPreset } from './typescript.ts';
+import { rustPreset } from './rust.ts';
 import type { Preset } from './preset.ts';
 
-export const PRESETS: Preset[] = [typescriptPreset as Preset];
+export const PRESETS: Preset[] = [typescriptPreset as Preset, rustPreset as Preset];
 
 export const PRESET_IDS = PRESETS.map((preset) => preset.id);
 
@@ -14,7 +15,7 @@ export const presetById = (id: string | null) => PRESETS.find((preset) => preset
 // when no preset for that language exists yet.
 const LANGUAGES: { manifest: string; language: string; preset: string | null }[] = [
   { manifest: 'package.json', language: 'TypeScript / JavaScript', preset: 'typescript' },
-  { manifest: 'Cargo.toml', language: 'Rust', preset: null },
+  { manifest: 'Cargo.toml', language: 'Rust', preset: 'rust' },
   { manifest: 'pyproject.toml', language: 'Python', preset: null },
 ];
 

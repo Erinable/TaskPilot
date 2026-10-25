@@ -1,0 +1,10 @@
+{"type":"suite","event":"started","test_count":3}
+{"type":"test","event":"started","name":"demo::demo$tests::adds_two_numbers"}
+{"type":"test","event":"started","name":"demo::demo$tests::broken"}
+{"type":"test","event":"started","name":"demo::demo$tests::ignored_case"}
+{"type":"test","event":"ignored","name":"demo::demo$tests::ignored_case"}
+{"type":"test","event":"ok","name":"demo::demo$tests::adds_two_numbers","exec_time":0.01391427}
+{"type":"suite","event":"ok","passed":1,"failed":0,"ignored":1,"measured":0,"filtered_out":0,"exec_time":0.01391427}
+{"type":"suite","event":"started","test_count":3}
+{"type":"test","event":"failed","name":"demo::demo$tests::broken","exec_time":0.01343784,"stdout":"\nthread 'tests::broken' (1) panicked at crates/demo/src/lib.rs:22:9:\nassertion `left == right` failed\n  left: 4\n right: 5\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"}
+{"type":"suite","event":"failed","passed":0,"failed":1,"ignored":1,"measured":0,"filtered_out":1,"exec_time":0.01343784}

@@ -84,8 +84,9 @@ const projectError = (error: unknown) => {
 };
 
 // Every step of `config`'s repository. A broken taskpilot.toml is reported,
-// and its layer is left out, so local settings still run.
-export const resolve = async (config: WorkspaceConfig, { always = [] as readonly StepId[] } = {}): Promise<Resolution> => {
+// and its layer is left out, so local settings still run. `envPath` is the
+// PATH steps run with, where a preset looks for optional tools.
+export const resolve = async (config: WorkspaceConfig, { always = [] as readonly StepId[], envPath = null as string | null } = {}): Promise<Resolution> => {
   const local: Layer = { source: 'local', steps: config.steps };
   if (!config.root) return { steps: mergeSteps([local], always), project: { status: 'missing' }, detected: [], suggestions: {} };
   const root = config.root;
@@ -106,7 +107,7 @@ export const resolve = async (config: WorkspaceConfig, { always = [] as readonly
 
   const preset = presets.presetById(file?.preset ?? null);
   const suggestionSource = preset ?? presets.presetById(detected.find((entry) => entry.preset)?.preset ?? null);
-  const suggestionFacts = suggestionSource ? await suggestionSource.facts(root) : null;
+  const suggestionFacts = suggestionSource ? await suggestionSource.facts(root, { envPath }) : null;
   const layers: Layer[] = [];
   if (preset) layers.push({ source: 'preset', steps: preset.steps(suggestionFacts) });
   if (file) layers.push({ source: 'project', steps: file.steps });

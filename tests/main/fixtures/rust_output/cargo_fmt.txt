@@ -1,0 +1,11 @@
+Diff in /work/rust_sample/crates/demo/src/lib.rs:4:
+ pub fn add(left: u64, right: u64) -> u64 {
+     let unused = 1;
+     let items: Vec<u64> = vec![];
+-    if items.len() == 0 { return left + right }
++    if items.len() == 0 {
++        return left + right;
++    }
+     left + right
+ }
+ 

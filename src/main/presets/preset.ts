@@ -14,8 +14,9 @@ export interface Preset<Facts = unknown> {
   // Tracked files that mark the language, for recommending this preset.
   manifests: string[];
   detect: (tracked: ReadonlySet<string>) => boolean;
-  // What the defaults depend on, read from the repository's tracked files.
-  facts: (root: string) => Promise<Facts>;
+  // What the defaults depend on, read from the repository's tracked files
+  // and, for optional tools, the PATH commands run with.
+  facts: (root: string, options?: { envPath?: string | null }) => Promise<Facts>;
   // Default steps, each with its parser.
   steps: (facts: Facts) => Partial<Record<StepId, StepPatch>>;
   // Common command lines per step, offered as choices in settings.

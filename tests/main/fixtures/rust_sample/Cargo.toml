@@ -1,0 +1,5 @@
+# A minimal Cargo workspace the Rust preset is run against
+# (tests/main/presets/rust.test.ts). Clean on purpose: every step passes.
+[workspace]
+members = ["crates/*"]
+resolver = "2"

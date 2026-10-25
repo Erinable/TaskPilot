@@ -137,7 +137,7 @@ test('detectLanguages() recognises package.json, Cargo.toml and pyproject.toml',
     detectLanguages(new Set(['Cargo.toml', 'pyproject.toml', 'package.json'])).map((entry) => [entry.manifest, entry.preset]),
     [
       ['package.json', 'typescript'],
-      ['Cargo.toml', null],
+      ['Cargo.toml', 'rust'],
       ['pyproject.toml', null],
     ],
   );

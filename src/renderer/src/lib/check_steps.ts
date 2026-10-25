@@ -45,7 +45,7 @@ export const stepLabel = (id: StepId | string, label: string | null = null) =>
 export const stepIcon = (id: StepId | string): IconName => STEP_ICONS[id as StepKind] ?? 'terminal';
 
 export const PARSER_LABELS: Record<CheckParser['format'], string> = {
-  tests: '测试输出（TAP / spec）',
+  tests: '测试输出（TAP / spec / libtest）',
   junit: 'JUnit 报告文件',
   json: 'JSON 诊断',
   sarif: 'SARIF',
