@@ -237,6 +237,9 @@ const setTimeout = (value: number | null | undefined) => {
               <el-option value="diagnostics" label="TaskPilot 诊断" />
               <el-option value="eslint" label="ESLint -f json" />
               <el-option value="cargo" label="Cargo --message-format=json" />
+              <el-option value="ruff" label="Ruff --output-format=json" />
+              <el-option value="mypy" label="mypy --output json" />
+              <el-option value="pyright" label="Pyright --outputjson" />
             </el-select>
           </label>
           <label v-if="parser && draft.parser.format === 'regex'" class="check-option grow">
