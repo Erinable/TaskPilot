@@ -4,7 +4,7 @@
 // annotates its handlers with these types so drift fails tsc.
 
 import type { CodingRun } from './coding_types.ts';
-import type { AgentId, AgentSettings, CliId } from './agent_runtime.ts';
+import type { AgentId, AgentSettings, CliId, TEAM_AGENT_IDS } from './agent_runtime.ts';
 import type { AvatarColor as SharedAvatarColor } from './avatar.ts';
 export type { AgentId, AgentRuntimeConfig, AgentRuntimeStatus, AgentSettings, CliId, ThinkingLevel } from './agent_runtime.ts';
 export type { CliModelCatalog, CliModelOption, CliModelScope, CliModelsRequest } from './agent_runtime.ts';
@@ -665,7 +665,7 @@ export type AgentStatus = {
 
 // ========== activity ==========
 
-export type ActivityAgent = 'product-lead' | 'architect' | 'qa' | 'release-manager' | 'coding-agent';
+export type ActivityAgent = (typeof TEAM_AGENT_IDS)[number];
 
 export type ActivityEvent =
   | {
@@ -688,8 +688,10 @@ export type ActivityRecord = ActivityEvent & { at: string };
 
 export type QueueMetrics = { doneThisWeek: number; donePreviousWeek: number; averageHours: number | null; averageHoursPrevious: number | null };
 
-// What an agent is running right now. `label` is the requirement or package title.
-export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release' | 'coding'; label: string };
+// What an agent is running right now. `label` is the requirement or package
+// title; null for a run with no subject of its own (a release draft), which
+// the renderer names by kind.
+export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release' | 'coding'; label: string | null };
 
 // Which agents are busy right now; availability is tracked per runtime.
 export type TeamStatus = { available: boolean; availableByAgent: Record<ActivityAgent, boolean>; busy: ActivityAgent[]; work: AgentWork[] };
@@ -996,7 +998,7 @@ export type RepositoryList = { repositories: Repository[]; current: string | nul
 
 // Background work a switch would cancel.
 export type BusyKind = 'requirement' | 'review' | 'adjudication' | 'baseline' | 'release' | 'environment' | 'tutor' | 'coding' | 'reference' | 'grade';
-export type BusyRun = { kind: BusyKind; label: string };
+export type BusyRun = { kind: BusyKind; label: string | null };
 
 // ========== commit ==========
 

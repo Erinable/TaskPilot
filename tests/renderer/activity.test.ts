@@ -101,7 +101,7 @@ test('workText() names what a member is running, by kind', () => {
     busy: ['architect', 'release-manager'],
     work: [
       { agent: 'architect', kind: 'adjudication', label: '登录接口' },
-      { agent: 'release-manager', kind: 'release', label: '发布说明' },
+      { agent: 'release-manager', kind: 'release', label: null },
     ],
   };
   assert.equal(activity.workText(status, 'architect'), '正在裁决偏差「登录接口」');

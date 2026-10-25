@@ -128,8 +128,6 @@ app.whenReady().then(async () => {
     },
     pathResolver: createPathResolver(),
     appVersion: app.getVersion(),
-    // electron-builder copies scripts/ into the bundle (extraResources).
-    codingSetupScript: app.isPackaged ? path.join(process.resourcesPath, 'scripts', 'setup-coding-agent-user.sh') : 'scripts/setup-coding-agent-user.sh',
     requirements,
     activity,
     releases,
@@ -143,21 +141,27 @@ app.whenReady().then(async () => {
         applyAppearance(window, next.appearance);
       }
     },
-    // openPath only receives configDir (app.getPath('userData')), never a
-    // path from the renderer.
-    revealPath: async (dir) => {
-      const failure = await shell.openPath(dir);
-      if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
+    shell: {
+      // openPath only receives configDir (app.getPath('userData')), never a
+      // path from the renderer.
+      revealPath: async (dir) => {
+        const failure = await shell.openPath(dir);
+        if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
+      },
+      // Only reached with a path open_file.ts has confined to the workspace.
+      revealFile: (file) => shell.showItemInFolder(file),
+      // Only reached with an http(s) or mailto URL (checked in ipc/notes.ts).
+      openUrl: (url) => shell.openExternal(url),
+      pickDirectory: async (defaultPath) => {
+        const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
+        const parent = BrowserWindow.getFocusedWindow();
+        const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+        return result.canceled ? null : (result.filePaths[0] ?? null);
+      },
     },
-    // Only reached with a path open_file.ts has confined to the workspace.
-    revealFile: (file) => shell.showItemInFolder(file),
-    // Only reached with an http(s) or mailto URL (checked in ipc.ts).
-    openUrl: (url) => shell.openExternal(url),
-    pickDirectory: async (defaultPath) => {
-      const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
-      const parent = BrowserWindow.getFocusedWindow();
-      const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
-      return result.canceled ? null : (result.filePaths[0] ?? null);
+    coding: {
+      // electron-builder copies scripts/ into the bundle (extraResources).
+      setupScript: app.isPackaged ? path.join(process.resourcesPath, 'scripts', 'setup-coding-agent-user.sh') : 'scripts/setup-coding-agent-user.sh',
     },
   });
 

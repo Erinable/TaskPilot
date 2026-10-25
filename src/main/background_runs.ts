@@ -27,8 +27,9 @@ type Listing = { busy: ipc.BusyKind; agent?: undefined } | { busy: ipc.AgentWork
 export type RunInfo = Listing & {
   kind: RunKind;
   key: string;
-  // Read when listed: a requirement's title can arrive while it runs.
-  label: () => string;
+  // Read when listed: a requirement's title can arrive while it runs. Null
+  // when the run has no subject; the renderer words it by kind.
+  label: () => string | null;
   // Listed once however many runs of this kind are in flight.
   once?: boolean;
 };

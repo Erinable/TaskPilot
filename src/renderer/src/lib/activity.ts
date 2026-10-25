@@ -146,10 +146,14 @@ const WORK_TEXT: Record<ipc.AgentWork['kind'], string> = {
   coding: '正在编码工作包',
 };
 
+// What a run with no subject of its own (label null) is called, by kind.
+const UNTITLED_RUNS: Partial<Record<ipc.BusyKind, string>> = { release: '发布说明' };
+export const runLabel = (run: { kind: ipc.BusyKind; label: string | null }) => run.label ?? UNTITLED_RUNS[run.kind] ?? run.kind;
+
 // "正在审查工作包「登录接口」"; null when the member is not running anything.
 export const workText = (team: ipc.TeamStatus | null, agent: ipc.ActivityAgent) => {
   const work = team?.work.find((item) => item.agent === agent);
-  return work ? `${WORK_TEXT[work.kind]}「${work.label}」` : null;
+  return work ? `${WORK_TEXT[work.kind]}「${runLabel(work)}」` : null;
 };
 
 // "$0.123", or "$0.00" for nothing spent; tiny amounts keep three decimals.
