@@ -65,7 +65,7 @@ const create = (preset: string) => {
       </template>
       <template v-else>
         <strong>仓库里还没有 taskpilot.toml</strong>
-        <p v-if="recommended">检测到 {{ recommended.manifest }}，推荐「{{ presetLabel(recommended.preset) }}」预设，它会按 package.json 的脚本补齐各步命令。</p>
+        <p v-if="recommended">检测到 {{ recommended.manifest }}，推荐「{{ presetLabel(recommended.preset) }}」预设，它会补齐各步的默认命令。</p>
         <p v-else>现在只运行本机设置的步骤。创建后可以把检查配置提交到仓库，团队共用。</p>
       </template>
       <p v-for="entry in unsupported" :key="entry.manifest" class="project-note">

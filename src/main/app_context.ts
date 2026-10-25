@@ -168,8 +168,8 @@ export const createAppContext = (deps: AppDeps) => {
   // The steps the open repository runs: preset, taskpilot.toml and this
   // machine's settings merged. Read fresh each time, so an edit to the file
   // shows up on the next run without a restart.
-  const resolveSteps = (config: workspace.WorkspaceConfig = getConfig(), options?: Parameters<typeof effectiveSteps.resolve>[1]) =>
-    effectiveSteps.resolve(config, options);
+  const resolveSteps = async (config: workspace.WorkspaceConfig = getConfig(), options?: Parameters<typeof effectiveSteps.resolve>[1]) =>
+    effectiveSteps.resolve(config, { envPath: (await commandPath()).path, ...options });
   const runnableSteps = async (config: workspace.WorkspaceConfig = getConfig()) => effectiveSteps.runnable(await resolveSteps(config));
 
   // Activity is a side record: a failed append is logged and never fails the

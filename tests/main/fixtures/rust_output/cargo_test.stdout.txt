@@ -1,0 +1,27 @@
+
+running 3 tests
+test tests::ignored_case ... ignored, slow
+test tests::adds_two_numbers ... ok
+test tests::broken ... FAILED
+
+failures:
+
+---- tests::broken stdout ----
+
+thread 'tests::broken' (1) panicked at crates/demo/src/lib.rs:22:9:
+assertion `left == right` failed
+  left: 4
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::broken
+
+test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
