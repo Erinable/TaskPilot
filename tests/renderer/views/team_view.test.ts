@@ -38,16 +38,16 @@ const overview = (overrides: Partial<activityTypes.ActivityOverview> = {}): acti
   metrics: { doneThisWeek: 0, donePreviousWeek: 0, averageHours: null, averageHoursPrevious: null },
   team: {
     available: true,
-    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'env-steward': true, tutor: true, 'coding-agent': false },
     busy: ['qa'],
     work: [{ agent: 'qa', kind: 'review', label: MARKUP }],
   },
   costs: {
-    byAgent: { 'product-lead': 0.034, architect: 0, qa: 1.5, 'release-manager': 0, 'coding-agent': 0 },
+    byAgent: { 'product-lead': 0.034, architect: 0, qa: 1.5, 'release-manager': 0, 'env-steward': 0, tutor: 0, 'coding-agent': 0 },
     since: '2026-10-07T02:00:00.000Z',
     partial: true,
   },
-  teamRecent: { 'product-lead': [], architect: [], qa: [REVIEW], 'release-manager': [], 'coding-agent': [] },
+  teamRecent: { 'product-lead': [], architect: [], qa: [REVIEW], 'release-manager': [], 'env-steward': [], tutor: [], 'coding-agent': [] },
   timeZone: 'Asia/Shanghai',
   ...overrides,
 });
@@ -70,6 +70,8 @@ describe('TeamView', () => {
       'team-product-lead',
       'team-architect',
       'team-release-manager',
+      'team-env-steward',
+      'team-tutor',
       'team-coding-agent',
     ]);
 
@@ -129,7 +131,15 @@ describe('TeamView', () => {
     useAppStore().activity = overview({
       team: {
         available: false,
-        availableByAgent: { 'product-lead': false, architect: false, qa: false, 'release-manager': false, 'coding-agent': false },
+        availableByAgent: {
+          'product-lead': false,
+          architect: false,
+          qa: false,
+          'release-manager': false,
+          'env-steward': false,
+          tutor: false,
+          'coding-agent': false,
+        },
         busy: [],
         work: [],
       },

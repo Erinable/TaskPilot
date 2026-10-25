@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as activity from '../../src/renderer/src/lib/activity.ts';
+import { AGENT_IDS, AGENT_LABELS } from '../../src/shared/agent_runtime.ts';
 import { TRANSITIONS } from '../../src/main/work_package_status.ts';
 import { agentOf } from '../../src/main/activity_summary.ts';
 import type { ActivityRecord, QueueMetrics, TeamStatus } from '../../src/shared/ipc/activity.ts';
@@ -33,6 +34,19 @@ test('every transition has feed wording attributed to the right actor', () => {
     assert.ok(item.what, transition.name);
     assert.equal(item.actor.avatar === 'you', transition.actor === 'human', transition.name);
   }
+});
+
+test('the team lists every configured agent, named as in settings', () => {
+  assert.deepEqual(
+    activity.TEAM.map(({ agent }) => agent),
+    [...AGENT_IDS],
+  );
+  for (const { agent, actor } of activity.TEAM) {
+    assert.equal(actor.name, AGENT_LABELS[agent], agent);
+    assert.ok(activity.ROLES[agent], agent);
+  }
+  // Avatars tell members apart.
+  assert.equal(new Set(activity.TEAM.map(({ actor }) => actor.avatar)).size, AGENT_IDS.length);
 });
 
 test('requirement events read as Product Lead or you', () => {
@@ -84,12 +98,20 @@ test('durationTrend() treats shorter as better and small changes as stable', () 
 
 test('presence follows CLI availability and running agents', () => {
   assert.equal(activity.presenceOf(null, 'qa'), 'offline');
-  const availableByAgent = { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false } as const;
+  const availableByAgent = {
+    'product-lead': true,
+    architect: true,
+    qa: true,
+    'release-manager': true,
+    'env-steward': true,
+    tutor: true,
+    'coding-agent': false,
+  } as const;
   assert.equal(activity.presenceOf({ available: false, availableByAgent, busy: [], work: [] }, 'qa'), 'offline');
   assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: ['qa'], work: [] }, 'qa'), 'busy');
   assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: ['qa'], work: [] }, 'architect'), 'online');
   assert.equal(activity.presenceOf({ available: true, availableByAgent, busy: [], work: [] }, 'coding-agent'), 'offline');
-  assert.equal(activity.presenceSummary({ available: true, availableByAgent, busy: [], work: [] }), '4 个 AI 成员在线');
+  assert.equal(activity.presenceSummary({ available: true, availableByAgent, busy: [], work: [] }), '6 个 AI 成员在线');
   assert.equal(activity.presenceSummary({ available: true, availableByAgent, busy: ['qa', 'architect'], work: [] }), '2 个 AI 成员正在工作');
   assert.equal(activity.presenceSummary({ available: false, availableByAgent, busy: [], work: [] }), 'AI 团队离线');
 });
@@ -97,7 +119,7 @@ test('presence follows CLI availability and running agents', () => {
 test('workText() names what a member is running, by kind', () => {
   const status: TeamStatus = {
     available: true,
-    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+    availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'env-steward': true, tutor: true, 'coding-agent': false },
     busy: ['architect', 'release-manager'],
     work: [
       { agent: 'architect', kind: 'adjudication', label: '登录接口' },
@@ -155,15 +177,18 @@ test("main's agentOf() names the same member the feed shows for every event", ()
 });
 
 test('members sort working, then online, then offline, keeping TEAM order within each', () => {
-  const members = activity.TEAM.map(({ agent }, index) => ({ agent, presence: (['offline', 'busy', 'online', 'busy', 'online'] as const)[index] }));
+  const members = activity.TEAM.map(({ agent }, index) => ({
+    agent,
+    presence: (['offline', 'busy', 'online', 'busy', 'offline', 'busy', 'online'] as const)[index],
+  }));
   assert.deepEqual(
     activity.sortByPresence(members).map((member) => member.agent),
-    ['architect', 'release-manager', 'qa', 'coding-agent', 'product-lead'],
+    ['architect', 'release-manager', 'tutor', 'qa', 'coding-agent', 'product-lead', 'env-steward'],
   );
 });
 
 test('the sidebar work line names one worker, or the first and a count', () => {
-  const availableByAgent = { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': true };
+  const availableByAgent = { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'env-steward': true, tutor: true, 'coding-agent': true };
   const team = (busy: TeamStatus['busy'], work: TeamStatus['work'] = []): TeamStatus => ({ available: true, availableByAgent, busy, work });
   assert.equal(activity.teamWorkSummary(null), null);
   assert.equal(activity.teamWorkSummary(team([])), null);

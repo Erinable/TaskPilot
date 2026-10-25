@@ -77,9 +77,16 @@ test('spend sums the metrics week per agent and flags a partly recorded week', (
     cost('qa', Number.NaN, '2026-10-05T01:00:00Z'), // bad amount
   ];
   const { costs } = summarize(records, new Date('2026-10-07T04:00:00Z'));
-  assert.deepEqual(costs.byAgent, { 'product-lead': 0, architect: 0.5, qa: 0.35, 'release-manager': 0, 'coding-agent': 0 });
+  assert.deepEqual(costs.byAgent, { 'product-lead': 0, architect: 0.5, qa: 0.35, 'release-manager': 0, 'env-steward': 0, tutor: 0, 'coding-agent': 0 });
   assert.equal(costs.since, '2026-10-05T01:00:00Z');
   assert.equal(costs.partial, true);
+});
+
+test('Tutor and Environment Steward spend counts like any member', () => {
+  const records = [cost('tutor', 0.2, '2026-10-06T01:00:00Z'), cost('env-steward', 0.05, '2026-10-06T02:00:00Z')];
+  const { costs } = summarize(records, new Date('2026-10-07T04:00:00Z'));
+  assert.equal(costs.byAgent.tutor, 0.2);
+  assert.equal(costs.byAgent['env-steward'], 0.05);
 });
 
 test('spend counts only the week once it has a full week of history', () => {
@@ -93,7 +100,7 @@ test('spend counts only the week once it has a full week of history', () => {
 
 test('spend with nothing recorded yet is empty and partial', () => {
   assert.deepEqual(summarize([], new Date()).costs, {
-    byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 },
+    byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'env-steward': 0, tutor: 0, 'coding-agent': 0 },
     since: null,
     partial: true,
   });

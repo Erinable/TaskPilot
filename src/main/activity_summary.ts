@@ -7,6 +7,8 @@
 // read, so a summary built yesterday answers like one built today. Entries
 // whose day has left the window are dropped then, which keeps memory bounded
 // by the window however long the app runs.
+import { AGENT_IDS } from '../shared/agent_runtime.ts';
+import type { AgentId } from '../shared/agent_runtime.ts';
 import type * as activityTypes from '../shared/ipc/activity.ts';
 import type { AgentTransition, CodingTransition } from '../shared/ipc/packages.ts';
 import { addCall, emptyTokens, keyOf } from './cost_rollup.ts';
@@ -27,21 +29,15 @@ export type OverviewSummary = {
   recent: activityTypes.ActivityRecord[];
   metrics: activityTypes.QueueMetrics;
   costs: activityTypes.AgentCosts;
-  teamRecent: Record<activityTypes.ActivityAgent, activityTypes.ActivityRecord[]>;
+  teamRecent: Record<AgentId, activityTypes.ActivityRecord[]>;
 };
 // Prices the token-only calls of one spend row, in micro-dollars, or null.
 export type EstimateRow = (row: CostRow) => number | null;
 
-const emptyByAgent = <Value>(make: () => Value): Record<activityTypes.ActivityAgent, Value> => ({
-  'product-lead': make(),
-  architect: make(),
-  qa: make(),
-  'release-manager': make(),
-  'coding-agent': make(),
-});
+const emptyByAgent = <Value>(make: () => Value) => Object.fromEntries(AGENT_IDS.map((agent) => [agent, make()])) as Record<AgentId, Value>;
 
 // Which agent makes each agent transition; human transitions have none.
-const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, activityTypes.ActivityAgent> = {
+const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, AgentId> = {
   breakdown_done: 'product-lead',
   review_accepted: 'qa',
   review_passed: 'qa',
@@ -53,7 +49,7 @@ const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, activityType
 
 // The team member a feed event belongs to, or null for the human's own.
 // Matches the actor the renderer's feed shows for the same event.
-export const agentOf = (record: activityTypes.ActivityRecord): activityTypes.ActivityAgent | null => {
+export const agentOf = (record: activityTypes.ActivityRecord): AgentId | null => {
   switch (record.kind) {
     case 'package_transition':
       // A hand-edited line could name "toString"; only own keys count.
@@ -115,7 +111,7 @@ export class ActivitySummary {
       metrics: this.#metrics(window, oldest),
       costs: this.#costs(window, estimate),
       teamRecent: Object.fromEntries(Object.entries(this.#teamRecent).map(([agent, records]) => [agent, records.filter(inWindow)])) as Record<
-        activityTypes.ActivityAgent,
+        AgentId,
         activityTypes.ActivityRecord[]
       >,
     };
@@ -170,18 +166,14 @@ export class ActivitySummary {
     // The earliest call with an amount, reported or estimated.
     const starts: string[] = [];
     for (const row of this.#spend.values()) {
-      // A hand-edited or future line with an unknown agent is skipped, as are
-      // agents outside the team page (Tutor, Environment Steward).
+      // A hand-edited or future line with an unknown agent is skipped.
       if (!Object.hasOwn(micros, row.agent)) continue;
       const estimated = row.tokenCalls ? estimate(row) : null;
       if (row.actualCalls && row.firstActualAt !== null) starts.push(row.firstActualAt);
       if (estimated !== null && row.firstTokensAt !== null) starts.push(row.firstTokensAt);
-      if (thisWeek.has(row.day)) micros[row.agent as activityTypes.ActivityAgent] += row.actualMicros + (estimated ?? 0);
+      if (thisWeek.has(row.day)) micros[row.agent as AgentId] += row.actualMicros + (estimated ?? 0);
     }
-    const byAgent = Object.fromEntries(Object.entries(micros).map(([agent, value]) => [agent, value / 1_000_000])) as Record<
-      activityTypes.ActivityAgent,
-      number
-    >;
+    const byAgent = Object.fromEntries(Object.entries(micros).map(([agent, value]) => [agent, value / 1_000_000])) as Record<AgentId, number>;
     const since = starts.length ? starts.reduce((earliest, at) => (at < earliest ? at : earliest)) : null;
     return { byAgent, since, partial: since === null || this.#dayOf(since) > window[METRIC_DAYS - 1] };
   }

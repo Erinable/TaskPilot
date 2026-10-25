@@ -82,12 +82,16 @@ describe('QueueView', () => {
       metrics: { doneThisWeek: 5, donePreviousWeek: 4, averageHours: 2.44, averageHoursPrevious: 2.4 },
       team: {
         available: true,
-        availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+        availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'env-steward': true, tutor: true, 'coding-agent': false },
         busy: ['qa'],
         work: [{ agent: 'qa', kind: 'review', label: '登录接口' }],
       },
-      costs: { byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 }, since: null, partial: true },
-      teamRecent: { 'product-lead': [], architect: [], qa: [], 'release-manager': [], 'coding-agent': [] },
+      costs: {
+        byAgent: { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'env-steward': 0, tutor: 0, 'coding-agent': 0 },
+        since: null,
+        partial: true,
+      },
+      teamRecent: { 'product-lead': [], architect: [], qa: [], 'release-manager': [], 'env-steward': [], tutor: [], 'coding-agent': [] },
       timeZone: 'Asia/Shanghai',
     };
     const wrapper = render();

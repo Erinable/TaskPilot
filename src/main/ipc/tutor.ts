@@ -61,7 +61,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if (current.status === 'running' || current.status === 'done') return current;
       // Fixed at the start, like the other runs.
       const { root } = ctx.getConfig();
-      const controller = backgroundRuns.start({ kind: 'tutor', key, busy: 'tutor', label: ctx.packageLabel(task.id) });
+      const controller = backgroundRuns.start({ kind: 'tutor', key, busy: 'tutor', agent: () => 'tutor', label: ctx.packageLabel(task.id) });
       tutorFailures.delete(key);
       const { path: envPath } = await ctx.commandPath();
       console.debug(`[tutor] ask package=${task.id} step=${stepIndex}`);

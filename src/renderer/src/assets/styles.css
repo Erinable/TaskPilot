@@ -531,6 +531,12 @@ code {
 .rel {
   background: linear-gradient(135deg, #f5be6b, #d68a2e);
 }
+.env {
+  background: linear-gradient(135deg, #8fc96a, #4f8f2f);
+}
+.tutor {
+  background: linear-gradient(135deg, #f08f6e, #cf5a3a);
+}
 .code {
   background: linear-gradient(135deg, #5bb7e8, #3178b8);
 }

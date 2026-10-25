@@ -8,7 +8,8 @@ import { SIDEBAR_STORAGE_KEY, useAppStore } from '../../../src/renderer/src/stor
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { installApi } from '../requirements_fakes.ts';
 import { taskView } from '../execution_fakes.ts';
-import type { ActivityAgent, ActivityOverview, TeamStatus } from '../../../src/shared/ipc/activity.ts';
+import type { AgentId } from '../../../src/shared/agent_runtime.ts';
+import type { ActivityOverview, TeamStatus } from '../../../src/shared/ipc/activity.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -83,19 +84,19 @@ describe('SideBar', () => {
 
   test('the team is one entry; a status line appears only while someone works', async () => {
     const app = useAppStore();
-    const team = (busy: ActivityAgent[], work: TeamStatus['work'] = []): TeamStatus => ({
+    const team = (busy: AgentId[], work: TeamStatus['work'] = []): TeamStatus => ({
       available: true,
-      availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+      availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'env-steward': true, tutor: true, 'coding-agent': false },
       busy,
       work,
     });
     app.activity = { team: team([]) } as ActivityOverview;
     const wrapper = mount(SideBar);
     expect(wrapper.findAll('button.team-member')).toHaveLength(0);
-    expect(wrapper.findAll('.team-stack-avatar')).toHaveLength(5);
+    expect(wrapper.findAll('.team-stack-avatar')).toHaveLength(7);
     expect(wrapper.find('.team-stack-avatar.code').classes()).toContain('offline');
     expect(wrapper.find('.team-entry-work').exists()).toBe(false);
-    expect(wrapper.find('button.team-entry').attributes('aria-label')).toBe('AI 团队：4 个 AI 成员在线');
+    expect(wrapper.find('button.team-entry').attributes('aria-label')).toBe('AI 团队：6 个 AI 成员在线');
 
     app.activity = { team: team(['architect'], [{ agent: 'architect', kind: 'adjudication', label: 'x' }]) } as ActivityOverview;
     await wrapper.vm.$nextTick();

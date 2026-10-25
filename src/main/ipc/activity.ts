@@ -8,7 +8,7 @@ import { buildCostReport } from '../cost_report.ts';
 import { estimateMicros, loadPrices, priceFor, syncPrices } from '../model_prices.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from '../engineering_map.ts';
 import { indexEntries } from '../repo_reader.ts';
-import { supportsAgentConfig, TEAM_AGENT_IDS } from '../../shared/agent_runtime.ts';
+import { AGENT_IDS, supportsAgentConfig } from '../../shared/agent_runtime.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import type * as activityTypes from '../../shared/ipc/activity.ts';
@@ -19,7 +19,7 @@ import type { CodingRuntime } from '../coding_runtime.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // The team's analysis agents; Coding Agent's availability is its runtime probe.
-const ANALYSIS_AGENTS = TEAM_AGENT_IDS.filter((agent) => agent !== 'coding-agent');
+const ANALYSIS_AGENTS = AGENT_IDS.filter((agent) => agent !== 'coding-agent');
 
 // How long a found or missing CLI is trusted; installing one shows up after this.
 const EXECUTABLE_TTL_MS = 60_000;

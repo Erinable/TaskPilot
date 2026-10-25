@@ -130,7 +130,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         live: null,
       };
       const session = env;
-      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
+      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', agent: () => 'env-steward', label: () => '环境初始化' });
       const { path: envPath } = await ctx.commandPath();
       backgroundRuns.track(
         (async () => {
