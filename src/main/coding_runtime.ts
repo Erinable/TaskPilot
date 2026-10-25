@@ -11,10 +11,13 @@ import * as codingWorkspace from './coding_workspace.ts';
 import * as codingSandbox from './coding_sandbox.ts';
 import * as patchMerge from './patch_merge.ts';
 import { env as appEnv } from './env.ts';
+import { profileBlock } from './agents/prompt_blocks.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
 import type * as codingTypes from '../shared/coding_types.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type { AppContext } from './app_context.ts';
+import type { ProfileSection } from './agents/prompt_blocks.ts';
+import type { ProjectProfile } from '../shared/project_profile.ts';
 import type { TaskDefinition } from './tasks.ts';
 
 // The coding executor and workspace operations; injectable for tests.
@@ -44,6 +47,11 @@ export const codingFailure = (error: unknown): envelopeTypes.ErrorInfo => ({
   code: errorCode(error) ?? 'coding_failed',
   message: error instanceof Error ? error.message : String(error),
 });
+
+// What of the project profile Coding Agent prompts show; empty until a later change
+// moves a language-specific sentence into the profile (see
+// tests/main/agents/prompt_golden.test.ts).
+const CODING_PROFILE_SECTIONS: ProfileSection[] = [];
 
 export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   const {
@@ -89,7 +97,7 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   };
 
   // QA checks linked tests by name, so the names go in exactly as planned.
-  const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null) => {
+  const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null, profile?: ProjectProfile | null) => {
     const interfaces = ctx.interfacesFor(task);
     return [
       'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
@@ -103,6 +111,7 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
       ...(interfaces ? ['', '<interface_summary author="Architect">', interfaces, '</interface_summary>'] : []),
       `Developer instruction: ${instruction}`,
       ...(feedback ? ['', 'The repository already contains your previous attempt.', feedback] : []),
+      ...profileBlock(profile, CODING_PROFILE_SECTIONS),
     ].join('\n');
   };
 

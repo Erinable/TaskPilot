@@ -20,6 +20,9 @@ import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
 import type { RawObject } from './product_lead.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
+import { profileBlock } from './prompt_blocks.ts';
+import type { ProfileSection } from './prompt_blocks.ts';
+import type { ProjectProfile } from '../../shared/project_profile.ts';
 
 export const MAX_SELECTED = 12;
 const MAX_MODULES = 12;
@@ -29,7 +32,14 @@ export interface ArchitectRequirement {
   title?: string | null;
   text: string;
   files: string[];
+  // The repository's profile (../project_profile.ts); null or absent without one.
+  profile?: ProjectProfile | null;
 }
+
+// What of the project profile Architect prompts show; empty until a later change
+// moves a language-specific sentence into the profile (see
+// tests/main/agents/prompt_golden.test.ts).
+const PROFILE_SECTIONS: ProfileSection[] = [];
 
 // A file read through repo_reader.readTracked().
 export interface SourceFile {
@@ -115,7 +125,7 @@ export const SYSTEM_PROMPT = [
 
 // Step 1: choose files to read
 
-export const selectPrompt = ({ title, text, files }: ArchitectRequirement): string => {
+export const selectPrompt = ({ title, text, files, profile }: ArchitectRequirement): string => {
   return [
     'Pick the files whose code you need to read to describe the parts of the repository this requirement touches.',
     `Choose at most ${MAX_SELECTED}, most important first. Include the modules the change will likely build on or modify, one existing test file per area the change touches (to learn the test conventions), and a manifest such as package.json or pyproject.toml if dependencies matter.`,
@@ -129,6 +139,7 @@ export const selectPrompt = ({ title, text, files }: ArchitectRequirement): stri
     '<repository_files>',
     files.join('\n'),
     '</repository_files>',
+    ...profileBlock(profile, PROFILE_SECTIONS),
   ]
     .filter((line) => line !== null)
     .join('\n');
@@ -164,7 +175,14 @@ export const validateSelection = (raw: unknown, files: string[]): string[] => {
 
 const formatSources = (sources: SourceFile[]): string => sources.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n\n');
 
-export const summarizePrompt = ({ title, text, files, sources, skipped }: ArchitectRequirement & { sources: SourceFile[]; skipped: SkippedFile[] }): string => {
+export const summarizePrompt = ({
+  title,
+  text,
+  files,
+  sources,
+  skipped,
+  profile,
+}: ArchitectRequirement & { sources: SourceFile[]; skipped: SkippedFile[] }): string => {
   const unread = skipped.length ? skipped.map((s) => `${s.path} (${s.reason})`).join('\n') : '(none)';
   return [
     'Describe the code below at the interface level, for a planner who will not see it.',
@@ -193,6 +211,7 @@ export const summarizePrompt = ({ title, text, files, sources, skipped }: Archit
     '<sources>',
     formatSources(sources),
     '</sources>',
+    ...profileBlock(profile, PROFILE_SECTIONS),
   ]
     .filter((line) => line !== null)
     .join('\n');
@@ -374,6 +393,7 @@ export const adjudicatePrompt = ({
   interfaces,
   sources,
   skipped,
+  profile,
 }: {
   task: AdjudicationTask;
   deviations: DeviationRecord[];
@@ -381,6 +401,7 @@ export const adjudicatePrompt = ({
   interfaces: string | null;
   sources: SourceFile[];
   skipped: SkippedFile[];
+  profile?: ProjectProfile | null;
 }): string => {
   const unread = skipped.length ? skipped.map((s) => `${s.path} (${s.reason})`).join('\n') : '(none)';
   return [
@@ -414,6 +435,7 @@ export const adjudicatePrompt = ({
     '<sources>',
     sources.length ? formatSources(sources) : '(none)',
     '</sources>',
+    ...profileBlock(profile, PROFILE_SECTIONS),
   ]
     .filter((line) => line !== null)
     .join('\n');

@@ -12,9 +12,10 @@ import type * as requirementTypes from '../../shared/ipc/requirements.ts';
 import type { AppContext } from '../app_context.ts';
 import type { RequirementStore } from '../requirement_store.ts';
 import type { IpcMainLike } from './handler.ts';
+import type { ProjectProfile } from '../../shared/project_profile.ts';
 
 type RequirementItem = Awaited<ReturnType<RequirementStore['get']>>;
-type PromptInput = Omit<RequirementItem, 'interfaces'> & { files: string[]; interfaces: string | null };
+type PromptInput = Omit<RequirementItem, 'interfaces'> & { files: string[]; interfaces: string | null; profile: ProjectProfile | null };
 
 // Repository paths Product Lead sees: tracked files only (gitignored and
 // untracked files are left out), capped, and never their contents.
@@ -56,13 +57,15 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       agent: () => (store.get(id).phase === 'architect' ? 'architect' : 'product-lead'),
       label: () => store.get(id).title || id,
     });
-    const { root } = ctx.getConfig();
+    const config = ctx.getConfig();
+    const { root } = config;
     const files = await repositoryFiles(root);
     const { path: envPath } = await ctx.commandPath();
     // Not awaited: the renderer polls requirements:get for the result.
     const settled = (async () => {
       let outcome: { output: Output; costUsd: number } | { error: unknown };
       try {
+        const profile = await ctx.profile(config);
         // Architect summarizes the touched code once, during clarification;
         // planning reuses it. Re-clarifying refreshes it.
         let interfaces = item.interfaces?.text ?? null;
@@ -73,6 +76,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             runAgent: architectRunner,
             root,
             files,
+            profile,
             envPath,
             signal: controller.signal,
           });
@@ -88,7 +92,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         }
         throwIfCancelled(controller.signal);
         const { output, costUsd } = await productRunner({
-          prompt: buildPrompt({ ...item, files, interfaces }),
+          prompt: buildPrompt({ ...item, files, interfaces, profile }),
           systemPrompt: productLead.SYSTEM_PROMPT,
           schema,
           envPath,

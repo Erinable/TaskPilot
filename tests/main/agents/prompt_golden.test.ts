@@ -11,6 +11,7 @@ import * as qa from '../../../src/main/agents/qa.ts';
 import * as tutor from '../../../src/main/agents/tutor.ts';
 import { createCodingRuntime } from '../../../src/main/coding_runtime.ts';
 import type { AppContext } from '../../../src/main/app_context.ts';
+import type { CheckOutcome, EvidenceItem } from '../../../src/main/evidence.ts';
 import type { TaskDefinition } from '../../../src/main/tasks.ts';
 import type { ProjectProfile } from '../../../src/shared/project_profile.ts';
 
@@ -52,7 +53,7 @@ const PACKAGE = {
 };
 const TASK = { id: 'p1', intro: PACKAGE.description, ...PACKAGE } as unknown as TaskDefinition;
 
-const CHECK_RUN = {
+const CHECK_RUN: CheckOutcome = {
   kind: 'test',
   command: 'npm test',
   exitCode: 1,
@@ -67,8 +68,8 @@ const CHECK_RUN = {
   summary: { total: 2, passed: 1, failed: 1, skipped: 0, ok: false },
   report: { format: 'tests', trusted: true, problem: null },
   check: { stage: 'submit', blocking: true },
-} as const;
-const CHECK_EVIDENCE = {
+};
+const CHECK_EVIDENCE: EvidenceItem = {
   kind: 'test',
   stage: 'submit',
   blocking: true,
@@ -78,7 +79,7 @@ const CHECK_EVIDENCE = {
   newFailures: ['locks after five failures'],
   preexisting: ['legacy flake'],
   fixed: [],
-} as const;
+};
 const CRITERIA = [
   { text: ACCEPTANCE[0].text, test: ACCEPTANCE[0].test, status: 'failed' as const },
   { text: ACCEPTANCE[1].text, manual: true },

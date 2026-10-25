@@ -16,6 +16,8 @@ import { createPathResolver } from './shell_env.ts';
 import { readModelCatalog } from './agent_model_catalog.ts';
 import { BackgroundRuns } from './background_runs.ts';
 import * as effectiveSteps from './effective_steps.ts';
+import * as projectConfig from './project_config.ts';
+import { buildProfile } from './project_profile.ts';
 import { humanTransitions } from './work_package_store.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import { supportsAgentConfig } from '../shared/agent_runtime.ts';
@@ -24,6 +26,7 @@ import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type * as requirementTypes from '../shared/ipc/requirements.ts';
 import type * as workspace from './workspace.ts';
+import type { ProjectProfile } from '../shared/project_profile.ts';
 import type { ActivityLog, LoggedEvent } from './activity_log.ts';
 import type { WorkPackageStore } from './work_package_store.ts';
 import type { Requirement, RequirementStore } from './requirement_store.ts';
@@ -171,6 +174,32 @@ export const createAppContext = (deps: AppDeps) => {
   const resolveSteps = async (config: workspace.WorkspaceConfig = getConfig(), options?: Parameters<typeof effectiveSteps.resolve>[1]) =>
     effectiveSteps.resolve(config, { envPath: (await commandPath()).path, ...options });
   const runnableSteps = async (config: workspace.WorkspaceConfig = getConfig()) => effectiveSteps.runnable(await resolveSteps(config));
+
+  // What the agents are told about the open repository; null without one,
+  // or when it cannot be built (an agent then plans as before). Cached until
+  // the root, taskpilot.toml's mtime, this machine's steps or the PATH
+  // change, so a prompt does not re-read the repository every time.
+  let cachedProfile: { key: string; profile: Promise<ProjectProfile | null> } | null = null;
+  const profile = async (config: workspace.WorkspaceConfig = getConfig()): Promise<ProjectProfile | null> => {
+    if (!config.root) return null;
+    const mtime = await fs.stat(path.join(config.root, projectConfig.PROJECT_FILENAME)).then(
+      (stat) => stat.mtimeMs,
+      () => null,
+    );
+    const envPath = (await commandPath()).path;
+    const key = JSON.stringify([config.root, mtime, config.steps, envPath]);
+    if (cachedProfile?.key !== key) {
+      const built = resolveSteps(config)
+        .then(buildProfile)
+        .catch((error) => {
+          console.error('[profile] build failed', error);
+          if (cachedProfile?.key === key) cachedProfile = null;
+          return null;
+        });
+      cachedProfile = { key, profile: built };
+    }
+    return cachedProfile.profile;
+  };
 
   // Activity is a side record: a failed append is logged and never fails the
   // action that caused it.
@@ -354,6 +383,7 @@ export const createAppContext = (deps: AppDeps) => {
     commandPath,
     resolveSteps,
     runnableSteps,
+    profile,
     record,
     recordCall,
     runnerFor,

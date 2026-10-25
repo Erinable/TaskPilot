@@ -46,6 +46,7 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
         const { path: envPath } = await ctx.commandPath();
         const steps = await ctx.runnableSteps(config);
         const checks = submitChecks(steps);
+        const profile = await ctx.profile(config);
         const result = await reviewWorkPackage(task, {
           root,
           baseline,
@@ -57,6 +58,7 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
           baselines: store.get(id).baselineChecks?.checks ?? {},
           ignore: reportIgnore(steps),
           interfaces: ctx.interfacesFor(task),
+          profile,
           envPath,
           signal: controller.signal,
         });
@@ -90,7 +92,8 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
     const task = requireTask(id);
     // Fixed at the start: a repository switch cancels the run, but the code
     // must never be read from the next repository meanwhile.
-    const { root } = ctx.getConfig();
+    const config = ctx.getConfig();
+    const { root } = config;
     const architectRunner = ctx.runnerFor('architect', { kind: 'package', id });
     const entry = await store.beginAdjudication(id);
     const controller = backgroundRuns.start({ kind: 'adjudication', key: id, busy: 'adjudication', agent: () => 'architect', label: ctx.packageLabel(id) });
@@ -105,6 +108,7 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
           mustReplan: entry.adjudication?.mustReplan === true,
           runAgent: architectRunner,
           interfaces: ctx.interfacesFor(task),
+          profile: await ctx.profile(config),
           envPath,
           signal: controller.signal,
         });

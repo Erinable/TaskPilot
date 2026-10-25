@@ -24,6 +24,7 @@ import type { ReleaseInput, ReleasePlan } from './release_manager.ts';
 import type { Blocker, EnvFacts } from '../presets/typescript_setup.ts';
 import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../evidence.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
+import type { ProjectProfile } from '../../shared/project_profile.ts';
 
 export interface AgentError {
   code: string;
@@ -91,12 +92,14 @@ export const throwIfCancelled = (signal: AbortSignal | null | undefined): void =
 // deps.root:      repository root, or null when none is configured
 // deps.files:     tracked file list (already capped)
 // deps.readFiles: optional (root, paths) => {files, skipped}, for tests
+// deps.profile:   the repository's profile, or null
 export const summarizeForRequirement = async (
   { title, text }: { title?: string | null; text: string },
   {
     runAgent,
     root,
     files,
+    profile = null,
     envPath,
     signal,
     readFiles = readTracked,
@@ -104,6 +107,7 @@ export const summarizeForRequirement = async (
     runAgent: RunAgent;
     root: string | null;
     files: string[];
+    profile?: ProjectProfile | null;
     envPath?: string | null;
     signal?: AbortSignal;
     readFiles?: ReadFiles;
@@ -115,7 +119,7 @@ export const summarizeForRequirement = async (
   try {
     throwIfCancelled(signal);
     const selected = await runAgent({
-      prompt: architect.selectPrompt({ title, text, files }),
+      prompt: architect.selectPrompt({ title, text, files, profile }),
       systemPrompt: architect.SYSTEM_PROMPT,
       schema: architect.SELECT_SCHEMA,
       envPath,
@@ -130,7 +134,7 @@ export const summarizeForRequirement = async (
 
     throwIfCancelled(signal);
     const summarized = await runAgent({
-      prompt: architect.summarizePrompt({ title, text, files, sources, skipped }),
+      prompt: architect.summarizePrompt({ title, text, files, sources, skipped, profile }),
       systemPrompt: architect.SYSTEM_PROMPT,
       schema: architect.SUMMARY_SCHEMA,
       envPath,
@@ -171,6 +175,7 @@ export const summarizeForRequirement = async (
 // deps.runAgent:  claude_cli.runStructured or a stand-in
 // deps.collect:   optional review_diff.collectChanges, for tests
 // deps.interfaces: Architect's formatted summary, or null
+// deps.profile:   the repository's profile, or null
 export const reviewWorkPackage = async (
   task: ReviewTask & { acceptance?: AcceptanceCriterion[] },
   {
@@ -183,6 +188,7 @@ export const reviewWorkPackage = async (
     ignore,
     collect = collectChanges,
     interfaces = null,
+    profile = null,
     envPath,
     signal,
   }: {
@@ -195,6 +201,7 @@ export const reviewWorkPackage = async (
     ignore?: (path: string) => boolean;
     collect?: CollectChanges;
     interfaces?: string | null;
+    profile?: ProjectProfile | null;
     envPath?: string | null;
     signal?: AbortSignal;
   },
@@ -246,7 +253,7 @@ export const reviewWorkPackage = async (
 
   throwIfCancelled(signal);
   const { output, costUsd } = await runAgent({
-    prompt: qa.reviewPrompt({ task, acceptance, checks: paired, diff: { ...diff, files: collected.files }, interfaces }),
+    prompt: qa.reviewPrompt({ task, acceptance, checks: paired, diff: { ...diff, files: collected.files }, interfaces, profile }),
     systemPrompt: qa.SYSTEM_PROMPT,
     schema: qa.REVIEW_SCHEMA,
     envPath,
@@ -299,6 +306,7 @@ export const planEnvironment = async ({
 // task: effective work package definition
 // deps.deviations: every deviation on the package; the last is judged
 // deps.mustReplan: the developer contested an earlier dismissal
+// deps.profile:    the repository's profile, or null
 export const adjudicateDeviation = async (
   task: AdjudicationTask,
   {
@@ -307,6 +315,7 @@ export const adjudicateDeviation = async (
     mustReplan = false,
     runAgent,
     interfaces = null,
+    profile = null,
     envPath,
     signal,
     readFiles = readTracked,
@@ -316,6 +325,7 @@ export const adjudicateDeviation = async (
     mustReplan?: boolean;
     runAgent: RunAgent;
     interfaces?: string | null;
+    profile?: ProjectProfile | null;
     envPath?: string | null;
     signal?: AbortSignal;
     readFiles?: ReadFiles;
@@ -326,7 +336,7 @@ export const adjudicateDeviation = async (
   const { files: sources, skipped } = root ? await readFiles(root, wanted) : { files: [], skipped: [] };
   throwIfCancelled(signal);
   const { output, costUsd } = await runAgent({
-    prompt: architect.adjudicatePrompt({ task, deviations, mustReplan, interfaces, sources, skipped }),
+    prompt: architect.adjudicatePrompt({ task, deviations, mustReplan, interfaces, sources, skipped, profile }),
     systemPrompt: architect.ADJUDICATE_SYSTEM_PROMPT,
     schema: architect.ADJUDICATE_SCHEMA,
     envPath,
