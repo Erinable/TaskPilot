@@ -3,6 +3,8 @@ import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 
 import { registerIpcHandlers } from './ipc.ts';
+import { wrap } from './ipc/handler.ts';
+import { createStartupGate } from './startup_gate.ts';
 import type { IpcHandle } from './ipc.ts';
 import { WorkPackageStore } from './work_package_store.ts';
 import { RequirementStore } from './requirement_store.ts';
@@ -16,7 +18,7 @@ import { TutorStore } from './tutor_store.ts';
 import { NoteStore } from './note_store.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 
-// Matches --canvas in styles.css, so the first paint and any area the page
+// Matches --canvas in tokens.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
 const CANVAS = { light: '#eef1f8', dark: '#0d0f16' };
 const canvasColor = () => (nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light);
@@ -92,80 +94,98 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
   const configDir = app.getPath('userData');
-  // Moves pre-repository files into place on the first start of this version.
-  const repositories = await new RepositoryRegistry(configDir).load();
-  // Everything below belongs to the open repository (or the unassigned data).
-  const repoDir = repositories.dataDir();
-  let config = await repositories.loadConfig();
-  let prefs = await preferences.load(configDir);
-  // Published packages must be known before the work package store loads, or
-  // their saved progress would be dropped as unknown ids.
-  const requirements = await new RequirementStore(repoDir).load();
-  const store = await new WorkPackageStore(repoDir).load(requirements.listTasks());
-  const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
-  const releases = await new ReleaseStore(repoDir).load();
-  const tutor = await new TutorStore(repoDir).load();
-  // Notes follow the developer, not the repository.
-  const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
-  // Expired day files go at startup; a failure only leaves old files behind.
-  activity.prune().catch((error) => console.error('[activity] prune failed', error));
-
+  // The window opens before the stores load, so its splash covers that time.
+  // Only the appearance is read first; initialize() reads the file again and
+  // reports a failure on the splash.
+  let prefs = await preferences.load(configDir).catch((error) => {
+    console.error('[startup] preferences could not be read', error);
+    return preferences.defaults();
+  });
   // themeSource drives prefers-color-scheme in every window, so the CSS
   // follows the setting without the page needing to know about it.
   nativeTheme.themeSource = prefs.appearance.theme;
 
-  const ipc = registerIpcHandlers(ipcMain, {
-    store,
-    configDir,
-    repositories,
-    getConfig: () => config,
-    setConfig: (next) => {
-      config = next;
-    },
-    getPreferences: () => prefs,
-    setPreferences: (next) => {
-      prefs = next;
-    },
-    pathResolver: createPathResolver(),
-    appVersion: app.getVersion(),
-    requirements,
-    activity,
-    releases,
-    tutor,
-    notes,
-    onPreferencesChanged: (next) => {
-      nativeTheme.themeSource = next.appearance.theme;
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (process.platform === 'darwin' && next.appearance.vibrancy) vibrantWindows.add(window);
-        else vibrantWindows.delete(window);
-        applyAppearance(window, next.appearance);
-      }
-    },
-    shell: {
-      // openPath only receives configDir (app.getPath('userData')), never a
-      // path from the renderer.
-      revealPath: async (dir) => {
-        const failure = await shell.openPath(dir);
-        if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
-      },
-      // Only reached with a path open_file.ts has confined to the workspace.
-      revealFile: (file) => shell.showItemInFolder(file),
-      // Only reached with an http(s) or mailto URL (checked in ipc/notes.ts).
-      openUrl: (url) => shell.openExternal(url),
-      pickDirectory: async (defaultPath) => {
-        const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
-        const parent = BrowserWindow.getFocusedWindow();
-        const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
-        return result.canceled ? null : (result.filePaths[0] ?? null);
-      },
-    },
-    coding: {
-      // electron-builder copies scripts/ into the bundle (extraResources).
-      setupScript: app.isPackaged ? path.join(process.resourcesPath, 'scripts', 'setup-coding-agent-user.sh') : 'scripts/setup-coding-agent-user.sh',
-    },
-  });
+  const initialize = async () => {
+    // Moves pre-repository files into place on the first start of this version.
+    const repositories = await new RepositoryRegistry(configDir).load();
+    // Everything below belongs to the open repository (or the unassigned data).
+    const repoDir = repositories.dataDir();
+    let config = await repositories.loadConfig();
+    prefs = await preferences.load(configDir);
+    nativeTheme.themeSource = prefs.appearance.theme;
+    // Published packages must be known before the work package store loads, or
+    // their saved progress would be dropped as unknown ids.
+    const requirements = await new RequirementStore(repoDir).load();
+    const store = await new WorkPackageStore(repoDir).load(requirements.listTasks());
+    const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
+    const releases = await new ReleaseStore(repoDir).load();
+    const tutor = await new TutorStore(repoDir).load();
+    // Notes follow the developer, not the repository.
+    const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
+    // Expired day files go at startup; a failure only leaves old files behind.
+    activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
-  ipcHandle = ipc;
+    ipcHandle = registerIpcHandlers(ipcMain, {
+      store,
+      configDir,
+      repositories,
+      getConfig: () => config,
+      setConfig: (next) => {
+        config = next;
+      },
+      getPreferences: () => prefs,
+      setPreferences: (next) => {
+        prefs = next;
+      },
+      pathResolver: createPathResolver(),
+      appVersion: app.getVersion(),
+      requirements,
+      activity,
+      releases,
+      tutor,
+      notes,
+      onPreferencesChanged: (next) => {
+        nativeTheme.themeSource = next.appearance.theme;
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (process.platform === 'darwin' && next.appearance.vibrancy) vibrantWindows.add(window);
+          else vibrantWindows.delete(window);
+          applyAppearance(window, next.appearance);
+        }
+      },
+      shell: {
+        // openPath only receives configDir (app.getPath('userData')), never a
+        // path from the renderer.
+        revealPath: async (dir) => {
+          const failure = await shell.openPath(dir);
+          if (failure) throw Object.assign(new Error(failure), { code: 'open_failed' });
+        },
+        // Only reached with a path open_file.ts has confined to the workspace.
+        revealFile: (file) => shell.showItemInFolder(file),
+        // Only reached with an http(s) or mailto URL (checked in ipc/notes.ts).
+        openUrl: (url) => shell.openExternal(url),
+        pickDirectory: async (defaultPath) => {
+          const options: OpenDialogOptions = { properties: ['openDirectory'], defaultPath: defaultPath ?? app.getPath('home') };
+          const parent = BrowserWindow.getFocusedWindow();
+          const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+          return result.canceled ? null : (result.filePaths[0] ?? null);
+        },
+      },
+      coding: {
+        // electron-builder copies scripts/ into the bundle (extraResources).
+        setupScript: app.isPackaged ? path.join(process.resourcesPath, 'scripts', 'setup-coding-agent-user.sh') : 'scripts/setup-coding-agent-user.sh',
+      },
+    });
+  };
+
+  const startup = createStartupGate(initialize);
+  // The renderer waits on this before any other call.
+  ipcMain.handle(
+    CHANNELS.startupReady,
+    wrap(async (_event, retry) => {
+      await startup.ready(retry === true);
+      return true;
+    }),
+  );
   createWindow(prefs.appearance);
 
   app.on('activate', () => {

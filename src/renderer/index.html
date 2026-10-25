@@ -7,6 +7,16 @@
     <title>TaskPilot · Human Coding Workbench</title>
   </head>
   <body>
+    <!-- Shown until the app has its first data (src/lib/splash.ts). -->
+    <div id="splash" class="splash" aria-busy="true">
+      <img class="splash-mark" src="../../assets/icon/icon_small.svg" alt="" />
+      <div class="splash-name">TaskPilot</div>
+      <div class="splash-status">
+        <span class="splash-spinner" aria-hidden="true"></span>
+        <span class="splash-message" aria-live="polite">正在启动…</span>
+      </div>
+      <button class="splash-retry" type="button">重试</button>
+    </div>
     <div id="app"></div>
     <script type="module" src="./src/main.ts"></script>
   </body>
