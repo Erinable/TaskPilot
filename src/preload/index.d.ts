@@ -15,6 +15,7 @@ import type * as workspaceTypes from '../shared/ipc/workspace.ts';
 declare const api: {
   businessTimeZone: string;
   onFullScreen: (listener: (fullScreen: boolean) => void) => void;
+  startupReady: (retry: boolean) => Promise<envelopeTypes.IpcResult<boolean>>;
   listTasks: () => Promise<envelopeTypes.IpcResult<packageTypes.TaskView[]>>;
   getTask: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
   transition: (

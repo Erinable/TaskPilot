@@ -91,6 +91,8 @@ export const CHANNELS = {
   notesPickDirectory: 'notes:pick-directory',
   notesReveal: 'notes:reveal',
   notesOpenUrl: 'notes:open-url',
+  // Resolves once the main process has loaded its stores; true retries a failed start.
+  startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.
   windowFullScreen: 'window:full-screen',
 } as const;

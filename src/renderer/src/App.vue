@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue';
 
 import TopBar from './components/TopBar.vue';
 import SideBar from './components/SideBar.vue';
@@ -13,7 +13,6 @@ import ActivityView from './views/ActivityView.vue';
 import ReleaseView from './views/ReleaseView.vue';
 import TeamView from './views/TeamView.vue';
 import CostView from './views/CostView.vue';
-import NotesView from './views/NotesView.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import { useAppStore } from './stores/app.ts';
 import { useTasksStore } from './stores/tasks.ts';
@@ -25,6 +24,10 @@ import { useRepositoriesStore } from './stores/repositories.ts';
 import { useCodingActivityStore } from './stores/coding_activity.ts';
 import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
+import { hideSplash } from './lib/splash.ts';
+
+// Notes bring KaTeX and syntax highlighting; they load when first opened.
+const NotesView = defineAsyncComponent(() => import('./views/NotesView.vue'));
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -62,18 +65,16 @@ onMounted(async () => {
   await repositories.refresh();
   useNotificationsStore().useRepository(repositories.currentId);
   requirements.init().catch((error) => console.error(error));
-  try {
-    await app.loadPreferences();
-  } catch (error) {
-    console.error('Failed to load preferences', error);
-  }
-  try {
-    await tasks.reloadQueue();
-  } catch (error) {
-    console.error('Failed to load tasks', error);
-    showToast(`工作包加载失败：${describeError(error)}`);
-  }
-  const info = await app.refreshWorkspaceStatus();
+  // The rest is independent; the splash stays until all of it is in.
+  const [, , info] = await Promise.all([
+    app.loadPreferences().catch((error) => console.error('Failed to load preferences', error)),
+    tasks.reloadQueue().catch((error) => {
+      console.error('Failed to load tasks', error);
+      showToast(`工作包加载失败：${describeError(error)}`);
+    }),
+    app.refreshWorkspaceStatus(),
+  ]);
+  hideSplash();
   if (info && !info.configured) showToast('还没有添加仓库，点顶栏的仓库菜单添加一个。', 'info');
 });
 

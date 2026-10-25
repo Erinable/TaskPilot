@@ -34,6 +34,8 @@ const api = {
   onFullScreen: (listener: (fullScreen: boolean) => void) => {
     ipcRenderer.on(CHANNELS.windowFullScreen, (_event, fullScreen: unknown) => listener(fullScreen === true));
   },
+  // Every other call waits for this: the stores load after the window opens.
+  startupReady: (retry: boolean) => invoke<boolean>(CHANNELS.startupReady, retry),
   listTasks: () => invoke<packageTypes.TaskView[]>(CHANNELS.listTasks),
   getTask: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.getTask, id),
 
