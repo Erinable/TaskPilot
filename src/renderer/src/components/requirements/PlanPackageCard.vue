@@ -8,9 +8,9 @@ import InlineCode from '@/components/InlineCode.vue';
 import { modeLabel } from '@/lib/execution_mode.ts';
 import { PRIORITY_LABELS } from './requirement_model.ts';
 import type { IconName } from '@/lib/icons.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
-const props = defineProps<{ pkg: ipc.PlanPackage; index: number }>();
+const props = defineProps<{ pkg: requirementTypes.PlanPackage; index: number }>();
 
 // The module tag first, then the rest without repeating it.
 const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) => tag !== props.pkg.module)]);

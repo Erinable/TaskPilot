@@ -9,14 +9,14 @@ import { countStatuses } from '@shared/repository_counts.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as repositoryTypes from '@shared/ipc/repositories.ts';
 
 const app = useAppStore();
 const repositories = useRepositoriesStore();
 const tasks = useTasksStore();
 
 // Plain words for a count line, with the parts that are zero left out.
-const describe = (counts: ipc.RepositoryCounts | null): string => {
+const describe = (counts: repositoryTypes.RepositoryCounts | null): string => {
   if (!counts) return '读不到进度';
   const parts = [
     counts.active ? `${counts.active} 执行中` : null,
@@ -35,7 +35,7 @@ const projects = computed(() =>
   }),
 );
 
-const open = (repo: ipc.Repository) => {
+const open = (repo: repositoryTypes.Repository) => {
   if (repo.missing) repositories.relocate(repo.id).catch((error) => console.error(error));
   else if (!repo.current) repositories.switchTo(repo.id).catch((error) => console.error(error));
 };

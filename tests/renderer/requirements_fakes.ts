@@ -2,9 +2,13 @@
 // window.taskpilot stub whose calls resolve {ok: true, data}.
 import { vi } from 'vitest';
 
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
+import type * as releaseTypes from '../../src/shared/ipc/release.ts';
+import type * as requirementTypes from '../../src/shared/ipc/requirements.ts';
+import type * as settingsTypes from '../../src/shared/ipc/settings.ts';
+import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 
-export const requirement = (overrides: Partial<ipc.Requirement> = {}): ipc.Requirement => ({
+export const requirement = (overrides: Partial<requirementTypes.Requirement> = {}): requirementTypes.Requirement => ({
   id: 'r1',
   status: 'answering',
   title: '邮箱登录',
@@ -23,7 +27,7 @@ export const requirement = (overrides: Partial<ipc.Requirement> = {}): ipc.Requi
   ...overrides,
 });
 
-export const planPackage = (overrides: Partial<ipc.PlanPackage> = {}): ipc.PlanPackage => ({
+export const planPackage = (overrides: Partial<requirementTypes.PlanPackage> = {}): requirementTypes.PlanPackage => ({
   title: '登录接口',
   description: '实现邮箱登录',
   module: 'auth',
@@ -41,28 +45,30 @@ export const planPackage = (overrides: Partial<ipc.PlanPackage> = {}): ipc.PlanP
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 // Installs window.taskpilot; `list` is what requirements.list() returns now.
-export const installApi = (state: { list: ipc.Requirement[] }) => {
+export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
   const api = {
     requirements: {
       list: vi.fn(() => ok(state.list)),
-      create: vi.fn((input: ipc.RequirementInput) => ok(requirement({ id: 'new', status: 'clarifying', title: input.title ?? '', text: input.text }))),
+      create: vi.fn((input: requirementTypes.RequirementInput) =>
+        ok(requirement({ id: 'new', status: 'clarifying', title: input.title ?? '', text: input.text })),
+      ),
       clarify: vi.fn((id: string) => ok(requirement({ id, status: 'clarifying' }))),
       answer: vi.fn((id: string) => ok(requirement({ id, status: 'answering' }))),
       plan: vi.fn((id: string) => ok(requirement({ id, status: 'planning' }))),
       publish: vi.fn((id: string) =>
-        ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as ipc.TaskDefinition] })),
+        ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as packageTypes.TaskDefinition] })),
       ),
       remove: vi.fn(() => ok(true as const)),
       cancel: vi.fn(() => ok(true)),
     },
     // MilestonePicker loads the release state when a requirement detail mounts.
     release: {
-      get: vi.fn(() => ok<ipc.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false })),
+      get: vi.fn(() => ok<releaseTypes.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false })),
     },
-    agent: { status: vi.fn(() => ok<ipc.AgentStatus>(agentStatus())) },
+    agent: { status: vi.fn(() => ok<settingsTypes.AgentStatus>(agentStatus())) },
     workspace: {
-      info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)),
-      get: vi.fn(() => ok({ lines: { test: '' } } as ipc.WorkspaceView)),
+      info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
+      get: vi.fn(() => ok({ lines: { test: '' } } as workspaceTypes.WorkspaceView)),
     },
     listTasks: vi.fn(() => ok([])),
   };
@@ -72,7 +78,7 @@ export const installApi = (state: { list: ipc.Requirement[] }) => {
 };
 
 // agent:status for a ready machine: analysis CLI signed in, coding CLI installed and signed in.
-export const agentStatus = (overrides: Partial<ipc.AgentStatus> = {}): ipc.AgentStatus => ({
+export const agentStatus = (overrides: Partial<settingsTypes.AgentStatus> = {}): settingsTypes.AgentStatus => ({
   available: true,
   command: 'claude',
   signIn: { state: 'signed_in', source: 'claude auth status' },

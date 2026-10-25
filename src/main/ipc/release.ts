@@ -13,7 +13,7 @@ import { env as appEnv } from '../env.ts';
 import { planRelease, throwIfCancelled, RELEASE_MAX_COMMITS } from '../agents/pipeline.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as releaseTypes from '../../shared/ipc/release.ts';
 import type { ReleasePackage } from '../agents/pipeline.ts';
 import type { AppContext } from '../app_context.ts';
 import type { ReleaseStore } from '../release_store.ts';
@@ -23,7 +23,7 @@ const RECENT_COMMITS = 30;
 const MAX_RELEASE_PACKAGES = 50;
 const MAX_PACKAGE_TEXT = 500;
 
-const NO_START: ipc.ReleaseStartPoint = { kind: 'none', commit: null, label: null, commitCount: 0, commitsTruncated: false, packageCount: 0 };
+const NO_START: releaseTypes.ReleaseStartPoint = { kind: 'none', commit: null, label: null, commitCount: 0, commitsTruncated: false, packageCount: 0 };
 
 const releaseNotesPath = (root: string, requested: string) => {
   if (path.isAbsolute(requested) || path.win32.isAbsolute(requested)) throw codedError('Use a path relative to the workspace', 'path_not_relative', 'path');
@@ -78,7 +78,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   // The start point plus a cheap preview: a capped rev-list count and the
   // package filter a run would use.
-  const releaseStartPoint = async (root: string, store: ReleaseStore): Promise<ipc.ReleaseStartPoint> => {
+  const releaseStartPoint = async (root: string, store: ReleaseStore): Promise<releaseTypes.ReleaseStartPoint> => {
     const found = await findStart(root, store);
     if (!found) return NO_START;
     const counted = await git.countRange(root, found.commit, found.head, { limit: RELEASE_MAX_COMMITS + 1 });
@@ -94,10 +94,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   // Each milestone with how far its requirements' packages are. Open plans
   // first, nearest target date first; released ones after, newest first.
-  const milestoneViews = (store: ReleaseStore): ipc.MilestoneView[] => {
+  const milestoneViews = (store: ReleaseStore): releaseTypes.MilestoneView[] => {
     const state = workPackages.all();
     const packagesOf = (requirementId: string) => catalog.listTasks().filter((task) => task.requirementId === requirementId);
-    const views = store.milestones().map((milestone): ipc.MilestoneView => {
+    const views = store.milestones().map((milestone): releaseTypes.MilestoneView => {
       const items = milestone.requirementIds.map((id) => {
         const packages = packagesOf(id);
         return { id, title: ctx.requirementTitle(id), done: packages.filter((task) => state[task.id]?.status === 'done').length, total: packages.length };
@@ -114,7 +114,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   };
   const knownRequirements = () => new Set((ctx.requirements?.list() ?? []).map((item) => item.id));
 
-  const releaseState = async (): Promise<ipc.ReleaseState> => {
+  const releaseState = async (): Promise<releaseTypes.ReleaseState> => {
     const store = requireReleases();
     const root = ctx.getConfig().root;
     return {
@@ -129,21 +129,21 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.milestoneCreate,
-    wrap(async (_event, raw): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, raw): Promise<releaseTypes.ReleaseState> => {
       await requireReleases().createMilestone(raw, knownRequirements());
       return releaseState();
     }),
   );
   ipcMain.handle(
     CHANNELS.milestoneUpdate,
-    wrap(async (_event, rawId, raw): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, rawId, raw): Promise<releaseTypes.ReleaseState> => {
       await requireReleases().updateMilestone(requireString(rawId, 'id'), raw, knownRequirements());
       return releaseState();
     }),
   );
   ipcMain.handle(
     CHANNELS.milestoneDelete,
-    wrap(async (_event, rawId): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, rawId): Promise<releaseTypes.ReleaseState> => {
       await requireReleases().deleteMilestone(requireString(rawId, 'id'));
       return releaseState();
     }),
@@ -151,7 +151,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // From a requirement's detail page: plan it into a version, or out of all.
   ipcMain.handle(
     CHANNELS.milestoneAssign,
-    wrap(async (_event, rawRequirementId, rawMilestoneId): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, rawRequirementId, rawMilestoneId): Promise<releaseTypes.ReleaseState> => {
       const requirementId = requireString(rawRequirementId, 'requirementId');
       if (!knownRequirements().has(requirementId)) failWith('Unknown requirement', 'invalid_argument', 'requirementId');
       const milestoneId = rawMilestoneId === null ? null : requireString(rawMilestoneId, 'milestoneId');
@@ -162,12 +162,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.releaseGet,
-    wrap((): Promise<ipc.ReleaseState> => releaseState()),
+    wrap((): Promise<releaseTypes.ReleaseState> => releaseState()),
   );
 
   ipcMain.handle(
     CHANNELS.releaseRecentCommits,
-    wrap(async (): Promise<ipc.ReleaseCommit[]> => {
+    wrap(async (): Promise<releaseTypes.ReleaseCommit[]> => {
       requireReleases();
       return git.recentCommits(ctx.requireRoot(), { limit: RECENT_COMMITS });
     }),
@@ -196,7 +196,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // Starts Release Manager in the background; the renderer polls release:get.
   ipcMain.handle(
     CHANNELS.releaseGenerate,
-    wrap(async (_event, rawStart): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, rawStart): Promise<releaseTypes.ReleaseState> => {
       const store = requireReleases();
       const root = ctx.requireRoot();
       const releaseRunner = ctx.runnerFor('release-manager');
@@ -237,7 +237,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             return;
           }
           const { input, plan, costUsd } = outcome.result;
-          const summary: ipc.ReleaseInputSummary = {
+          const summary: releaseTypes.ReleaseInputSummary = {
             commitCount: input.commits.length,
             commitsTruncated: input.commitsTruncated,
             fileCount: input.files.length,
@@ -256,7 +256,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // The store validates the notes length and the checklist indices.
   ipcMain.handle(
     CHANNELS.releaseUpdateDraft,
-    wrap(async (_event, raw): Promise<ipc.ReleaseState> => {
+    wrap(async (_event, raw): Promise<releaseTypes.ReleaseState> => {
       await requireReleases().update(raw);
       return releaseState();
     }),
@@ -265,7 +265,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // The store refuses while any checklist item is unticked.
   ipcMain.handle(
     CHANNELS.releaseFinish,
-    wrap(async (): Promise<ipc.Release> => {
+    wrap(async (): Promise<releaseTypes.Release> => {
       const store = requireReleases();
       const draft = store.draft();
       const release = await store.finish({ packageIds: draft?.input?.packageIds ?? [] });
@@ -281,7 +281,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // Nothing is staged or committed.
   ipcMain.handle(
     CHANNELS.releaseWriteNotes,
-    wrap(async (_event, raw): Promise<ipc.ReleaseWriteResult> => {
+    wrap(async (_event, raw): Promise<releaseTypes.ReleaseWriteResult> => {
       const store = requireReleases();
       const root = ctx.requireRoot();
       const requested = requireString((raw as { path?: unknown } | null | undefined)?.path, 'path').trim();

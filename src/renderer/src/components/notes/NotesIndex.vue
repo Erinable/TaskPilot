@@ -7,11 +7,11 @@ import { computed, onUnmounted, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import * as model from '@/lib/notes_model.ts';
 import { useNotesStore } from '@/stores/notes.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const notes = useNotesStore();
 
-const CATEGORIES = Object.keys(model.CATEGORY_LABELS) as ipc.GradeCategory[];
+const CATEGORIES = Object.keys(model.CATEGORY_LABELS) as packageTypes.GradeCategory[];
 const groups = computed(() => model.groupByMonth(notes.visible));
 const tagCounts = computed(() => model.tagCounts(notes.notes));
 const categoryCounts = computed(() => model.categoryCounts(notes.notes));

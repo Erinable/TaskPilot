@@ -10,16 +10,17 @@ import * as model from '@/components/requirements/requirement_model.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
 import type { IpcError } from '@/lib/ipc.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 export type RequirementPane = 'new' | 'detail' | 'empty';
 
 // What the compose form tells the user up front about what agents will see.
-export type ComposeContext = { workspace: ipc.WorkspaceInfo; agentAvailable: boolean };
+export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAvailable: boolean };
 
 export const useRequirementsStore = defineStore('requirements', () => {
   // ========== List ==========
-  const items = ref<ipc.Requirement[]>([]);
+  const items = ref<requirementTypes.Requirement[]>([]);
   // Requirements waiting on the human, for the sidebar badge.
   const attentionCount = computed(() => items.value.filter(model.needsAttention).length);
 
@@ -33,7 +34,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   };
 
-  const upsert = (item: ipc.Requirement) => {
+  const upsert = (item: requirementTypes.Requirement) => {
     const index = items.value.findIndex((candidate) => candidate.id === item.id);
     if (index === -1) items.value.unshift(item);
     else items.value[index] = item;
@@ -45,11 +46,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const composing = ref(false);
   // The requirement the detail pane shows. A snapshot, replaced only when the
   // page re-renders it, so polling never disturbs answers being typed.
-  const current = ref<ipc.Requirement | null>(null);
+  const current = ref<requirementTypes.Requirement | null>(null);
   // Bumped on every detail render; the pane is keyed on it to reset its inputs.
   const detailRevision = ref(0);
 
-  const renderDetail = (item: ipc.Requirement) => {
+  const renderDetail = (item: requirementTypes.Requirement) => {
     current.value = item;
     pane.value = 'detail';
     detailRevision.value += 1;
@@ -143,7 +144,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // The step request in flight, until the requirement reports it is running.
   const acting = ref<'clarify' | 'plan' | 'edit' | null>(null);
 
-  const runStep = async (item: ipc.Requirement, step: 'clarify' | 'plan', answers?: ipc.RequirementAnswers) => {
+  const runStep = async (item: requirementTypes.Requirement, step: 'clarify' | 'plan', answers?: requirementTypes.RequirementAnswers) => {
     if (acting.value) return;
     acting.value = step;
     try {
@@ -161,7 +162,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   // Back to the question form with the current answers, discarding the plan.
-  const editAnswers = async (item: ipc.Requirement) => {
+  const editAnswers = async (item: requirementTypes.Requirement) => {
     if (acting.value) return;
     acting.value = 'edit';
     try {
@@ -182,7 +183,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   // Resolves false when publishing failed, so the button can be used again.
-  const publishPlan = async (item: ipc.Requirement) => {
+  const publishPlan = async (item: requirementTypes.Requirement) => {
     try {
       const next = await call(window.taskpilot.requirements.publish(item.id));
       upsert(next);
@@ -197,7 +198,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   };
 
-  const cancelRun = async (item: ipc.Requirement) => {
+  const cancelRun = async (item: requirementTypes.Requirement) => {
     try {
       await call(window.taskpilot.requirements.cancel(item.id));
     } catch (error) {
@@ -206,7 +207,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   };
 
-  const removeRequirement = async (item: ipc.Requirement) => {
+  const removeRequirement = async (item: requirementTypes.Requirement) => {
     const confirmed = await confirmAction({
       title: '删除这个需求？',
       body: '需求、Product Lead 的问题和拆解结果都会被删除，无法恢复。',
@@ -236,7 +237,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pollTimer = null;
   };
 
-  const announce = (item: ipc.Requirement) => {
+  const announce = (item: requirementTypes.Requirement) => {
     if (item.status === 'answering') announceAgent('Product Lead 提出了澄清问题，等你回答。', 'info');
     else if (item.status === 'reviewing') announceAgent('工作包拆解完成，请确认。', 'info');
     else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);

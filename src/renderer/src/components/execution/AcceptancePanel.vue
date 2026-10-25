@@ -5,9 +5,9 @@ import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
 import { criterionRows } from '@/lib/review_model.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 

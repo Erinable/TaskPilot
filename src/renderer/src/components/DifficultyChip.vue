@@ -2,13 +2,13 @@
 // How hard a package is for a beginner. The reason shows on hover and, with
 // `detailed`, as a line of text under the chip. Packages planned before
 // difficulty existed have none and render nothing.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const LABELS: Record<ipc.Difficulty, string> = { easy: '入门', medium: '适中', hard: '有挑战' };
+const LABELS: Record<packageTypes.Difficulty, string> = { easy: '入门', medium: '适中', hard: '有挑战' };
 // Filled bars out of three, like a signal meter.
-const BARS: Record<ipc.Difficulty, number> = { easy: 1, medium: 2, hard: 3 };
+const BARS: Record<packageTypes.Difficulty, number> = { easy: 1, medium: 2, hard: 3 };
 
-defineProps<{ difficulty?: ipc.PackageDifficulty; detailed?: boolean }>();
+defineProps<{ difficulty?: packageTypes.PackageDifficulty; detailed?: boolean }>();
 </script>
 
 <template>

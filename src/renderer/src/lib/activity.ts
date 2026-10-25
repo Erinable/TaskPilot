@@ -1,12 +1,15 @@
 // Wording for the activity feed, the queue metrics and team presence.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as repositoryTypes from '@shared/ipc/repositories.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import { businessDay, previousDay } from './time_zone.ts';
 
 export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'code' | 'you'; initials: string; name: string };
 
 export type FeedItem = { key: string; actor: FeedActor; what: string; detail: string; at: string };
 
-const AGENTS: Record<ipc.ActivityAgent, FeedActor> = {
+const AGENTS: Record<activityTypes.ActivityAgent, FeedActor> = {
   'product-lead': { avatar: 'pm', initials: 'PM', name: 'Product Lead' },
   architect: { avatar: 'arch', initials: 'AR', name: 'Architect' },
   qa: { avatar: 'qa', initials: 'QA', name: 'QA Partner' },
@@ -15,15 +18,15 @@ const AGENTS: Record<ipc.ActivityAgent, FeedActor> = {
 };
 const YOU: FeedActor = { avatar: 'you', initials: '你', name: '你' };
 
-export const TEAM: { agent: ipc.ActivityAgent; actor: FeedActor }[] = (['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const).map(
-  (agent) => ({
-    agent,
-    actor: AGENTS[agent],
-  }),
-);
+export const TEAM: { agent: activityTypes.ActivityAgent; actor: FeedActor }[] = (
+  ['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const
+).map((agent) => ({
+  agent,
+  actor: AGENTS[agent],
+}));
 
 // What a transition reads as, and who did it.
-const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition | ipc.CodingTransition, { by: FeedActor; what: string }> = {
+const TRANSITION_TEXT: Record<packageTypes.HumanTransition | packageTypes.AgentTransition | packageTypes.CodingTransition, { by: FeedActor; what: string }> = {
   breakdown_done: { by: AGENTS['product-lead'], what: '拆解完成了工作包' },
   claim: { by: YOU, what: '开始执行' },
   release: { by: YOU, what: '把工作包放回了队列' },
@@ -43,9 +46,9 @@ const TRANSITION_TEXT: Record<ipc.HumanTransition | ipc.AgentTransition | ipc.Co
   deviation_dismissed: { by: AGENTS.architect, what: '驳回了偏差，按原计划继续' },
 };
 
-const STEP_TEXT: Record<ipc.RequirementStep, string> = { clarifying: '提出了澄清问题', planning: '拆解出了工作包' };
+const STEP_TEXT: Record<requirementTypes.RequirementStep, string> = { clarifying: '提出了澄清问题', planning: '拆解出了工作包' };
 
-export const toFeedItem = (record: ipc.ActivityRecord, index: number): FeedItem => {
+export const toFeedItem = (record: activityTypes.ActivityRecord, index: number): FeedItem => {
   const key = `${record.at}-${index}`;
   switch (record.kind) {
     case 'package_transition': {
@@ -95,7 +98,7 @@ export const relativeTime = (at: string, now: Date, timeZone: string) => {
 export type Trend = { text: string; tone: 'up' | 'down' | 'neutral' };
 
 // Done count this week, against last week.
-export const doneTrend = ({ doneThisWeek, donePreviousWeek }: ipc.QueueMetrics): Trend => {
+export const doneTrend = ({ doneThisWeek, donePreviousWeek }: activityTypes.QueueMetrics): Trend => {
   if (donePreviousWeek === 0) return doneThisWeek ? { text: '上周没有', tone: 'up' } : { text: '本周暂无', tone: 'neutral' };
   const change = Math.round(((doneThisWeek - donePreviousWeek) / donePreviousWeek) * 100);
   if (change === 0) return { text: '与上周持平', tone: 'neutral' };
@@ -106,7 +109,7 @@ export const doneTrend = ({ doneThisWeek, donePreviousWeek }: ipc.QueueMetrics):
 export const formatHours = (hours: number | null) => (hours === null ? '–' : hours < 10 ? `${hours.toFixed(1)}h` : `${Math.round(hours)}h`);
 
 // Shorter is better here, so a drop of more than 10% reads as an improvement.
-export const durationTrend = ({ averageHours, averageHoursPrevious }: ipc.QueueMetrics): Trend => {
+export const durationTrend = ({ averageHours, averageHoursPrevious }: activityTypes.QueueMetrics): Trend => {
   if (averageHours === null || averageHoursPrevious === null || averageHoursPrevious === 0) return { text: '数据不足', tone: 'neutral' };
   const change = (averageHours - averageHoursPrevious) / averageHoursPrevious;
   if (Math.abs(change) <= 0.1) return { text: '较上周稳定', tone: 'neutral' };
@@ -115,14 +118,14 @@ export const durationTrend = ({ averageHours, averageHoursPrevious }: ipc.QueueM
 
 export type Presence = 'online' | 'busy' | 'offline';
 
-export const presenceOf = (team: ipc.TeamStatus | null, agent: ipc.ActivityAgent): Presence => {
+export const presenceOf = (team: activityTypes.TeamStatus | null, agent: activityTypes.ActivityAgent): Presence => {
   if (!team || !team.available || !team.availableByAgent[agent]) return 'offline';
   return team.busy.includes(agent) ? 'busy' : 'online';
 };
 
 export const PRESENCE_LABELS: Record<Presence, string> = { online: '在线', busy: '工作中', offline: '暂时离线' };
 
-export const presenceSummary = (team: ipc.TeamStatus | null) => {
+export const presenceSummary = (team: activityTypes.TeamStatus | null) => {
   if (!team) return '';
   if (!team.available) return 'AI 团队离线';
   const availableCount = Object.values(team.availableByAgent).filter(Boolean).length;
@@ -131,14 +134,14 @@ export const presenceSummary = (team: ipc.TeamStatus | null) => {
 };
 
 // What each member does, in plain words for people new to the workflow.
-export const ROLES: Record<ipc.ActivityAgent, string> = {
+export const ROLES: Record<activityTypes.ActivityAgent, string> = {
   'product-lead': '把你的需求问清楚，再拆成一个个能直接动手的工作包。',
   architect: '先读相关代码，告诉团队接口长什么样；你发现计划和代码对不上时，由它决定怎么改。',
   qa: '你提交工作包后检查代码和测试，确认验收条件都做到了。',
   'release-manager': '根据最近的提交和完成的工作包，起草版本号、更新说明和发布清单。',
   'coding-agent': '在隔离运行目录里执行编码工作，产出变更供你审查和应用。',
 };
-const WORK_TEXT: Record<ipc.AgentWork['kind'], string> = {
+const WORK_TEXT: Record<activityTypes.AgentWork['kind'], string> = {
   requirement: '正在处理需求',
   review: '正在审查工作包',
   adjudication: '正在裁决偏差',
@@ -147,11 +150,11 @@ const WORK_TEXT: Record<ipc.AgentWork['kind'], string> = {
 };
 
 // What a run with no subject of its own (label null) is called, by kind.
-const UNTITLED_RUNS: Partial<Record<ipc.BusyKind, string>> = { release: '发布说明' };
-export const runLabel = (run: { kind: ipc.BusyKind; label: string | null }) => run.label ?? UNTITLED_RUNS[run.kind] ?? run.kind;
+const UNTITLED_RUNS: Partial<Record<repositoryTypes.BusyKind, string>> = { release: '发布说明' };
+export const runLabel = (run: { kind: repositoryTypes.BusyKind; label: string | null }) => run.label ?? UNTITLED_RUNS[run.kind] ?? run.kind;
 
 // "正在审查工作包「登录接口」"; null when the member is not running anything.
-export const workText = (team: ipc.TeamStatus | null, agent: ipc.ActivityAgent) => {
+export const workText = (team: activityTypes.TeamStatus | null, agent: activityTypes.ActivityAgent) => {
   const work = team?.work.find((item) => item.agent === agent);
   return work ? `${WORK_TEXT[work.kind]}「${runLabel(work)}」` : null;
 };

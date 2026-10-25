@@ -8,7 +8,7 @@ import { ActivityLog, RETENTION_DAYS, businessDay, recentDays } from '../../src/
 import { ActivitySummary, agentOf } from '../../src/main/activity_summary.ts';
 import type { LoggedEvent, LoggedRecord } from '../../src/main/activity_log.ts';
 import type { EstimateRow } from '../../src/main/activity_summary.ts';
-import type { ActivityRecord } from '../../src/shared/ipc_types.ts';
+import type { ActivityRecord } from '../../src/shared/ipc/activity.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
 

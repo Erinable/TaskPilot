@@ -3,7 +3,9 @@
 // when the underlying event changes, so a new event shows as unread again.
 import { rowTitle } from '@/components/requirements/requirement_model.ts';
 import { describeErrorInfo } from './errors.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
 export const MAX_NOTIFICATIONS = 50;
 
@@ -19,14 +21,17 @@ export type NotificationItem = {
   target: NotificationTarget;
 };
 
-const cancelled = (error: ipc.ErrorInfo) => error.code === 'agent_cancelled';
+const cancelled = (error: envelopeTypes.ErrorInfo) => error.code === 'agent_cancelled';
 
-const DECISION_TEXT: Record<ipc.DeviationResolution['decision'], string> = { dismiss: 'Architect 已裁决（驳回）', replan: 'Architect 已裁决（重新规划）' };
+const DECISION_TEXT: Record<packageTypes.DeviationResolution['decision'], string> = {
+  dismiss: 'Architect 已裁决（驳回）',
+  replan: 'Architect 已裁决（重新规划）',
+};
 
 type TaskNotification = (key: string, text: string, at: string | null, tone: NotificationItem['tone']) => NotificationItem;
 
 const failedAgentNotification = (
-  run: ipc.TaskView['review'] | ipc.TaskView['adjudication'],
+  run: packageTypes.TaskView['review'] | packageTypes.TaskView['adjudication'],
   kind: string,
   label: string,
   item: TaskNotification,
@@ -36,7 +41,7 @@ const failedAgentNotification = (
   return [item(`${kind}-failed:${at}`, `${label}：${describeErrorInfo(run.error)}`, at, 'danger')];
 };
 
-const fromTask = (task: ipc.TaskView): NotificationItem[] => {
+const fromTask = (task: packageTypes.TaskView): NotificationItem[] => {
   const target: NotificationTarget = { kind: 'package', id: task.id };
   const item = (key: string, text: string, at: string | null, tone: NotificationItem['tone']): NotificationItem => ({
     id: `${task.id}:${key}`,
@@ -64,7 +69,7 @@ const fromTask = (task: ipc.TaskView): NotificationItem[] => {
   return items;
 };
 
-const fromRequirement = (requirement: ipc.Requirement): NotificationItem[] => {
+const fromRequirement = (requirement: requirementTypes.Requirement): NotificationItem[] => {
   const item = (text: string, tone: NotificationItem['tone']): NotificationItem[] => [
     {
       id: `${requirement.id}:${requirement.status}:${requirement.updatedAt}`,
@@ -86,7 +91,7 @@ const time = (item: NotificationItem) => (item.at ? Date.parse(item.at) : -Infin
 
 // Every current notification, newest first (untimed last). The list shows the
 // first MAX_NOTIFICATIONS; read state is pruned against all of them.
-export const deriveNotifications = (tasks: ipc.TaskView[], requirements: ipc.Requirement[]): NotificationItem[] =>
+export const deriveNotifications = (tasks: packageTypes.TaskView[], requirements: requirementTypes.Requirement[]): NotificationItem[] =>
   [...tasks.flatMap(fromTask), ...requirements.flatMap(fromRequirement)].sort((left, right) => time(right) - time(left) || left.id.localeCompare(right.id));
 
 // Read ids that still name a notification, so the stored set stays bounded.

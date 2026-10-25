@@ -6,9 +6,9 @@ import DifficultyChip from '@/components/DifficultyChip.vue';
 import { actionOf, flagsOf, timeText } from '@/lib/board.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type { IconName } from '@/lib/icons.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 const execution = useExecutionStore();
 
 const action = computed(() => actionOf(props.task));

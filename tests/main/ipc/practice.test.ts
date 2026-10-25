@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TaskView } from '../../../src/shared/ipc_types.ts';
+import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { parsePatchPreview } from '../../../src/main/coding_workspace.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';

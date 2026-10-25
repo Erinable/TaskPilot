@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // Project conventions and gaps Architect noted, each with its requirement.
 import InlineCode from '@/components/InlineCode.vue';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 import { sourceDate } from './map_wording.ts';
 
-const props = defineProps<{ title: string; kind: 'conventions' | 'gaps'; notes: ipc.MapNote[]; timeZone: string }>();
+const props = defineProps<{ title: string; kind: 'conventions' | 'gaps'; notes: activityTypes.MapNote[]; timeZone: string }>();
 const emit = defineEmits<{ source: [requirementId: string] }>();
 </script>
 

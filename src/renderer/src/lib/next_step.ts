@@ -2,13 +2,13 @@
 // action that matches it. The execution page shows that action as the main
 // button and folds the rest under "more", so a beginner is never left to
 // choose among ten buttons.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 export type NextStep = {
   // Plain words, addressed to the developer.
   text: string;
   // The transition the advice points at, when it is a button.
-  action: ipc.HumanTransition | null;
+  action: packageTypes.HumanTransition | null;
   // The advice is to hand the package to the Coding Agent.
   coding?: boolean;
   // When the AI work the advice waits on started, for an elapsed-time clock.
@@ -16,7 +16,7 @@ export type NextStep = {
 };
 
 // While a Coding Agent run exists, its state decides the advice.
-const codingAdvice = (task: ipc.TaskView): NextStep | null => {
+const codingAdvice = (task: packageTypes.TaskView): NextStep | null => {
   const run = task.codingRun;
   if (!run) return null;
   if (['preparing', 'running', 'checking'].includes(run.status))
@@ -33,7 +33,7 @@ const codingAdvice = (task: ipc.TaskView): NextStep | null => {
   return null;
 };
 
-const pendingAdvice = (task: ipc.TaskView): NextStep => {
+const pendingAdvice = (task: packageTypes.TaskView): NextStep => {
   const blocking = (task.dependencies ?? []).filter((dependency) => dependency.blocking);
   if (blocking.length)
     return {
@@ -43,7 +43,7 @@ const pendingAdvice = (task: ipc.TaskView): NextStep => {
   return { text: '读一遍下面的步骤和验收条件，准备好了就开始。开始后 TaskPilot 会记下项目当前的样子，用来对比你的改动。', action: 'claim' };
 };
 
-export const nextStep = (task: ipc.TaskView): NextStep => {
+export const nextStep = (task: packageTypes.TaskView): NextStep => {
   const total = task.steps.length;
   const done = task.completedSteps.length;
   switch (task.status) {

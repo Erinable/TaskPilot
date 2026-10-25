@@ -8,7 +8,7 @@ import { toWireRequirement } from '../app_context.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import type * as claudeCli from '../agents/claude_cli.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as requirementTypes from '../../shared/ipc/requirements.ts';
 import type { AppContext } from '../app_context.ts';
 import type { RequirementStore } from '../requirement_store.ts';
 import type { IpcMainLike } from './handler.ts';
@@ -38,7 +38,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // Runs one Product Lead step in the background and records the outcome.
   const startRun = async <Output>(
     id: string,
-    step: ipc.RequirementStep,
+    step: requirementTypes.RequirementStep,
     buildPrompt: (input: PromptInput) => string,
     schema: claudeCli.JsonSchema,
     validate: (raw: unknown) => Output,
@@ -126,18 +126,18 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.requirementsList,
-    wrap((): ipc.Requirement[] => requireRequirements().list().map(toWireRequirement)),
+    wrap((): requirementTypes.Requirement[] => requireRequirements().list().map(toWireRequirement)),
   );
 
   ipcMain.handle(
     CHANNELS.requirementsGet,
-    wrap((_event, id): ipc.Requirement => toWireRequirement(requireRequirements().get(requireString(id, 'id')))),
+    wrap((_event, id): requirementTypes.Requirement => toWireRequirement(requireRequirements().get(requireString(id, 'id')))),
   );
 
   // The store validates title and text.
   ipcMain.handle(
     CHANNELS.requirementsCreate,
-    wrap(async (_event, rawInput): Promise<ipc.Requirement> => {
+    wrap(async (_event, rawInput): Promise<requirementTypes.Requirement> => {
       const input = rawInput as { title?: unknown; text?: unknown } | null | undefined;
       const item = await requireRequirements().create({ title: input?.title, text: input?.text });
       record({ kind: 'requirement_created', requirementId: item.id, title: item.title || item.text.slice(0, 40) });
@@ -148,18 +148,20 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.requirementsClarify,
-    wrap((_event, id): Promise<ipc.Requirement> => clarify(requireString(id, 'id'))),
+    wrap((_event, id): Promise<requirementTypes.Requirement> => clarify(requireString(id, 'id'))),
   );
 
   // The store checks the answers against the questions.
   ipcMain.handle(
     CHANNELS.requirementsAnswer,
-    wrap((_event, id, answers): Promise<ipc.Requirement> => requireRequirements().setAnswers(requireString(id, 'id'), answers).then(toWireRequirement)),
+    wrap((_event, id, answers): Promise<requirementTypes.Requirement> =>
+      requireRequirements().setAnswers(requireString(id, 'id'), answers).then(toWireRequirement),
+    ),
   );
 
   ipcMain.handle(
     CHANNELS.requirementsPlan,
-    wrap(async (_event, id, answers): Promise<ipc.Requirement> => {
+    wrap(async (_event, id, answers): Promise<requirementTypes.Requirement> => {
       const rid = requireString(id, 'id');
       // Answers submitted with the plan request are saved first, in one step.
       if (answers !== undefined) await requireRequirements().setAnswers(rid, answers);
@@ -189,7 +191,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // Publishing turns the reviewed plan into queue entries.
   ipcMain.handle(
     CHANNELS.requirementsPublish,
-    wrap(async (_event, id): Promise<ipc.Requirement> => {
+    wrap(async (_event, id): Promise<requirementTypes.Requirement> => {
       const store = requireRequirements();
       const item = store.get(requireString(id, 'id'));
       if (item.status !== 'reviewing' || !item.plan) return failWith('There is no plan to publish', 'invalid_state');

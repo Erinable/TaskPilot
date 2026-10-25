@@ -3,13 +3,13 @@
 // wording is tested without timers.
 import { MAX_AUTO_ATTEMPTS } from '@shared/coding_types.ts';
 import { describeErrorInfo } from './errors.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 export type CodingPhase = { label: string; since: string | null };
 
 // The phase of a package the loop is still moving, or null once it waits for
 // the developer or is over.
-export const codingPhase = (task: ipc.TaskView): CodingPhase | null => {
+export const codingPhase = (task: packageTypes.TaskView): CodingPhase | null => {
   const run = task.codingRun;
   if (!run || run.halt) return null;
   if (['preparing', 'running', 'checking'].includes(run.status)) return { label: `第 ${run.attempt} 轮编码中`, since: run.startedAt };
@@ -24,7 +24,7 @@ export type CodingOutcome = { text: string; tone: 'success' | 'error' | 'info'; 
 
 // The one sentence for a package whose automatic flow just stopped. `qa`
 // marks QA results, which the open execution page already announces.
-export const codingOutcome = (task: ipc.TaskView): CodingOutcome | null => {
+export const codingOutcome = (task: packageTypes.TaskView): CodingOutcome | null => {
   const run = task.codingRun;
   if (!run) return null;
   const title = `「${task.title}」`;

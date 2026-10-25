@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // One summarized module: purpose, members, dependencies and where it came from.
 import InlineCode from '@/components/InlineCode.vue';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 import { FRESHNESS, sourceDate } from './map_wording.ts';
 
-const props = defineProps<{ module: ipc.MapModule; known: Set<string>; timeZone: string }>();
+const props = defineProps<{ module: activityTypes.MapModule; known: Set<string>; timeZone: string }>();
 const emit = defineEmits<{ select: [path: string]; source: [requirementId: string] }>();
 </script>
 

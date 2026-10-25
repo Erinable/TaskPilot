@@ -2,11 +2,11 @@
 import AppIcon from '@/components/AppIcon.vue';
 import type { IconName } from '@/lib/icons.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
 
 const settings = useSettingsStore();
 
-const THEMES: { value: ipc.Theme; label: string; icon: IconName }[] = [
+const THEMES: { value: settingsTypes.Theme; label: string; icon: IconName }[] = [
   { value: 'system', label: '跟随系统', icon: 'monitor' },
   { value: 'light', label: '浅色', icon: 'sun' },
   { value: 'dark', label: '深色', icon: 'moon' },

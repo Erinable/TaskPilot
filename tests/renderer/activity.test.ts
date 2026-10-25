@@ -4,10 +4,10 @@ import assert from 'node:assert/strict';
 import * as activity from '../../src/renderer/src/lib/activity.ts';
 import { TRANSITIONS } from '../../src/main/work_package_status.ts';
 import { agentOf } from '../../src/main/activity_summary.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type { ActivityRecord, QueueMetrics, TeamStatus } from '../../src/shared/ipc/activity.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
-const metrics = (overrides: Partial<ipc.QueueMetrics>): ipc.QueueMetrics => ({
+const metrics = (overrides: Partial<QueueMetrics>): QueueMetrics => ({
   doneThisWeek: 0,
   donePreviousWeek: 0,
   averageHours: null,
@@ -95,7 +95,7 @@ test('presence follows CLI availability and running agents', () => {
 });
 
 test('workText() names what a member is running, by kind', () => {
-  const status: ipc.TeamStatus = {
+  const status: TeamStatus = {
     available: true,
     availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
     busy: ['architect', 'release-manager'],
@@ -119,8 +119,8 @@ test('formatCost() keeps three decimals under a dollar', () => {
 test("main's agentOf() names the same member the feed shows for every event", () => {
   const names = Object.fromEntries(activity.TEAM.map(({ agent, actor }) => [actor.name, agent]));
   const at = '2026-10-01T00:00:00.000Z';
-  const records: ipc.ActivityRecord[] = [
-    ...[...new Set(TRANSITIONS.map((item) => item.name))].map((transition): ipc.ActivityRecord => ({
+  const records: ActivityRecord[] = [
+    ...[...new Set(TRANSITIONS.map((item) => item.name))].map((transition): ActivityRecord => ({
       kind: 'package_transition',
       packageId: 'p',
       title: 't',
@@ -131,7 +131,7 @@ test("main's agentOf() names the same member the feed shows for every event", ()
       at,
     })),
     ...(['breakdown_done', 'review_accepted', 'review_passed', 'review_rejected', 'replanned', 'deviation_dismissed'] as const).map(
-      (transition): ipc.ActivityRecord => ({
+      (transition): ActivityRecord => ({
         kind: 'package_transition',
         packageId: 'p',
         title: 't',

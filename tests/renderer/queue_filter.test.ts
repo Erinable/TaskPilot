@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 
 import { FILTER_OPTIONS, countByFilter, filterQueue } from '../../src/renderer/src/lib/queue_filter.ts';
 import { STATUSES } from '../../src/main/work_package_status.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 
-const task = (id: string, status: ipc.WorkPackageStatus, priority: ipc.Priority) => ({ id, status, priority }) as ipc.TaskView;
+const task = (id: string, status: packageTypes.WorkPackageStatus, priority: packageTypes.Priority) => ({ id, status, priority }) as packageTypes.TaskView;
 
 const queue = [
   task('a', 'done', 'high'),
@@ -43,7 +43,7 @@ test('every status is reachable from a non-"all" filter', () => {
   const covered = new Set(
     FILTER_OPTIONS.filter((option) => option.value !== 'all').flatMap((option) =>
       filterQueue(
-        Object.keys(STATUSES).map((status) => task(status, status as ipc.WorkPackageStatus, 'low')),
+        Object.keys(STATUSES).map((status) => task(status, status as packageTypes.WorkPackageStatus, 'low')),
         option.value,
       ).map((item) => item.status),
     ),

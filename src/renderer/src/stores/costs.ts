@@ -7,12 +7,12 @@ import { ref } from 'vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 export const useCostsStore = defineStore('costs', () => {
   // ========== Report ==========
-  const days = ref<ipc.CostRange>(7);
-  const report = ref<ipc.CostReport | null>(null);
+  const days = ref<activityTypes.CostRange>(7);
+  const report = ref<activityTypes.CostReport | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   let generation = 0;
@@ -31,7 +31,7 @@ export const useCostsStore = defineStore('costs', () => {
     }
   };
 
-  const setDays = (next: ipc.CostRange) => {
+  const setDays = (next: activityTypes.CostRange) => {
     days.value = next;
     load().catch((cause) => console.error(cause));
   };

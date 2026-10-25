@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { ReleaseStore } from '../../src/main/release_store.ts';
 import { assignRequirement, parseMilestoneInput } from '../../src/main/milestones.ts';
-import type { Milestone } from '../../src/shared/ipc_types.ts';
+import type { Milestone } from '../../src/shared/ipc/release.ts';
 import type { ReleasePlan } from '../../src/main/agents/release_manager.ts';
 
 const known = new Set(['r1', 'r2', 'r3']);

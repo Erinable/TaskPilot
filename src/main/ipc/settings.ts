@@ -10,26 +10,27 @@ import { env as appEnv } from '../env.ts';
 import { AGENT_IDS, CLI_IDS } from '../../shared/agent_runtime.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '../../shared/agent_runtime.ts';
+import type * as settingsTypes from '../../shared/ipc/settings.ts';
 import type { CliProbeResult } from '../agents/cli_runner.ts';
 import type { AppContext } from '../app_context.ts';
 import type { CodingRuntime } from '../coding_runtime.ts';
 import type { IpcMainLike } from './handler.ts';
 
-const isPathSource = (value: unknown): value is ipc.PathSource => preferences.PATH_SOURCES.includes(value as ipc.PathSource);
+const isPathSource = (value: unknown): value is settingsTypes.PathSource => preferences.PATH_SOURCES.includes(value as settingsTypes.PathSource);
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { runtime: CodingRuntime }) => {
   const { configDir, getPreferences, pathResolver, store, probeAgent, checkSignIn } = ctx;
 
   ipcMain.handle(
     CHANNELS.preferencesGet,
-    wrap((): ipc.Preferences => preferences.toView(getPreferences())),
+    wrap((): settingsTypes.Preferences => preferences.toView(getPreferences())),
   );
 
   // preferences.save() validates the raw value strictly.
   ipcMain.handle(
     CHANNELS.preferencesSet,
-    wrap(async (_event, raw): Promise<ipc.Preferences> => {
+    wrap(async (_event, raw): Promise<settingsTypes.Preferences> => {
       const previous = getPreferences();
       const saved = await preferences.save(configDir, raw);
       ctx.setPreferences(saved);
@@ -44,7 +45,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // `source` lets the page preview a choice before saving it.
   ipcMain.handle(
     CHANNELS.environmentInfo,
-    wrap(async (_event, rawOptions): Promise<ipc.EnvironmentInfo> => {
+    wrap(async (_event, rawOptions): Promise<settingsTypes.EnvironmentInfo> => {
       const options = rawOptions as { source?: unknown; refresh?: unknown } | null | undefined;
       const requested = options?.source ?? getPreferences().environment.pathSource;
       if (!isPathSource(requested)) return failWith(`Unknown PATH source: ${requested}`, 'invalid_argument');
@@ -66,7 +67,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
 
   ipcMain.handle(
     CHANNELS.dataInfo,
-    wrap((): ipc.DataInfo => {
+    wrap((): settingsTypes.DataInfo => {
       const repoDir = path.relative(configDir, ctx.repositories.dataDir());
       return {
         configDir,
@@ -79,7 +80,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // Only resets execution progress; workspace config and preferences stay.
   ipcMain.handle(
     CHANNELS.dataResetProgress,
-    wrap(async (): Promise<ipc.PackageSummary> => {
+    wrap(async (): Promise<settingsTypes.PackageSummary> => {
       // Every background run would otherwise write its result over the reset;
       // a coding round or baseline left running could hold it for minutes.
       await ctx.cancelAll();
@@ -101,7 +102,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // hard-coded executable. The settings page probes every role separately.
   ipcMain.handle(
     CHANNELS.agentStatus,
-    wrap(async (): Promise<ipc.AgentStatus> => {
+    wrap(async (): Promise<settingsTypes.AgentStatus> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const codingCli = settings['coding-agent'].cli;
@@ -112,7 +113,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       ]);
       const available = product.available && architect.available;
       // One check per CLI, shared when analysis and coding use the same one.
-      const signIns = new Map<string, Promise<ipc.CliSignIn>>();
+      const signIns = new Map<string, Promise<settingsTypes.CliSignIn>>();
       const signInOf = (cli: typeof codingCli) => signIns.get(cli) ?? signIns.set(cli, checkSignIn(cli, { envPath })).get(cli)!;
       const [analysisSignIn, codingSignIn] = await Promise.all([
         available ? signInOf(settings['product-lead'].cli) : null,
@@ -128,7 +129,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   );
   ipcMain.handle(
     CHANNELS.agentRuntimes,
-    wrap(async (): Promise<ipc.AgentRuntimeStatus[]> => {
+    wrap(async (): Promise<agentRuntimeTypes.AgentRuntimeStatus[]> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const probes = new Map<string, Promise<CliProbeResult>>();
@@ -153,17 +154,17 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
 
   // Opening settings reads local CLI config only. Refresh invalidates this
   // metadata cache; it never runs inference, auth helpers or remote catalogs.
-  const modelCatalogs = new Map<string, Promise<ipc.CliModelCatalog>>();
+  const modelCatalogs = new Map<string, Promise<agentRuntimeTypes.CliModelCatalog>>();
   ipcMain.handle(
     CHANNELS.agentModels,
-    wrap(async (_event, request): Promise<ipc.CliModelCatalog> => {
+    wrap(async (_event, request): Promise<agentRuntimeTypes.CliModelCatalog> => {
       if (!request || typeof request !== 'object' || Array.isArray(request)) failWith('Model request must be an object', 'invalid_argument');
       const raw = request as Record<string, unknown>;
-      if (!CLI_IDS.includes(raw.cli as ipc.CliId)) failWith('Unknown CLI', 'invalid_argument', 'cli');
+      if (!CLI_IDS.includes(raw.cli as agentRuntimeTypes.CliId)) failWith('Unknown CLI', 'invalid_argument', 'cli');
       if (raw.scope !== 'analysis' && raw.scope !== 'coding') failWith('Unknown model scope', 'invalid_argument', 'scope');
       if (raw.refresh !== undefined && typeof raw.refresh !== 'boolean') failWith('refresh must be boolean', 'invalid_argument', 'refresh');
-      const cli = raw.cli as ipc.CliId;
-      const scope = raw.scope as ipc.CliModelScope;
+      const cli = raw.cli as agentRuntimeTypes.CliId;
+      const scope = raw.scope as agentRuntimeTypes.CliModelScope;
       // Which account's config holds the coding models depends on the isolation mode.
       const separateUser = scope === 'coding' && !runtime.sandboxed();
       const key = `${scope}:${cli}:${separateUser ? 'separate-user' : 'own'}`;

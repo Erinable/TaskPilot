@@ -8,7 +8,8 @@ import path from 'node:path';
 import { REQUIREMENTS_FILENAME } from './requirement_store.ts';
 import { STATE_FILENAME } from './work_package_store.ts';
 import { countStatuses } from '../shared/repository_counts.ts';
-import type { RepositoryCounts, WorkPackageStatus } from '../shared/ipc_types.ts';
+import type { WorkPackageStatus } from '../shared/ipc/packages.ts';
+import type { RepositoryCounts } from '../shared/ipc/repositories.ts';
 
 const readJson = async (file: string): Promise<unknown> => {
   try {

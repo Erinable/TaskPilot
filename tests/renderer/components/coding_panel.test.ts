@@ -6,7 +6,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import CodingPanel from '../../../src/renderer/src/components/execution/CodingPanel.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { codingRun, installApi, taskView } from '../execution_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as codingTypes from '../../../src/shared/coding_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -16,7 +17,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
 }));
 
 let api: ReturnType<typeof installApi>;
-const offline = (reason: string): ipc.CodingRuntimeStatus => ({
+const offline = (reason: string): codingTypes.CodingRuntimeStatus => ({
   backend: 'claude',
   protocol: 'claude-jsonl',
   boundary: 'separate-user',
@@ -35,7 +36,7 @@ beforeEach(() => {
 });
 
 const render = async () => {
-  const wrapper = mount(CodingPanel, { props: { task: useExecutionStore().current as ipc.TaskView } });
+  const wrapper = mount(CodingPanel, { props: { task: useExecutionStore().current as packageTypes.TaskView } });
   await flushPromises();
   return wrapper;
 };

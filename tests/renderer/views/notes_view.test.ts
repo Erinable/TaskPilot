@@ -9,7 +9,7 @@ import NoteMarkdown from '../../../src/renderer/src/components/notes/NoteMarkdow
 import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as noteTypes from '../../../src/shared/ipc/notes.ts';
 
 // KaTeX checks once, when it loads, that the page is not in quirks mode;
 // happy-dom reports no compatMode at all, while the app page has a doctype.
@@ -24,7 +24,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
 }));
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
-const meta = (overrides: Partial<ipc.NoteMeta> = {}): ipc.NoteMeta => ({
+const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta => ({
   id: '用例要有断言.md',
   title: '用例要有断言',
   category: 'writing',
@@ -41,13 +41,20 @@ const meta = (overrides: Partial<ipc.NoteMeta> = {}): ipc.NoteMeta => ({
   frontmatterError: false,
   ...overrides,
 });
-const NOTE: ipc.Note = { ...meta(), body: '# 断言\n\n<b>没有 expect</b> 见 [[命名]] 和 [[不存在]]\n\n- [ ] 补上\n\n```ts\nconst a = 1\n```\n' };
+const NOTE: noteTypes.Note = { ...meta(), body: '# 断言\n\n<b>没有 expect</b> 见 [[命名]] 和 [[不存在]]\n\n- [ ] 补上\n\n```ts\nconst a = 1\n```\n' };
 const LINKING = meta({ id: '命名.md', title: '命名', category: null, tags: [], links: ['用例要有断言'], excerpt: '链接到断言', source: null, version: 'v9' });
 
 let api: { businessTimeZone: string; notes: Record<string, ReturnType<typeof vi.fn>>; workspace: { openFile: ReturnType<typeof vi.fn> } };
-const list = (notes: ipc.NoteMeta[]): ipc.NoteList => ({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes });
+const list = (notes: noteTypes.NoteMeta[]): noteTypes.NoteList => ({
+  revision: 1,
+  directory: '/notes',
+  custom: false,
+  unavailable: null,
+  truncated: false,
+  notes,
+});
 
-const mountView = async (notes: ipc.NoteMeta[]) => {
+const mountView = async (notes: noteTypes.NoteMeta[]) => {
   api.notes.list.mockImplementation(() => ok(list(notes)));
   const pinia = createPinia();
   setActivePinia(pinia);
@@ -67,10 +74,10 @@ beforeEach(() => {
       list: vi.fn(() => ok(list([]))),
       get: vi.fn((id: string) => ok(id === NOTE.id ? NOTE : { ...LINKING, body: '[[用例要有断言]]' })),
       search: vi.fn(() => ok([])),
-      create: vi.fn((input: ipc.NoteInput) =>
+      create: vi.fn((input: noteTypes.NoteInput) =>
         ok({ revision: 2, relinked: 0, note: { ...meta({ id: `${input.title}.md`, title: input.title, source: null }), body: input.body } }),
       ),
-      update: vi.fn((id: string, edit: ipc.NoteEdit) =>
+      update: vi.fn((id: string, edit: noteTypes.NoteEdit) =>
         ok({ revision: 2, relinked: 1, note: { ...NOTE, ...edit, id: `${edit.title}.md`, version: 'v2', summary: edit.summary ?? null } }),
       ),
       remove: vi.fn(() => ok(true)),

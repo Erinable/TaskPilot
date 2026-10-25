@@ -3,22 +3,24 @@ import assert from 'node:assert/strict';
 
 import * as model from '../../src/renderer/src/lib/settings_model.ts';
 import { defaultAgentSettings } from '@shared/agent_runtime.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 type PreferenceOverrides = {
-  profile?: Partial<{ displayName: string; avatarColor: ipc.AvatarColor }>;
-  appearance?: Partial<{ theme: ipc.Theme; vibrancy: boolean }>;
-  environment?: Partial<{ pathSource: ipc.PathSource }>;
-  agents?: ipc.AgentSettings;
+  profile?: Partial<{ displayName: string; avatarColor: settingsTypes.AvatarColor }>;
+  appearance?: Partial<{ theme: settingsTypes.Theme; vibrancy: boolean }>;
+  environment?: Partial<{ pathSource: settingsTypes.PathSource }>;
+  agents?: agentRuntimeTypes.AgentSettings;
 };
-const prefs = (overrides: PreferenceOverrides = {}): ipc.PreferencesInput => ({
+const prefs = (overrides: PreferenceOverrides = {}): settingsTypes.PreferencesInput => ({
   profile: { displayName: 'Ada', avatarColor: 'ocean', ...overrides.profile },
   appearance: { theme: 'system', vibrancy: false, ...overrides.appearance },
   environment: { pathSource: 'inherit', ...overrides.environment },
   agents: overrides.agents ?? defaultAgentSettings(),
   coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
 });
-const ws = (overrides: Partial<ipc.WorkspaceForm> = {}): ipc.WorkspaceForm => ({
+const ws = (overrides: Partial<workspaceTypes.WorkspaceForm> = {}): workspaceTypes.WorkspaceForm => ({
   root: '/repo',
   commands: { test: 'npm test', lint: '', build: '', smoke: '', ...overrides.commands },
   options: { ...overrides.options },
@@ -110,7 +112,7 @@ test('charCount() counts code points after trimming', () => {
 });
 
 test('changing a check option marks the commands page dirty, but not for an empty command', () => {
-  const opts = (blocking: boolean): Partial<Record<ipc.CheckKind, Partial<ipc.CheckOptions>>> => ({
+  const opts = (blocking: boolean): Partial<Record<workspaceTypes.CheckKind, Partial<workspaceTypes.CheckOptions>>> => ({
     test: { stage: 'submit', blocking, reportPath: '' },
     lint: { stage: 'step', blocking, reportPath: '' },
   });

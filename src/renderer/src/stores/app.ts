@@ -4,7 +4,9 @@ import { ref } from 'vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import * as layout from '@/lib/sidebar_layout.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes';
 
@@ -81,11 +83,11 @@ export const useAppStore = defineStore('app', () => {
   };
 
   // ========== Preferences ==========
-  const preferences = ref<ipc.Preferences | null>(null);
+  const preferences = ref<settingsTypes.Preferences | null>(null);
 
   // The main process sets nativeTheme.themeSource, which drives the CSS
   // colour scheme; the page only needs to know about vibrancy.
-  const applyPreferences = (next: ipc.Preferences) => {
+  const applyPreferences = (next: settingsTypes.Preferences) => {
     preferences.value = next;
     document.body.classList.toggle('vibrancy', next.appearance.vibrancy && /mac/i.test(navigator.platform));
   };
@@ -93,7 +95,7 @@ export const useAppStore = defineStore('app', () => {
   const loadPreferences = async () => applyPreferences(await call(window.taskpilot.preferences.get()));
 
   // ========== Workspace ==========
-  const workspaceInfo = ref<ipc.WorkspaceInfo | null>(null);
+  const workspaceInfo = ref<workspaceTypes.WorkspaceInfo | null>(null);
   const workspaceError = ref<string | null>(null);
 
   const refreshWorkspaceStatus = async () => {
@@ -110,7 +112,7 @@ export const useAppStore = defineStore('app', () => {
   };
 
   // ========== Activity ==========
-  const activity = ref<ipc.ActivityOverview | null>(null);
+  const activity = ref<activityTypes.ActivityOverview | null>(null);
   let activityTimer: number | null = null;
 
   // A failed read keeps the last overview; the feed is not worth a toast.

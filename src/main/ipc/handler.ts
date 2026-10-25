@@ -1,15 +1,15 @@
 // The IPC boundary: how a handler's outcome reaches the renderer.
 import type { CodedError } from '../coded_error.ts';
 import type { Channel } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
 
 // Electron's ipcMain, or a stand-in exposing `handle`.
 export type IpcMainLike = { handle(channel: Channel, listener: (event: unknown, ...args: unknown[]) => unknown): void };
 
 // Shaped like an Error but safe to send over IPC.
-export const toFailure = (error: unknown): { ok: false; error: ipc.IpcFailure } => {
+export const toFailure = (error: unknown): { ok: false; error: envelopeTypes.IpcFailure } => {
   const coded = error as CodedError;
-  const failure: ipc.IpcFailure = { code: typeof coded.code === 'string' ? coded.code : 'unknown', message: coded.message };
+  const failure: envelopeTypes.IpcFailure = { code: typeof coded.code === 'string' ? coded.code : 'unknown', message: coded.message };
   if (typeof coded.field === 'string' && coded.field) failure.field = coded.field;
   return { ok: false, error: failure };
 };
@@ -21,7 +21,7 @@ type Handler<T> = (event: unknown, ...args: unknown[]) => T | Promise<T>;
 // {ok: false, error} instead of an opaque rejected promise.
 export const wrap =
   <T>(handler: Handler<T>) =>
-  async (event: unknown, ...args: unknown[]): Promise<ipc.IpcResult<T>> => {
+  async (event: unknown, ...args: unknown[]): Promise<envelopeTypes.IpcResult<T>> => {
     try {
       return { ok: true, data: await handler(event, ...args) };
     } catch (error) {

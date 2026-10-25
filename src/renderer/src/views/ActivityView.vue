@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';
-import { call } from '@/lib/ipc.ts';
-import { describeError } from '@/lib/errors.ts';
 import { businessDay, businessTimeZone, previousDay } from '@/lib/time_zone.ts';
 import * as activity from '@/lib/activity.ts';
+import { useActivityFeedStore } from '@/stores/activity_feed.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 type Who = 'all' | 'you' | 'agents';
 
@@ -24,30 +24,11 @@ const execution = useExecutionStore();
 const requirements = useRequirementsStore();
 const tasks = useTasksStore();
 
-const days = ref<ipc.ActivityPage['days']>([]);
-const nextBefore = ref<string | null>(null);
-const retentionDays = ref(0);
-const loading = ref(false);
-const loaded = ref(false);
-const error = ref<string | null>(null);
+const feed = useActivityFeedStore();
+const { days, nextBefore, retentionDays, loading, loaded, error } = storeToRefs(feed);
 const who = ref<Who>('all');
 
-const loadPage = async (before: string | null) => {
-  loading.value = true;
-  try {
-    const page = await call(window.taskpilot.activity.page(before));
-    days.value = before ? [...days.value, ...page.days] : page.days;
-    nextBefore.value = page.nextBefore;
-    retentionDays.value = page.retentionDays;
-    error.value = null;
-  } catch (caught) {
-    console.error('[activity] page failed', caught);
-    error.value = describeError(caught);
-  } finally {
-    loading.value = false;
-    loaded.value = true;
-  }
-};
+const loadPage = (before: string | null) => feed.loadPage(before);
 
 const dayLabel = (day: string) => {
   const today = businessDay(new Date());
@@ -73,7 +54,7 @@ const groups = computed(() =>
 );
 
 // Where clicking an event goes: the package if it still exists, else the requirement.
-const targetOf = (record: ipc.ActivityRecord) => {
+const targetOf = (record: activityTypes.ActivityRecord) => {
   if (record.kind === 'package_transition') {
     return tasks.tasks.some((task) => task.id === record.packageId) ? { kind: 'package' as const, id: record.packageId } : null;
   }
@@ -87,7 +68,7 @@ const openTarget = (target: { kind: 'package' | 'requirement'; id: string }) => 
   opening.catch((caught) => console.error(caught));
 };
 
-onMounted(() => loadPage(null));
+onMounted(() => feed.open());
 </script>
 
 <template>

@@ -4,9 +4,19 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
+import { useActivityFeedStore } from '../../../src/renderer/src/stores/activity_feed.ts';
+import { useCommitStore } from '../../../src/renderer/src/stores/commit.ts';
+import { useEngineeringMapStore } from '../../../src/renderer/src/stores/engineering_map.ts';
+import { useOnboardingStore } from '../../../src/renderer/src/stores/onboarding.ts';
+import { useTutorStore } from '../../../src/renderer/src/stores/tutor.ts';
 import { readStorageKey, useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as activityTypes from '../../../src/shared/ipc/activity.ts';
+import type * as commitTypes from '../../../src/shared/ipc/commit.ts';
+import type * as repositoryTypes from '../../../src/shared/ipc/repositories.ts';
+import type * as settingsTypes from '../../../src/shared/ipc/settings.ts';
+import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
+import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -16,7 +26,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
-const repo = (id: string, overrides: Partial<ipc.Repository> = {}): ipc.Repository => ({
+const repo = (id: string, overrides: Partial<repositoryTypes.Repository> = {}): repositoryTypes.Repository => ({
   id,
   root: `/work/${id}`,
   name: id,
@@ -27,9 +37,9 @@ const repo = (id: string, overrides: Partial<ipc.Repository> = {}): ipc.Reposito
   ...overrides,
 });
 
-const listOf = (current: string): ipc.RepositoryList => ({ current, repositories: ['a', 'b'].map((id) => repo(id, { current: id === current })) });
+const listOf = (current: string): repositoryTypes.RepositoryList => ({ current, repositories: ['a', 'b'].map((id) => repo(id, { current: id === current })) });
 
-let busy: ipc.BusyRun[];
+let busy: repositoryTypes.BusyRun[];
 let api: ReturnType<typeof installApi>;
 
 const installApi = () => {
@@ -43,7 +53,7 @@ const installApi = () => {
     },
     workspace: {
       pickRoot: vi.fn(() => ok<string | null>('/work/c')),
-      info: vi.fn(() => ok({ configured: false } as ipc.WorkspaceInfo)),
+      info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
     },
     requirements: { list: vi.fn(() => ok([])) },
     release: { updateDraft: vi.fn() },
@@ -77,6 +87,62 @@ describe('repositories store', () => {
     expect(store.current?.id).toBe('b');
     expect(store.generation).toBe(before + 1);
     expect(feedback.confirmAction).not.toHaveBeenCalled();
+  });
+
+  test('switching clears what the views read for the old repository', async () => {
+    const tutorState: tutorTypes.TutorState = { status: 'done', answer: null, error: null, costUsd: 0 };
+    const preview: commitTypes.CommitPreview = { files: ['a.ts'], skipped: [], message: 'feat: a' };
+    const map: activityTypes.EngineeringMap = { modules: [], conventions: [], gaps: [], files: ['a.ts'], truncated: false };
+    Object.assign(window.taskpilot, {
+      activity: {
+        ...api.activity,
+        page: vi.fn(() => ok({ days: [{ day: '2026-10-25', records: [] }], nextBefore: '2026-10-24', timeZone: 'Asia/Shanghai', retentionDays: 30 })),
+      },
+      commit: { preview: vi.fn(() => ok(preview)) },
+      engineeringMap: { get: vi.fn(() => ok(map)) },
+      agent: { status: vi.fn(() => ok({ available: true } as settingsTypes.AgentStatus)) },
+      workspace: { ...api.workspace, get: vi.fn(() => ok({ lines: { test: 'npm test' } } as workspaceTypes.WorkspaceView)) },
+      tutor: { get: vi.fn(() => ok(tutorState)) },
+    });
+    const feed = useActivityFeedStore();
+    const commit = useCommitStore();
+    const engineeringMap = useEngineeringMapStore();
+    const onboarding = useOnboardingStore();
+    const tutor = useTutorStore();
+    await Promise.all([feed.open(), commit.open('p1'), engineeringMap.open(), onboarding.recheck(), tutor.refresh('p1', 0)]);
+    expect(feed.days).toHaveLength(1);
+    expect(commit.preview).toEqual(preview);
+    expect(engineeringMap.map).toEqual(map);
+    expect(onboarding.testCommand).toBe('npm test');
+    expect(tutor.stateOf('p1', 0)).toEqual(tutorState);
+
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.switchTo('b')).toBe(true);
+    expect(feed.days).toEqual([]);
+    expect(feed.nextBefore).toBeNull();
+    expect(commit.preview).toBeNull();
+    expect(commit.message).toBe('');
+    expect(engineeringMap.map).toBeNull();
+    expect(onboarding.agent).toBeNull();
+    expect(onboarding.testCommand).toBeNull();
+    expect(tutor.stateOf('p1', 0)).toBeNull();
+  });
+
+  test('an answer for the old repository that lands after the switch is dropped', async () => {
+    let answer: (value: { ok: true; data: activityTypes.EngineeringMap }) => void = () => {};
+    Object.assign(window.taskpilot, { engineeringMap: { get: vi.fn(() => new Promise((resolve) => (answer = resolve))) } });
+    const engineeringMap = useEngineeringMapStore();
+    const loading = engineeringMap.open();
+    expect(engineeringMap.loading).toBe(true);
+
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.switchTo('b')).toBe(true);
+    answer({ ok: true, data: { modules: [], conventions: [], gaps: [], files: ['old.ts'], truncated: false } });
+    await loading;
+    expect(engineeringMap.map).toBeNull();
+    expect(engineeringMap.loading).toBe(false);
   });
 
   test('running work is listed and a declined switch changes nothing', async () => {

@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useCodingActivityStore } from '../../../src/renderer/src/stores/coding_activity.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import { codingRun, installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
@@ -15,7 +15,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-let current: { task: ipc.TaskView };
+let current: { task: packageTypes.TaskView };
 let api: ReturnType<typeof installApi>;
 beforeEach(() => {
   setActivePinia(createPinia());

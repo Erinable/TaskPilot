@@ -5,7 +5,7 @@ import AppIcon from '@/components/AppIcon.vue';
 import { useReleaseStore } from '@/stores/release.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import type { IconName } from '@/lib/icons.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as releaseTypes from '@shared/ipc/release.ts';
 
 // Version plans at the top of the release page: what each version is meant
 // to ship and how far it is. A complete plan leads straight into drafting
@@ -29,7 +29,7 @@ const form = ref<{ id: string | null; version: string; targetDate: string; requi
 const startCreate = () => {
   form.value = { id: null, version: '', targetDate: '', requirementIds: [] };
 };
-const startEdit = (milestone: ipc.MilestoneView) => {
+const startEdit = (milestone: releaseTypes.MilestoneView) => {
   form.value = { id: milestone.id, version: milestone.version, targetDate: milestone.targetDate ?? '', requirementIds: [...milestone.requirementIds] };
 };
 const save = async () => {
@@ -39,8 +39,8 @@ const save = async () => {
   if (saved) form.value = null;
 };
 
-const percent = (milestone: ipc.MilestoneView) => (milestone.total ? Math.round((milestone.done / milestone.total) * 100) : 0);
-const requirementState = (item: ipc.MilestoneView['requirements'][number]): { icon: IconName; text: string } =>
+const percent = (milestone: releaseTypes.MilestoneView) => (milestone.total ? Math.round((milestone.done / milestone.total) * 100) : 0);
+const requirementState = (item: releaseTypes.MilestoneView['requirements'][number]): { icon: IconName; text: string } =>
   item.total === 0
     ? { icon: 'circle', text: '还没有工作包' }
     : item.done === item.total
@@ -48,7 +48,7 @@ const requirementState = (item: ipc.MilestoneView['requirements'][number]): { ic
       : { icon: 'clock', text: `${item.done}/${item.total} 包` };
 const dateText = (day: string | null) => (day ? `目标 ${day.slice(5).replace('-', '/')}` : '没有目标日期');
 // Past its target date and not finished.
-const late = (milestone: ipc.MilestoneView) =>
+const late = (milestone: releaseTypes.MilestoneView) =>
   Boolean(milestone.targetDate && !milestone.complete && milestone.targetDate < new Date().toISOString().slice(0, 10));
 </script>
 

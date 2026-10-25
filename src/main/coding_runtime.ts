@@ -11,7 +11,9 @@ import * as codingWorkspace from './coding_workspace.ts';
 import * as codingSandbox from './coding_sandbox.ts';
 import * as patchMerge from './patch_merge.ts';
 import { env as appEnv } from './env.ts';
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
+import type * as codingTypes from '../shared/coding_types.ts';
+import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type { AppContext } from './app_context.ts';
 import type { TaskDefinition } from './tasks.ts';
 
@@ -38,7 +40,7 @@ export const billableCodingUsage = (error: unknown) => {
   return spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null) ? spent : null;
 };
 
-export const codingFailure = (error: unknown): ipc.ErrorInfo => ({
+export const codingFailure = (error: unknown): envelopeTypes.ErrorInfo => ({
   code: errorCode(error) ?? 'coding_failed',
   message: error instanceof Error ? error.message : String(error),
 });
@@ -76,12 +78,12 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   const runNameFor = (sandbox: codingSandbox.SandboxContext | undefined, runId: string) =>
     path.join(sandbox ? sandboxRunRoot : codingWorkspace.DEFAULT_RUN_ROOT, runId);
   const sandboxOfRun = async (runName: string) => (path.dirname(runName) === sandboxRunRoot ? await sandboxContext() : undefined);
-  const readRunPatch = async (runName: string, fileScope: string[], extra: { signal?: AbortSignal; cli?: ipc.CliId } = {}) =>
+  const readRunPatch = async (runName: string, fileScope: string[], extra: { signal?: AbortSignal; cli?: agentRuntimeTypes.CliId } = {}) =>
     readPatch(runName, fileScope, { ...extra, sandbox: await sandboxOfRun(runName) });
   const cleanRun = async (runName: string) => clean(runName, { sandbox: await sandboxOfRun(runName) });
-  const probeCoding = async (config: ipc.AgentRuntimeConfig) => probe({ config, sandbox: sandboxed() ? await sandboxContext() : undefined });
+  const probeCoding = async (config: agentRuntimeTypes.AgentRuntimeConfig) => probe({ config, sandbox: sandboxed() ? await sandboxContext() : undefined });
 
-  const codingStatus = async (): Promise<ipc.CodingRuntimeStatus> => {
+  const codingStatus = async (): Promise<codingTypes.CodingRuntimeStatus> => {
     const status = await probeCoding({ ...getPreferences().agents['coding-agent'] });
     return { ...status, config: { ...status.config, timeoutMinutes: getPreferences().coding.timeoutMinutes }, setupScript };
   };

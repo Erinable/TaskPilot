@@ -54,6 +54,17 @@ export default tseslint.config(
     rules: { complexity: ['warn', { max: 20, variant: 'classic' }] },
   },
   {
+    // Components and views read stores; only stores and lib/ talk to the main process.
+    files: ['src/renderer/src/components/**/*.{ts,vue}', 'src/renderer/src/views/**/*.{ts,vue}'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        { object: 'process', property: 'env', message: 'Read configuration from src/main/env.ts.' },
+        { object: 'window', property: 'taskpilot', message: 'Call the main process through a store in src/renderer/src/stores/.' },
+      ],
+    },
+  },
+  {
     // The config module, scripts and tests may read the environment directly.
     files: ['src/main/env.ts', 'evals/**', 'tests/**', '*.config.ts'],
     rules: { 'no-restricted-properties': 'off' },

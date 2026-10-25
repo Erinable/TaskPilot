@@ -3,12 +3,13 @@ import { describe, expect, test } from 'vitest';
 import { deriveNotifications, pruneRead } from '../../src/renderer/src/lib/notifications.ts';
 import { taskView } from './execution_fakes.ts';
 import { requirement } from './requirements_fakes.ts';
-import type * as ipc from '../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../src/shared/ipc/packages.ts';
+import type * as requirementTypes from '../../src/shared/ipc/requirements.ts';
 
 const T1 = '2026-01-03T00:00:00.000Z';
 const T2 = '2026-01-04T00:00:00.000Z';
 
-const review = (status: 'passed' | 'rejected', finishedAt = T1): ipc.Review => ({
+const review = (status: 'passed' | 'rejected', finishedAt = T1): packageTypes.Review => ({
   status,
   startedAt: T1,
   finishedAt,
@@ -22,13 +23,13 @@ const review = (status: 'passed' | 'rejected', finishedAt = T1): ipc.Review => (
   diff: { files: [], skipped: [], outOfScope: [] },
   costUsd: 0,
 });
-const failedReview = (code = 'agent_timeout', finishedAt: string | null = T1): ipc.Review => ({
+const failedReview = (code = 'agent_timeout', finishedAt: string | null = T1): packageTypes.Review => ({
   status: 'failed',
   startedAt: T1,
   finishedAt,
   error: { code, message: 'x' },
 });
-const resolution = (decision: 'dismiss' | 'replan', reverted = false): ipc.DeviationResolution => ({
+const resolution = (decision: 'dismiss' | 'replan', reverted = false): packageTypes.DeviationResolution => ({
   decision,
   reason: 'r',
   changes: [],
@@ -37,14 +38,14 @@ const resolution = (decision: 'dismiss' | 'replan', reverted = false): ipc.Devia
   contested: false,
   reverted,
 });
-const deviation = (decision: 'dismiss' | 'replan', reverted = false): ipc.Deviation => ({
+const deviation = (decision: 'dismiss' | 'replan', reverted = false): packageTypes.Deviation => ({
   note: 'n',
   stepIndex: null,
   filePath: null,
   reportedAt: T1,
   resolution: resolution(decision, reverted),
 });
-const doneAdjudication = (finishedAt = T1): ipc.Adjudication => ({
+const doneAdjudication = (finishedAt = T1): packageTypes.Adjudication => ({
   status: 'done',
   mustReplan: false,
   startedAt: T1,
@@ -55,7 +56,7 @@ const doneAdjudication = (finishedAt = T1): ipc.Adjudication => ({
   costUsd: 0,
 });
 
-const one = (tasks: ipc.TaskView[], requirements: ipc.Requirement[] = []) =>
+const one = (tasks: packageTypes.TaskView[], requirements: requirementTypes.Requirement[] = []) =>
   deriveNotifications(tasks, requirements).map(({ id, text, at, target }) => ({ id, text, at, target }));
 
 describe('deriveNotifications', () => {
@@ -89,7 +90,7 @@ describe('deriveNotifications', () => {
       [{ id: `t1:adjudication-failed:${T2}`, text: '裁决没有完成：炸了', at: T2, target: pkg }],
     ],
     ['blocked', { status: 'blocked' }, [{ id: 't1:blocked', text: '已标记阻塞', at: null, target: pkg }]],
-  ] as [string, Partial<ipc.TaskView>, unknown][])('%s', (_name, overrides, expected) => {
+  ] as [string, Partial<packageTypes.TaskView>, unknown][])('%s', (_name, overrides, expected) => {
     expect(one([taskView(overrides)])).toEqual(expected);
   });
 
@@ -107,7 +108,7 @@ describe('deriveNotifications', () => {
     ],
     ['replan reverted by the human', { status: 'in_progress', adjudication: doneAdjudication(), deviations: [deviation('replan', true)] }],
     ['done package keeps no old ruling', { status: 'done', review: review('passed'), adjudication: doneAdjudication(), deviations: [deviation('dismiss')] }],
-  ] as [string, Partial<ipc.TaskView>][])('nothing for %s', (_name, overrides) => {
+  ] as [string, Partial<packageTypes.TaskView>][])('nothing for %s', (_name, overrides) => {
     expect(one([taskView(overrides)])).toEqual([]);
   });
 
@@ -116,12 +117,12 @@ describe('deriveNotifications', () => {
     ['answering', { status: 'answering' }, 'Product Lead 等你回答问题'],
     ['reviewing', { status: 'reviewing' }, '拆解完成，等你确认发布'],
     ['failed', { status: 'failed', error: { code: 'boom', message: '炸了' } }, '运行失败：炸了'],
-  ] as [string, Partial<ipc.Requirement>, string][])('requirement %s', (_name, overrides, text) => {
+  ] as [string, Partial<requirementTypes.Requirement>, string][])('requirement %s', (_name, overrides, text) => {
     const item = requirement({ updatedAt: T2, ...overrides });
     expect(one([], [item])).toEqual([{ id: `r1:${item.status}:${T2}`, text, at: T2, target: req }]);
   });
 
-  test.each(['draft', 'clarifying', 'planning', 'published'] as ipc.RequirementStatus[])('nothing for a %s requirement', (status) => {
+  test.each(['draft', 'clarifying', 'planning', 'published'] as requirementTypes.RequirementStatus[])('nothing for a %s requirement', (status) => {
     expect(one([], [requirement({ status })])).toEqual([]);
   });
 

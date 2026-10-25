@@ -1,7 +1,8 @@
 // The cost page's numbers: raw cost records for the last 30 business days,
 // rollup rows before that, grouped by agent, day, model and work item.
 // Sums are integer micro-dollars and become dollars only at the end.
-import type { AgentId, CostBucket, CostRange, CostReport, TokenUsage } from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
+import type { AgentId } from '../shared/agent_runtime.ts';
 import { businessDay, recentDays, RETENTION_DAYS } from './activity_log.ts';
 import type { LoggedRecord } from './activity_log.ts';
 import { foldCosts } from './cost_rollup.ts';
@@ -9,7 +10,7 @@ import type { CostRow } from './cost_rollup.ts';
 import { estimateMicros, priceFor } from './model_prices.ts';
 import type { PriceTable } from './model_prices.ts';
 
-type Micros = { calls: number; actual: number; estimated: number; unknown: number; unpriced: number; tokens: TokenUsage };
+type Micros = { calls: number; actual: number; estimated: number; unknown: number; unpriced: number; tokens: activityTypes.TokenUsage };
 
 const empty = (): Micros => ({ calls: 0, actual: 0, estimated: 0, unknown: 0, unpriced: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
 
@@ -38,7 +39,7 @@ const add = (into: Micros, part: Micros) => {
   into.tokens.cacheWrite += part.tokens.cacheWrite;
 };
 
-const bucket = (micros: Micros): CostBucket => ({
+const bucket = (micros: Micros): activityTypes.CostBucket => ({
   calls: micros.calls,
   actualUsd: micros.actual / 1_000_000,
   estimatedUsd: micros.estimated / 1_000_000,
@@ -70,7 +71,7 @@ export const buildCostReport = ({
   timeZone,
   titleOf,
 }: {
-  days: CostRange;
+  days: activityTypes.CostRange;
   // Raw records of the last RETENTION_DAYS business days.
   records: LoggedRecord[];
   rollup: CostRow[];
@@ -78,7 +79,7 @@ export const buildCostReport = ({
   now: Date;
   timeZone: string;
   titleOf: (kind: 'package' | 'requirement', id: string) => string;
-}): CostReport => {
+}): activityTypes.CostReport => {
   const window = recentDays(now, timeZone, days);
   const inWindow = new Set(window);
   const rawOldest = recentDays(now, timeZone, RETENTION_DAYS).at(-1) as string;

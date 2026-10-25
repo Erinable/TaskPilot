@@ -1,5 +1,5 @@
 // Planned and actual hours of a work package, for the queue and the board.
-import type { TaskView } from './ipc_types.ts';
+import type { TaskView } from './ipc/packages.ts';
 
 // The hours in a "预计 2 小时" / "预计 30 分钟" estimate, for packages saved
 // before the number was kept; null when the text is something else.

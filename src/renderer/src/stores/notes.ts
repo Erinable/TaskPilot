@@ -11,7 +11,8 @@ import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
 import * as markdown from '@shared/note_markdown.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as noteTypes from '@shared/ipc/notes.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useRepositoriesStore } from './repositories.ts';
 
 const POLL_MS = 2000;
@@ -20,7 +21,7 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 export const useNotesStore = defineStore('notes', () => {
   // ========== List ==========
-  const notes = ref<ipc.NoteMeta[]>([]);
+  const notes = ref<noteTypes.NoteMeta[]>([]);
   const loaded = ref(false);
   const revision = ref<number | null>(null);
   const directory = ref('');
@@ -35,7 +36,7 @@ export const useNotesStore = defineStore('notes', () => {
   const byTitle = computed(() => model.titleIndex(notes.value));
   const findByTitle = (title: string) => byTitle.value.get(markdown.titleKey(title)) ?? null;
 
-  const applyList = (list: ipc.NoteList) => {
+  const applyList = (list: noteTypes.NoteList) => {
     notes.value = list.notes;
     revision.value = list.revision;
     directory.value = list.directory;
@@ -64,7 +65,7 @@ export const useNotesStore = defineStore('notes', () => {
   // The notes page works like a small blog: the index (optionally one
   // category or tag) and one page per note, with back and forward.
   // heading: a [[note#heading]] to scroll to once the note is shown.
-  type Route = { name: 'index'; category: ipc.GradeCategory | null; tag: string | null } | { name: 'note'; id: string; heading: string | null };
+  type Route = { name: 'index'; category: packageTypes.GradeCategory | null; tag: string | null } | { name: 'note'; id: string; heading: string | null };
   const history = ref<Route[]>([{ name: 'index', category: null, tag: null }]);
   const position = ref(0);
   const route = computed(() => history.value[position.value]);
@@ -106,7 +107,7 @@ export const useNotesStore = defineStore('notes', () => {
     position.value += 1;
     await show(route.value).catch(() => show({ name: 'index', category: null, tag: null }));
   };
-  const goIndex = (options: { category?: ipc.GradeCategory | null; tag?: string | null } = {}) =>
+  const goIndex = (options: { category?: packageTypes.GradeCategory | null; tag?: string | null } = {}) =>
     navigate({ name: 'index', category: options.category ?? null, tag: options.tag ?? null });
   const goNote = (id: string, heading: string | null = null) => navigate({ name: 'note', id, heading });
 
@@ -128,14 +129,20 @@ export const useNotesStore = defineStore('notes', () => {
 
   // ========== Open note ==========
   // The note being read or edited, and the edit in progress.
-  type Draft = { title: string; body: string; category: ipc.GradeCategory | null; tags: string[]; summary: string | null };
-  const current = ref<ipc.Note | null>(null);
+  type Draft = { title: string; body: string; category: packageTypes.GradeCategory | null; tags: string[]; summary: string | null };
+  const current = ref<noteTypes.Note | null>(null);
   const draft = ref<Draft | null>(null);
   // The file changed on disk while there were unsaved edits.
   const conflict = ref(false);
   const saving = ref(false);
   const summarizing = ref(false);
-  const toDraft = (note: ipc.Note): Draft => ({ title: note.title, body: note.body, category: note.category, tags: [...note.tags], summary: note.summary });
+  const toDraft = (note: noteTypes.Note): Draft => ({
+    title: note.title,
+    body: note.body,
+    category: note.category,
+    tags: [...note.tags],
+    summary: note.summary,
+  });
   const dirty = computed(() => {
     const note = current.value;
     const edit = draft.value;
@@ -188,7 +195,7 @@ export const useNotesStore = defineStore('notes', () => {
   };
 
   // previousId: the id before a rename, whose entry goes.
-  const afterSave = (saved: ipc.NoteSaved, previousId: string = saved.note.id) => {
+  const afterSave = (saved: noteTypes.NoteSaved, previousId: string = saved.note.id) => {
     current.value = saved.note;
     draft.value = toDraft(saved.note);
     conflict.value = false;
@@ -225,7 +232,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   // Each resolves the saved note, or null after telling the developer why not.
   // open: go to the new note's page, in the editor.
-  const create = async (input: ipc.NoteInput, { autoRename = false, open = false } = {}) => {
+  const create = async (input: noteTypes.NoteInput, { autoRename = false, open = false } = {}) => {
     if (open && !(await confirmLeave())) return null;
     try {
       const saved = await call(window.taskpilot.notes.create(plain(input), autoRename));
@@ -312,6 +319,9 @@ export const useNotesStore = defineStore('notes', () => {
 
   const revealDirectory = () => call(window.taskpilot.notes.reveal());
 
+  // A link in a note opens in the system browser or mail app.
+  const openUrl = (url: string) => call(window.taskpilot.notes.openUrl(url));
+
   let pollTimer: number | null = null;
   const startPolling = () => {
     if (pollTimer !== null) return;
@@ -325,7 +335,7 @@ export const useNotesStore = defineStore('notes', () => {
   // ========== From grading ==========
   // One click under a grade comment: the comment becomes a note that points
   // back at the package and the line it was about.
-  const saveComment = async (task: Pick<ipc.TaskView, 'id' | 'title'>, comment: ipc.GradeComment) => {
+  const saveComment = async (task: Pick<packageTypes.TaskView, 'id' | 'title'>, comment: packageTypes.GradeComment) => {
     const repository = useRepositoriesStore().current;
     const note = await create(
       {
@@ -393,6 +403,7 @@ export const useNotesStore = defineStore('notes', () => {
     chooseDirectory,
     resetDirectory,
     revealDirectory,
+    openUrl,
     startPolling,
     stopPolling,
     // From grading

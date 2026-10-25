@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 // A package's dependencies: done ones ticked, open ones linked, and, while
 // the package has not started, a way to stop waiting for one.
-const props = defineProps<{ task: ipc.TaskView; compact?: boolean }>();
+const props = defineProps<{ task: packageTypes.TaskView; compact?: boolean }>();
 const execution = useExecutionStore();
 
-const STATE_TEXT = (dependency: ipc.PackageDependency) =>
+const STATE_TEXT = (dependency: packageTypes.PackageDependency) =>
   dependency.status === null ? '已不存在' : dependency.status === 'done' ? '已完成' : dependency.waived ? '已解除，不再等待' : '未完成';
 
-const open = (dependency: ipc.PackageDependency) => {
+const open = (dependency: packageTypes.PackageDependency) => {
   if (dependency.status !== null) execution.open(dependency.id).catch((error) => console.error(error));
 };
-const waive = (dependency: ipc.PackageDependency) => {
+const waive = (dependency: packageTypes.PackageDependency) => {
   execution.waiveDependency(props.task, dependency).catch((error) => console.error(error));
 };
 </script>

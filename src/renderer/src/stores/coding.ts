@@ -5,21 +5,22 @@ import { call } from '@/lib/ipc.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { describeError } from '@/lib/errors.ts';
 import { MAX_AUTO_ATTEMPTS } from '@shared/coding_types.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as codingTypes from '@shared/coding_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useExecutionStore } from './execution.ts';
 
 export const CODING_POLL_MS = 1000;
 export const CODING_SETUP_SCRIPT = 'scripts/setup-coding-agent-user.sh';
 
-const ACTIVE_STATUSES: ipc.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying', 'verifying'];
+const ACTIVE_STATUSES: codingTypes.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying', 'verifying'];
 // The package's own steps, scope and acceptance criteria go into every prompt,
 // so a first round needs no retyping; the developer can add to it.
 export const DEFAULT_INSTRUCTION = '按工作包的执行指令完成全部步骤，满足验收条件，只改文件范围内的文件。';
-const TERMINAL_STATUSES: ipc.CodingRun['status'][] = ['ready', 'applied', 'submitted', 'failed', 'cancelled', 'discarded'];
+const TERMINAL_STATUSES: codingTypes.CodingRun['status'][] = ['ready', 'applied', 'submitted', 'failed', 'cancelled', 'discarded'];
 
 // The loop is still moving on its own: a round is working, an automatic
 // round's patch is about to be applied, or QA is reviewing its submission.
-export const looping = (task: ipc.TaskView) => {
+export const looping = (task: packageTypes.TaskView) => {
   const codingRun = task.codingRun;
   if (!codingRun || codingRun.halt) return false;
   if (ACTIVE_STATUSES.includes(codingRun.status)) return true;
@@ -32,13 +33,13 @@ export const looping = (task: ipc.TaskView) => {
 
 export const useCodingStore = defineStore('coding', () => {
   const execution = useExecutionStore();
-  const runtime = ref<ipc.CodingRuntimeStatus | null>(null);
+  const runtime = ref<codingTypes.CodingRuntimeStatus | null>(null);
   const runtimeLoading = ref(false);
   const runtimeError = ref<string | null>(null);
-  const events = ref<ipc.CodingEvent[]>([]);
+  const events = ref<codingTypes.CodingEvent[]>([]);
   const eventCursor = ref(-1);
   const eventsLoading = ref(false);
-  const patch = ref<ipc.CodingPatchPreview | null>(null);
+  const patch = ref<codingTypes.CodingPatchPreview | null>(null);
   const patchLoading = ref(false);
   const operation = ref<'status' | 'start' | 'cancel' | 'retry' | 'apply' | null>(null);
   const error = ref<string | null>(null);
@@ -52,7 +53,7 @@ export const useCodingStore = defineStore('coding', () => {
   // Patch paths the developer accepts; all applicable files by default.
   const selectedFiles = ref<string[]>([]);
   // The developer's choice for each conflicted file.
-  const resolutions = ref<Partial<Record<string, ipc.CodingResolution>>>({});
+  const resolutions = ref<Partial<Record<string, codingTypes.CodingResolution>>>({});
 
   const run = computed(() => execution.current?.codingRun ?? null);
   const eligible = computed(() => execution.current?.status === 'in_progress' || !!run.value);
@@ -81,7 +82,7 @@ export const useCodingStore = defineStore('coding', () => {
   const loopActive = computed(() => (execution.current ? looping(execution.current) : false));
   const blockedPaths = computed(() => new Set((patch.value?.blocked ?? run.value?.blocked ?? []).map((entry) => entry.path)));
   // High-risk files are applicable with consent; other blocked files never are.
-  const applicable = (file: ipc.CodingPatchFile) =>
+  const applicable = (file: codingTypes.CodingPatchFile) =>
     !(patch.value?.blocked ?? []).some((entry) => entry.path === file.path && entry.reason !== 'high-risk project control or test path');
   const highRisk = computed(() => (patch.value?.files ?? []).some((file) => file.highRisk && selectedFiles.value.includes(file.path)));
   const mergeOf = (filePath: string) => patch.value?.merge?.find((file) => file.path === filePath) ?? null;
@@ -97,7 +98,7 @@ export const useCodingStore = defineStore('coding', () => {
 
   const sameSelection = (id: string, token: number) => selectedId.value === id && generation === token && execution.current?.id === id;
 
-  const adopt = (task: ipc.TaskView, id: string, token: number) => {
+  const adopt = (task: packageTypes.TaskView, id: string, token: number) => {
     if (!sameSelection(id, token)) return false;
     execution.adoptTask(task);
     return true;
@@ -262,7 +263,7 @@ export const useCodingStore = defineStore('coding', () => {
 
   const applicationDigest = computed(() => patch.value?.mergeDigest ?? patch.value?.digest ?? run.value?.patchDigest);
 
-  const confirmPatchApplication = async (files: string[], chosen: Partial<Record<string, ipc.CodingResolution>>) => {
+  const confirmPatchApplication = async (files: string[], chosen: Partial<Record<string, codingTypes.CodingResolution>>) => {
     const overwrites = Object.entries(chosen)
       .filter(([, choice]) => choice === 'theirs')
       .map(([filePath]) => filePath);
@@ -326,7 +327,7 @@ export const useCodingStore = defineStore('coding', () => {
     }
   };
 
-  const setResolution = (filePath: string, choice: ipc.CodingResolution) => {
+  const setResolution = (filePath: string, choice: codingTypes.CodingResolution) => {
     resolutions.value = { ...resolutions.value, [filePath]: choice };
   };
 

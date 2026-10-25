@@ -7,19 +7,20 @@ import { GLOSSARY } from '@/lib/glossary.ts';
 import * as reviewModel from '@/lib/review_model.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore, VERIFY_LABELS } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import EvidenceRow from './EvidenceRow.vue';
 import FailureExplain from './FailureExplain.vue';
 
 // Each check names what it does; the tooltip explains it in plain words.
-const SEGMENTS: { kind: ipc.CheckKind; icon: IconName; label: string }[] = [
+const SEGMENTS: { kind: workspaceTypes.CheckKind; icon: IconName; label: string }[] = [
   { kind: 'test', icon: 'flask', label: '测试' },
   { kind: 'lint', icon: 'wand', label: '代码检查' },
   { kind: 'build', icon: 'box', label: '构建' },
   { kind: 'smoke', icon: 'rocket', label: '冒烟测试' },
 ];
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 
@@ -41,7 +42,7 @@ const failures = computed(() => (result.value?.results ?? []).filter((entry) => 
 // nothing parsed shows its log open, as the only evidence there is.
 const showOutput = computed(() => !!result.value && (!result.value.summary.ok || result.value.summary.total === 0));
 
-const run = (kind: ipc.CheckKind) => {
+const run = (kind: workspaceTypes.CheckKind) => {
   execution.runVerification(kind).catch((error) => console.error(error));
 };
 const remeasure = () => {

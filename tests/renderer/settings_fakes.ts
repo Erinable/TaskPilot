@@ -2,7 +2,8 @@
 // {ok: true, data} unless a test overrides it.
 import { vi } from 'vitest';
 import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
+import type * as settingsTypes from '@shared/ipc/settings.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
 
@@ -11,7 +12,7 @@ export const ok = <T>(data: T): Promise<Result<T>> => Promise.resolve({ ok: true
 // Typed as any result, so it can replace a success in mockReturnValueOnce.
 export const fail = (code: string, message: string, field?: string): Promise<Result<never>> => Promise.resolve({ ok: false, error: { code, message, field } });
 
-export const preferences = (): ipc.Preferences => ({
+export const preferences = (): settingsTypes.Preferences => ({
   profile: { displayName: 'Ada', avatarColor: 'ocean', initials: 'A' },
   appearance: { theme: 'system', vibrancy: false },
   environment: { pathSource: 'inherit' },
@@ -80,7 +81,7 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
 });
 
 export const installApi = () => {
-  let savedPreferences: ipc.Preferences = preferences();
+  let savedPreferences: settingsTypes.Preferences = preferences();
   const api = {
     listTasks: vi.fn(() => ok([])),
     workspace: {
@@ -94,7 +95,7 @@ export const installApi = () => {
     },
     preferences: {
       get: vi.fn(() => ok(savedPreferences)),
-      set: vi.fn((input: ipc.PreferencesInput) => {
+      set: vi.fn((input: settingsTypes.PreferencesInput) => {
         savedPreferences = { ...input, profile: { ...input.profile, initials: 'X' } };
         return ok(savedPreferences);
       }),
@@ -103,8 +104,8 @@ export const installApi = () => {
       runtimes: vi.fn(() =>
         ok(AGENT_IDS.map((agent) => ({ agent, config: defaultAgentSettings()[agent], command: 'claude', available: true, version: '1.0', reason: null }))),
       ),
-      models: vi.fn((request: ipc.CliModelsRequest) =>
-        ok<ipc.CliModelCatalog>({
+      models: vi.fn((request: agentRuntimeTypes.CliModelsRequest) =>
+        ok<agentRuntimeTypes.CliModelCatalog>({
           cli: request.cli,
           scope: request.scope,
           models:

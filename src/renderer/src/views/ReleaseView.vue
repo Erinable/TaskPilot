@@ -12,7 +12,7 @@ import { describeErrorInfo } from '@/lib/errors.ts';
 import * as model from '@/lib/release_model.ts';
 import { useReleaseStore } from '@/stores/release.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as releaseTypes from '@shared/ipc/release.ts';
 
 const store = useReleaseStore();
 const settings = useSettingsStore();
@@ -20,7 +20,9 @@ const requirements = useRequirementsStore();
 
 const startPoint = computed(() => store.state?.startPoint ?? null);
 const draft = computed(() => store.draft);
-const readyDraft = computed(() => (draft.value?.status === 'ready' && draft.value.plan ? (draft.value as ipc.ReleaseDraft & { plan: ipc.ReleasePlan }) : null));
+const readyDraft = computed(() =>
+  draft.value?.status === 'ready' && draft.value.plan ? (draft.value as releaseTypes.ReleaseDraft & { plan: releaseTypes.ReleasePlan }) : null,
+);
 const commitOptions = computed(() => (store.commits ?? []).map((commit) => ({ value: commit.sha, label: model.commitOptionLabel(commit) })));
 
 const run = (action: () => Promise<unknown>) => {

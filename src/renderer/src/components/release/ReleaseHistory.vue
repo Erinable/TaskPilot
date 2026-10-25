@@ -6,9 +6,9 @@ import { computed, ref } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import * as model from '@/lib/release_model.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as releaseTypes from '@shared/ipc/release.ts';
 
-const props = defineProps<{ releases: ipc.Release[] }>();
+const props = defineProps<{ releases: releaseTypes.Release[] }>();
 
 const limit = ref(model.HISTORY_PAGE);
 const expanded = ref<Set<string>>(new Set());

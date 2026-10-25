@@ -11,7 +11,7 @@ import { indexEntries } from '../repo_reader.ts';
 import { supportsAgentConfig, TEAM_AGENT_IDS } from '../../shared/agent_runtime.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as activityTypes from '../../shared/ipc/activity.ts';
 import type { PriceTable } from '../model_prices.ts';
 import type { CostRow } from '../cost_rollup.ts';
 import type { AppContext } from '../app_context.ts';
@@ -63,7 +63,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // in-memory summary, so a poll reads no day files.
   ipcMain.handle(
     CHANNELS.activityOverview,
-    wrap(async (): Promise<ipc.ActivityOverview> => {
+    wrap(async (): Promise<activityTypes.ActivityOverview> => {
       const activity = requireActivity();
       const settings = ctx.getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
@@ -77,7 +77,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
           }),
         ),
       ]);
-      const availableByAgent = { ...Object.fromEntries(analysis), 'coding-agent': coding.available } as ipc.TeamStatus['availableByAgent'];
+      const availableByAgent = { ...Object.fromEntries(analysis), 'coding-agent': coding.available } as activityTypes.TeamStatus['availableByAgent'];
       const work = ctx.backgroundRuns.work();
       return {
         recent: summary.recent,
@@ -97,12 +97,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
 
   ipcMain.handle(
     CHANNELS.costsReport,
-    wrap(async (_event, rawDays): Promise<ipc.CostReport> => {
+    wrap(async (_event, rawDays): Promise<activityTypes.CostReport> => {
       const activity = requireActivity();
       if (rawDays !== 7 && rawDays !== 30 && rawDays !== 90) failWith('days must be 7, 30 or 90', 'invalid_argument', 'days');
       const [records, rollup, table] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup(), currentPrices()]);
       return buildCostReport({
-        days: rawDays as ipc.CostRange,
+        days: rawDays as activityTypes.CostRange,
         records,
         rollup,
         prices: table,
@@ -136,7 +136,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // The full feed, a few business days per page.
   ipcMain.handle(
     CHANNELS.activityPage,
-    wrap(async (_event, before): Promise<ipc.ActivityPage> => {
+    wrap(async (_event, before): Promise<activityTypes.ActivityPage> => {
       const activity = requireActivity();
       // A day key from an earlier page; anything else starts from today.
       const cursor = typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before) ? before : null;
@@ -149,7 +149,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
   // workspace the summaries still show, with unknown freshness.
   ipcMain.handle(
     CHANNELS.engineeringMap,
-    wrap(async (): Promise<ipc.EngineeringMap> => {
+    wrap(async (): Promise<activityTypes.EngineeringMap> => {
       const root = ctx.getConfig().root;
       const [index, paths] = root ? await Promise.all([indexEntries(root), git.listFiles(root, { limit: MAX_TREE_FILES + 1 })]) : [null, []];
       return buildEngineeringMap(ctx.requirements?.list() ?? [], index, paths);

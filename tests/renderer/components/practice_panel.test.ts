@@ -6,7 +6,7 @@ import ElementPlus from 'element-plus';
 
 import PracticePanel from '../../../src/renderer/src/components/execution/PracticePanel.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -14,7 +14,7 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   return { showToast, announceAgent: showToast, confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
 });
 
-const READY: ipc.ReferenceRun = {
+const READY: packageTypes.ReferenceRun = {
   id: 'r1',
   status: 'ready',
   startedAt: '',
@@ -24,8 +24,8 @@ const READY: ipc.ReferenceRun = {
   costUsd: 0.2,
   revealedAt: null,
 };
-const REVIEWED = { status: 'rejected', startedAt: '', finishedAt: '', error: null } as unknown as ipc.Review;
-const GRADE: ipc.Grade = {
+const REVIEWED = { status: 'rejected', startedAt: '', finishedAt: '', error: null } as unknown as packageTypes.Review;
+const GRADE: packageTypes.Grade = {
   id: 'g1',
   status: 'done',
   startedAt: '',
@@ -44,10 +44,10 @@ const GRADE: ipc.Grade = {
   },
 };
 
-let current: { task: ipc.TaskView };
+let current: { task: packageTypes.TaskView };
 let api: ReturnType<typeof installApi>;
 
-const mountPanel = async (overrides: Partial<ipc.TaskView>) => {
+const mountPanel = async (overrides: Partial<packageTypes.TaskView>) => {
   current.task = taskView({ mode: 'practice', ...overrides });
   const pinia = createPinia();
   setActivePinia(pinia);

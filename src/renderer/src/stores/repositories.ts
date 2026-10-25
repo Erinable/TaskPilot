@@ -8,16 +8,22 @@ import { call } from '@/lib/ipc.ts';
 import { runLabel } from '@/lib/activity.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
+import { useActivityFeedStore } from './activity_feed.ts';
 import { useAppStore } from './app.ts';
+import { useCommitStore } from './commit.ts';
+import { useEngineeringMapStore } from './engineering_map.ts';
 import { useExecutionStore } from './execution.ts';
 import { useNotificationsStore } from './notifications.ts';
+import { useOnboardingStore } from './onboarding.ts';
 import { useReleaseStore } from './release.ts';
 import { useRequirementsStore } from './requirements.ts';
 import { useSettingsStore } from './settings.ts';
 import { useTasksStore } from './tasks.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import { useTutorStore } from './tutor.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
+import type * as repositoryTypes from '@shared/ipc/repositories.ts';
 
-const BUSY_LABELS: Record<ipc.BusyKind, string> = {
+const BUSY_LABELS: Record<repositoryTypes.BusyKind, string> = {
   requirement: '需求',
   review: 'QA 审查',
   adjudication: '偏差裁决',
@@ -32,7 +38,7 @@ const BUSY_LABELS: Record<ipc.BusyKind, string> = {
 
 export const useRepositoriesStore = defineStore('repositories', () => {
   // ========== List ==========
-  const repositories = ref<ipc.Repository[]>([]);
+  const repositories = ref<repositoryTypes.Repository[]>([]);
   const currentId = ref<string | null>(null);
   const current = computed(() => repositories.value.find((repo) => repo.id === currentId.value) ?? null);
   // Bumped after every switch; the main content is keyed on it so each view
@@ -40,7 +46,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
   const generation = ref(0);
   const switching = ref(false);
 
-  const apply = (list: ipc.RepositoryList) => {
+  const apply = (list: repositoryTypes.RepositoryList) => {
     repositories.value = list.repositories;
     currentId.value = list.current;
   };
@@ -73,6 +79,12 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     useRequirementsStore().stopPolling();
     useReleaseStore().leave();
     execution.close();
+    // What the views read for the old repository; each view reloads on remount.
+    useActivityFeedStore().reset();
+    useCommitStore().reset();
+    useEngineeringMapStore().reset();
+    useOnboardingStore().reset();
+    useTutorStore().reset();
     if (app.view === 'execution') await app.navigate('queue');
     return true;
   };
@@ -92,7 +104,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
 
   // Shared by switch and add: confirm, cancel, then reload. False when the
   // user backed out or the main process refused.
-  const runSwitch = async (action: () => Promise<ipc.IpcResult<ipc.RepositoryList>>) => {
+  const runSwitch = async (action: () => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>) => {
     if (switching.value) return false;
     switching.value = true;
     try {

@@ -5,9 +5,9 @@
 import AppIcon from '@/components/AppIcon.vue';
 import { MODE_OPTIONS } from '@/lib/execution_mode.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-defineProps<{ task: ipc.TaskView }>();
+defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 

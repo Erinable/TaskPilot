@@ -2,7 +2,8 @@
 // step that outlives its IPC call registers here. A repository switch or quit
 // cancels them all and waits for their last writes, and "who is busy" (the
 // switch dialog, the team view) is read from the same entries.
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
+import type * as repositoryTypes from '../shared/ipc/repositories.ts';
 
 // Registry kinds, in the order runs are listed.
 const RUN_KINDS = [
@@ -22,7 +23,7 @@ const RUN_KINDS = [
 export type RunKind = (typeof RUN_KINDS)[number];
 
 // Only kinds the team view knows can name an agent.
-type Listing = { busy: ipc.BusyKind; agent?: undefined } | { busy: ipc.AgentWork['kind']; agent: () => ipc.ActivityAgent };
+type Listing = { busy: repositoryTypes.BusyKind; agent?: undefined } | { busy: activityTypes.AgentWork['kind']; agent: () => activityTypes.ActivityAgent };
 
 export type RunInfo = Listing & {
   kind: RunKind;
@@ -77,9 +78,9 @@ export class BackgroundRuns {
   }
 
   // What cancelAll() would stop, named for the confirmation dialog.
-  busy(): ipc.BusyRun[] {
+  busy(): repositoryTypes.BusyRun[] {
     const listed = new Set<RunKind>();
-    return this.#list().flatMap((entry): ipc.BusyRun[] => {
+    return this.#list().flatMap((entry): repositoryTypes.BusyRun[] => {
       if (entry.once && listed.has(entry.kind)) return [];
       listed.add(entry.kind);
       return [{ kind: entry.busy, label: entry.label() }];
@@ -87,8 +88,8 @@ export class BackgroundRuns {
   }
 
   // The runs an agent of the team is busy with.
-  work(): ipc.AgentWork[] {
-    return this.#list().flatMap((entry): ipc.AgentWork[] => (entry.agent ? [{ agent: entry.agent(), kind: entry.busy, label: entry.label() }] : []));
+  work(): activityTypes.AgentWork[] {
+    return this.#list().flatMap((entry): activityTypes.AgentWork[] => (entry.agent ? [{ agent: entry.agent(), kind: entry.busy, label: entry.label() }] : []));
   }
 
   // Aborts every run and waits for every tracked promise to settle.

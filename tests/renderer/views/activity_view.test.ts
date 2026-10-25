@@ -7,12 +7,13 @@ import ElementPlus from 'element-plus';
 import ActivityView from '../../../src/renderer/src/views/ActivityView.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as activityTypes from '../../../src/shared/ipc/activity.ts';
+import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 const at = (iso: string) => iso;
 
-const pages: Record<string, ipc.ActivityPage> = {
+const pages: Record<string, activityTypes.ActivityPage> = {
   first: {
     days: [
       {
@@ -54,7 +55,7 @@ describe('ActivityView', () => {
       activity: { page },
       getTask: vi.fn(() => ok({ id: 'p1' })),
     };
-    useTasksStore().tasks = [{ id: 'p1', title: '登录接口' } as ipc.TaskView];
+    useTasksStore().tasks = [{ id: 'p1', title: '登录接口' } as packageTypes.TaskView];
   });
 
   const render = async () => {

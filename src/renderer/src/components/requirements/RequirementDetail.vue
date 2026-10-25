@@ -14,9 +14,9 @@ import InterfacesPanel from './InterfacesPanel.vue';
 import PlanPackageCard from './PlanPackageCard.vue';
 import MilestonePicker from './MilestonePicker.vue';
 import * as model from './requirement_model.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
-const props = defineProps<{ item: ipc.Requirement }>();
+const props = defineProps<{ item: requirementTypes.Requirement }>();
 
 const store = useRequirementsStore();
 

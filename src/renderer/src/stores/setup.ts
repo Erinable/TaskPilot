@@ -11,7 +11,8 @@ import { confirmAction, showToast } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useAppStore } from './app.ts';
 import { useSettingsStore } from './settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
+import type * as envTypes from '@shared/ipc/environment.ts';
 
 const POLL_MS = 800;
 
@@ -22,7 +23,7 @@ const BLOCKER_TEXT: Record<string, string> = {
   node_missing: '在当前 PATH 中找不到 node。可以在「运行环境」里改为从登录 shell 读取 PATH。',
   npm_missing: '在当前 PATH 中找不到 npm。',
 };
-const adjustmentText = (adjustment: ipc.EnvAdjustment) => {
+const adjustmentText = (adjustment: envTypes.EnvAdjustment) => {
   if (adjustment.code === 'install_without_manifest') return '没有 package.json，已跳过安装。';
   if (adjustment.code === 'ci_without_lockfile') return '仓库没有 package-lock.json，已把 npm ci 改为 npm install。';
   if (adjustment.code === 'unknown_script') return `package.json 里没有脚本「${adjustment.script}」，已取消 ${adjustment.kind} 步骤。`;
@@ -35,9 +36,9 @@ const packageList = (packages: string[]) =>
   packages.length > NAMED_PACKAGES ? `${packages.slice(0, NAMED_PACKAGES).join('、')} 等 ${packages.length} 个` : packages.join('、');
 
 export type SetupNotice = { tone: 'danger' | 'info' | 'warning'; icon: IconName; text: string; detail: string | null };
-export type ApplyItem = { kind: ipc.ScriptKind; proposed: string; current: string; disabled: boolean; note: string };
+export type ApplyItem = { kind: envTypes.ScriptKind; proposed: string; current: string; disabled: boolean; note: string };
 
-export const resultText = (result: ipc.EnvStepResult) => {
+export const resultText = (result: envTypes.EnvStepResult) => {
   if (result.timedOut) return '超时';
   const seconds = (result.durationMs / 1000).toFixed(1);
   if (result.ok) return `成功 · ${seconds}s`;
@@ -49,12 +50,12 @@ export const useSetupStore = defineStore('setup', () => {
   const settings = useSettingsStore();
 
   // ========== Session ==========
-  const view = ref<ipc.EnvState | null>(null);
+  const view = ref<envTypes.EnvState | null>(null);
   const loadError = ref<string | null>(null);
   // A click is waiting on the main process.
   const acting = ref(false);
   // Kinds ticked in the apply list; reset whenever a new view arrives.
-  const selectedKinds = ref<ipc.ScriptKind[]>([]);
+  const selectedKinds = ref<envTypes.ScriptKind[]>([]);
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   const busy = computed(() => acting.value || view.value?.status === 'planning' || Boolean(view.value?.running));
@@ -154,7 +155,7 @@ export const useSetupStore = defineStore('setup', () => {
 
   // ========== Actions ==========
   // Every new view resets the apply ticks to their defaults, as a repaint did.
-  const setView = (next: ipc.EnvState) => {
+  const setView = (next: envTypes.EnvState) => {
     view.value = next;
     selectedKinds.value = (['test', 'lint', 'build'] as const).filter((kind) => {
       const step = next.steps.find((candidate) => candidate.id === kind);
@@ -187,7 +188,7 @@ export const useSetupStore = defineStore('setup', () => {
   };
 
   // Runs an action, takes its returned view, and keeps polling if needed.
-  const act = async <T extends ipc.EnvState>(promise: Promise<ipc.IpcResult<T>>, failure = '操作失败') => {
+  const act = async <T extends envTypes.EnvState>(promise: Promise<envelopeTypes.IpcResult<T>>, failure = '操作失败') => {
     acting.value = true;
     // Long steps hold the call open; poll meanwhile so "运行中" and Cancel show.
     if (pollTimer) clearTimeout(pollTimer);
@@ -229,7 +230,7 @@ export const useSetupStore = defineStore('setup', () => {
   };
 
   // Only a step id crosses IPC; the main process rebuilds the command.
-  const runStep = async (stepId: ipc.EnvStepId) => {
+  const runStep = async (stepId: envTypes.EnvStepId) => {
     if (busy.value || view.value?.stale) return false;
     const step = view.value?.steps.find((candidate) => candidate.id === stepId);
     // npm ci starts by deleting node_modules; a working install would be lost.

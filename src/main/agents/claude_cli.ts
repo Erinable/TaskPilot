@@ -23,7 +23,7 @@ import { processEnv } from '../env.ts';
 import { claudeCall } from './model_usage.ts';
 
 import type { ThinkingLevel } from '../../shared/agent_runtime.ts';
-import type { ModelCall } from '../../shared/ipc_types.ts';
+import type { ModelCall } from '../../shared/ipc/activity.ts';
 export type JsonSchema = Record<string, unknown>;
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;

@@ -1,10 +1,10 @@
 // Plain-language reading of a failed check, for people new to test runners
 // and compilers: what most likely went wrong and what to try next. Pattern
 // rules over the output, no model call; the raw output stays available below.
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 export type FailureInput = {
-  kind: ipc.CheckKind;
+  kind: workspaceTypes.CheckKind;
   exitCode: number;
   timedOut: boolean;
   // Full output, or its tail when that is all a stored review kept.

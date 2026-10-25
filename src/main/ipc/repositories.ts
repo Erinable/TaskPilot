@@ -8,7 +8,7 @@ import { readCounts } from '../repository_summary.ts';
 import { countStatuses } from '../../shared/repository_counts.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as repositoryTypes from '../../shared/ipc/repositories.ts';
 import type { AppContext } from '../app_context.ts';
 import type { RepositoryEntry } from '../repositories.ts';
 import type { IpcMainLike } from './handler.ts';
@@ -16,7 +16,7 @@ import type { IpcMainLike } from './handler.ts';
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const { repositories, store, catalog } = ctx;
 
-  const repositoryList = async (): Promise<ipc.RepositoryList> => {
+  const repositoryList = async (): Promise<repositoryTypes.RepositoryList> => {
     const current = repositories.current?.id ?? null;
     const entries = repositories.list();
     const present = await Promise.all(entries.map((entry) => git.isRepo(entry.root).catch(() => false)));
@@ -67,12 +67,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.repositoriesBusy,
-    wrap((): ipc.BusyRun[] => ctx.backgroundRuns.busy()),
+    wrap((): repositoryTypes.BusyRun[] => ctx.backgroundRuns.busy()),
   );
 
   ipcMain.handle(
     CHANNELS.repositoriesAdd,
-    wrap(async (_event, rawRoot, open): Promise<ipc.RepositoryList> => {
+    wrap(async (_event, rawRoot, open): Promise<repositoryTypes.RepositoryList> => {
       const { root } = await ctx.validateRoot(rawRoot);
       const hadCurrent = repositories.current !== null;
       const entry = await repositories.add(root);
@@ -84,7 +84,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.repositoriesSwitch,
-    wrap(async (_event, rawId): Promise<ipc.RepositoryList> => {
+    wrap(async (_event, rawId): Promise<repositoryTypes.RepositoryList> => {
       const id = requireString(rawId, 'id');
       if (!repositories.get(id)) return failWith(`Unknown repository: ${id}`, 'unknown_repository');
       if (repositories.current?.id !== id) await openRepository(id);
@@ -94,7 +94,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.repositoriesRelocate,
-    wrap(async (_event, rawId, rawRoot): Promise<ipc.RepositoryList> => {
+    wrap(async (_event, rawId, rawRoot): Promise<repositoryTypes.RepositoryList> => {
       const id = requireString(rawId, 'id');
       const { root } = await ctx.validateRoot(rawRoot);
       await repositories.relocate(id, root);

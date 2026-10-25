@@ -11,7 +11,7 @@ import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts
 import { READ_STORAGE_KEY, useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import { taskView } from '../execution_fakes.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
-import type * as ipc from '../../../src/shared/ipc_types.ts';
+import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -23,7 +23,7 @@ const MARKUP = '<img src=x onerror=alert(1)>';
 
 describe('NotificationCenter', () => {
   let pinia: ReturnType<typeof createPinia>;
-  let state: { list: ipc.Requirement[] };
+  let state: { list: requirementTypes.Requirement[] };
   let api: ReturnType<typeof installApi>;
 
   beforeEach(() => {

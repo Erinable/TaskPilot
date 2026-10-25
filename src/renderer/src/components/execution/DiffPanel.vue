@@ -3,10 +3,10 @@ import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 import DiffFile from './DiffFile.vue';
 
-defineProps<{ task: ipc.TaskView }>();
+defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 

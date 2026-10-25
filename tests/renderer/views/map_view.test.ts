@@ -7,13 +7,14 @@ import ElementPlus from 'element-plus';
 import MapView from '@/views/MapView.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
 
 const source = { requirementId: 'r1', title: '邮箱登录', at: '2026-01-02T03:00:00.000Z' };
 
-const mapModule = (overrides: Partial<ipc.MapModule> = {}): ipc.MapModule => ({
+const mapModule = (overrides: Partial<activityTypes.MapModule> = {}): activityTypes.MapModule => ({
   path: 'src/main/ipc.ts',
   purpose: '注册 `ipcMain` 处理器',
   members: [{ name: 'registerIpc', signature: '(ipcMain: IpcMain) => void' }],
@@ -24,7 +25,7 @@ const mapModule = (overrides: Partial<ipc.MapModule> = {}): ipc.MapModule => ({
   ...overrides,
 });
 
-const engineeringMap = (overrides: Partial<ipc.EngineeringMap> = {}): ipc.EngineeringMap => ({
+const engineeringMap = (overrides: Partial<activityTypes.EngineeringMap> = {}): activityTypes.EngineeringMap => ({
   modules: [
     mapModule(),
     mapModule({
@@ -44,7 +45,7 @@ const engineeringMap = (overrides: Partial<ipc.EngineeringMap> = {}): ipc.Engine
   ...overrides,
 });
 
-let state: { result: { ok: true; data: ipc.EngineeringMap } | { ok: false; error: ipc.ErrorInfo } };
+let state: { result: { ok: true; data: activityTypes.EngineeringMap } | { ok: false; error: envelopeTypes.ErrorInfo } };
 let get: ReturnType<typeof vi.fn>;
 let pinia: ReturnType<typeof createPinia>;
 

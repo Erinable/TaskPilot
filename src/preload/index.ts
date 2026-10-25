@@ -5,9 +5,22 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 import { CHANNELS } from '../shared/ipc_channels.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
+import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
+import type * as codingTypes from '../shared/coding_types.ts';
+import type * as commitTypes from '../shared/ipc/commit.ts';
+import type * as envelopeTypes from '../shared/ipc/envelope.ts';
+import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as noteTypes from '../shared/ipc/notes.ts';
+import type * as packageTypes from '../shared/ipc/packages.ts';
+import type * as releaseTypes from '../shared/ipc/release.ts';
+import type * as repositoryTypes from '../shared/ipc/repositories.ts';
+import type * as requirementTypes from '../shared/ipc/requirements.ts';
+import type * as settingsTypes from '../shared/ipc/settings.ts';
+import type * as tutorTypes from '../shared/ipc/tutor.ts';
+import type * as workspaceTypes from '../shared/ipc/workspace.ts';
 
-const invoke = <T>(channel: Channel, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<ipc.IpcResult<T>>;
+const invoke = <T>(channel: Channel, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<envelopeTypes.IpcResult<T>>;
 
 // Passed by the main process (see BrowserWindow additionalArguments).
 const TIME_ZONE_ARG = '--taskpilot-time-zone=';
@@ -21,144 +34,146 @@ const api = {
   onFullScreen: (listener: (fullScreen: boolean) => void) => {
     ipcRenderer.on(CHANNELS.windowFullScreen, (_event, fullScreen: unknown) => listener(fullScreen === true));
   },
-  listTasks: () => invoke<ipc.TaskView[]>(CHANNELS.listTasks),
-  getTask: (id: string) => invoke<ipc.TaskView>(CHANNELS.getTask, id),
+  listTasks: () => invoke<packageTypes.TaskView[]>(CHANNELS.listTasks),
+  getTask: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.getTask, id),
 
-  transition: (id: string, name: ipc.HumanTransition, options?: ipc.TransitionOptions) => invoke<ipc.WorkPackageState>(CHANNELS.transition, id, name, options),
-  waiveDependency: (id: string, dependency: string) => invoke<ipc.TaskView>(CHANNELS.waiveDependency, id, dependency),
-  measureBaseline: (id: string) => invoke<ipc.TaskView>(CHANNELS.baselineMeasure, id),
-  setStepDone: (id: string, stepIndex: number, done: boolean) => invoke<ipc.WorkPackageState>(CHANNELS.setStepDone, id, stepIndex, done),
+  transition: (id: string, name: packageTypes.HumanTransition, options?: packageTypes.TransitionOptions) =>
+    invoke<packageTypes.WorkPackageState>(CHANNELS.transition, id, name, options),
+  waiveDependency: (id: string, dependency: string) => invoke<packageTypes.TaskView>(CHANNELS.waiveDependency, id, dependency),
+  measureBaseline: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.baselineMeasure, id),
+  setStepDone: (id: string, stepIndex: number, done: boolean) => invoke<packageTypes.WorkPackageState>(CHANNELS.setStepDone, id, stepIndex, done),
 
   review: {
-    retry: (id: string) => invoke<ipc.WorkPackageState>(CHANNELS.reviewRetry, id),
+    retry: (id: string) => invoke<packageTypes.WorkPackageState>(CHANNELS.reviewRetry, id),
     cancel: (id: string) => invoke<boolean>(CHANNELS.reviewCancel, id),
   },
 
   deviation: {
-    retry: (id: string) => invoke<ipc.WorkPackageState>(CHANNELS.deviationRetry, id),
+    retry: (id: string) => invoke<packageTypes.WorkPackageState>(CHANNELS.deviationRetry, id),
     cancel: (id: string) => invoke<boolean>(CHANNELS.deviationCancel, id),
   },
 
   workspace: {
-    get: () => invoke<ipc.WorkspaceView>(CHANNELS.workspaceGet),
-    set: (form: ipc.WorkspaceForm) => invoke<ipc.WorkspaceView>(CHANNELS.workspaceSet, form),
-    check: (form: ipc.WorkspaceForm) => invoke<ipc.WorkspaceCheck>(CHANNELS.workspaceCheck, form),
+    get: () => invoke<workspaceTypes.WorkspaceView>(CHANNELS.workspaceGet),
+    set: (form: workspaceTypes.WorkspaceForm) => invoke<workspaceTypes.WorkspaceView>(CHANNELS.workspaceSet, form),
+    check: (form: workspaceTypes.WorkspaceForm) => invoke<workspaceTypes.WorkspaceCheck>(CHANNELS.workspaceCheck, form),
     pickRoot: () => invoke<string | null>(CHANNELS.workspacePickRoot),
-    info: () => invoke<ipc.WorkspaceInfo>(CHANNELS.workspaceInfo),
-    openFile: (filePath: string, line: number | null = null) => invoke<ipc.OpenedWith>(CHANNELS.workspaceOpenFile, filePath, line),
+    info: () => invoke<workspaceTypes.WorkspaceInfo>(CHANNELS.workspaceInfo),
+    openFile: (filePath: string, line: number | null = null) => invoke<workspaceTypes.OpenedWith>(CHANNELS.workspaceOpenFile, filePath, line),
   },
 
   diff: {
-    stat: (id: string) => invoke<ipc.DiffStat>(CHANNELS.diffStat, id),
-    file: (id: string, filePath: string) => invoke<ipc.DiffFile>(CHANNELS.diffFile, id, filePath),
+    stat: (id: string) => invoke<workspaceTypes.DiffStat>(CHANNELS.diffStat, id),
+    file: (id: string, filePath: string) => invoke<workspaceTypes.DiffFile>(CHANNELS.diffFile, id, filePath),
   },
 
   verify: {
-    run: (kind: ipc.CheckKind, taskId?: string) => invoke<ipc.VerifyRun>(CHANNELS.verifyRun, kind, taskId),
+    run: (kind: workspaceTypes.CheckKind, taskId?: string) => invoke<workspaceTypes.VerifyRun>(CHANNELS.verifyRun, kind, taskId),
   },
 
   preferences: {
-    get: () => invoke<ipc.Preferences>(CHANNELS.preferencesGet),
-    set: (prefs: ipc.PreferencesInput) => invoke<ipc.Preferences>(CHANNELS.preferencesSet, prefs),
+    get: () => invoke<settingsTypes.Preferences>(CHANNELS.preferencesGet),
+    set: (prefs: settingsTypes.PreferencesInput) => invoke<settingsTypes.Preferences>(CHANNELS.preferencesSet, prefs),
   },
 
   environment: {
-    info: (options?: ipc.EnvironmentInfoOptions) => invoke<ipc.EnvironmentInfo>(CHANNELS.environmentInfo, options),
+    info: (options?: settingsTypes.EnvironmentInfoOptions) => invoke<settingsTypes.EnvironmentInfo>(CHANNELS.environmentInfo, options),
   },
 
   data: {
-    info: () => invoke<ipc.DataInfo>(CHANNELS.dataInfo),
-    resetProgress: () => invoke<ipc.PackageSummary>(CHANNELS.dataResetProgress),
+    info: () => invoke<settingsTypes.DataInfo>(CHANNELS.dataInfo),
+    resetProgress: () => invoke<settingsTypes.PackageSummary>(CHANNELS.dataResetProgress),
     reveal: () => invoke<true>(CHANNELS.dataReveal),
   },
 
   requirements: {
-    list: () => invoke<ipc.Requirement[]>(CHANNELS.requirementsList),
-    get: (id: string) => invoke<ipc.Requirement>(CHANNELS.requirementsGet, id),
-    create: (input: ipc.RequirementInput) => invoke<ipc.Requirement>(CHANNELS.requirementsCreate, input),
-    clarify: (id: string) => invoke<ipc.Requirement>(CHANNELS.requirementsClarify, id),
-    answer: (id: string, answers: ipc.RequirementAnswers) => invoke<ipc.Requirement>(CHANNELS.requirementsAnswer, id, answers),
-    plan: (id: string, answers?: ipc.RequirementAnswers) => invoke<ipc.Requirement>(CHANNELS.requirementsPlan, id, answers),
-    publish: (id: string) => invoke<ipc.Requirement>(CHANNELS.requirementsPublish, id),
+    list: () => invoke<requirementTypes.Requirement[]>(CHANNELS.requirementsList),
+    get: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsGet, id),
+    create: (input: requirementTypes.RequirementInput) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCreate, input),
+    clarify: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsClarify, id),
+    answer: (id: string, answers: requirementTypes.RequirementAnswers) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsAnswer, id, answers),
+    plan: (id: string, answers?: requirementTypes.RequirementAnswers) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsPlan, id, answers),
+    publish: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsPublish, id),
     remove: (id: string) => invoke<true>(CHANNELS.requirementsRemove, id),
     cancel: (id: string) => invoke<boolean>(CHANNELS.requirementsCancel, id),
   },
 
   agent: {
-    status: () => invoke<ipc.AgentStatus>(CHANNELS.agentStatus),
-    runtimes: () => invoke<ipc.AgentRuntimeStatus[]>(CHANNELS.agentRuntimes),
-    models: (request: ipc.CliModelsRequest) => invoke<ipc.CliModelCatalog>(CHANNELS.agentModels, request),
+    status: () => invoke<settingsTypes.AgentStatus>(CHANNELS.agentStatus),
+    runtimes: () => invoke<agentRuntimeTypes.AgentRuntimeStatus[]>(CHANNELS.agentRuntimes),
+    models: (request: agentRuntimeTypes.CliModelsRequest) => invoke<agentRuntimeTypes.CliModelCatalog>(CHANNELS.agentModels, request),
   },
   coding: {
-    status: () => invoke<ipc.CodingRuntimeStatus>(CHANNELS.codingStatus),
-    start: (id: string, input: ipc.CodingStart) => invoke<ipc.TaskView>(CHANNELS.codingStart, id, input),
-    get: (id: string) => invoke<ipc.TaskView>(CHANNELS.codingGet, id),
-    events: (id: string, after: number) => invoke<ipc.CodingEventPage>(CHANNELS.codingEvents, id, after),
+    status: () => invoke<codingTypes.CodingRuntimeStatus>(CHANNELS.codingStatus),
+    start: (id: string, input: codingTypes.CodingStart) => invoke<packageTypes.TaskView>(CHANNELS.codingStart, id, input),
+    get: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.codingGet, id),
+    events: (id: string, after: number) => invoke<codingTypes.CodingEventPage>(CHANNELS.codingEvents, id, after),
     cancel: (id: string) => invoke<boolean>(CHANNELS.codingCancel, id),
-    patch: (id: string) => invoke<ipc.CodingPatchPreview>(CHANNELS.codingPatch, id),
-    apply: (id: string, input: ipc.CodingApply) => invoke<ipc.CodingApplyResult>(CHANNELS.codingApply, id, input),
-    resume: (id: string) => invoke<ipc.TaskView>(CHANNELS.codingResume, id),
-    active: () => invoke<ipc.CodingActiveRun[]>(CHANNELS.codingActive),
+    patch: (id: string) => invoke<codingTypes.CodingPatchPreview>(CHANNELS.codingPatch, id),
+    apply: (id: string, input: codingTypes.CodingApply) => invoke<codingTypes.CodingApplyResult>(CHANNELS.codingApply, id, input),
+    resume: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.codingResume, id),
+    active: () => invoke<codingTypes.CodingActiveRun[]>(CHANNELS.codingActive),
   },
 
   activity: {
-    overview: () => invoke<ipc.ActivityOverview>(CHANNELS.activityOverview),
-    page: (before: string | null) => invoke<ipc.ActivityPage>(CHANNELS.activityPage, before),
+    overview: () => invoke<activityTypes.ActivityOverview>(CHANNELS.activityOverview),
+    page: (before: string | null) => invoke<activityTypes.ActivityPage>(CHANNELS.activityPage, before),
   },
 
   costs: {
-    report: (days: ipc.CostRange) => invoke<ipc.CostReport>(CHANNELS.costsReport, days),
+    report: (days: activityTypes.CostRange) => invoke<activityTypes.CostReport>(CHANNELS.costsReport, days),
     // The one outbound request: downloads the models.dev price list.
     syncPrices: () => invoke<{ syncedAt: string }>(CHANNELS.costsSyncPrices),
   },
 
   engineeringMap: {
-    get: () => invoke<ipc.EngineeringMap>(CHANNELS.engineeringMap),
+    get: () => invoke<activityTypes.EngineeringMap>(CHANNELS.engineeringMap),
   },
 
   env: {
-    get: () => invoke<ipc.EnvState>(CHANNELS.envGet),
-    plan: (options?: ipc.EnvPlanOptions) => invoke<ipc.EnvState>(CHANNELS.envPlan, options),
-    setAllowScripts: (allow: boolean) => invoke<ipc.EnvState>(CHANNELS.envSetAllowScripts, allow),
-    runStep: (stepId: string) => invoke<ipc.EnvState>(CHANNELS.envRunStep, stepId),
-    apply: (kinds: ipc.ScriptKind[]) => invoke<ipc.EnvApplyResult>(CHANNELS.envApply, kinds),
+    get: () => invoke<envTypes.EnvState>(CHANNELS.envGet),
+    plan: (options?: envTypes.EnvPlanOptions) => invoke<envTypes.EnvState>(CHANNELS.envPlan, options),
+    setAllowScripts: (allow: boolean) => invoke<envTypes.EnvState>(CHANNELS.envSetAllowScripts, allow),
+    runStep: (stepId: string) => invoke<envTypes.EnvState>(CHANNELS.envRunStep, stepId),
+    apply: (kinds: envTypes.ScriptKind[]) => invoke<envTypes.EnvApplyResult>(CHANNELS.envApply, kinds),
     cancel: () => invoke<boolean>(CHANNELS.envCancel),
   },
 
   release: {
-    get: () => invoke<ipc.ReleaseState>(CHANNELS.releaseGet),
-    recentCommits: () => invoke<ipc.ReleaseCommit[]>(CHANNELS.releaseRecentCommits),
-    generate: (startCommit?: string) => invoke<ipc.ReleaseState>(CHANNELS.releaseGenerate, startCommit),
-    updateDraft: (input: ipc.ReleaseDraftInput) => invoke<ipc.ReleaseState>(CHANNELS.releaseUpdateDraft, input),
-    finish: () => invoke<ipc.Release>(CHANNELS.releaseFinish),
-    writeNotes: (input: ipc.ReleaseWriteInput) => invoke<ipc.ReleaseWriteResult>(CHANNELS.releaseWriteNotes, input),
+    get: () => invoke<releaseTypes.ReleaseState>(CHANNELS.releaseGet),
+    recentCommits: () => invoke<releaseTypes.ReleaseCommit[]>(CHANNELS.releaseRecentCommits),
+    generate: (startCommit?: string) => invoke<releaseTypes.ReleaseState>(CHANNELS.releaseGenerate, startCommit),
+    updateDraft: (input: releaseTypes.ReleaseDraftInput) => invoke<releaseTypes.ReleaseState>(CHANNELS.releaseUpdateDraft, input),
+    finish: () => invoke<releaseTypes.Release>(CHANNELS.releaseFinish),
+    writeNotes: (input: releaseTypes.ReleaseWriteInput) => invoke<releaseTypes.ReleaseWriteResult>(CHANNELS.releaseWriteNotes, input),
     cancel: () => invoke<boolean>(CHANNELS.releaseCancel),
-    createMilestone: (input: ipc.MilestoneInput) => invoke<ipc.ReleaseState>(CHANNELS.milestoneCreate, input),
-    updateMilestone: (id: string, input: ipc.MilestoneInput) => invoke<ipc.ReleaseState>(CHANNELS.milestoneUpdate, id, input),
-    deleteMilestone: (id: string) => invoke<ipc.ReleaseState>(CHANNELS.milestoneDelete, id),
-    assignMilestone: (requirementId: string, milestoneId: string | null) => invoke<ipc.ReleaseState>(CHANNELS.milestoneAssign, requirementId, milestoneId),
+    createMilestone: (input: releaseTypes.MilestoneInput) => invoke<releaseTypes.ReleaseState>(CHANNELS.milestoneCreate, input),
+    updateMilestone: (id: string, input: releaseTypes.MilestoneInput) => invoke<releaseTypes.ReleaseState>(CHANNELS.milestoneUpdate, id, input),
+    deleteMilestone: (id: string) => invoke<releaseTypes.ReleaseState>(CHANNELS.milestoneDelete, id),
+    assignMilestone: (requirementId: string, milestoneId: string | null) =>
+      invoke<releaseTypes.ReleaseState>(CHANNELS.milestoneAssign, requirementId, milestoneId),
   },
 
   repositories: {
-    list: () => invoke<ipc.RepositoryList>(CHANNELS.repositoriesList),
+    list: () => invoke<repositoryTypes.RepositoryList>(CHANNELS.repositoriesList),
     // Validates and registers a root; `open` also switches to it.
-    add: (root: string, open: boolean) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesAdd, root, open),
+    add: (root: string, open: boolean) => invoke<repositoryTypes.RepositoryList>(CHANNELS.repositoriesAdd, root, open),
     // Cancels running work first; ask with busy() before calling.
-    switch: (id: string) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesSwitch, id),
-    relocate: (id: string, root: string) => invoke<ipc.RepositoryList>(CHANNELS.repositoriesRelocate, id, root),
-    busy: () => invoke<ipc.BusyRun[]>(CHANNELS.repositoriesBusy),
+    switch: (id: string) => invoke<repositoryTypes.RepositoryList>(CHANNELS.repositoriesSwitch, id),
+    relocate: (id: string, root: string) => invoke<repositoryTypes.RepositoryList>(CHANNELS.repositoriesRelocate, id, root),
+    busy: () => invoke<repositoryTypes.BusyRun[]>(CHANNELS.repositoriesBusy),
   },
 
   commit: {
-    preview: (id: string) => invoke<ipc.CommitPreview>(CHANNELS.commitPreview, id),
+    preview: (id: string) => invoke<commitTypes.CommitPreview>(CHANNELS.commitPreview, id),
     // `files` is the list the developer reviewed; a changed list is refused.
-    create: (id: string, message: string, files: string[]) => invoke<ipc.CommitResult>(CHANNELS.commitCreate, id, message, files),
+    create: (id: string, message: string, files: string[]) => invoke<commitTypes.CommitResult>(CHANNELS.commitCreate, id, message, files),
   },
 
   tutor: {
-    get: (id: string, stepIndex: number) => invoke<ipc.TutorState>(CHANNELS.tutorGet, id, stepIndex),
+    get: (id: string, stepIndex: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorGet, id, stepIndex),
     // Starts Tutor in the background; poll get() for the answer.
-    ask: (id: string, stepIndex: number) => invoke<ipc.TutorState>(CHANNELS.tutorAsk, id, stepIndex),
+    ask: (id: string, stepIndex: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorAsk, id, stepIndex),
     cancel: (id: string, stepIndex: number) => invoke<boolean>(CHANNELS.tutorCancel, id, stepIndex),
   },
 
@@ -166,25 +181,25 @@ const api = {
     // The reference patch; refused until the package was first submitted.
     reference: (id: string) => invoke<string>(CHANNELS.referenceGet, id),
     // Grades now: a retry, or without waiting for the reference.
-    grade: (id: string, skipReference: boolean) => invoke<ipc.TaskView>(CHANNELS.gradeStart, id, skipReference),
+    grade: (id: string, skipReference: boolean) => invoke<packageTypes.TaskView>(CHANNELS.gradeStart, id, skipReference),
   },
 
   notes: {
     // Every note without its body; `since` returns null when nothing changed.
-    list: (since: number | null) => invoke<ipc.NoteList | null>(CHANNELS.notesList, since),
-    get: (id: string) => invoke<ipc.Note>(CHANNELS.notesGet, id),
+    list: (since: number | null) => invoke<noteTypes.NoteList | null>(CHANNELS.notesList, since),
+    get: (id: string) => invoke<noteTypes.Note>(CHANNELS.notesGet, id),
     // Ids of notes whose title, tags or body contain the query.
     search: (query: string) => invoke<string[]>(CHANNELS.notesSearch, query),
     // autoRename: a taken title gets a number instead of being refused.
-    create: (input: ipc.NoteInput, autoRename: boolean) => invoke<ipc.NoteSaved>(CHANNELS.notesCreate, input, autoRename),
+    create: (input: noteTypes.NoteInput, autoRename: boolean) => invoke<noteTypes.NoteSaved>(CHANNELS.notesCreate, input, autoRename),
     // The source stays as recorded; only the developer's text changes.
-    update: (id: string, edit: ipc.NoteEdit) => invoke<ipc.NoteSaved>(CHANNELS.notesUpdate, id, edit),
+    update: (id: string, edit: noteTypes.NoteEdit) => invoke<noteTypes.NoteSaved>(CHANNELS.notesUpdate, id, edit),
     // Moves the file to the system trash.
     remove: (id: string) => invoke<boolean>(CHANNELS.notesDelete, id),
     // Tutor writes the note's summary (costs a model call).
-    summarize: (id: string, baseVersion: string) => invoke<ipc.NoteSaved>(CHANNELS.notesSummarize, id, baseVersion),
+    summarize: (id: string, baseVersion: string) => invoke<noteTypes.NoteSaved>(CHANNELS.notesSummarize, id, baseVersion),
     // null goes back to the default folder; files are never moved.
-    setDirectory: (directory: string | null) => invoke<ipc.NoteList>(CHANNELS.notesSetDirectory, directory),
+    setDirectory: (directory: string | null) => invoke<noteTypes.NoteList>(CHANNELS.notesSetDirectory, directory),
     pickDirectory: () => invoke<string | null>(CHANNELS.notesPickDirectory),
     reveal: () => invoke<boolean>(CHANNELS.notesReveal),
     // http(s) and mailto links only, opened by the system.

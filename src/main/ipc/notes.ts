@@ -5,7 +5,7 @@ import * as tutorAgent from '../agents/tutor.ts';
 import { throwIfCancelled } from '../agents/pipeline.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as noteTypes from '../../shared/ipc/notes.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
@@ -18,14 +18,14 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.notesList,
-    wrap((_event, since): ipc.NoteList | null => {
+    wrap((_event, since): noteTypes.NoteList | null => {
       const store = requireNotes();
       return since === store.revision ? null : store.list();
     }),
   );
   ipcMain.handle(
     CHANNELS.notesGet,
-    wrap((_event, rawId): ipc.Note => requireNotes().get(requireString(rawId, 'id'))),
+    wrap((_event, rawId): noteTypes.Note => requireNotes().get(requireString(rawId, 'id'))),
   );
   ipcMain.handle(
     CHANNELS.notesSearch,
@@ -33,11 +33,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   );
   ipcMain.handle(
     CHANNELS.notesCreate,
-    wrap((_event, input, autoRename): Promise<ipc.NoteSaved> => requireNotes().create(input, { autoRename: autoRename === true })),
+    wrap((_event, input, autoRename): Promise<noteTypes.NoteSaved> => requireNotes().create(input, { autoRename: autoRename === true })),
   );
   ipcMain.handle(
     CHANNELS.notesUpdate,
-    wrap((_event, rawId, edit): Promise<ipc.NoteSaved> => requireNotes().update(requireString(rawId, 'id'), edit)),
+    wrap((_event, rawId, edit): Promise<noteTypes.NoteSaved> => requireNotes().update(requireString(rawId, 'id'), edit)),
   );
   ipcMain.handle(
     CHANNELS.notesDelete,
@@ -51,7 +51,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // answer; the edit it saves is pinned to the version it summarised.
   ipcMain.handle(
     CHANNELS.notesSummarize,
-    wrap(async (_event, rawId, rawVersion): Promise<ipc.NoteSaved> => {
+    wrap(async (_event, rawId, rawVersion): Promise<noteTypes.NoteSaved> => {
       const store = requireNotes();
       const id = requireString(rawId, 'id');
       const baseVersion = requireString(rawVersion, 'baseVersion');
@@ -91,7 +91,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   );
   ipcMain.handle(
     CHANNELS.notesSetDirectory,
-    wrap((_event, directory): Promise<ipc.NoteList> => {
+    wrap((_event, directory): Promise<noteTypes.NoteList> => {
       if (directory === null) return requireNotes().setDirectory(null);
       if (pickedNotesDirectory === null || directory !== pickedNotesDirectory)
         return failWith('Choose the folder with the folder picker', 'invalid_argument', 'directory');

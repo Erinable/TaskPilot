@@ -5,7 +5,7 @@
 //
 // [人工决策-2026-10-14] 看板不支持拖动；每张卡片只放一个这一列最该做的操作。
 import { ACCURATE_RANGE, OVERRUN_RATIO, actualHours, plannedHours } from '@shared/estimate.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 export type ColumnId = 'todo' | 'doing' | 'review' | 'accept' | 'done';
 
@@ -18,7 +18,7 @@ export const COLUMNS: { id: ColumnId; label: string; hint: string }[] = [
 ];
 
 // Deviation and blocked stay with the developer's work, marked on the card.
-const COLUMN_OF: Record<ipc.WorkPackageStatus, ColumnId> = {
+const COLUMN_OF: Record<packageTypes.WorkPackageStatus, ColumnId> = {
   clarifying: 'todo',
   pending: 'todo',
   in_progress: 'doing',
@@ -29,12 +29,12 @@ const COLUMN_OF: Record<ipc.WorkPackageStatus, ColumnId> = {
   done: 'done',
 };
 
-export const columnOf = (task: Pick<ipc.TaskView, 'status'>): ColumnId => COLUMN_OF[task.status] ?? 'todo';
+export const columnOf = (task: Pick<packageTypes.TaskView, 'status'>): ColumnId => COLUMN_OF[task.status] ?? 'todo';
 
 // What a card's one button does. `wait` means there is nothing to do yet.
 export type CardAction = { kind: 'claim' | 'open' | 'accept'; label: string } | { kind: 'wait'; label: string };
 
-export const actionOf = (task: Pick<ipc.TaskView, 'status' | 'dependencies' | 'humanTransitions'>): CardAction => {
+export const actionOf = (task: Pick<packageTypes.TaskView, 'status' | 'dependencies' | 'humanTransitions'>): CardAction => {
   switch (task.status) {
     case 'pending':
       if ((task.dependencies ?? []).some((dependency) => dependency.blocking)) return { kind: 'wait', label: '等待前置' };
@@ -59,7 +59,7 @@ export const actionOf = (task: Pick<ipc.TaskView, 'status' | 'dependencies' | 'h
 // Small labels on a card besides its status.
 export type CardFlag = { tone: 'warning' | 'danger' | 'info'; text: string };
 
-export const flagsOf = (task: ipc.TaskView): CardFlag[] => {
+export const flagsOf = (task: packageTypes.TaskView): CardFlag[] => {
   const flags: CardFlag[] = [];
   const blocking = (task.dependencies ?? []).filter((dependency) => dependency.blocking);
   if (task.status === 'pending' && blocking.length)
@@ -74,14 +74,14 @@ export const flagsOf = (task: ipc.TaskView): CardFlag[] => {
 };
 
 // Groups the queue into columns, keeping the queue's order inside each.
-export const groupByColumn = (tasks: ipc.TaskView[]): Record<ColumnId, ipc.TaskView[]> => {
-  const columns = Object.fromEntries(COLUMNS.map((column) => [column.id, [] as ipc.TaskView[]])) as Record<ColumnId, ipc.TaskView[]>;
+export const groupByColumn = (tasks: packageTypes.TaskView[]): Record<ColumnId, packageTypes.TaskView[]> => {
+  const columns = Object.fromEntries(COLUMNS.map((column) => [column.id, [] as packageTypes.TaskView[]])) as Record<ColumnId, packageTypes.TaskView[]>;
   for (const task of tasks) columns[columnOf(task)].push(task);
   return columns;
 };
 
 // "预计 2h · 实际 2.5h", and whether it ran over by more than half.
-export const timeText = (task: ipc.TaskView): { text: string; overrun: boolean } | null => {
+export const timeText = (task: packageTypes.TaskView): { text: string; overrun: boolean } | null => {
   const planned = plannedHours(task);
   const actual = actualHours(task);
   if (actual === null) return null;
@@ -94,7 +94,7 @@ export const timeText = (task: ipc.TaskView): { text: string; overrun: boolean }
 
 // Share of finished packages that took between half and one-and-a-half
 // times their estimate; null without any finished package with both.
-export const estimateAccuracy = (tasks: ipc.TaskView[]): { ratio: number; count: number } | null => {
+export const estimateAccuracy = (tasks: packageTypes.TaskView[]): { ratio: number; count: number } | null => {
   const pairs = tasks.flatMap((task) => {
     const planned = plannedHours(task);
     const actual = actualHours(task);
@@ -106,7 +106,7 @@ export const estimateAccuracy = (tasks: ipc.TaskView[]): { ratio: number; count:
 };
 
 // Packages the developer is working on right now, for the one-at-a-time hint.
-export const inProgressCount = (tasks: ipc.TaskView[]) => tasks.filter((task) => task.status === 'in_progress').length;
+export const inProgressCount = (tasks: packageTypes.TaskView[]) => tasks.filter((task) => task.status === 'in_progress').length;
 
 export type QueueLayout = 'board' | 'list';
 export const LAYOUT_STORAGE_KEY = 'taskpilot.queueLayout';

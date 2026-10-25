@@ -1,139 +1,156 @@
-import type * as ipc from '../shared/ipc_types.ts';
+import type * as activityTypes from '../shared/ipc/activity.ts';
+import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
+import type * as codingTypes from '../shared/coding_types.ts';
+import type * as commitTypes from '../shared/ipc/commit.ts';
+import type * as envelopeTypes from '../shared/ipc/envelope.ts';
+import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as noteTypes from '../shared/ipc/notes.ts';
+import type * as packageTypes from '../shared/ipc/packages.ts';
+import type * as releaseTypes from '../shared/ipc/release.ts';
+import type * as repositoryTypes from '../shared/ipc/repositories.ts';
+import type * as requirementTypes from '../shared/ipc/requirements.ts';
+import type * as settingsTypes from '../shared/ipc/settings.ts';
+import type * as tutorTypes from '../shared/ipc/tutor.ts';
+import type * as workspaceTypes from '../shared/ipc/workspace.ts';
 declare const api: {
   businessTimeZone: string;
   onFullScreen: (listener: (fullScreen: boolean) => void) => void;
-  listTasks: () => Promise<ipc.IpcResult<ipc.TaskView[]>>;
-  getTask: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
-  transition: (id: string, name: ipc.HumanTransition, options?: ipc.TransitionOptions) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
-  waiveDependency: (id: string, dependency: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
-  measureBaseline: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
-  setStepDone: (id: string, stepIndex: number, done: boolean) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
+  listTasks: () => Promise<envelopeTypes.IpcResult<packageTypes.TaskView[]>>;
+  getTask: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+  transition: (
+    id: string,
+    name: packageTypes.HumanTransition,
+    options?: packageTypes.TransitionOptions,
+  ) => Promise<envelopeTypes.IpcResult<packageTypes.WorkPackageState>>;
+  waiveDependency: (id: string, dependency: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+  measureBaseline: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+  setStepDone: (id: string, stepIndex: number, done: boolean) => Promise<envelopeTypes.IpcResult<packageTypes.WorkPackageState>>;
   review: {
-    retry: (id: string) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
-    cancel: (id: string) => Promise<ipc.IpcResult<boolean>>;
+    retry: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.WorkPackageState>>;
+    cancel: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
   };
   deviation: {
-    retry: (id: string) => Promise<ipc.IpcResult<ipc.WorkPackageState>>;
-    cancel: (id: string) => Promise<ipc.IpcResult<boolean>>;
+    retry: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.WorkPackageState>>;
+    cancel: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
   };
   workspace: {
-    get: () => Promise<ipc.IpcResult<ipc.WorkspaceView>>;
-    set: (form: ipc.WorkspaceForm) => Promise<ipc.IpcResult<ipc.WorkspaceView>>;
-    check: (form: ipc.WorkspaceForm) => Promise<ipc.IpcResult<ipc.WorkspaceCheck>>;
-    pickRoot: () => Promise<ipc.IpcResult<string | null>>;
-    info: () => Promise<ipc.IpcResult<ipc.WorkspaceInfo>>;
-    openFile: (filePath: string, line?: number | null) => Promise<ipc.IpcResult<ipc.OpenedWith>>;
+    get: () => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceView>>;
+    set: (form: workspaceTypes.WorkspaceForm) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceView>>;
+    check: (form: workspaceTypes.WorkspaceForm) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceCheck>>;
+    pickRoot: () => Promise<envelopeTypes.IpcResult<string | null>>;
+    info: () => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceInfo>>;
+    openFile: (filePath: string, line?: number | null) => Promise<envelopeTypes.IpcResult<workspaceTypes.OpenedWith>>;
   };
   diff: {
-    stat: (id: string) => Promise<ipc.IpcResult<ipc.DiffStat>>;
-    file: (id: string, filePath: string) => Promise<ipc.IpcResult<string>>;
+    stat: (id: string) => Promise<envelopeTypes.IpcResult<workspaceTypes.DiffStat>>;
+    file: (id: string, filePath: string) => Promise<envelopeTypes.IpcResult<string>>;
   };
   verify: {
-    run: (kind: ipc.CheckKind, taskId?: string) => Promise<ipc.IpcResult<ipc.VerifyRun>>;
+    run: (kind: workspaceTypes.CheckKind, taskId?: string) => Promise<envelopeTypes.IpcResult<workspaceTypes.VerifyRun>>;
   };
   preferences: {
-    get: () => Promise<ipc.IpcResult<ipc.Preferences>>;
-    set: (prefs: ipc.PreferencesInput) => Promise<ipc.IpcResult<ipc.Preferences>>;
+    get: () => Promise<envelopeTypes.IpcResult<settingsTypes.Preferences>>;
+    set: (prefs: settingsTypes.PreferencesInput) => Promise<envelopeTypes.IpcResult<settingsTypes.Preferences>>;
   };
   environment: {
-    info: (options?: ipc.EnvironmentInfoOptions) => Promise<ipc.IpcResult<ipc.EnvironmentInfo>>;
+    info: (options?: settingsTypes.EnvironmentInfoOptions) => Promise<envelopeTypes.IpcResult<settingsTypes.EnvironmentInfo>>;
   };
   data: {
-    info: () => Promise<ipc.IpcResult<ipc.DataInfo>>;
-    resetProgress: () => Promise<ipc.IpcResult<ipc.PackageSummary>>;
-    reveal: () => Promise<ipc.IpcResult<true>>;
+    info: () => Promise<envelopeTypes.IpcResult<settingsTypes.DataInfo>>;
+    resetProgress: () => Promise<envelopeTypes.IpcResult<settingsTypes.PackageSummary>>;
+    reveal: () => Promise<envelopeTypes.IpcResult<true>>;
   };
   requirements: {
-    list: () => Promise<ipc.IpcResult<ipc.Requirement[]>>;
-    get: (id: string) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    create: (input: ipc.RequirementInput) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    clarify: (id: string) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    answer: (id: string, answers: ipc.RequirementAnswers) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    plan: (id: string, answers?: ipc.RequirementAnswers) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    publish: (id: string) => Promise<ipc.IpcResult<ipc.Requirement>>;
-    remove: (id: string) => Promise<ipc.IpcResult<true>>;
-    cancel: (id: string) => Promise<ipc.IpcResult<boolean>>;
+    list: () => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement[]>>;
+    get: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    create: (input: requirementTypes.RequirementInput) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    clarify: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    answer: (id: string, answers: requirementTypes.RequirementAnswers) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    plan: (id: string, answers?: requirementTypes.RequirementAnswers) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    publish: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    remove: (id: string) => Promise<envelopeTypes.IpcResult<true>>;
+    cancel: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
   };
   agent: {
-    status: () => Promise<ipc.IpcResult<ipc.AgentStatus>>;
-    runtimes: () => Promise<ipc.IpcResult<ipc.AgentRuntimeStatus[]>>;
-    models: (request: ipc.CliModelsRequest) => Promise<ipc.IpcResult<ipc.CliModelCatalog>>;
+    status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;
+    runtimes: () => Promise<envelopeTypes.IpcResult<agentRuntimeTypes.AgentRuntimeStatus[]>>;
+    models: (request: agentRuntimeTypes.CliModelsRequest) => Promise<envelopeTypes.IpcResult<agentRuntimeTypes.CliModelCatalog>>;
   };
   coding: {
-    status: () => Promise<ipc.IpcResult<ipc.CodingRuntimeStatus>>;
-    start: (id: string, input: ipc.CodingStart) => Promise<ipc.IpcResult<ipc.TaskView>>;
-    get: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
-    events: (id: string, after: number) => Promise<ipc.IpcResult<ipc.CodingEventPage>>;
-    cancel: (id: string) => Promise<ipc.IpcResult<boolean>>;
-    patch: (id: string) => Promise<ipc.IpcResult<ipc.CodingPatchPreview>>;
-    apply: (id: string, input: ipc.CodingApply) => Promise<ipc.IpcResult<ipc.CodingApplyResult>>;
-    resume: (id: string) => Promise<ipc.IpcResult<ipc.TaskView>>;
-    active: () => Promise<ipc.IpcResult<ipc.CodingActiveRun[]>>;
+    status: () => Promise<envelopeTypes.IpcResult<codingTypes.CodingRuntimeStatus>>;
+    start: (id: string, input: codingTypes.CodingStart) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    get: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    events: (id: string, after: number) => Promise<envelopeTypes.IpcResult<codingTypes.CodingEventPage>>;
+    cancel: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
+    patch: (id: string) => Promise<envelopeTypes.IpcResult<codingTypes.CodingPatchPreview>>;
+    apply: (id: string, input: codingTypes.CodingApply) => Promise<envelopeTypes.IpcResult<codingTypes.CodingApplyResult>>;
+    resume: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    active: () => Promise<envelopeTypes.IpcResult<codingTypes.CodingActiveRun[]>>;
   };
   activity: {
-    overview: () => Promise<ipc.IpcResult<ipc.ActivityOverview>>;
-    page: (before: string | null) => Promise<ipc.IpcResult<ipc.ActivityPage>>;
+    overview: () => Promise<envelopeTypes.IpcResult<activityTypes.ActivityOverview>>;
+    page: (before: string | null) => Promise<envelopeTypes.IpcResult<activityTypes.ActivityPage>>;
   };
   costs: {
-    report: (days: ipc.CostRange) => Promise<ipc.IpcResult<ipc.CostReport>>;
-    syncPrices: () => Promise<ipc.IpcResult<{ syncedAt: string }>>;
+    report: (days: activityTypes.CostRange) => Promise<envelopeTypes.IpcResult<activityTypes.CostReport>>;
+    syncPrices: () => Promise<envelopeTypes.IpcResult<{ syncedAt: string }>>;
   };
   engineeringMap: {
-    get: () => Promise<ipc.IpcResult<ipc.EngineeringMap>>;
+    get: () => Promise<envelopeTypes.IpcResult<activityTypes.EngineeringMap>>;
   };
   env: {
-    get: () => Promise<ipc.IpcResult<ipc.EnvState>>;
-    plan: (options?: ipc.EnvPlanOptions) => Promise<ipc.IpcResult<ipc.EnvState>>;
-    setAllowScripts: (allow: boolean) => Promise<ipc.IpcResult<ipc.EnvState>>;
-    runStep: (stepId: string) => Promise<ipc.IpcResult<ipc.EnvState>>;
-    apply: (kinds: ipc.ScriptKind[]) => Promise<ipc.IpcResult<ipc.EnvState>>;
-    cancel: () => Promise<ipc.IpcResult<boolean>>;
+    get: () => Promise<envelopeTypes.IpcResult<envTypes.EnvState>>;
+    plan: (options?: envTypes.EnvPlanOptions) => Promise<envelopeTypes.IpcResult<envTypes.EnvState>>;
+    setAllowScripts: (allow: boolean) => Promise<envelopeTypes.IpcResult<envTypes.EnvState>>;
+    runStep: (stepId: string) => Promise<envelopeTypes.IpcResult<envTypes.EnvState>>;
+    apply: (kinds: envTypes.ScriptKind[]) => Promise<envelopeTypes.IpcResult<envTypes.EnvState>>;
+    cancel: () => Promise<envelopeTypes.IpcResult<boolean>>;
   };
   release: {
-    get: () => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    recentCommits: () => Promise<ipc.IpcResult<ipc.ReleaseCommit[]>>;
-    generate: (startCommit?: string) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    updateDraft: (input: ipc.ReleaseDraftInput) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    finish: () => Promise<ipc.IpcResult<ipc.Release>>;
-    writeNotes: (input: ipc.ReleaseWriteInput) => Promise<ipc.IpcResult<ipc.ReleaseWriteResult>>;
-    cancel: () => Promise<ipc.IpcResult<boolean>>;
-    createMilestone: (input: ipc.MilestoneInput) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    updateMilestone: (id: string, input: ipc.MilestoneInput) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    deleteMilestone: (id: string) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
-    assignMilestone: (requirementId: string, milestoneId: string | null) => Promise<ipc.IpcResult<ipc.ReleaseState>>;
+    get: () => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    recentCommits: () => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseCommit[]>>;
+    generate: (startCommit?: string) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    updateDraft: (input: releaseTypes.ReleaseDraftInput) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    finish: () => Promise<envelopeTypes.IpcResult<releaseTypes.Release>>;
+    writeNotes: (input: releaseTypes.ReleaseWriteInput) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseWriteResult>>;
+    cancel: () => Promise<envelopeTypes.IpcResult<boolean>>;
+    createMilestone: (input: releaseTypes.MilestoneInput) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    updateMilestone: (id: string, input: releaseTypes.MilestoneInput) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    deleteMilestone: (id: string) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
+    assignMilestone: (requirementId: string, milestoneId: string | null) => Promise<envelopeTypes.IpcResult<releaseTypes.ReleaseState>>;
   };
   repositories: {
-    list: () => Promise<ipc.IpcResult<ipc.RepositoryList>>;
-    add: (root: string, open: boolean) => Promise<ipc.IpcResult<ipc.RepositoryList>>;
-    switch: (id: string) => Promise<ipc.IpcResult<ipc.RepositoryList>>;
-    relocate: (id: string, root: string) => Promise<ipc.IpcResult<ipc.RepositoryList>>;
-    busy: () => Promise<ipc.IpcResult<ipc.BusyRun[]>>;
+    list: () => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>;
+    add: (root: string, open: boolean) => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>;
+    switch: (id: string) => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>;
+    relocate: (id: string, root: string) => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>;
+    busy: () => Promise<envelopeTypes.IpcResult<repositoryTypes.BusyRun[]>>;
   };
   commit: {
-    preview: (id: string) => Promise<ipc.IpcResult<ipc.CommitPreview>>;
-    create: (id: string, message: string, files: string[]) => Promise<ipc.IpcResult<ipc.CommitResult>>;
+    preview: (id: string) => Promise<envelopeTypes.IpcResult<commitTypes.CommitPreview>>;
+    create: (id: string, message: string, files: string[]) => Promise<envelopeTypes.IpcResult<commitTypes.CommitResult>>;
   };
   tutor: {
-    get: (id: string, stepIndex: number) => Promise<ipc.IpcResult<ipc.TutorState>>;
-    ask: (id: string, stepIndex: number) => Promise<ipc.IpcResult<ipc.TutorState>>;
-    cancel: (id: string, stepIndex: number) => Promise<ipc.IpcResult<boolean>>;
+    get: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
+    ask: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
+    cancel: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<boolean>>;
   };
   practice: {
-    reference: (id: string) => Promise<ipc.IpcResult<string>>;
-    grade: (id: string, skipReference: boolean) => Promise<ipc.IpcResult<ipc.TaskView>>;
+    reference: (id: string) => Promise<envelopeTypes.IpcResult<string>>;
+    grade: (id: string, skipReference: boolean) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
   };
   notes: {
-    list: (since: number | null) => Promise<ipc.IpcResult<ipc.NoteList | null>>;
-    get: (id: string) => Promise<ipc.IpcResult<ipc.Note>>;
-    search: (query: string) => Promise<ipc.IpcResult<string[]>>;
-    create: (input: ipc.NoteInput, autoRename: boolean) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
-    update: (id: string, edit: ipc.NoteEdit) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
-    remove: (id: string) => Promise<ipc.IpcResult<boolean>>;
-    summarize: (id: string, baseVersion: string) => Promise<ipc.IpcResult<ipc.NoteSaved>>;
-    setDirectory: (directory: string | null) => Promise<ipc.IpcResult<ipc.NoteList>>;
-    pickDirectory: () => Promise<ipc.IpcResult<string | null>>;
-    reveal: () => Promise<ipc.IpcResult<boolean>>;
-    openUrl: (url: string) => Promise<ipc.IpcResult<boolean>>;
+    list: (since: number | null) => Promise<envelopeTypes.IpcResult<noteTypes.NoteList | null>>;
+    get: (id: string) => Promise<envelopeTypes.IpcResult<noteTypes.Note>>;
+    search: (query: string) => Promise<envelopeTypes.IpcResult<string[]>>;
+    create: (input: noteTypes.NoteInput, autoRename: boolean) => Promise<envelopeTypes.IpcResult<noteTypes.NoteSaved>>;
+    update: (id: string, edit: noteTypes.NoteEdit) => Promise<envelopeTypes.IpcResult<noteTypes.NoteSaved>>;
+    remove: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
+    summarize: (id: string, baseVersion: string) => Promise<envelopeTypes.IpcResult<noteTypes.NoteSaved>>;
+    setDirectory: (directory: string | null) => Promise<envelopeTypes.IpcResult<noteTypes.NoteList>>;
+    pickDirectory: () => Promise<envelopeTypes.IpcResult<string | null>>;
+    reveal: () => Promise<envelopeTypes.IpcResult<boolean>>;
+    openUrl: (url: string) => Promise<envelopeTypes.IpcResult<boolean>>;
   };
 };
 

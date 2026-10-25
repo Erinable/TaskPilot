@@ -3,7 +3,7 @@
 // packages of its requirements, so it moves as work is accepted.
 //
 // [人工决策-2026-10-14] 里程碑以需求为单位，放在发布页顶部；全部完成后可直接起草发布说明。
-import type { Milestone } from '../shared/ipc_types.ts';
+import type { Milestone } from '../shared/ipc/release.ts';
 
 export const MAX_MILESTONES = 20;
 export const MAX_MILESTONE_REQUIREMENTS = 30;

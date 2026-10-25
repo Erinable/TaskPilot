@@ -4,7 +4,8 @@
 //
 // [人工决策-2026-10-12 15:08:39] 检查失败和 QA 驳回共用 3 轮自动重试；第一轮由人按文件确认，
 // 自动轮的补丁没碰高风险路径就直接应用，碰了才停下等人。
-import type { CheckRun, Evidence, QaReport } from '../shared/ipc_types.ts';
+import type { QaReport } from '../shared/ipc/packages.ts';
+import type { CheckRun, Evidence } from '../shared/ipc/workspace.ts';
 import { MAX_AUTO_ATTEMPTS } from '../shared/coding_types.ts';
 import type { CodingPatchPreview, CodingRound, CodingRun } from '../shared/coding_types.ts';
 

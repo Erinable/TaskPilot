@@ -12,22 +12,22 @@ import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import { useNotesStore } from '@/stores/notes.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: ipc.TaskView }>();
+const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 const notes = useNotesStore();
 // Comments already saved while this page is open, so the button says so.
-const saved = ref(new Set<ipc.GradeComment>());
+const saved = ref(new Set<packageTypes.GradeComment>());
 
-const save = async (comment: ipc.GradeComment) => {
+const save = async (comment: packageTypes.GradeComment) => {
   if (await notes.saveComment(props.task, comment)) saved.value = new Set([...saved.value, comment]);
 };
 
 type PracticeView = { text: string; tone: '' | 'success' | 'danger' };
 
-const CATEGORY_LABELS: Record<ipc.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
+const CATEGORY_LABELS: Record<packageTypes.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
 
 const run = computed(() => props.task.referenceRun);
 const grade = computed(() => props.task.grade);
@@ -57,7 +57,7 @@ const gradeText = computed((): string | null => {
 
 const byCategory = computed(() => {
   const comments = grade.value?.report?.comments ?? [];
-  return (Object.keys(CATEGORY_LABELS) as ipc.GradeCategory[])
+  return (Object.keys(CATEGORY_LABELS) as packageTypes.GradeCategory[])
     .map((category) => ({ category, label: CATEGORY_LABELS[category], comments: comments.filter((comment) => comment.category === category) }))
     .filter((group) => group.comments.length);
 });

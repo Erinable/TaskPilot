@@ -8,22 +8,23 @@ import * as envSetup from '../env_setup.ts';
 import { planEnvironment } from '../agents/pipeline.ts';
 import { toFailure, wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
+import type * as envTypes from '../../shared/ipc/environment.ts';
 import type { EnvFailure } from '../agents/env_steward.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
 type EnvSession = {
   root: string | null;
-  status: ipc.EnvStatus;
+  status: envTypes.EnvStatus;
   facts: Awaited<ReturnType<typeof envSetup.probe>> | null;
   blockers: ReturnType<typeof envSetup.blockers>;
   plan: Awaited<ReturnType<typeof planEnvironment>>['plan'];
-  error: ipc.IpcFailure | null;
+  error: envelopeTypes.IpcFailure | null;
   costUsd: number;
   allowScripts: boolean;
-  results: Partial<Record<ipc.EnvStepId, ipc.EnvStepResult>>;
-  running: ipc.EnvStepId | null;
+  results: Partial<Record<envTypes.EnvStepId, envTypes.EnvStepResult>>;
+  running: envTypes.EnvStepId | null;
   // The running step's output so far (its tail) and when it started.
   live: { output: string; startedAt: string } | null;
 };
@@ -56,7 +57,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // A plan only exists alongside the facts it was made from.
   const envSteps = () => (env.plan && env.facts ? envSetup.buildSteps(env.plan, env.facts, { allowScripts: env.allowScripts }) : []);
 
-  const envView = (): ipc.EnvState => ({
+  const envView = (): envTypes.EnvState => ({
     root: env.root,
     status: env.status,
     stale: Boolean(env.root && env.root !== getConfig().root),
@@ -83,7 +84,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     })),
     configured: Object.fromEntries(
       workspace.COMMAND_KINDS.map((kind) => [kind, workspace.formatCommandLine(getConfig().commands[kind])]),
-    ) as ipc.EnvState['configured'],
+    ) as envTypes.EnvState['configured'],
   });
 
   const requireEnvPlan = () => {
@@ -103,12 +104,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.envGet,
-    wrap((): ipc.EnvState => envView()),
+    wrap((): envTypes.EnvState => envView()),
   );
 
   ipcMain.handle(
     CHANNELS.envPlan,
-    wrap(async (_event, options): Promise<ipc.EnvState> => {
+    wrap(async (_event, options): Promise<envTypes.EnvState> => {
       const root = ctx.requireRoot();
       const stewardRunner = ctx.runnerFor('env-steward');
       if (env.status === 'planning' || env.running) failWith('The Environment Steward is busy', 'env_busy');
@@ -138,7 +139,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
             // Results only carry over for steps the new plan still runs unchanged.
             const lines = new Map(envSteps().map((step) => [step.id, workspace.formatCommandLine(step)]));
-            for (const id of Object.keys(session.results) as ipc.EnvStepId[]) {
+            for (const id of Object.keys(session.results) as envTypes.EnvStepId[]) {
               if (session.results[id]?.line !== lines.get(id)) delete session.results[id];
             }
           } catch (error) {
@@ -154,7 +155,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.envSetAllowScripts,
-    wrap((_event, allow): ipc.EnvState => {
+    wrap((_event, allow): envTypes.EnvState => {
       if (env.running) failWith('A setup step is already running', 'env_busy');
       env.allowScripts = allow === true;
       delete env.results.install;
@@ -166,7 +167,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // from the stored plan, never taken from the renderer.
   ipcMain.handle(
     CHANNELS.envRunStep,
-    wrap(async (_event, stepId): Promise<ipc.EnvState> => {
+    wrap(async (_event, stepId): Promise<envTypes.EnvState> => {
       requireString(stepId, 'stepId');
       requireEnvPlan();
       const step = envSteps().find((candidate) => candidate.id === stepId);
@@ -220,7 +221,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // kinds the user ticked. Lines are rebuilt here, as in envRunStep.
   ipcMain.handle(
     CHANNELS.envApply,
-    wrap(async (_event, kinds): Promise<ipc.EnvApplyResult> => {
+    wrap(async (_event, kinds): Promise<envTypes.EnvApplyResult> => {
       const plan = requireEnvPlan();
       if (!Array.isArray(kinds) || kinds.some((kind) => !envSetup.SCRIPT_KINDS.includes(kind))) {
         failWith('kinds must be a list of test, lint or build', 'invalid_argument');
@@ -228,7 +229,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const config = getConfig();
       // workspace.save() normalizes the checks, filling in what is left unset.
       const checks: Record<string, unknown> = { ...config.checks };
-      for (const kind of new Set(kinds as ipc.ScriptKind[])) {
+      for (const kind of new Set(kinds as envTypes.ScriptKind[])) {
         const name = plan.scripts[kind];
         if (!name) failWith(`The plan has no ${kind} script`, 'invalid_argument');
         // A new command keeps the slot's stage and blocking choice; its report

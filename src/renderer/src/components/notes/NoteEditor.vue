@@ -11,11 +11,11 @@ import { confirmAction, confirmChoice } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
 import { useNotesStore } from '@/stores/notes.ts';
 import * as markdown from '@shared/note_markdown.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const notes = useNotesStore();
 
-const CATEGORY_OPTIONS = (Object.keys(model.CATEGORY_LABELS) as ipc.GradeCategory[]).map((value) => ({ value, label: model.CATEGORY_LABELS[value] }));
+const CATEGORY_OPTIONS = (Object.keys(model.CATEGORY_LABELS) as packageTypes.GradeCategory[]).map((value) => ({ value, label: model.CATEGORY_LABELS[value] }));
 const showPreview = ref(true);
 
 const note = computed(() => notes.current!);

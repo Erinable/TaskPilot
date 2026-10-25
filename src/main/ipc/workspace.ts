@@ -10,12 +10,12 @@ import { checkLine } from '../submit_checks.ts';
 import { openWorkspaceFile } from '../open_file.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as workspaceTypes from '../../shared/ipc/workspace.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // Config plus the command lines and check options the settings form edits.
-export const toFormView = (config: workspace.WorkspaceConfig): ipc.WorkspaceView => {
+export const toFormView = (config: workspace.WorkspaceConfig): workspaceTypes.WorkspaceView => {
   const form = workspace.toForm(config);
   return { root: config.root, commands: config.commands, checks: config.checks, lines: form.commands, options: form.options };
 };
@@ -31,7 +31,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const validateForm = async (form: unknown) => {
     const config = workspace.fromForm(form as workspace.WorkspaceFormInput, getConfig());
     config.root = getConfig().root;
-    const info: { repo: ipc.RepoInfo | null } = { repo: null };
+    const info: { repo: workspaceTypes.RepoInfo | null } = { repo: null };
     if (!config.root) return { config, info };
     const checked = await ctx.validateRoot(config.root);
     config.root = checked.root;
@@ -48,14 +48,14 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.workspaceGet,
-    wrap((): ipc.WorkspaceView => toFormView(getConfig())),
+    wrap((): workspaceTypes.WorkspaceView => toFormView(getConfig())),
   );
 
   // Validates everything before writing, so a bad path or command is never
   // persisted and reloaded on the next launch.
   ipcMain.handle(
     CHANNELS.workspaceSet,
-    wrap(async (_event, form): Promise<ipc.WorkspaceView> => {
+    wrap(async (_event, form): Promise<workspaceTypes.WorkspaceView> => {
       const { config } = await validateForm(form);
       const saved = await ctx.repositories.saveConfig(config);
       setConfig(saved);
@@ -67,10 +67,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // writing anything. Lets the settings page warn before the user commits.
   ipcMain.handle(
     CHANNELS.workspaceCheck,
-    wrap(async (_event, form): Promise<ipc.WorkspaceCheck> => {
+    wrap(async (_event, form): Promise<workspaceTypes.WorkspaceCheck> => {
       const { config, info } = await validateForm(form);
       const { path: envPath } = await ctx.commandPath();
-      const commands = {} as ipc.WorkspaceCheck['commands'];
+      const commands = {} as workspaceTypes.WorkspaceCheck['commands'];
       for (const kind of workspace.COMMAND_KINDS) {
         const entry = config.commands[kind];
         commands[kind] = entry
@@ -92,7 +92,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.workspaceInfo,
-    wrap(async (): Promise<ipc.WorkspaceInfo> => {
+    wrap(async (): Promise<workspaceTypes.WorkspaceInfo> => {
       const config = getConfig();
       if (!config.root) return { configured: false };
       return { configured: true, root: config.root, ...(await git.describe(config.root)) };
@@ -104,7 +104,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // to the workspace after symlinks.
   ipcMain.handle(
     CHANNELS.workspaceOpenFile,
-    wrap(async (_event, filePath, line): Promise<ipc.OpenedWith> => {
+    wrap(async (_event, filePath, line): Promise<workspaceTypes.OpenedWith> => {
       if (!shell.revealFile) return failWith('Opening files is unavailable', 'unsupported');
       const root = requireRoot();
       const { path: envPath } = await ctx.commandPath();
@@ -116,7 +116,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.diffStat,
-    wrap(async (_event, rawId): Promise<ipc.DiffStat> => {
+    wrap(async (_event, rawId): Promise<workspaceTypes.DiffStat> => {
       const root = requireRoot();
       const id = requireString(rawId, 'id');
       const task = requireTask(id);
@@ -133,7 +133,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.diffFile,
-    wrap(async (_event, id, filePath): Promise<ipc.DiffFile> => {
+    wrap(async (_event, id, filePath): Promise<workspaceTypes.DiffFile> => {
       const root = requireRoot();
       return git.diffFile(root, requireBaseline(requireString(id, 'id')), safePath(root, filePath));
     }),
@@ -141,7 +141,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.verifyRun,
-    wrap(async (_event, kind, taskId): Promise<ipc.VerifyRun> => {
+    wrap(async (_event, kind, taskId): Promise<workspaceTypes.VerifyRun> => {
       if (!isCommandKind(kind)) throw codedError(`Unknown verification kind: ${kind}`, 'invalid_argument');
       const config = getConfig();
       // runCheck() echoes the kind it ran, which is a CheckKind here.

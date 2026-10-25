@@ -5,7 +5,8 @@ import { readTracked } from '../repo_reader.ts';
 import { throwIfCancelled } from '../agents/pipeline.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as ipc from '../../shared/ipc_types.ts';
+import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
+import type * as tutorTypes from '../../shared/ipc/tutor.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
@@ -15,7 +16,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const { backgroundRuns } = ctx;
 
   // One in-flight answer per package step; failures are kept until retried.
-  const tutorFailures = new Map<string, ipc.ErrorInfo>();
+  const tutorFailures = new Map<string, envelopeTypes.ErrorInfo>();
   ctx.onCancelAll(() => tutorFailures.clear());
 
   const requireTutor = () => {
@@ -31,7 +32,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return { task, stepIndex: rawIndex as number, step: task.steps[rawIndex as number] };
   };
 
-  const tutorState = (id: string, stepIndex: number, step: string): ipc.TutorState => {
+  const tutorState = (id: string, stepIndex: number, step: string): tutorTypes.TutorState => {
     const key = tutorKey(id, stepIndex);
     if (backgroundRuns.has('tutor', key)) return { status: 'running', answer: null, error: null, costUsd: 0 };
     const saved = requireTutor().get(id, stepIndex, step);
@@ -42,7 +43,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.tutorGet,
-    wrap((_event, rawId, rawIndex): ipc.TutorState => {
+    wrap((_event, rawId, rawIndex): tutorTypes.TutorState => {
       const { task, stepIndex, step } = requireStep(rawId, rawIndex);
       return tutorState(task.id, stepIndex, step);
     }),
@@ -51,7 +52,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // A saved answer is returned as is: asking again costs nothing.
   ipcMain.handle(
     CHANNELS.tutorAsk,
-    wrap(async (_event, rawId, rawIndex): Promise<ipc.TutorState> => {
+    wrap(async (_event, rawId, rawIndex): Promise<tutorTypes.TutorState> => {
       const store = requireTutor();
       const { task, stepIndex, step } = requireStep(rawId, rawIndex);
       const tutorRunner = ctx.runnerFor('tutor', { kind: 'package', id: task.id });

@@ -21,7 +21,8 @@ import YAML from 'yaml';
 import * as markdown from '../shared/note_markdown.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
-import type { GradeCategory, Note, NoteInput, NoteList, NoteMeta, NoteSaved, NoteSource } from '../shared/ipc_types.ts';
+import type * as noteTypes from '../shared/ipc/notes.ts';
+import type { GradeCategory } from '../shared/ipc/packages.ts';
 
 export const DEFAULT_DIRNAME = 'notes';
 // Which folder the developer chose; absent means the default one.
@@ -86,7 +87,7 @@ const tags = (value: unknown): string[] => {
   return [...new Set(list.map((tag, index) => text(typeof tag === 'string' ? tag.replace(/^#/, '') : tag, `tags[${index}]`, MAX_TAG)))];
 };
 
-const source = (value: unknown): NoteSource | null => {
+const source = (value: unknown): noteTypes.NoteSource | null => {
   if (value === null || value === undefined) return null;
   if (typeof value !== 'object' || Array.isArray(value)) fail('source must be an object', 'source');
   const raw = value as Record<string, unknown>;
@@ -106,7 +107,7 @@ const source = (value: unknown): NoteSource | null => {
 const summary = (value: unknown): string | null => (value === null ? null : text(value, 'summary', MAX_SUMMARY));
 
 // Checks a new note from the renderer; the id and times are the store's own.
-export const validateNote = (raw: unknown): NoteInput => {
+export const validateNote = (raw: unknown): noteTypes.NoteInput => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('A note must be an object', 'note');
   const input = raw as Record<string, unknown>;
   return { title: title(input.title), body: body(input.body ?? ''), category: category(input.category), tags: tags(input.tags), source: source(input.source) };
@@ -142,7 +143,7 @@ const loose = {
       ),
     ];
   },
-  source: (value: unknown): NoteSource | null => {
+  source: (value: unknown): noteTypes.NoteSource | null => {
     try {
       return source(value);
     } catch {
@@ -152,7 +153,7 @@ const loose = {
 };
 
 // head: the frontmatter block exactly as written, '' when there is none.
-type Entry = { meta: NoteMeta; body: string; doc: YAML.Document | null; head: string };
+type Entry = { meta: noteTypes.NoteMeta; body: string; doc: YAML.Document | null; head: string };
 
 const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }): Entry => {
   const parsed = parseFile(raw);
@@ -186,7 +187,7 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
   };
 };
 
-type Fields = { category: GradeCategory | null; tags: string[]; source?: NoteSource | null; summary?: string | null; created?: string };
+type Fields = { category: GradeCategory | null; tags: string[]; source?: noteTypes.NoteSource | null; summary?: string | null; created?: string };
 
 // The file for a body and fields, keeping every other frontmatter field.
 const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): string => {
@@ -283,7 +284,7 @@ export class NoteStore {
   }
 
   // Switches folders and remembers the choice; files are not moved.
-  async setDirectory(directory: string | null): Promise<NoteList> {
+  async setDirectory(directory: string | null): Promise<noteTypes.NoteList> {
     await this.open(directory);
     this.#unavailable = null;
     const file = path.join(this.#configDir, LOCATION_FILENAME);
@@ -324,12 +325,12 @@ export class NoteStore {
     await this.#refreshing;
   }
 
-  list(): NoteList {
+  list(): noteTypes.NoteList {
     const notes = [...this.#entries.values()].map((entry) => structuredClone(entry.meta)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return { revision: this.#revision, directory: this.#directory, custom: this.#custom, unavailable: this.#unavailable, truncated: this.#truncated, notes };
   }
 
-  get(id: string): Note {
+  get(id: string): noteTypes.Note {
     const entry = this.#entries.get(id);
     if (!entry) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
     return { ...structuredClone(entry.meta), body: entry.body };
@@ -345,7 +346,7 @@ export class NoteStore {
   }
 
   // autoRename: a taken title gets " 2", " 3"… instead of being refused.
-  create(raw: unknown, { autoRename = false } = {}): Promise<NoteSaved> {
+  create(raw: unknown, { autoRename = false } = {}): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
       const input = validateNote(raw);
       if (this.#entries.size >= MAX_NOTES) throw new NoteError(`At most ${MAX_NOTES} notes`, 'notes_full');
@@ -362,7 +363,7 @@ export class NoteStore {
 
   // Saves the developer's edit; the source stays as recorded. A rename moves
   // the file and, when asked, points [[old title]] in other notes at the new one.
-  update(id: string, raw: unknown): Promise<NoteSaved> {
+  update(id: string, raw: unknown): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('An edit must be an object', 'note');
       const input = raw as Record<string, unknown>;
@@ -398,7 +399,7 @@ export class NoteStore {
   }
 
   // Writes Tutor's (or the developer's) summary without touching the body.
-  setSummary(id: string, value: string, baseVersion: string): Promise<NoteSaved> {
+  setSummary(id: string, value: string, baseVersion: string): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
       const current = await this.#fresh(id);
       if (current.meta.frontmatterError) throw new NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
