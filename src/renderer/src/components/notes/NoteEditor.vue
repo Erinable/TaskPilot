@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Editing the open note: title, properties, Markdown beside a live preview,
-// and Tutor's summary. Typing [[ suggests titles. Saving never overwrites a
+// and Tutor's summary. Source, split or preview mode (⌘E cycles), remembered
+// on this machine. Typing [[ suggests titles. Saving never overwrites a
 // file another program changed without asking; renaming asks whether to
 // update [[links]] in other notes. Save or cancel returns to reading.
 import { computed, nextTick, ref } from 'vue';
@@ -16,7 +17,15 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 const notes = useNotesStore();
 
 const CATEGORY_OPTIONS = (Object.keys(model.CATEGORY_LABELS) as packageTypes.GradeCategory[]).map((value) => ({ value, label: model.CATEGORY_LABELS[value] }));
-const showPreview = ref(true);
+// Remembered on this machine, like the queue's board / list choice.
+const storedMode = ref<model.EditorMode>(model.readEditorMode(globalThis.localStorage));
+const mode = computed({
+  get: () => storedMode.value,
+  set: (next: model.EditorMode) => {
+    storedMode.value = next;
+    globalThis.localStorage?.setItem(model.EDITOR_MODE_STORAGE_KEY, next);
+  },
+});
 
 const note = computed(() => notes.current!);
 const draft = computed(() => notes.draft!);
@@ -59,6 +68,9 @@ const onKeydown = (event: KeyboardEvent) => {
   if ((event.metaKey || event.ctrlKey) && event.key === 's') {
     event.preventDefault();
     save().catch((error) => console.error(error));
+  } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
+    event.preventDefault();
+    mode.value = model.nextEditorMode(mode.value);
   }
 };
 
@@ -113,10 +125,7 @@ const summaryText = computed({
   <section class="note-editor" :data-note-open="note.id" data-note-editor @keydown="onKeydown">
     <header class="note-editor-head">
       <input v-model="draft.title" class="note-title-input" maxlength="80" aria-label="标题" placeholder="标题" />
-      <label class="note-preview-toggle">
-        <el-switch v-model="showPreview" />
-        预览
-      </label>
+      <el-segmented v-model="mode" :options="model.EDITOR_MODES" class="note-mode-switch" aria-label="编辑模式" title="切换编辑模式（⌘E）" data-note-mode />
       <button class="secondary-button small" type="button" data-action="cancel-edit" @click="notes.stopEditing()">取消</button>
       <button class="primary-button small" type="button" data-action="save-note" :disabled="notes.saving || !!titleError" @click="saveAndRead">
         <AppIcon :name="notes.saving ? 'spinner' : 'check'" :class="{ spin: notes.saving }" />
@@ -153,8 +162,8 @@ const summaryText = computed({
       <span v-for="tag in inlineTags" :key="tag" class="tag" title="正文里写的标签">#{{ tag }}</span>
     </div>
 
-    <div class="note-body-area" :class="{ split: showPreview }">
-      <div class="note-source-pane">
+    <div class="note-body-area" :class="{ split: mode === 'split' }">
+      <div v-if="mode !== 'preview'" class="note-source-pane">
         <textarea
           ref="textarea"
           v-model="draft.body"
@@ -180,7 +189,7 @@ const summaryText = computed({
           </li>
         </ul>
       </div>
-      <div v-if="showPreview" class="note-preview-pane blog-article" data-note-preview>
+      <div v-if="mode !== 'source'" class="note-preview-pane blog-article" :class="{ alone: mode === 'preview' }" data-note-preview>
         <NoteMarkdown v-if="draft.body.trim()" :body="draft.body" :exists="exists" />
         <p v-else class="blog-muted">预览会显示在这里。</p>
       </div>

@@ -116,3 +116,18 @@ describe('note markdown', () => {
     expect(markdown.excerptOf(markdown.parseMarkdown('# 别的\n\n正文'), '逻辑回归')).toBe('别的 正文');
   });
 });
+
+describe('editor modes', () => {
+  test('the remembered mode is read back, anything else is split', () => {
+    const storage = (value: string | null) => ({ getItem: () => value });
+    expect(model.readEditorMode(storage('source'))).toBe('source');
+    expect(model.readEditorMode(storage('preview'))).toBe('preview');
+    expect(model.readEditorMode(storage('wysiwyg'))).toBe('split');
+    expect(model.readEditorMode(storage(null))).toBe('split');
+    expect(model.readEditorMode(undefined)).toBe('split');
+  });
+
+  test('⌘E cycles source → split → preview → source', () => {
+    expect(['source', 'split', 'preview'].map((mode) => model.nextEditorMode(mode as model.EditorMode))).toEqual(['split', 'preview', 'source']);
+  });
+});
