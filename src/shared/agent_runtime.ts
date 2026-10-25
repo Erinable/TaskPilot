@@ -2,6 +2,8 @@
 // are fixed by TaskPilot; users only choose the CLI, model and thinking level.
 export const AGENT_IDS = ['product-lead', 'architect', 'qa', 'release-manager', 'env-steward', 'tutor', 'coding-agent'] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
+// The members the team page, the activity feed and spend are shown for.
+export const TEAM_AGENT_IDS = ['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const satisfies readonly AgentId[];
 export const CLI_IDS = ['claude', 'pi', 'grok', 'codex', 'opencode'] as const;
 export type CliId = (typeof CLI_IDS)[number];
 export const THINKING_LEVELS = ['default', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;

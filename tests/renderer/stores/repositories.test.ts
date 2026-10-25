@@ -91,6 +91,16 @@ describe('repositories store', () => {
     expect(store.current?.id).toBe('a');
   });
 
+  test('a release draft has no title of its own and is named by kind', async () => {
+    busy = [{ kind: 'release', label: null }];
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+    const store = useRepositoriesStore();
+    await store.refresh();
+
+    expect(await store.switchTo('b')).toBe(false);
+    expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('Release Manager：发布说明');
+  });
+
   test('unsaved settings that the user keeps stop the switch', async () => {
     const app = useAppStore();
     app.view = 'settings';

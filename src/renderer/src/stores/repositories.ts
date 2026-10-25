@@ -5,6 +5,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
+import { runLabel } from '@/lib/activity.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { useAppStore } from './app.ts';
@@ -80,7 +81,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
   const confirmCancel = async () => {
     const busy = await call(window.taskpilot.repositories.busy());
     if (busy.length === 0) return true;
-    const lines = busy.map((run) => `${BUSY_LABELS[run.kind]}：${run.label}`).join('；');
+    const lines = busy.map((run) => `${BUSY_LABELS[run.kind]}：${runLabel(run)}`).join('；');
     return confirmAction({
       title: '切换仓库会取消正在运行的任务',
       body: `${lines}。被取消的任务会标为已取消，回到这个仓库后可以重试。`,
