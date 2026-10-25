@@ -23,6 +23,7 @@ import type {
 } from '../shared/ipc_types.ts';
 import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME, toMicros } from './cost_rollup.ts';
 import type { CostRow } from './cost_rollup.ts';
+import { writeFileAtomic } from './atomic_json_file.ts';
 
 // One model call's spend. Stored beside the feed events so it expires with
 // them, but never shown in the feed: it is not something that happened.
@@ -159,7 +160,9 @@ export class ActivityLog {
     // Written before the day files go: a crash in between folds them again,
     // and the merge replaces those days rather than adding to them.
     const rollup = mergeRollup(await this.rollup(), folded, days, rollupOldest);
-    await fs.writeFile(path.join(this.#dir, ROLLUP_FILENAME), `${JSON.stringify({ version: 1, rows: rollup })}\n`);
+    // Through a temp file: the day files it folds are deleted next, so a
+    // half-written rollup could never be rebuilt.
+    await writeFileAtomic(path.join(this.#dir, ROLLUP_FILENAME), `${JSON.stringify({ version: 1, rows: rollup })}\n`);
     await Promise.all(expired.map((name) => fs.rm(path.join(this.#dir, name), { force: true })));
     return expired;
   }

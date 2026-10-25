@@ -15,6 +15,7 @@ import type { ReleasePlan } from './agents/release_manager.ts';
 import type { Milestone, ReleaseInputSummary } from '../shared/ipc_types.ts';
 import { MAX_MILESTONES, MilestoneError, assignRequirement, parseMilestoneInput } from './milestones.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
+import { JsonWriteQueue } from './atomic_json_file.ts';
 
 export const RELEASES_FILENAME = 'releases.json';
 export const MAX_HISTORY = 50;
@@ -126,23 +127,13 @@ export class ReleaseStore {
     return this;
   }
 
-  // Writes are chained so they never overlap (see requirement_store.ts).
-  #writes: Promise<void> = Promise.resolve();
+  #writes = new JsonWriteQueue();
 
-  #persist(): Promise<void> {
-    const write = this.#writes.then(async () => {
-      await fs.mkdir(path.dirname(this.#file), { recursive: true });
-      const tmp = `${this.#file}.tmp`;
-      await fs.writeFile(tmp, `${JSON.stringify(this.#state, null, 2)}\n`);
-      await fs.rename(tmp, this.#file);
-    });
-    this.#writes = write.catch(() => {});
-    return write;
-  }
+  #persist = () => this.#writes.write(() => ({ file: this.#file, value: this.#state }));
 
   // Resolves once every write so far has landed.
   flush(): Promise<void> {
-    return this.#writes;
+    return this.#writes.flush();
   }
 
   #mustDraft(statuses: DraftStatus[]): ReleaseDraft {

@@ -39,6 +39,7 @@ import path from 'node:path';
 
 import type { AgentRuntimeConfig, CliId } from '../shared/agent_runtime.ts';
 import { processEnv } from './env.ts';
+import { writeFileAtomic } from './atomic_json_file.ts';
 
 export const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec';
 export const GIT_PATH = '/usr/bin/git';
@@ -289,10 +290,8 @@ export const syncCredentials = async (context: SandboxContext, runDir: string, c
     const current = await seedContent(target, {});
     const shape = jsonKeys(written);
     if (written === null || current === null || written === current || shape === null || shape !== jsonKeys(current)) continue;
-    const temporary = `${target}.taskpilot-${randomUUID().slice(0, 8)}`;
     await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-    await fsp.writeFile(temporary, written, { mode: 0o600 });
-    await fsp.rename(temporary, target);
+    await writeFileAtomic(target, written, { tmp: `${target}.taskpilot-${randomUUID().slice(0, 8)}`, mode: 0o600 });
     updated.push(file.path);
   }
   return updated;

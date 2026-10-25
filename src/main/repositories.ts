@@ -11,6 +11,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import * as workspace from './workspace.ts';
+import { jsonText, writeFileAtomic } from './atomic_json_file.ts';
 import { EVENTS_DIRNAME } from './activity_log.ts';
 import { RELEASES_FILENAME } from './release_store.ts';
 import { REQUIREMENTS_FILENAME } from './requirement_store.ts';
@@ -132,8 +133,7 @@ export class RepositoryRegistry {
   async #persist() {
     await fs.mkdir(this.#configDir, { recursive: true });
     const file = path.join(this.#configDir, REGISTRY_FILENAME);
-    await fs.writeFile(`${file}.tmp`, `${JSON.stringify(this.#registry, null, 2)}\n`);
-    await fs.rename(`${file}.tmp`, file);
+    await writeFileAtomic(file, jsonText(this.#registry));
   }
 
   get current(): RepositoryEntry | null {

@@ -7,6 +7,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import * as status from './work_package_status.ts';
+import { JsonWriteQueue } from './atomic_json_file.ts';
 import type { Actor, TransitionName, WorkPackageStatus } from './work_package_status.ts';
 import type { TaskDefinition, TaskRevisionDefinition } from './tasks.ts';
 import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from './evidence.ts';
@@ -348,25 +349,13 @@ export class WorkPackageStore {
     }
   }
 
-  // Writes are chained and go through a temp file, so they never overlap and
-  // a crash mid-write leaves the previous file intact (see requirement_store.ts).
-  #writes: Promise<void> = Promise.resolve();
+  #writes = new JsonWriteQueue();
 
-  #persist(): Promise<void> {
-    const write = this.#writes.then(async () => {
-      await fs.mkdir(path.dirname(this.#file), { recursive: true });
-      const tmp = `${this.#file}.tmp`;
-      // Snapshot at write time, so the file always reflects the latest state.
-      await fs.writeFile(tmp, `${JSON.stringify(Object.fromEntries(this.#state), null, 2)}\n`);
-      await fs.rename(tmp, this.#file);
-    });
-    this.#writes = write.catch(() => {});
-    return write;
-  }
+  #persist = () => this.#writes.write(() => ({ file: this.#file, value: Object.fromEntries(this.#state) }));
 
   // Resolves once every write so far has landed.
   flush(): Promise<void> {
-    return this.#writes;
+    return this.#writes.flush();
   }
 
   get(id: string): WorkPackageState {

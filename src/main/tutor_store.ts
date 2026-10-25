@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { TutorAnswer } from './agents/tutor.ts';
+import { JsonWriteQueue } from './atomic_json_file.ts';
 
 export const TUTOR_FILENAME = 'tutor.json';
 // Packages kept; the oldest answers go first beyond this.
@@ -25,7 +26,7 @@ const keyOf = (packageId: string, stepIndex: number) => `${packageId}#${stepInde
 export class TutorStore {
   #file: string;
   #records = new Map<string, TutorRecord>();
-  #writes: Promise<void> = Promise.resolve();
+  #writes = new JsonWriteQueue();
 
   constructor(configDir: string) {
     this.#file = path.join(configDir, TUTOR_FILENAME);
@@ -53,7 +54,7 @@ export class TutorStore {
   }
 
   flush(): Promise<void> {
-    return this.#writes;
+    return this.#writes.flush();
   }
 
   // The answer for this step, if its text is unchanged since it was asked.
@@ -73,14 +74,5 @@ export class TutorStore {
     return structuredClone(record);
   }
 
-  #persist(): Promise<void> {
-    const write = this.#writes.then(async () => {
-      await fs.mkdir(path.dirname(this.#file), { recursive: true });
-      const tmp = `${this.#file}.tmp`;
-      await fs.writeFile(tmp, `${JSON.stringify([...this.#records.values()], null, 2)}\n`);
-      await fs.rename(tmp, this.#file);
-    });
-    this.#writes = write.catch(() => {});
-    return write;
-  }
+  #persist = () => this.#writes.write(() => ({ file: this.#file, value: [...this.#records.values()] }));
 }

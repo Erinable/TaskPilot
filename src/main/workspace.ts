@@ -10,6 +10,7 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 
 import { env } from './env.ts';
+import { jsonText, writeFileAtomic } from './atomic_json_file.ts';
 import type { LooseJson } from './loose_json.ts';
 
 // Report paths must not contain C0 controls.
@@ -391,8 +392,7 @@ export const save = async (configDir: string, raw: unknown): Promise<WorkspaceCo
   await fs.mkdir(configDir, { recursive: true });
   const file = path.join(configDir, CONFIG_FILENAME);
   // Through a temp file, so a crash mid-write leaves the previous config.
-  await fs.writeFile(`${file}.tmp`, `${JSON.stringify(serialize(config), null, 2)}\n`);
-  await fs.rename(`${file}.tmp`, file);
+  await writeFileAtomic(file, jsonText(serialize(config)));
   return config;
 };
 

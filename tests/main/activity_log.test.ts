@@ -165,6 +165,21 @@ test('prune() drops rollup rows older than a year', async () => {
   );
 });
 
+test('prune() writes the rollup through a temp file and keeps the day files when that fails', async () => {
+  const dir = await tempDir();
+  const events = path.join(dir, EVENTS_DIRNAME);
+  await fs.mkdir(events);
+  const previous = JSON.stringify({ version: 1, rows: [] });
+  await fs.writeFile(path.join(events, ROLLUP_FILENAME), previous);
+  await fs.writeFile(path.join(events, '2026-09-01.jsonl'), JSON.stringify({ kind: 'agent_cost', agent: 'qa', costUsd: 0.2, at: '2026-09-01T03:00:00Z' }));
+  // A directory where the temp file goes makes the rollup write fail.
+  await fs.mkdir(path.join(events, `${ROLLUP_FILENAME}.tmp`));
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => new Date('2026-10-13T02:00:00Z') });
+  await assert.rejects(() => log.prune());
+  assert.equal(await fs.readFile(path.join(events, ROLLUP_FILENAME), 'utf8'), previous);
+  assert.equal((await fs.readdir(events)).includes('2026-09-01.jsonl'), true);
+});
+
 test('prune() is a no-op before anything was recorded', async () => {
   assert.deepEqual(await new ActivityLog(await tempDir(), { timeZone: SHANGHAI }).prune(), []);
 });
