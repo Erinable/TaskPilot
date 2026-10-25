@@ -103,7 +103,29 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
       active: vi.fn(() => ok<codingTypes.CodingActiveRun[]>([])),
       resume: vi.fn((_id: string) => ok(current.task)),
     },
-    workspace: { info: vi.fn(() => ok<workspaceTypes.WorkspaceInfo>({ configured: false })), openFile: vi.fn(() => ok<workspaceTypes.OpenedWith>('vscode')) },
+    workspace: {
+      info: vi.fn(() => ok<workspaceTypes.WorkspaceInfo>({ configured: false })),
+      openFile: vi.fn(() => ok<workspaceTypes.OpenedWith>('vscode')),
+      get: vi.fn(() =>
+        ok<workspaceTypes.WorkspaceView>({
+          root: '/repo',
+          steps: [
+            {
+              id: 'test',
+              label: null,
+              effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
+              source: 'local',
+              skipped: null,
+              local: null,
+              suggestions: [],
+            },
+          ],
+          project: { status: 'missing' },
+          detected: [],
+          presets: [],
+        }),
+      ),
+    },
     commit: {
       preview: vi.fn(() =>
         ok<commitTypes.CommitPreview>({

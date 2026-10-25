@@ -183,6 +183,7 @@ test('search hides unmatched pages, their group labels, and shows the empty hint
 
 test('a save error lands beside its step and focuses its command input', async () => {
   const wrapper = await mountView('commands');
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
   await wrapper.get('[data-step="lint"] [data-mode="override"]').trigger('click');
   await flushPromises();
   expect(isShown(wrapper.get('#checkSettings'))).toBe(true);
@@ -198,17 +199,24 @@ test('a save error lands beside its step and focuses its command input', async (
 
 test('the steps page lists every fixed step and offers to create taskpilot.toml', async () => {
   const wrapper = await mountView('commands');
+  // Grouped by what happens: the submit step first, then what is not set up.
+  expect(wrapper.findAll('[data-step-group]').map((node) => node.attributes('data-step-group'))).toEqual(['submit', 'skipped']);
   expect(wrapper.findAll('[data-step]').map((node) => node.attributes('data-step'))).toEqual([
+    'test',
     'setup',
     'build',
     'format',
     'lint',
     'typecheck',
-    'test',
     'coverage',
   ]);
-  expect(wrapper.get('[data-step="lint"]').text()).toContain('未配置，跳过');
+  expect(wrapper.get('[data-step="lint"]').text()).toContain('未配置，会跳过');
+  // Rows start folded and open on click.
+  expect(wrapper.find('[data-step="lint"] [data-mode]').exists()).toBe(false);
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
+  expect(wrapper.get('[data-step="lint"] [data-edit]').attributes('aria-expanded')).toBe('true');
   expect(wrapper.get('#projectFile').text()).toContain('推荐「TypeScript / JavaScript」预设');
+  expect(wrapper.get('#createProject').text()).toContain('用推荐预设创建');
   vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
   await wrapper.get('#createProject').trigger('click');
   await flushPromises();
@@ -219,6 +227,7 @@ test('the steps page lists every fixed step and offers to create taskpilot.toml'
 
 test('a lint override offers the preset command as an option', async () => {
   const wrapper = await mountView('commands');
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
   await wrapper.get('[data-step="lint"] [data-mode="override"]').trigger('click');
   await flushPromises();
   expect(useSettingsStore().workspaceDraft?.steps.lint).toMatchObject({ mode: 'override', lines: ['npm run lint'] });
