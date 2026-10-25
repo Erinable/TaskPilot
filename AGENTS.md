@@ -7,6 +7,7 @@ TaskPilot is an Electron app built with electron-vite: TypeScript in the main pr
 - `src/main/index.ts` — main process: window creation and IPC registration. In dev it loads the electron-vite dev server, otherwise `out/renderer/index.html`.
 - `src/main/env.ts` — the only reader of `process.env` in the main process.
 - `src/main/ipc.ts` — IPC handlers; testable with a fake `ipcMain`.
+- `src/main/background_runs.ts` — the registry of background runs. Every run that outlives its IPC call registers its controller and promise here; cancelling on a switch, reset or quit, the switch dialog's busy list and the team's busy work are all read from it, so a new kind of run only needs to register.
 - `src/shared/ipc_channels.ts` / `src/shared/ipc_types.ts` — channel names and the typed wire contract shared by main, preload and renderer. `src/shared` must not import from `src/main`.
 - `src/preload/index.ts` — exposes `window.taskpilot` (typed as `TaskPilotApi`) via `contextBridge`. It is bundled to CommonJS (`out/preload/index.cjs`) because sandboxed preloads cannot be ES modules.
 - `src/main/tasks.ts` — the work-package definitions: only packages published from requirements. Tests use `tests/main/fixtures/sample_tasks.ts`.
