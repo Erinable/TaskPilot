@@ -66,7 +66,13 @@ export interface WorkspaceOptions {
   // Set in sandbox mode, with the CLI whose state folder the profile opens.
   sandbox?: SandboxContext;
   cli?: CliId;
+  rules?: PatchRules;
 }
+
+// Paths the repository's language presets add to the fixed rules below:
+// `protectedFiles` are high-risk, `secretFiles` are never written.
+export type PatchRules = { protectedFiles: readonly RegExp[]; secretFiles: readonly RegExp[] };
+const NO_RULES: PatchRules = { protectedFiles: [], secretFiles: [] };
 
 export interface PreparedCodingWorkspace {
   runName: string;
@@ -80,10 +86,13 @@ const execFileAsync = promisify(execFile);
 const defaultSpawn: WorkspaceSpawnFn = (command, args, options) => nodeSpawn(command, [...args], options as never) as unknown as Child;
 const safeName = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // taskpilot.toml decides which commands the checks run, so like the
-// manifests it is the developer's to change.
+// manifests it is the developer's to change. Language-specific files come
+// from the presets (PatchRules); these hold for every repository.
 const highRiskName =
   /^(?:\.git(?:\/|$)|\.hooks(?:\/|$)|taskpilot\.toml$|package\.json$|package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.npmrc$|(?:test|tests|spec|__tests__|build|dist)(?:[./]|\/|$)|(?:Makefile|makefile|make\.bat)$|(?:\.github|\.gitlab|\.circleci)(?:\/|$))/i;
 const secretName = /(?:^|\/)(?:\.env(?:\.|$)|\.npmrc$|(?:id|identity)_rsa(?:\.pub)?$|.*\.(?:pem|key|p12|pfx)$|credentials?(?:\.|\/|$))/i;
+const highRiskPath = (filePath: string, rules: PatchRules) => highRiskName.test(filePath) || rules.protectedFiles.some((rule) => rule.test(filePath));
+const secretPath = (filePath: string, rules: PatchRules) => secretName.test(filePath) || rules.secretFiles.some((rule) => rule.test(filePath));
 const forbiddenMode = /(?:^|\s)(?:new file mode|old mode) (?:120000|160000)\s*$/m;
 const resolveRunName = (runName: string, runRoot: string): string => {
   if (safeName.test(runName)) return path.join(runRoot, runName);
@@ -147,7 +156,7 @@ const checkPatchPath = (candidate: string, fileScope: FileScope, blocked: Blocke
   if (!inScope(candidate, fileScope)) blocked.push({ path: candidate, reason: 'outside requested file scope' });
 };
 
-const parsePatchFiles = (patch: string, fileScope: FileScope): { files: CodingPatchFile[]; blocked: BlockedPatch[] } => {
+const parsePatchFiles = (patch: string, fileScope: FileScope, rules: PatchRules): { files: CodingPatchFile[]; blocked: BlockedPatch[] } => {
   if (Buffer.byteLength(patch) > MAX_PATCH_BYTES) throw new CodingWorkspaceError('Patch exceeds the size limit', 'workspace_invalid_patch');
   const files: CodingPatchFile[] = [];
   const blocked: BlockedPatch[] = [];
@@ -160,11 +169,11 @@ const parsePatchFiles = (patch: string, fileScope: FileScope): { files: CodingPa
       current.highRisk = true;
       blocked.push({ path: current.path, reason: 'symlink or submodule mode is not permitted' });
     }
-    if (highRiskName.test(current.path)) {
+    if (highRiskPath(current.path, rules)) {
       current.highRisk = true;
       blocked.push({ path: current.path, reason: 'high-risk project control or test path' });
     }
-    if (secretName.test(current.path)) blocked.push({ path: current.path, reason: 'secret path' });
+    if (secretPath(current.path, rules)) blocked.push({ path: current.path, reason: 'secret path' });
     if (!inScope(current.path, fileScope)) blocked.push({ path: current.path, reason: 'outside requested file scope' });
     files.push(current);
   };
@@ -370,7 +379,7 @@ export const readPatch = async (runName: string, fileScope?: FileScope, options:
   const stdout = options.sandbox
     ? await fromSandbox(() => sandbox.diff(runName, { context: options.sandbox as SandboxContext, cli: options.cli ?? 'codex', signal: options.signal }))
     : (await runWrapper('diff', runName, options)).stdout;
-  const parsed = parsePatchFiles(stdout, fileScope);
+  const parsed = parsePatchFiles(stdout, fileScope, options.rules ?? NO_RULES);
   const digest = createHash('sha256').update(stdout).digest('hex');
   return { digest, files: parsed.files, patch: stdout, blocked: parsed.blocked };
 };
@@ -396,7 +405,7 @@ export const filePatches = (patch: string): patchMerge.FilePatch[] =>
   patch
     .split(/(?=^diff --git )/m)
     .filter((segment) => segment.startsWith('diff --git '))
-    .map((segment) => ({ path: parsePatchFiles(segment, undefined).files[0].path, patch: segment }));
+    .map((segment) => ({ path: parsePatchFiles(segment, undefined, NO_RULES).files[0].path, patch: segment }));
 
 // Writes a reviewed patch into the developer's working tree. The safety
 // checks come first and hold for every write: the digest must match what
@@ -413,7 +422,7 @@ export const applyPatch = async (
   const digest = createHash('sha256').update(patch).digest('hex');
   if (digest !== previewDigest) throw new CodingWorkspaceError('Patch digest does not match the preview', 'workspace_digest_mismatch');
   if (options.signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
-  const parsed = parsePatchFiles(patch, undefined);
+  const parsed = parsePatchFiles(patch, undefined, options.rules ?? NO_RULES);
   const blockedPaths = typeof blocked === 'boolean' ? (blocked ? [{ path: '*', reason: 'caller blocked patch application' }] : []) : blocked;
   const intrinsicBlocked = parsed.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path');
   if (blockedPaths.length || intrinsicBlocked.length) throw new CodingWorkspaceError('Patch contains blocked or unsafe paths', 'workspace_blocked_patch');
@@ -428,7 +437,7 @@ export const selectPatch = (patch: string, selected: readonly string[]): string 
   const segments: { path: string; text: string }[] = [];
   for (const segment of patch.split(/(?=^diff --git )/m)) {
     if (!segment.startsWith('diff --git ')) continue;
-    segments.push({ path: parsePatchFiles(segment, undefined).files[0].path, text: segment });
+    segments.push({ path: parsePatchFiles(segment, undefined, NO_RULES).files[0].path, text: segment });
   }
   const found = new Set(segments.map((segment) => segment.path));
   const missing = selected.find((filePath) => !found.has(filePath));
@@ -476,8 +485,8 @@ export const clean = async (runName: string, options: WorkspaceOptions = {}): Pr
   await runWrapper('clean', runName, options);
 };
 
-export const parsePatchPreview = (patch: string, fileScope?: FileScope): CodingPatchPreview => {
-  const parsed = parsePatchFiles(patch, fileScope);
+export const parsePatchPreview = (patch: string, fileScope?: FileScope, rules: PatchRules = NO_RULES): CodingPatchPreview => {
+  const parsed = parsePatchFiles(patch, fileScope, rules);
   return { digest: createHash('sha256').update(patch).digest('hex'), files: parsed.files, patch, blocked: parsed.blocked };
 };
 

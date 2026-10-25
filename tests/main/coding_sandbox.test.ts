@@ -64,6 +64,28 @@ test('sandboxEnv() points HOME, XDG folders and the npm cache at the run home', 
   assert.equal(env.npm_config_cache, '/runs/r1-home/.npm');
 });
 
+test("sandboxEnv() adds the languages' cache folders under the run home, and never lets them replace HOME", () => {
+  const context: sandbox.SandboxContext = {
+    home: HOME,
+    runRoot: '',
+    probeFile: '',
+    pathEntries: [],
+    extraRead: [],
+    extraWrite: [],
+    languageEnv: (agentHome) => ({ CARGO_HOME: `${agentHome}/.cargo`, HOME: '/elsewhere' }),
+  };
+  const env = sandbox.sandboxEnv(context, {}, '/runs/r1-home');
+  assert.equal(env.CARGO_HOME, '/runs/r1-home/.cargo');
+  assert.equal(env.HOME, '/runs/r1-home');
+});
+
+test("profileFor() lets the run read the languages' toolchain folders, never write them", () => {
+  const context = { home: HOME, runRoot: '', probeFile: '', pathEntries: [], extraRead: [], extraWrite: [], languageRead: [`${HOME}/.rustup`] };
+  const spec = sandbox.profileFor(context, 'claude', `${HOME}/runs/r1`, null);
+  assert.deepEqual(spec.readable, [`${HOME}/.rustup`]);
+  assert.ok(!spec.writable.includes(`${HOME}/.rustup`));
+});
+
 test('sandboxEnv() passes model provider keys and nothing else from the app environment', () => {
   const context = { home: HOME, runRoot: '', probeFile: '', pathEntries: ['/a', '/b'], extraRead: [], extraWrite: [] };
   const env = sandbox.sandboxEnv(context, {

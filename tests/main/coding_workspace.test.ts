@@ -8,6 +8,7 @@ import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
 import {
   CodingWorkspaceError,
+  applyPatch,
   parsePatchPreview,
   prepare,
   readPatch,
@@ -15,6 +16,8 @@ import {
   snapshotBaseline,
   type WorkspaceSpawnFn,
 } from '../../src/main/coding_workspace.ts';
+import { PRESETS, presetById } from '../../src/main/presets/index.ts';
+import type { PatchRules } from '../../src/main/coding_workspace.ts';
 
 const patch = (file: string): string =>
   `diff --git a/${file} b/${file}\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+safe\n`;
@@ -30,6 +33,67 @@ test('parsePatchPreview classifies high-risk project files', () => {
   const preview = parsePatchPreview(patch('package.json'));
   assert.equal(preview.files[0]?.highRisk, true);
   assert.equal(preview.blocked[0]?.reason, 'high-risk project control or test path');
+});
+
+const rulesOf = (...ids: string[]): PatchRules => {
+  const list = ids.map((id) => presetById(id)).filter((preset) => preset !== null);
+  return { protectedFiles: list.flatMap((preset) => preset.protectedFiles), secretFiles: list.flatMap((preset) => preset.secretFiles) };
+};
+const reasons = (file: string, rules?: PatchRules) => parsePatchPreview(patch(file), undefined, rules).blocked.map((entry) => entry.reason);
+const HIGH_RISK = 'high-risk project control or test path';
+
+test('the Rust and Python presets mark their manifests, lockfiles and build scripts high-risk', () => {
+  const protectedFiles: Record<string, string[]> = {
+    rust: ['Cargo.toml', 'Cargo.lock', 'build.rs', 'crates/core/Cargo.toml', 'crates/core/build.rs', '.cargo/config.toml'],
+    python: [
+      'pyproject.toml',
+      'setup.py',
+      'setup.cfg',
+      'requirements.txt',
+      'requirements-dev.txt',
+      'requirements/base.txt',
+      'conftest.py',
+      'src/pkg/conftest.py',
+      'tox.ini',
+      'noxfile.py',
+      'uv.lock',
+    ],
+  };
+  for (const [id, files] of Object.entries(protectedFiles))
+    for (const file of files) {
+      const preview = parsePatchPreview(patch(file), undefined, rulesOf(id));
+      assert.equal(preview.files[0]?.highRisk, true, `${id}: ${file}`);
+      assert.ok(reasons(file, rulesOf(id)).includes(HIGH_RISK), `${id}: ${file}`);
+    }
+  // Only the repository's own languages add rules.
+  for (const file of ['Cargo.toml', 'Cargo.lock', 'pyproject.toml', 'requirements.txt', 'conftest.py']) assert.deepEqual(reasons(file), [], file);
+  assert.deepEqual(reasons('pyproject.toml', rulesOf('rust')), []);
+  for (const file of ['src/main.rs', 'src/lib.rs', 'src/pkg/module.py', 'docs/requirements.md', 'my_setup.py'])
+    assert.deepEqual(reasons(file, rulesOf('rust', 'python')), [], file);
+});
+
+test('the Rust and Python presets block their credential files', () => {
+  assert.ok(reasons('.pypirc', rulesOf('python')).includes('secret path'));
+  assert.ok(reasons('.cargo/credentials', rulesOf('rust')).includes('secret path'));
+  assert.ok(reasons('.cargo/credentials.toml', rulesOf('rust')).includes('secret path'));
+  // .cargo/credentials* was already caught by the fixed rule; .pypirc was not.
+  assert.deepEqual(reasons('.pypirc'), []);
+});
+
+test('the presets only add to the fixed rules', () => {
+  const every = rulesOf(...PRESETS.map((preset) => preset.id));
+  const files = ['package.json', 'taskpilot.toml', '.github/workflows/ci.yml', 'tests/a.test.ts', 'Makefile', '.env', 'id_rsa', 'src/a.ts', 'README.md'];
+  for (const file of files) for (const reason of reasons(file)) assert.ok(reasons(file, every).includes(reason), `${file}: ${reason}`);
+  assert.deepEqual(reasons('src/a.ts', every), []);
+  assert.deepEqual(rulesOf('typescript'), { protectedFiles: [], secretFiles: [] });
+});
+
+test('applyPatch refuses a preset secret path even when high-risk files are allowed', async () => {
+  const preview = parsePatchPreview(patch('.pypirc'), undefined, rulesOf('python'));
+  await assert.rejects(
+    applyPatch(os.tmpdir(), preview.patch, preview.digest, [], { rules: rulesOf('python') }),
+    (error: unknown) => error instanceof CodingWorkspaceError && error.code === 'workspace_blocked_patch',
+  );
 });
 
 test('readPatch uses the fixed wrapper action and validates scope', async () => {

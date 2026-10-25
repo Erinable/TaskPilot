@@ -7,6 +7,7 @@
 // project and its declared dependencies, which may run build backends, as
 // any `pip install` the developer runs would; nothing is installed until
 // the user runs the setup step. uv itself is only detected, never installed.
+import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { indexEntries, readTracked } from '../repo_reader.ts';
@@ -168,4 +169,14 @@ export const pythonPreset: Preset<PythonFacts> = {
     { command: PYTHON, versionArgs: ['--version'], install: 'brew install python   # 或从 https://www.python.org/downloads/ 安装' },
     { command: 'uv', versionArgs: ['--version'], install: 'curl -LsSf https://astral.sh/uv/install.sh | sh   # 可选；没有 uv 时用 venv + pip' },
   ],
+  // [人工决策-2026-10-25 23:51:35] Python 仓库的项目配置、依赖清单和 pytest 配置改动要人工确认（CARM-16 #9）。
+  // 这会让更多补丁停下等确认，与 work_package_status.ts 的全自动闭环决策不冲突：有确认项本来就停下等人。
+  protectedFiles: [
+    /(?:^|\/)(?:pyproject\.toml|setup\.py|setup\.cfg|conftest\.py|tox\.ini|noxfile\.py|uv\.lock)$/i,
+    // requirements*.txt, and the files of a requirements/ folder.
+    /(?:^|\/)requirements(?:[^/]*|\/[^/]+)\.txt$/i,
+  ],
+  secretFiles: [/(?:^|\/)\.pypirc$/i],
+  sandboxEnv: (agentHome) => ({ PIP_CACHE_DIR: path.join(agentHome, '.cache', 'pip'), UV_CACHE_DIR: path.join(agentHome, '.cache', 'uv') }),
+  sandboxRead: () => [],
 };

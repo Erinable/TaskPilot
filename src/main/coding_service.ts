@@ -230,11 +230,12 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     resolutions: Partial<Record<string, codingTypes.CodingResolution>>,
   ): Promise<codingTypes.CodingApplyResult> => {
     const { task, run } = codingRunOf(id);
-    const selected = codingWorkspace.parsePatchPreview(codingWorkspace.selectPatch(preview.patch, files), task.fileScope);
+    const rules = await runtime.patchRules();
+    const selected = codingWorkspace.parsePatchPreview(codingWorkspace.selectPatch(preview.patch, files), task.fileScope, rules);
     const blocked = allowHighRisk ? selected.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path') : selected.blocked;
     await updateCoding(id, { status: 'applying', error: null });
     try {
-      const applied = await runtime.applyPatch(requireRoot(), selected.patch, selected.digest, blocked, { baseline: run.baseline, resolutions });
+      const applied = await runtime.applyPatch(requireRoot(), selected.patch, selected.digest, blocked, { baseline: run.baseline, resolutions, rules });
       await updateCoding(id, {
         status: applied.markers.length ? 'applied' : 'verifying',
         halt: applied.markers.length ? 'markers' : null,

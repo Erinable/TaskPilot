@@ -10,6 +10,7 @@ import * as codingExec from './coding_exec.ts';
 import * as codingWorkspace from './coding_workspace.ts';
 import * as codingSandbox from './coding_sandbox.ts';
 import * as patchMerge from './patch_merge.ts';
+import * as presets from './presets/index.ts';
 import { env as appEnv } from './env.ts';
 import { profileBlock } from './agents/prompt_blocks.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
@@ -67,17 +68,30 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   } = deps;
   const { getPreferences, configDir } = ctx;
 
+  // The presets of the open repository's languages (taskpilot.toml's, or the
+  // detected ones), for what only those languages need.
+  const languagePresets = async () => presets.presetsOf((await ctx.profile())?.languages.map((language) => language.id) ?? []);
+  const patchRules = async (): Promise<codingWorkspace.PatchRules> => {
+    const list = await languagePresets();
+    return { protectedFiles: list.flatMap((preset) => preset.protectedFiles), secretFiles: list.flatMap((preset) => preset.secretFiles) };
+  };
+  const readRulePatch: typeof readPatch = async (runName, fileScope, options = {}) => readPatch(runName, fileScope, { rules: await patchRules(), ...options });
+
   const sandboxRunRoot = path.join(configDir, codingSandbox.RUNS_DIRNAME);
   const sandboxContext = async (): Promise<codingSandbox.SandboxContext> => {
     const coding = getPreferences().coding;
     const { path: envPath } = await ctx.commandPath();
+    const home = os.homedir();
+    const languages = await languagePresets();
     return {
-      home: os.homedir(),
+      home,
       runRoot: sandboxRunRoot,
       probeFile: path.join(configDir, codingSandbox.PROBE_FILENAME),
       pathEntries: (envPath || appEnv.path).split(':').filter(Boolean),
       extraRead: coding.extraRead,
       extraWrite: coding.extraWrite,
+      languageEnv: (agentHome) => Object.assign({}, ...languages.map((preset) => preset.sandboxEnv(agentHome, home))),
+      languageRead: languages.flatMap((preset) => preset.sandboxRead(home)),
     };
   };
   const sandboxed = () => getPreferences().coding?.isolation !== 'separate-user';
@@ -87,7 +101,7 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
     path.join(sandbox ? sandboxRunRoot : codingWorkspace.DEFAULT_RUN_ROOT, runId);
   const sandboxOfRun = async (runName: string) => (path.dirname(runName) === sandboxRunRoot ? await sandboxContext() : undefined);
   const readRunPatch = async (runName: string, fileScope: string[], extra: { signal?: AbortSignal; cli?: agentRuntimeTypes.CliId } = {}) =>
-    readPatch(runName, fileScope, { ...extra, sandbox: await sandboxOfRun(runName) });
+    readRulePatch(runName, fileScope, { ...extra, sandbox: await sandboxOfRun(runName) });
   const cleanRun = async (runName: string) => clean(runName, { sandbox: await sandboxOfRun(runName) });
   const probeCoding = async (config: agentRuntimeTypes.AgentRuntimeConfig) => probe({ config, sandbox: sandboxed() ? await sandboxContext() : undefined });
 
@@ -118,7 +132,8 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   return {
     prepare,
     run,
-    readPatch,
+    readPatch: readRulePatch,
+    patchRules,
     previewMerge,
     applyPatch,
     snapshot,
