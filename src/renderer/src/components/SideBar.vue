@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick } from 'vue';
+import { computed } from 'vue';
 
 import AppIcon from './AppIcon.vue';
 import ProjectList from './ProjectList.vue';
@@ -10,7 +10,6 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import * as activity from '@/lib/activity.ts';
-import type * as activityTypes from '@shared/ipc/activity.ts';
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -40,20 +39,16 @@ const openView = async (view: 'map' | 'release' | 'team' | 'notes') => {
   if (await app.navigate(view)) execution.close();
 };
 
-// Opens the team page with that member's card focused.
-const openMember = async (agent: activityTypes.ActivityAgent) => {
-  if (!(await app.navigate('team'))) return;
-  execution.close();
-  await nextTick();
-  document.getElementById(`team-${agent}`)?.focus();
-};
-
 const team = computed(() =>
   activity.TEAM.map(({ agent, actor }) => {
     const presence = activity.presenceOf(app.activity?.team ?? null, agent);
-    return { ...actor, agent, presence, label: activity.PRESENCE_LABELS[presence] };
+    return { ...actor, agent, presence };
   }),
 );
+const teamWork = computed(() => activity.teamWorkSummary(app.activity?.team ?? null));
+// Collapsed, the status lives in the tooltip and the accessible name.
+const teamStatus = computed(() => teamWork.value ?? activity.presenceSummary(app.activity?.team ?? null));
+const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.value}` : 'AI 团队'));
 </script>
 
 <template>
@@ -101,30 +96,25 @@ const team = computed(() =>
       </button>
     </nav>
     <ProjectList />
-    <div class="side-section-label team-label">AI 团队</div>
-    <div class="team-list">
-      <!-- Members, activity and cost are tabs of one page. -->
+    <!-- Members, activity and cost are tabs of one page. -->
+    <div class="team-entry-wrap">
       <button
-        class="nav-item"
-        :class="{ active: TEAM_VIEWS.includes(app.view) }"
-        :title="app.sidebarCollapsed ? 'AI 团队' : undefined"
+        class="nav-item team-entry"
+        :class="{ active: TEAM_VIEWS.includes(app.view), working: teamWork }"
+        :title="app.sidebarCollapsed ? teamTitle : undefined"
+        :aria-label="teamTitle"
         @click="openView('team')"
       >
         <AppIcon name="bot" class="nav-icon" />
-        <span class="nav-label">团队概览</span>
+        <span class="nav-label">AI 团队</span>
+        <span class="team-stack" aria-hidden="true">
+          <span v-for="member in team" :key="member.agent" class="agent-avatar team-stack-avatar" :class="[member.avatar, member.presence]">
+            <span v-if="member.presence === 'busy'" class="presence busy"></span>
+          </span>
+        </span>
       </button>
-      <button
-        v-for="member in team"
-        :key="member.agent"
-        class="team-member"
-        type="button"
-        :title="`${member.name}：${member.label}`"
-        @click="openMember(member.agent)"
-      >
-        <span class="agent-avatar" :class="member.avatar">{{ member.initials }}</span>
-        <span class="nav-label">{{ member.name }}</span>
-        <span class="presence" :class="member.presence" role="img" :aria-label="member.label"></span>
-      </button>
+      <!-- Already part of the entry's accessible name. -->
+      <p v-if="teamWork" class="team-entry-work nav-label" aria-hidden="true">{{ teamWork }}</p>
     </div>
     <div class="sidebar-bottom">
       <div class="sync-card" :title="app.sidebarCollapsed ? `${syncTitle} · ${syncDetail}` : undefined">
@@ -157,14 +147,70 @@ const team = computed(() =>
 </template>
 
 <style scoped>
-/* Busy reads as working, offline as unreachable; online keeps the theme's dot. */
-.presence.busy {
+.team-entry-wrap {
+  margin-top: 28px;
+}
+.sidebar.collapsed .team-entry-wrap {
+  margin-top: var(--space-6);
+}
+/* Five small avatars overlap; working members stand out, offline ones fade. */
+.team-stack {
+  display: flex;
+  margin-left: auto;
+}
+.team-stack-avatar {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--glass-border);
+}
+.team-stack-avatar + .team-stack-avatar {
+  margin-left: -4px;
+}
+.team-stack-avatar.offline {
+  filter: grayscale(1);
+  opacity: 0.4;
+}
+.team-stack-avatar.busy {
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.team-stack .presence.busy {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  margin: 0;
   background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--glass-border);
   animation: pulse 1.6s ease-in-out infinite;
 }
-.presence.offline {
-  background: var(--text-tertiary);
-  opacity: 0.6;
+.sidebar.collapsed .team-stack {
+  display: none;
+}
+.team-entry-work {
+  margin: 2px 0 0;
+  padding: 0 12px 0 calc(12px + 16px + var(--space-3));
+  overflow: hidden;
+  color: var(--accent-strong);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Collapsed, a dot on the icon says someone is working. */
+.sidebar.collapsed .team-entry.working::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--glass-border);
+  animation: pulse 1.6s ease-in-out infinite;
 }
 </style>

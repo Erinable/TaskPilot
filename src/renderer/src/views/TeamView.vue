@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';
@@ -8,6 +8,7 @@ import { businessDay } from '@/lib/time_zone.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { CLI_OPTIONS } from '@shared/agent_runtime.ts';
+import type * as activityTypes from '@shared/ipc/activity.ts';
 
 const app = useAppStore();
 const settings = useSettingsStore();
@@ -23,7 +24,7 @@ const costNote = computed(() => {
 const members = computed(() => {
   const overview = app.activity;
   const now = new Date();
-  return activity.TEAM.map(({ agent, actor }) => {
+  const list = activity.TEAM.map(({ agent, actor }) => {
     const presence = activity.presenceOf(overview?.team ?? null, agent);
     return {
       agent,
@@ -44,7 +45,14 @@ const members = computed(() => {
       })),
     };
   });
+  return activity.sortByPresence(list);
 });
+
+// Working members always show the full card; the others open on request.
+const expanded = reactive(new Set<activityTypes.ActivityAgent>());
+const rolesOpen = reactive(new Set<activityTypes.ActivityAgent>());
+const toggle = (set: Set<activityTypes.ActivityAgent>, agent: activityTypes.ActivityAgent) => (set.has(agent) ? set.delete(agent) : set.add(agent));
+const openAgents = () => settings.open('agents').catch((caught) => console.error(caught));
 </script>
 
 <template>
@@ -53,7 +61,7 @@ const members = computed(() => {
     <div class="page-heading">
       <div>
         <h1>AI 团队</h1>
-        <p>AI 成员分工协作：拆需求、写代码、审查、发布、环境和辅导。点成员卡片看它最近做了什么。</p>
+        <p>AI 成员分工协作：拆需求、写代码、审查、发布、环境和辅导。正在工作的成员排在最前，其他成员点「展开」看详情。</p>
       </div>
       <span class="team-presence-chip">{{ activity.presenceSummary(app.activity?.team ?? null) }}</span>
     </div>
@@ -64,63 +72,99 @@ const members = computed(() => {
         :id="`team-${member.agent}`"
         :key="member.agent"
         class="panel glass team-card"
+        :class="{ compact: member.presence !== 'busy' && !expanded.has(member.agent) }"
         tabindex="-1"
         :aria-labelledby="`team-${member.agent}-name`"
       >
         <header class="team-card-head">
-          <span class="agent-avatar large" :class="member.actor.avatar">{{ member.actor.initials }}</span>
-          <div>
+          <span class="agent-avatar large" :class="[member.actor.avatar, member.presence]">{{ member.actor.initials }}</span>
+          <div class="team-card-title">
             <h2 :id="`team-${member.agent}-name`">{{ member.actor.name }}</h2>
             <span class="presence-text" :class="member.presence">
               <span class="presence" :class="member.presence" aria-hidden="true"></span>
               {{ member.label }}
             </span>
           </div>
+          <button
+            v-if="member.presence !== 'busy'"
+            class="team-expand link-button"
+            type="button"
+            :aria-expanded="expanded.has(member.agent)"
+            :aria-controls="`team-${member.agent}-details`"
+            @click="toggle(expanded, member.agent)"
+          >
+            {{ expanded.has(member.agent) ? '收起' : '展开' }}
+            <span class="visually-hidden">{{ member.actor.name }}</span>
+          </button>
         </header>
 
-        <p class="team-role">{{ member.role }}</p>
-        <div class="team-runtime" aria-label="Agent 配置">
-          <span>{{ member.cli }}</span>
-          <span>{{ member.runtime?.model || 'CLI 默认模型' }}</span>
-          <span>思考：{{ member.runtime?.thinking ?? '默认' }}</span>
-          <button class="empty-action" type="button" @click="settings.open('agents').catch((caught) => console.error(caught))">配置</button>
+        <div class="team-role-block">
+          <button
+            class="team-role-toggle link-button"
+            type="button"
+            :aria-expanded="rolesOpen.has(member.agent)"
+            :aria-controls="`team-${member.agent}-role`"
+            @click="toggle(rolesOpen, member.agent)"
+          >
+            这是做什么的
+            <AppIcon name="chevron-down" class="team-role-chevron" :class="{ open: rolesOpen.has(member.agent) }" />
+          </button>
+          <p v-if="rolesOpen.has(member.agent)" :id="`team-${member.agent}-role`" class="team-role">{{ member.role }}</p>
         </div>
 
-        <dl class="team-facts">
-          <div>
-            <dt>现在</dt>
-            <dd v-if="member.presence === 'offline'">
-              暂时联系不上。检查所选 CLI 的安装和运行环境。
-              <button class="empty-action" type="button" @click="settings.open('agents').catch((caught) => console.error(caught))">配置 Agent</button>
-            </dd>
-            <dd v-else-if="member.work" class="team-work">{{ member.work }}</dd>
-            <dd v-else class="muted">空闲，等待下一项任务</dd>
-          </div>
-          <div>
-            <dt>本周花费</dt>
-            <dd>
-              <button
-                class="team-cost link-button"
-                type="button"
-                :aria-label="`${member.actor.name} 本周花费 ${member.cost}，查看成本页`"
-                @click="app.navigate('costs')"
-              >
-                {{ member.cost }}
-              </button>
-              <small>{{ costNote }}</small>
-            </dd>
-          </div>
-        </dl>
+        <div v-if="member.presence !== 'busy' && !expanded.has(member.agent)" class="team-compact-line">
+          <span v-if="member.recent.length" class="team-compact-recent">
+            {{ member.recent[0].text }}
+            <time :datetime="member.recent[0].at">{{ member.recent[0].time }}</time>
+          </span>
+          <span v-else class="muted">最近没有动态。</span>
+          <button v-if="member.presence === 'offline'" class="empty-action" type="button" @click="openAgents">配置</button>
+        </div>
 
-        <div class="team-recent">
-          <h3>最近动态</h3>
-          <ul v-if="member.recent.length">
-            <li v-for="item in member.recent" :key="item.key">
-              <span>{{ item.text }}</span>
-              <time :datetime="item.at">{{ item.time }}</time>
-            </li>
-          </ul>
-          <p v-else class="muted">最近没有动态。</p>
+        <div v-else :id="`team-${member.agent}-details`" class="team-details">
+          <div class="team-runtime" aria-label="Agent 配置">
+            <span>{{ member.cli }}</span>
+            <span>{{ member.runtime?.model || 'CLI 默认模型' }}</span>
+            <span>思考：{{ member.runtime?.thinking ?? '默认' }}</span>
+            <button class="empty-action" type="button" @click="openAgents">配置</button>
+          </div>
+
+          <dl class="team-facts">
+            <div>
+              <dt>现在</dt>
+              <dd v-if="member.presence === 'offline'">
+                暂时联系不上。检查所选 CLI 的安装和运行环境。
+                <button class="empty-action" type="button" @click="openAgents">配置 Agent</button>
+              </dd>
+              <dd v-else-if="member.work" class="team-work">{{ member.work }}</dd>
+              <dd v-else class="muted">空闲，等待下一项任务</dd>
+            </div>
+            <div>
+              <dt>本周花费</dt>
+              <dd>
+                <button
+                  class="team-cost link-button"
+                  type="button"
+                  :aria-label="`${member.actor.name} 本周花费 ${member.cost}，查看成本页`"
+                  @click="app.navigate('costs')"
+                >
+                  {{ member.cost }}
+                </button>
+                <small>{{ costNote }}</small>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="team-recent">
+            <h3>最近动态</h3>
+            <ul v-if="member.recent.length">
+              <li v-for="item in member.recent" :key="item.key">
+                <span>{{ item.text }}</span>
+                <time :datetime="item.at">{{ item.time }}</time>
+              </li>
+            </ul>
+            <p v-else class="muted">最近没有动态。</p>
+          </div>
         </div>
       </section>
     </div>
@@ -151,6 +195,7 @@ const members = computed(() => {
 .team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  align-items: start;
   gap: var(--space-4);
 }
 .team-card {
@@ -168,6 +213,70 @@ const members = computed(() => {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+}
+.team-card-title {
+  min-width: 0;
+}
+.team-expand {
+  margin-left: auto;
+  color: var(--accent-strong);
+  font-size: var(--text-sm);
+}
+/* Idle and offline members fold to a single row of recent activity. */
+.team-card.compact {
+  gap: var(--space-3);
+}
+.team-card.compact .agent-avatar.offline {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.team-compact-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.team-compact-recent {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-compact-recent time {
+  margin-left: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.team-compact-line .muted {
+  flex: 1;
+}
+.team-details {
+  display: grid;
+  gap: var(--space-4);
+}
+.team-role-block {
+  display: grid;
+  gap: var(--space-2);
+}
+.team-role-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  justify-self: start;
+  padding: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+.team-role-chevron {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s var(--ease);
+}
+.team-role-chevron.open {
+  transform: rotate(180deg);
 }
 .team-card-head h2 {
   margin: 0;

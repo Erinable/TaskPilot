@@ -61,26 +61,63 @@ describe('TeamView', () => {
     Object.assign(window.taskpilot, { businessTimeZone: 'Asia/Shanghai' });
   });
 
-  test('one card per member with role, current work, weekly spend and recent events', () => {
+  test('working members lead with a full card; the rest stay in TEAM order', () => {
     useAppStore().activity = overview();
     const wrapper = mount(TeamView);
-    expect(wrapper.findAll('.team-card')).toHaveLength(5);
+    // QA works, coding-agent is offline.
+    expect(wrapper.findAll('.team-card').map((node) => node.attributes('id'))).toEqual([
+      'team-qa',
+      'team-product-lead',
+      'team-architect',
+      'team-release-manager',
+      'team-coding-agent',
+    ]);
 
     const qa = card(wrapper, 'qa');
+    expect(qa.classes()).not.toContain('compact');
+    expect(qa.find('.team-expand').exists()).toBe(false);
     expect(qa.find('h2').text()).toBe('QA Partner');
     expect(qa.find('.presence-text').text()).toBe('工作中');
-    expect(qa.find('.team-role').text()).toContain('验收条件');
     // Package titles are model text: shown as text, never markup.
     expect(qa.find('.team-work').text()).toBe(`正在审查工作包「${MARKUP}」`);
     expect(qa.find('.team-work img').exists()).toBe(false);
     expect(qa.find('.team-cost').text()).toBe('$1.50');
     expect(qa.find('.team-facts small').text()).toBe('从 10 月 7 日开始统计');
     expect(qa.findAll('.team-recent li').map((item) => item.find('span').text())).toEqual(['审查通过，等你验收：登录接口']);
+  });
 
+  test('idle and offline members fold to a compact card that expands on request', async () => {
+    useAppStore().activity = overview();
+    const wrapper = mount(TeamView);
     const pm = card(wrapper, 'product-lead');
+    expect(pm.classes()).toContain('compact');
+    expect(pm.find('.presence-text').text()).toBe('在线');
+    expect(pm.find('.team-compact-line').text()).toContain('最近没有动态');
+    expect(pm.find('.team-facts').exists()).toBe(false);
+    expect(pm.find('.team-compact-line .empty-action').exists()).toBe(false);
+    expect(card(wrapper, 'coding-agent').find('.team-compact-line .empty-action').text()).toBe('配置');
+
+    const expand = pm.find('.team-expand');
+    expect(expand.attributes('aria-expanded')).toBe('false');
+    await expand.trigger('click');
+    expect(pm.classes()).not.toContain('compact');
+    expect(expand.attributes('aria-expanded')).toBe('true');
     expect(pm.find('.team-cost').text()).toBe('$0.034');
     expect(pm.find('.team-facts dd').text()).toBe('空闲，等待下一项任务');
     expect(pm.find('.team-recent').text()).toContain('最近没有动态');
+  });
+
+  test('role notes start folded and open per card', async () => {
+    useAppStore().activity = overview();
+    const wrapper = mount(TeamView);
+    expect(wrapper.findAll('.team-role')).toHaveLength(0);
+    const qa = card(wrapper, 'qa');
+    const toggle = qa.find('.team-role-toggle');
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+    expect(qa.find('.team-role').text()).toContain('验收条件');
+    expect(wrapper.findAll('.team-role')).toHaveLength(1);
   });
 
   test('a full recorded week drops the partial note', () => {
@@ -101,6 +138,8 @@ describe('TeamView', () => {
     const settings = useSettingsStore();
     const wrapper = mount(TeamView);
     const architect = card(wrapper, 'architect');
+    await architect.find('.team-expand').trigger('click');
+    expect(architect.find('.team-facts dd').text()).toContain('暂时联系不上');
     await architect.find('.team-facts button').trigger('click');
     await flushPromises();
     expect(useAppStore().view).toBe('settings');
@@ -108,28 +147,26 @@ describe('TeamView', () => {
     expect(settings.preferencesDraft?.agents.architect.cli).toBe('claude');
   });
 
-  test('before the first overview the spend shows a placeholder', () => {
+  test('before the first overview the spend shows a placeholder', async () => {
     const wrapper = mount(TeamView);
+    await card(wrapper, 'qa').find('.team-expand').trigger('click');
     expect(card(wrapper, 'qa').find('.team-cost').text()).toBe('–');
     expect(card(wrapper, 'qa').find('.team-facts small').text()).toBe('还没有花费记录');
   });
-
-  test('clicking a member in the sidebar opens the team page on that card', async () => {
+  test('the sidebar entry opens the team page', async () => {
     const app = useAppStore();
     app.activity = overview();
-    const host = document.createElement('div');
-    document.body.append(host);
-    const sidebar = mount(SideBar, { attachTo: host });
-    const page = mount(TeamView, { attachTo: document.body });
-
-    const members = sidebar.findAll('button.team-member');
-    expect(members).toHaveLength(5);
-    await members[1].trigger('click');
+    const sidebar = mount(SideBar);
+    await sidebar.find('button.team-entry').trigger('click');
     await flushPromises();
-
     expect(app.view).toBe('team');
+  });
+
+  test('member cards keep their ids so other pages can focus them', async () => {
+    useAppStore().activity = overview();
+    const page = mount(TeamView, { attachTo: document.body });
+    document.getElementById('team-architect')?.focus();
     expect(document.activeElement?.id).toBe('team-architect');
-    sidebar.unmount();
     page.unmount();
   });
 });

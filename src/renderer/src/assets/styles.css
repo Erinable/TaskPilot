@@ -551,7 +551,6 @@ code {
   white-space: nowrap;
 }
 .sidebar.collapsed .nav-item,
-.sidebar.collapsed .team-member,
 .sidebar.collapsed .sync-card {
   position: relative;
   justify-content: center;
@@ -571,23 +570,10 @@ code {
   font-size: 10px;
   line-height: 16px;
 }
-.sidebar.collapsed .presence {
-  position: absolute;
-  right: 8px;
-  bottom: 4px;
-  margin: 0;
-  box-shadow: 0 0 0 2px var(--glass-border);
-}
-.sidebar.collapsed .team-list {
-  margin-top: var(--space-6);
-}
 .side-section-label {
   color: var(--text-tertiary);
   font: 500 var(--text-xs) var(--font-sans);
   padding: 0 12px 10px;
-}
-.team-label {
-  margin-top: 28px;
 }
 .main-nav {
   display: grid;
@@ -632,27 +618,6 @@ code {
   border-radius: var(--radius-md);
   font: 600 var(--text-xs) var(--font-mono);
   text-align: center;
-}
-.team-list {
-  display: grid;
-  gap: var(--space-1);
-}
-.team-member {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 6px 12px;
-  color: var(--text-secondary);
-  border-radius: var(--radius-md);
-  font-size: var(--text-sm);
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s var(--ease);
-}
-.team-member:hover {
-  color: var(--text);
-  background: var(--fill);
 }
 .agent-avatar,
 .activity-avatar {

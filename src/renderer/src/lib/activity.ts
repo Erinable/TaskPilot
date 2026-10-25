@@ -161,3 +161,18 @@ export const workText = (team: activityTypes.TeamStatus | null, agent: activityT
 
 // "$0.123", or "$0.00" for nothing spent; tiny amounts keep three decimals.
 export const formatCost = (costUsd: number) => (costUsd === 0 ? '$0.00' : `$${costUsd.toFixed(costUsd < 1 ? 3 : 2)}`);
+
+// Working members first, then online, then offline; ties keep their order.
+const PRESENCE_RANK: Record<Presence, number> = { busy: 0, online: 1, offline: 2 };
+export const sortByPresence = <T extends { presence: Presence }>(members: T[]) =>
+  members.toSorted((left, right) => PRESENCE_RANK[left.presence] - PRESENCE_RANK[right.presence]);
+
+// "Architect 正在审查工作包…" or "Architect 等 2 人正在工作"; null when nobody works.
+export const teamWorkSummary = (team: activityTypes.TeamStatus | null) => {
+  const busy = TEAM.filter(({ agent }) => presenceOf(team, agent) === 'busy');
+  if (!busy.length) return null;
+  const [first] = busy;
+  if (busy.length > 1) return `${first.actor.name} 等 ${busy.length} 人正在工作`;
+  const work = team?.work.find((item) => item.agent === first.agent);
+  return `${first.actor.name} ${work ? WORK_TEXT[work.kind] : '正在工作'}…`;
+};
