@@ -2,15 +2,16 @@
 import { ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
 import type { DiffLineKind } from '@/lib/review_model.ts';
+import { useExecutionStore } from '@/stores/execution.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ taskId: string; change: ipc.FileChange }>();
 
+const execution = useExecutionStore();
 const expanded = ref(false);
 // Null until first expanded: the patch is fetched on demand so opening the page stays cheap.
 const lines = ref<{ kind: DiffLineKind; text: string }[] | null>(null);
@@ -18,7 +19,7 @@ const lines = ref<{ kind: DiffLineKind; text: string }[] | null>(null);
 const load = async () => {
   lines.value = [{ kind: 'meta', text: '加载中…' }];
   try {
-    const patch = await call(window.taskpilot.diff.file(props.taskId, props.change.path));
+    const patch = await execution.diffFile(props.taskId, props.change.path);
     const parsed = patch
       .split('\n')
       .filter((line) => line !== '')

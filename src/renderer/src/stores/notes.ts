@@ -312,6 +312,9 @@ export const useNotesStore = defineStore('notes', () => {
 
   const revealDirectory = () => call(window.taskpilot.notes.reveal());
 
+  // A link in a note opens in the system browser or mail app.
+  const openUrl = (url: string) => call(window.taskpilot.notes.openUrl(url));
+
   let pollTimer: number | null = null;
   const startPolling = () => {
     if (pollTimer !== null) return;
@@ -393,6 +396,7 @@ export const useNotesStore = defineStore('notes', () => {
     chooseDirectory,
     resetDirectory,
     revealDirectory,
+    openUrl,
     startPolling,
     stopPolling,
     // From grading

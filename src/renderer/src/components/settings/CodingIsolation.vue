@@ -2,7 +2,6 @@
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { call } from '@/lib/ipc.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { describeError } from '@/lib/errors.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
@@ -35,7 +34,7 @@ const add = async (list: 'extraRead' | 'extraWrite') => {
   if (!coding.value) return;
   let folder: string | null;
   try {
-    folder = await call(window.taskpilot.workspace.pickRoot());
+    folder = await settings.pickFolder();
   } catch (error) {
     showToast(`选择文件夹失败：${describeError(error)}`);
     return;

@@ -2,25 +2,23 @@
 // The engineering map: Architect's module summaries from every requirement,
 // beside the tracked file tree. Reads stored data only; no model calls.
 import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 
 import AppIcon from '@/components/AppIcon.vue';
 import MapFileTree from '@/components/map/MapFileTree.vue';
 import MapModuleDetail from '@/components/map/MapModuleDetail.vue';
 import MapModuleList from '@/components/map/MapModuleList.vue';
 import MapNotes from '@/components/map/MapNotes.vue';
-import { call } from '@/lib/ipc.ts';
-import { describeError } from '@/lib/errors.ts';
 import { businessTimeZone } from '@/lib/time_zone.ts';
+import { useEngineeringMapStore } from '@/stores/engineering_map.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
 
 const requirements = useRequirementsStore();
 const settings = useSettingsStore();
 
-const map = ref<ipc.EngineeringMap | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
+const engineeringMap = useEngineeringMapStore();
+const { map, loading, error } = storeToRefs(engineeringMap);
 const selectedPath = ref<string | null>(null);
 
 const modulesByPath = computed(() => new Map((map.value?.modules ?? []).map((module) => [module.path, module])));
@@ -28,18 +26,7 @@ const summarized = computed(() => new Set(modulesByPath.value.keys()));
 const selectedModule = computed(() => (selectedPath.value ? (modulesByPath.value.get(selectedPath.value) ?? null) : null));
 const timeZone = businessTimeZone();
 
-const load = async () => {
-  loading.value = true;
-  try {
-    map.value = await call(window.taskpilot.engineeringMap.get());
-    error.value = null;
-  } catch (caught) {
-    console.error(caught);
-    error.value = describeError(caught);
-  } finally {
-    loading.value = false;
-  }
-};
+const load = () => engineeringMap.load();
 
 const select = (path: string) => {
   selectedPath.value = path;
@@ -54,7 +41,7 @@ const openRepositorySettings = () => {
 };
 
 onMounted(() => {
-  load().catch((caught) => console.error(caught));
+  engineeringMap.open().catch((caught) => console.error(caught));
 });
 </script>
 

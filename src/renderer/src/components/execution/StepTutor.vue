@@ -1,55 +1,28 @@
 <script setup lang="ts">
 // "这一步怎么做？" under one step: asks Tutor once, then shows the saved
 // answer. Agent text is rendered with {{ }} only; the snippet is to read.
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
-import { call } from '@/lib/ipc.ts';
-import { describeError, describeErrorInfo } from '@/lib/errors.ts';
+import { describeErrorInfo } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
-import type * as ipc from '@shared/ipc_types.ts';
+import { useTutorStore } from '@/stores/tutor.ts';
 
 const props = defineProps<{ taskId: string; stepIndex: number }>();
 
-const TUTOR_POLL_MS = 1200;
-
-const state = ref<ipc.TutorState | null>(null);
+const tutor = useTutorStore();
+const state = computed(() => tutor.stateOf(props.taskId, props.stepIndex));
 const open = ref(false);
-let timer: ReturnType<typeof setTimeout> | null = null;
 
-const stop = () => {
-  if (timer) clearTimeout(timer);
-  timer = null;
-};
-
-const apply = (next: ipc.TutorState) => {
-  state.value = next;
-  stop();
-  if (next.status === 'running') timer = setTimeout(() => refresh().catch((error) => console.error(error)), TUTOR_POLL_MS);
-};
-
-const refresh = async () => apply(await call(window.taskpilot.tutor.get(props.taskId, props.stepIndex)));
+const ask = () => tutor.ask(props.taskId, props.stepIndex);
+const cancel = () => tutor.cancel(props.taskId, props.stepIndex);
 
 // Opening shows a saved answer straight away; otherwise it asks.
 const toggle = async () => {
   open.value = !open.value;
   if (!open.value || state.value?.status === 'done' || state.value?.status === 'running') return;
   await ask();
-};
-
-const ask = async () => {
-  try {
-    apply(await call(window.taskpilot.tutor.ask(props.taskId, props.stepIndex)));
-  } catch (error) {
-    console.error('[tutor] ask failed', error);
-    showToast(`导师暂时无法回答：${describeError(error)}`);
-  }
-};
-
-const cancel = async () => {
-  await call(window.taskpilot.tutor.cancel(props.taskId, props.stepIndex)).catch((error) => console.error(error));
-  await refresh();
 };
 
 const copySnippet = async (code: string) => {
@@ -62,8 +35,8 @@ const copySnippet = async (code: string) => {
   }
 };
 
-onMounted(() => refresh().catch((error) => console.error(error)));
-onBeforeUnmount(stop);
+onMounted(() => tutor.refresh(props.taskId, props.stepIndex).catch((error) => console.error(error)));
+onBeforeUnmount(() => tutor.stop(props.taskId, props.stepIndex));
 </script>
 
 <template>

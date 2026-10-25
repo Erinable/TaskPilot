@@ -315,6 +315,9 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   };
 
+  // One file's unified diff, fetched when its row is first expanded.
+  const diffFile = (taskId: string, path: string) => call(window.taskpilot.diff.file(taskId, path));
+
   // ========== Verification ==========
   const verifyKind = ref<ipc.CheckKind | null>(null);
   const verifyRunning = ref(false);
@@ -535,6 +538,7 @@ export const useExecutionStore = defineStore('execution', () => {
     diffHint,
     diffVersion,
     refreshDiff,
+    diffFile,
     // Verification
     verifyKind,
     verifyRunning,

@@ -2,41 +2,28 @@
 // The getting-started checklist at the top of the queue. It disappears once
 // every step is done, and each step explains itself in plain words.
 import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { call } from '@/lib/ipc.ts';
 import { showToast } from '@/lib/feedback.ts';
 import * as onboarding from '@/lib/onboarding.ts';
 import { useAppStore } from '@/stores/app.ts';
+import { useOnboardingStore } from '@/stores/onboarding.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import type * as ipc from '@shared/ipc_types.ts';
 
 const app = useAppStore();
 const repositories = useRepositoriesStore();
 const requirements = useRequirementsStore();
 const settings = useSettingsStore();
-
-const agent = ref<ipc.AgentStatus | null>(null);
-const testCommand = ref<string | null>(null);
-const checking = ref(false);
-// The step whose terminal command is shown.
-const shownCommand = ref<onboarding.OnboardingStepId | null>(null);
+const checks = useOnboardingStore();
 
 // The CLI and the test command are not in any store the queue reads.
-const recheck = async () => {
-  checking.value = true;
-  try {
-    const [status, view] = await Promise.all([call(window.taskpilot.agent.status()), call(window.taskpilot.workspace.get())]);
-    agent.value = status;
-    testCommand.value = view.lines.test;
-  } catch (error) {
-    console.error('[onboarding] recheck failed', error);
-  } finally {
-    checking.value = false;
-  }
-};
+const { agent, testCommand, checking } = storeToRefs(checks);
+const recheck = () => checks.recheck();
+// The step whose terminal command is shown.
+const shownCommand = ref<onboarding.OnboardingStepId | null>(null);
 
 const steps = computed(() =>
   onboarding.buildSteps({ agent: agent.value, workspace: app.workspaceInfo, testCommand: testCommand.value, requirementCount: requirements.items.length }),

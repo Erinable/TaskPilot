@@ -4,6 +4,11 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
+import { useActivityFeedStore } from '../../../src/renderer/src/stores/activity_feed.ts';
+import { useCommitStore } from '../../../src/renderer/src/stores/commit.ts';
+import { useEngineeringMapStore } from '../../../src/renderer/src/stores/engineering_map.ts';
+import { useOnboardingStore } from '../../../src/renderer/src/stores/onboarding.ts';
+import { useTutorStore } from '../../../src/renderer/src/stores/tutor.ts';
 import { readStorageKey, useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as ipc from '../../../src/shared/ipc_types.ts';
@@ -77,6 +82,62 @@ describe('repositories store', () => {
     expect(store.current?.id).toBe('b');
     expect(store.generation).toBe(before + 1);
     expect(feedback.confirmAction).not.toHaveBeenCalled();
+  });
+
+  test('switching clears what the views read for the old repository', async () => {
+    const tutorState: ipc.TutorState = { status: 'done', answer: null, error: null, costUsd: 0 };
+    const preview: ipc.CommitPreview = { files: ['a.ts'], skipped: [], message: 'feat: a' };
+    const map: ipc.EngineeringMap = { modules: [], conventions: [], gaps: [], files: ['a.ts'], truncated: false };
+    Object.assign(window.taskpilot, {
+      activity: {
+        ...api.activity,
+        page: vi.fn(() => ok({ days: [{ day: '2026-10-25', records: [] }], nextBefore: '2026-10-24', timeZone: 'Asia/Shanghai', retentionDays: 30 })),
+      },
+      commit: { preview: vi.fn(() => ok(preview)) },
+      engineeringMap: { get: vi.fn(() => ok(map)) },
+      agent: { status: vi.fn(() => ok({ available: true } as ipc.AgentStatus)) },
+      workspace: { ...api.workspace, get: vi.fn(() => ok({ lines: { test: 'npm test' } } as ipc.WorkspaceView)) },
+      tutor: { get: vi.fn(() => ok(tutorState)) },
+    });
+    const feed = useActivityFeedStore();
+    const commit = useCommitStore();
+    const engineeringMap = useEngineeringMapStore();
+    const onboarding = useOnboardingStore();
+    const tutor = useTutorStore();
+    await Promise.all([feed.open(), commit.open('p1'), engineeringMap.open(), onboarding.recheck(), tutor.refresh('p1', 0)]);
+    expect(feed.days).toHaveLength(1);
+    expect(commit.preview).toEqual(preview);
+    expect(engineeringMap.map).toEqual(map);
+    expect(onboarding.testCommand).toBe('npm test');
+    expect(tutor.stateOf('p1', 0)).toEqual(tutorState);
+
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.switchTo('b')).toBe(true);
+    expect(feed.days).toEqual([]);
+    expect(feed.nextBefore).toBeNull();
+    expect(commit.preview).toBeNull();
+    expect(commit.message).toBe('');
+    expect(engineeringMap.map).toBeNull();
+    expect(onboarding.agent).toBeNull();
+    expect(onboarding.testCommand).toBeNull();
+    expect(tutor.stateOf('p1', 0)).toBeNull();
+  });
+
+  test('an answer for the old repository that lands after the switch is dropped', async () => {
+    let answer: (value: { ok: true; data: ipc.EngineeringMap }) => void = () => {};
+    Object.assign(window.taskpilot, { engineeringMap: { get: vi.fn(() => new Promise((resolve) => (answer = resolve))) } });
+    const engineeringMap = useEngineeringMapStore();
+    const loading = engineeringMap.open();
+    expect(engineeringMap.loading).toBe(true);
+
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.switchTo('b')).toBe(true);
+    answer({ ok: true, data: { modules: [], conventions: [], gaps: [], files: ['old.ts'], truncated: false } });
+    await loading;
+    expect(engineeringMap.map).toBeNull();
+    expect(engineeringMap.loading).toBe(false);
   });
 
   test('running work is listed and a declined switch changes nothing', async () => {

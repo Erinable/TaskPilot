@@ -8,13 +8,18 @@ import { call } from '@/lib/ipc.ts';
 import { runLabel } from '@/lib/activity.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
+import { useActivityFeedStore } from './activity_feed.ts';
 import { useAppStore } from './app.ts';
+import { useCommitStore } from './commit.ts';
+import { useEngineeringMapStore } from './engineering_map.ts';
 import { useExecutionStore } from './execution.ts';
 import { useNotificationsStore } from './notifications.ts';
+import { useOnboardingStore } from './onboarding.ts';
 import { useReleaseStore } from './release.ts';
 import { useRequirementsStore } from './requirements.ts';
 import { useSettingsStore } from './settings.ts';
 import { useTasksStore } from './tasks.ts';
+import { useTutorStore } from './tutor.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const BUSY_LABELS: Record<ipc.BusyKind, string> = {
@@ -73,6 +78,12 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     useRequirementsStore().stopPolling();
     useReleaseStore().leave();
     execution.close();
+    // What the views read for the old repository; each view reloads on remount.
+    useActivityFeedStore().reset();
+    useCommitStore().reset();
+    useEngineeringMapStore().reset();
+    useOnboardingStore().reset();
+    useTutorStore().reset();
     if (app.view === 'execution') await app.navigate('queue');
     return true;
   };

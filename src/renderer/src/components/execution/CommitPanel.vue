@@ -2,12 +2,11 @@
 // Saving a finished package into git history: the files inside its scope,
 // a suggested message the developer can edit, and a button. Nothing is
 // committed without that click, and nothing is ever pushed.
-import { computed, onMounted, ref, watch } from 'vue';
+import { onMounted, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { call } from '@/lib/ipc.ts';
-import { describeError } from '@/lib/errors.ts';
-import { showToast } from '@/lib/feedback.ts';
+import { useCommitStore } from '@/stores/commit.ts';
 import type * as ipc from '@shared/ipc_types.ts';
 
 const props = defineProps<{ task: ipc.TaskView }>();
@@ -18,50 +17,16 @@ const SKIP_LABELS: Record<ipc.CommitSkipReason, string> = {
   rename: '改名的文件请自己提交',
 };
 
-const preview = ref<ipc.CommitPreview | null>(null);
-const message = ref('');
-const loading = ref(false);
-const committing = ref(false);
-const error = ref<string | null>(null);
-const committed = ref<ipc.CommitResult | null>(null);
+const store = useCommitStore();
+const { preview, message, loading, committing, error, committed, canCommit } = storeToRefs(store);
+const load = () => store.load();
+const commit = () => store.commit();
 
-const load = async () => {
-  loading.value = true;
-  try {
-    preview.value = await call(window.taskpilot.commit.preview(props.task.id));
-    message.value = preview.value.message;
-    error.value = null;
-  } catch (caught) {
-    console.error('[commit] preview failed', caught);
-    error.value = describeError(caught);
-  } finally {
-    loading.value = false;
-  }
-};
-
-const canCommit = computed(() => Boolean(preview.value?.files.length) && message.value.trim().length > 0 && !committing.value);
-
-const commit = async () => {
-  if (!preview.value || !canCommit.value) return;
-  committing.value = true;
-  try {
-    committed.value = await call(window.taskpilot.commit.create(props.task.id, message.value, preview.value.files));
-    showToast(`已提交 ${committed.value.files.length} 个文件`);
-  } catch (caught) {
-    console.error('[commit] create failed', caught);
-    showToast(`提交失败：${describeError(caught)}`);
-    // The list may be stale (changes_changed); show the current one.
-    await load();
-  } finally {
-    committing.value = false;
-  }
-};
-
-onMounted(() => load());
+onMounted(() => store.open(props.task.id));
 // Becoming accepted or done while the page is open makes it committable.
 watch(
   () => props.task.status,
-  () => load().catch((caught) => console.error(caught)),
+  () => store.load().catch((caught) => console.error(caught)),
 );
 </script>
 

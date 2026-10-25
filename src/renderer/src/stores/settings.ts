@@ -335,6 +335,9 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   };
 
+  // A folder from the native picker, for the sandbox's extra folders; null when dismissed.
+  const pickFolder = () => call(window.taskpilot.workspace.pickRoot());
+
   // ========== Environment ==========
   const environmentLoading = ref(false);
   const environmentError = ref<string | null>(null);
@@ -560,6 +563,7 @@ export const useSettingsStore = defineStore('settings', () => {
     checkNameLength,
     // Repository
     checkWorkspace,
+    pickFolder,
     // Environment
     environmentLoading,
     environmentError,
