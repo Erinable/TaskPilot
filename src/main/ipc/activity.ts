@@ -3,7 +3,7 @@
 import { failWith } from '../coded_error.ts';
 import * as git from '../git.ts';
 import * as workspace from '../workspace.ts';
-import { computeAgentCosts, computeMetrics, recentByAgent, RETENTION_DAYS } from '../activity_log.ts';
+import { RETENTION_DAYS } from '../activity_log.ts';
 import { buildCostReport } from '../cost_report.ts';
 import { estimateMicros, loadPrices, priceFor, syncPrices } from '../model_prices.ts';
 import { buildEngineeringMap, MAX_TREE_FILES } from '../engineering_map.ts';
@@ -13,18 +13,20 @@ import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import type * as ipc from '../../shared/ipc_types.ts';
 import type { PriceTable } from '../model_prices.ts';
+import type { CostRow } from '../cost_rollup.ts';
 import type { AppContext } from '../app_context.ts';
 import type { CodingRuntime } from '../coding_runtime.ts';
 import type { IpcMainLike } from './handler.ts';
 
-const TEAM_RECENT_COUNT = 3;
-
 // The team's analysis agents; Coding Agent's availability is its runtime probe.
 const ANALYSIS_AGENTS = TEAM_AGENT_IDS.filter((agent) => agent !== 'coding-agent');
 
-const estimateCall = (table: PriceTable | null) => (call: ipc.ModelCall) => {
-  const price = call.tokens ? priceFor(table, call.provider, call.model) : null;
-  return price && call.tokens ? estimateMicros(price, call.tokens) : null;
+// How long a found or missing CLI is trusted; installing one shows up after this.
+const EXECUTABLE_TTL_MS = 60_000;
+
+const estimateRow = (table: PriceTable | null) => (row: CostRow) => {
+  const price = priceFor(table, row.provider, row.model);
+  return price ? estimateMicros(price, row.tokens) : null;
 };
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { runtime: CodingRuntime }) => {
@@ -41,40 +43,53 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       throw error;
     }));
 
+  // Whether each CLI is on the PATH, keyed by CLI and PATH so a settings or
+  // PATH change asks again at once; the renderer polls every 15 seconds.
+  const executables = new Map<string, { found: Promise<boolean>; at: number }>();
+  const isInstalled = (cli: string, envPath: string) => {
+    const key = `${cli}\u0000${envPath}`;
+    const now = Date.now();
+    const cached = executables.get(key);
+    if (cached && now - cached.at < EXECUTABLE_TTL_MS) return cached.found;
+    // Entries of an earlier PATH or CLI are dropped, so the map stays small.
+    for (const [entryKey, entry] of executables) if (now - entry.at >= EXECUTABLE_TTL_MS) executables.delete(entryKey);
+    const found = workspace.resolveExecutable(cli, { envPath }).then(Boolean);
+    executables.set(key, { found, at: now });
+    return found;
+  };
+
   // The feed, the week's metrics, each member's newest events and spend, and
-  // who on the team is busy. Metrics, spend and per-member events share one
-  // read of the retention window; the feed reads only the newest days.
+  // who on the team is busy. Everything but presence comes from the log's
+  // in-memory summary, so a poll reads no day files.
   ipcMain.handle(
     CHANNELS.activityOverview,
     wrap(async (): Promise<ipc.ActivityOverview> => {
       const activity = requireActivity();
       const settings = ctx.getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
-      const [recent, window, coding, analysis] = await Promise.all([
-        activity.recent({ days: RETENTION_DAYS, limit: 20 }),
-        activity.window(RETENTION_DAYS),
+      const [summary, coding, analysis] = await Promise.all([
+        currentPrices().then((table) => activity.overview(estimateRow(table))),
         runtime.codingStatus(),
         Promise.all(
           ANALYSIS_AGENTS.map(async (agent) => {
             const config = settings[agent];
-            return [agent, supportsAgentConfig(agent, config) && Boolean(await workspace.resolveExecutable(config.cli, { envPath }))] as const;
+            return [agent, supportsAgentConfig(agent, config) && (await isInstalled(config.cli, envPath))] as const;
           }),
         ),
       ]);
       const availableByAgent = { ...Object.fromEntries(analysis), 'coding-agent': coding.available } as ipc.TeamStatus['availableByAgent'];
       const work = ctx.backgroundRuns.work();
-      const now = new Date();
       return {
-        recent,
-        metrics: computeMetrics(window, now, activity.timeZone),
+        recent: summary.recent,
+        metrics: summary.metrics,
         team: {
           available: Object.values(availableByAgent).some(Boolean),
           availableByAgent,
           busy: [...new Set(work.map((item) => item.agent))],
           work,
         },
-        costs: computeAgentCosts(window, now, activity.timeZone, estimateCall(await currentPrices())),
-        teamRecent: recentByAgent(window, TEAM_RECENT_COUNT),
+        costs: summary.costs,
+        teamRecent: summary.teamRecent,
         timeZone: activity.timeZone,
       };
     }),

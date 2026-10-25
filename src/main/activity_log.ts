@@ -9,21 +9,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type {
-  ActivityAgent,
-  ActivityEvent,
-  ActivityRecord,
-  AgentCosts,
-  AgentId,
-  AgentTransition,
-  CodingTransition,
-  CostSubject,
-  ModelCall,
-  QueueMetrics,
-} from '../shared/ipc_types.ts';
-import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME, toMicros } from './cost_rollup.ts';
+import type { ActivityEvent, ActivityRecord, AgentId, CostSubject, ModelCall } from '../shared/ipc_types.ts';
+import { foldCosts, mergeRollup, parseRollup, ROLLUP_DAYS, ROLLUP_FILENAME } from './cost_rollup.ts';
 import type { CostRow } from './cost_rollup.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
+import { ActivitySummary } from './activity_summary.ts';
+import type { EstimateRow, OverviewSummary } from './activity_summary.ts';
 
 // One model call's spend. Stored beside the feed events so it expires with
 // them, but never shown in the feed: it is not something that happened.
@@ -59,6 +50,10 @@ export class ActivityLog {
   #now: () => Date;
   // Appends are chained so lines from concurrent writers never interleave.
   #writes: Promise<void> = Promise.resolve();
+  // The overview's aggregates, built from the files on first use and then
+  // kept current by every append that lands.
+  #summary: ActivitySummary | null = null;
+  #building: Promise<ActivitySummary> | null = null;
 
   constructor(configDir: string, { timeZone, now = () => new Date() }: { timeZone: string; now?: () => Date }) {
     this.#dir = path.join(configDir, EVENTS_DIRNAME);
@@ -79,6 +74,8 @@ export class ActivityLog {
   async open(configDir: string): Promise<this> {
     await this.flush();
     this.#dir = path.join(configDir, EVENTS_DIRNAME);
+    this.#summary = null;
+    this.#building = null;
     return this;
   }
 
@@ -90,6 +87,7 @@ export class ActivityLog {
     const write = this.#writes.then(async () => {
       await fs.mkdir(this.#dir, { recursive: true });
       await fs.appendFile(file, `${JSON.stringify(record)}\n`);
+      this.#summary?.add(record);
     });
     this.#writes = write.catch(() => {});
     return write;
@@ -134,6 +132,34 @@ export class ActivityLog {
   async window(days: number): Promise<LoggedRecord[]> {
     const perDay = await Promise.all(recentDays(this.#now(), this.#timeZone, days).map((day) => this.#readDay(day)));
     return perDay.reverse().flat();
+  }
+
+  // The overview's feed, metrics, per-member events and spend, from memory.
+  // `estimate` prices token-only spend with the current price table.
+  async overview(estimate?: EstimateRow): Promise<OverviewSummary> {
+    const summary = await (this.#building ??= this.#build());
+    return summary.read(recentDays(this.#now(), this.#timeZone, RETENTION_DAYS), estimate);
+  }
+
+  // Reads the window once, queued behind the appends so far: every append
+  // before it is in the files it reads, every one after it lands in memory.
+  #build(): Promise<ActivitySummary> {
+    const build = this.#writes.then(async () => {
+      const summary = new ActivitySummary((at) => businessDay(new Date(at), this.#timeZone));
+      for (const record of await this.window(RETENTION_DAYS)) summary.add(record);
+      this.#summary = summary;
+      console.debug(`[activity] summary built dir=${this.#dir}`);
+      return summary;
+    });
+    this.#writes = build.then(
+      () => {},
+      () => {},
+    );
+    // A failed read is retried on the next request instead of sticking.
+    build.catch(() => {
+      if (this.#building === build) this.#building = null;
+    });
+    return build;
   }
 
   // Deletes day files older than the retention window, after folding their
@@ -197,104 +223,3 @@ export class ActivityLog {
     });
   }
 }
-
-const METRIC_DAYS = 7;
-
-// Claim-to-done durations need the claim, which may be older than the week
-// the package finished in; the whole retention window is scanned once.
-export const computeMetrics = (records: LoggedRecord[], now: Date, timeZone: string): QueueMetrics => {
-  const thisWeek = new Set(recentDays(now, timeZone, METRIC_DAYS));
-  const previousWeek = new Set(recentDays(now, timeZone, METRIC_DAYS * 2).slice(METRIC_DAYS));
-  const claimedAt = new Map<string, number>();
-  const durations = { current: [] as number[], previous: [] as number[] };
-  let doneThisWeek = 0;
-  let donePreviousWeek = 0;
-  for (const record of records) {
-    if (record.kind !== 'package_transition') continue;
-    if (record.transition === 'claim') claimedAt.set(record.packageId, Date.parse(record.at));
-    if (record.transition === 'release') claimedAt.delete(record.packageId);
-    if (record.to !== 'done') continue;
-    const day = businessDay(new Date(record.at), timeZone);
-    const bucket = thisWeek.has(day) ? 'current' : previousWeek.has(day) ? 'previous' : null;
-    if (!bucket) continue;
-    if (bucket === 'current') doneThisWeek += 1;
-    else donePreviousWeek += 1;
-    const start = claimedAt.get(record.packageId);
-    if (start !== undefined) durations[bucket].push((Date.parse(record.at) - start) / 3_600_000);
-  }
-  const mean = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null);
-  return { doneThisWeek, donePreviousWeek, averageHours: mean(durations.current), averageHoursPrevious: mean(durations.previous) };
-};
-
-// Each agent's spend over the metrics week, reported or estimated (the same
-// numbers as the cost page). Spend was not recorded before 2026-10-07, so a
-// week starting before the earliest recorded run is partial.
-// `estimate` prices a call without a reported cost, in micro-dollars, or null.
-export const computeAgentCosts = (
-  records: LoggedRecord[],
-  now: Date,
-  timeZone: string,
-  estimate: (call: NonNullable<AgentCostEvent['call']>) => number | null = () => null,
-): AgentCosts => {
-  const week = recentDays(now, timeZone, METRIC_DAYS);
-  const thisWeek = new Set(week);
-  const micros: Record<ActivityAgent, number> = { 'product-lead': 0, architect: 0, qa: 0, 'release-manager': 0, 'coding-agent': 0 };
-  let since: string | null = null;
-  for (const record of records) {
-    // A hand-edited or future line with an unknown agent is skipped, as are
-    // agents outside the team page (Tutor, Environment Steward).
-    if (record.kind !== 'agent_cost' || !Object.hasOwn(micros, record.agent)) continue;
-    const reported = typeof record.costUsd === 'number' && Number.isFinite(record.costUsd) && record.costUsd > 0 ? toMicros(record.costUsd) : null;
-    const amount = reported ?? (record.call ? estimate(record.call) : null);
-    if (amount === null) continue;
-    if (since === null || record.at < since) since = record.at;
-    if (thisWeek.has(businessDay(new Date(record.at), timeZone))) micros[record.agent as ActivityAgent] += amount;
-  }
-  const byAgent = Object.fromEntries(Object.entries(micros).map(([agent, value]) => [agent, value / 1_000_000])) as Record<ActivityAgent, number>;
-  const weekStart = week.at(-1) as string;
-  return { byAgent, since, partial: since === null || businessDay(new Date(since), timeZone) > weekStart };
-};
-
-// Which agent makes each agent transition; human transitions have none.
-const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, ActivityAgent> = {
-  breakdown_done: 'product-lead',
-  review_accepted: 'qa',
-  review_passed: 'qa',
-  review_rejected: 'qa',
-  replanned: 'architect',
-  deviation_dismissed: 'architect',
-  coding_submitted: 'coding-agent',
-};
-
-// The team member a feed event belongs to, or null for the human's own.
-// Matches the actor the renderer's feed shows for the same event.
-export const agentOf = (record: ActivityRecord): ActivityAgent | null => {
-  switch (record.kind) {
-    case 'package_transition':
-      // A hand-edited line could name "toString"; only own keys count.
-      return Object.hasOwn(TRANSITION_AGENTS, record.transition) ? TRANSITION_AGENTS[record.transition as AgentTransition | CodingTransition] : null;
-    case 'coding_run':
-      return 'coding-agent';
-    case 'requirement_finished':
-    case 'requirement_failed':
-      return 'product-lead';
-    case 'release_finished':
-      return 'release-manager';
-    case 'requirement_created':
-    case 'requirement_published':
-      return null;
-  }
-};
-
-// Each agent's newest `count` feed events. The overview's shared feed is
-// mostly the human's own steps, so filtering it would leave agents empty.
-export const recentByAgent = (records: LoggedRecord[], count: number): Record<ActivityAgent, ActivityRecord[]> => {
-  const byAgent: Record<ActivityAgent, ActivityRecord[]> = { 'product-lead': [], architect: [], qa: [], 'release-manager': [], 'coding-agent': [] };
-  for (let index = records.length - 1; index >= 0; index -= 1) {
-    const record = records[index];
-    if (!isFeedRecord(record)) continue;
-    const agent = agentOf(record);
-    if (agent && byAgent[agent].length < count) byAgent[agent].push(record);
-  }
-  return byAgent;
-};

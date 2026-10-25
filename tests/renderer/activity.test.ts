@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as activity from '../../src/renderer/src/lib/activity.ts';
 import { TRANSITIONS } from '../../src/main/work_package_status.ts';
-import { agentOf } from '../../src/main/activity_log.ts';
+import { agentOf } from '../../src/main/activity_summary.ts';
 import type * as ipc from '../../src/shared/ipc_types.ts';
 
 const SHANGHAI = 'Asia/Shanghai';
