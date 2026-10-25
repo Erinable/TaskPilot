@@ -153,7 +153,10 @@ test('agent:status reports sign-in for the analysis CLI and the coding CLI, chec
 
 test('data:reset-progress clears execution state but keeps config and preferences', async () => {
   const { call, configDir, repoDir, root } = await fixtures.harness();
-  await call(CHANNELS.workspaceSet, { root, commands: { test: 'npm test' } });
+  await call(CHANNELS.workspaceSet, {
+    root,
+    steps: { test: { enabled: true, lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null } },
+  });
   await call(CHANNELS.preferencesSet, fixtures.validPrefs());
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
   assert.equal((await call(CHANNELS.dataInfo)).data.packages.claimed, 1);
@@ -161,7 +164,7 @@ test('data:reset-progress clears execution state but keeps config and preference
   const { data } = await call(CHANNELS.dataResetProgress);
   assert.equal(data.claimed, 0);
   assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
-  assert.equal((await workspace.load(repoDir)).commands.test!.command, 'npm');
+  assert.equal((await workspace.load(repoDir)).steps.test!.commands[0].command, 'npm');
   assert.equal((await preferences.load(configDir)).profile.displayName, 'Ada Lovelace');
 });
 

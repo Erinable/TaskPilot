@@ -14,8 +14,10 @@
 // package; tests failing only now are "newFailures".
 //
 // Everything here is pure, so the rules can be tested row by row.
-import type { CheckRun, TestResult } from './verification.ts';
-import type { CheckKind, CheckStage } from './workspace.ts';
+import type { CheckRun } from './verification.ts';
+import type { TestResult } from './check_output.ts';
+import type { CheckStage } from './step_config.ts';
+import type { StepId as CheckKind } from '../shared/check_steps.ts';
 import type { AcceptanceCriterion } from './tasks.ts';
 
 export type EvidenceStatus = 'pass' | 'fail' | 'unverifiable' | 'skipped';

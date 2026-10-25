@@ -44,14 +44,18 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
       let outcome: { result: Awaited<ReturnType<typeof reviewWorkPackage>> } | { error: unknown };
       try {
         const { path: envPath } = await ctx.commandPath();
+        const steps = await ctx.runnableSteps(config);
+        const checks = submitChecks(steps);
         const result = await reviewWorkPackage(task, {
           root,
           baseline,
           runAgent: reviewRunner,
-          checks: submitChecks(config),
-          runCheck: (kind: string, signal?: AbortSignal) => verification.runCheck(config, kind, { signal, envPath }),
+          checks,
+          runCheck: (kind: string, signal?: AbortSignal) =>
+            // reviewWorkPackage() only asks for the kinds in `checks`.
+            verification.runStep(root, (checks.find((check) => check.kind === kind) as (typeof checks)[number]).step, { signal, envPath }),
           baselines: store.get(id).baselineChecks?.checks ?? {},
-          ignore: reportIgnore(config),
+          ignore: reportIgnore(steps),
           interfaces: ctx.interfacesFor(task),
           envPath,
           signal: controller.signal,
@@ -140,7 +144,6 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
     if (!root || !commit) return;
     backgroundRuns.get('baseline', id)?.abort();
     const controller = backgroundRuns.start({ kind: 'baseline', key: id, busy: 'baseline', label: ctx.packageLabel(id) });
-    const checks = submitChecks(config);
     const startedAt = new Date().toISOString();
     const record = (status: BaselineChecksStatus, extra: Partial<BaselineChecks> = {}) =>
       store
@@ -157,6 +160,8 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
 
     const settled = (async () => {
       try {
+        // Resolved inside the tracked run, so a switch or shutdown waits for it.
+        const checks = submitChecks(await ctx.runnableSteps(config));
         if (!checks.length) return void (await record('unavailable', { reason: 'no_checks' }));
         const before = await treeState(root);
         if (before.head !== commit) return void (await record('unavailable', { reason: 'head_moved' }));
@@ -168,7 +173,7 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
         for (const check of checks) {
           if (controller.signal.aborted) break;
           try {
-            const run = await verification.runCheck(config, check.kind, { signal: controller.signal, envPath });
+            const run = await verification.runStep(root, check.step, { signal: controller.signal, envPath });
             results[check.kind] = evidence.baselineRecord(run, check.line);
           } catch (error) {
             if (controller.signal.aborted) break;

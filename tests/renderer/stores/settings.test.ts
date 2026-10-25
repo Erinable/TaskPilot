@@ -33,7 +33,8 @@ test('open() navigates to settings and loads both stores', async () => {
   expect(useAppStore().view).toBe('settings');
   expect(settings.activePage).toBe('profile');
   expect(settings.preferencesDraft?.profile.displayName).toBe('Ada');
-  expect(settings.workspaceDraft?.commands.test).toBe('npm test');
+  expect(settings.workspaceDraft?.steps.test).toMatchObject({ lines: ['npm test'], mode: 'override' });
+  expect(settings.workspaceDraft?.steps.lint).toMatchObject({ lines: [], mode: 'inherit' });
   expect(settings.hasUnsavedChanges()).toBe(false);
 });
 
@@ -52,7 +53,7 @@ test('edits mark exactly their page dirty and label the save bar', async () => {
   expect(settings.dirtyPages.profile).toBe(true);
   expect(settings.dirtyPages.preferences).toBe(false);
   expect(settings.savebarText).toBe('个人与偏好有未保存的修改');
-  settings.workspaceDraft!.commands.lint = 'eslint .';
+  settings.workspaceDraft!.steps.lint = { ...settings.workspaceDraft!.steps.lint!, mode: 'override', lines: ['eslint .'] };
   expect(settings.dirtyPages.commands).toBe(true);
   expect(settings.dirtyPages.repository).toBe(false);
   expect(settings.savebarText).toBe('个人与偏好、工作区有未保存的修改');
@@ -138,13 +139,18 @@ test('search filters pages, hides empty groups, and moves off a hidden page', as
 
 test('save checks the workspace, then sends each dirty store in form shape', async () => {
   const settings = await loaded();
-  settings.workspaceDraft!.commands.lint = 'eslint .';
+  settings.workspaceDraft!.steps.lint = { ...settings.workspaceDraft!.steps.lint!, mode: 'override', lines: [' eslint . ', ''] };
+  settings.workspaceDraft!.steps.coverage = { ...settings.workspaceDraft!.steps.coverage!, mode: 'off' };
   settings.preferencesDraft!.appearance.theme = 'dark';
   expect(await settings.saveAll()).toBe(true);
   expect(api.workspace.check).toHaveBeenCalledBefore(api.workspace.set);
   const form = api.workspace.set.mock.calls[0][0];
   expect(form.root).toBe('/repo');
-  expect(form.commands).toEqual({ test: 'npm test', lint: 'eslint .', build: '', smoke: '' });
+  // Only steps this machine sets are sent; one left to the project is not.
+  expect(Object.keys(form.steps).sort()).toEqual(['coverage', 'lint', 'test']);
+  expect(form.steps.lint).toMatchObject({ enabled: true, lines: ['eslint .'], stage: 'step', blocking: false });
+  expect(form.steps.coverage).toMatchObject({ enabled: false, lines: [] });
+  expect(form.steps.test?.lines).toEqual(['npm test']);
   expect(api.preferences.set).toHaveBeenCalledWith({
     profile: { displayName: 'Ada', avatarColor: 'ocean' },
     appearance: { theme: 'dark', vibrancy: false },
@@ -167,12 +173,12 @@ test('a clean save writes nothing', async () => {
 
 test('a failed check shows the error on its field and writes nothing', async () => {
   const settings = await loaded();
-  settings.workspaceDraft!.commands.build = 'make | tee';
-  api.workspace.check.mockReturnValueOnce(fail('shell_syntax', 'shell syntax', 'build'));
+  settings.workspaceDraft!.steps.build = { ...settings.workspaceDraft!.steps.build!, mode: 'override', lines: ['make | tee'] };
+  api.workspace.check.mockReturnValueOnce(fail('shell_syntax', 'steps.build.commands[0]: command uses shell syntax "|"', 'steps.build.commands[0]'));
   expect(await settings.saveAll()).toBe(false);
   expect(api.workspace.set).not.toHaveBeenCalled();
   expect(settings.activePage).toBe('commands');
-  expect(settings.statuses.build).toEqual({ tone: 'error', message: '不支持 shell 语法，请改用 package.json 脚本。' });
+  expect(settings.statuses.build).toEqual({ tone: 'error', message: 'steps.build.commands[0]: command uses shell syntax "|"' });
   expect(settings.hasUnsavedChanges()).toBe(true);
 });
 
@@ -189,7 +195,7 @@ test('the workspace check shows resolved commands and repo facts', async () => {
   expect(await settings.checkWorkspace()).toBe(true);
   expect(settings.statuses.root).toEqual({ tone: 'ok', message: '这是一个 git 仓库' });
   expect(settings.statuses.test).toEqual({ tone: 'ok', message: '/usr/local/bin/npm' });
-  expect(settings.statuses.lint).toEqual({ tone: null, message: '未配置' });
+  expect(settings.statuses.lint).toEqual({ tone: null, message: '未配置，会跳过' });
   expect(settings.repoFacts).toEqual([
     { term: '分支', value: 'main' },
     { term: '当前提交', value: 'abcdef123456' },
@@ -285,7 +291,7 @@ test('setup cannot apply commands over unsaved settings edits', async () => {
   settings.openPage('setup');
   await vi.waitFor(() => expect(setup.view).not.toBeNull());
   setup.selectedKinds = ['test'];
-  settings.workspaceDraft!.commands.test = 'npm run unit';
+  settings.workspaceDraft!.steps.test!.lines = ['npm run unit'];
   expect(await setup.apply()).toBe(false);
   expect(api.env.apply).not.toHaveBeenCalled();
   expect(feedback.showToast).toHaveBeenCalledWith('设置里还有未保存的修改，请先保存或放弃。', 'error');

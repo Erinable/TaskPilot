@@ -15,6 +15,7 @@ import * as cliSignIn from './cli_sign_in.ts';
 import { createPathResolver } from './shell_env.ts';
 import { readModelCatalog } from './agent_model_catalog.ts';
 import { BackgroundRuns } from './background_runs.ts';
+import * as effectiveSteps from './effective_steps.ts';
 import { humanTransitions } from './work_package_store.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
 import { supportsAgentConfig } from '../shared/agent_runtime.ts';
@@ -163,6 +164,13 @@ export const createAppContext = (deps: AppDeps) => {
 
   // The PATH verification commands run with, per the user's preference.
   const commandPath = () => pathResolver.resolve(getPreferences().environment.pathSource);
+
+  // The steps the open repository runs: preset, taskpilot.toml and this
+  // machine's settings merged. Read fresh each time, so an edit to the file
+  // shows up on the next run without a restart.
+  const resolveSteps = (config: workspace.WorkspaceConfig = getConfig(), options?: Parameters<typeof effectiveSteps.resolve>[1]) =>
+    effectiveSteps.resolve(config, options);
+  const runnableSteps = async (config: workspace.WorkspaceConfig = getConfig()) => effectiveSteps.runnable(await resolveSteps(config));
 
   // Activity is a side record: a failed append is logged and never fails the
   // action that caused it.
@@ -344,6 +352,8 @@ export const createAppContext = (deps: AppDeps) => {
     modelCatalog,
     catalog,
     commandPath,
+    resolveSteps,
+    runnableSteps,
     record,
     recordCall,
     runnerFor,

@@ -76,6 +76,20 @@ const RULES: { test: (input: FailureInput) => boolean; explain: (input: FailureI
     }),
   },
   {
+    test: ({ kind }) => kind === 'typecheck',
+    explain: () => ({
+      title: '类型检查没通过',
+      detail: '类型检查不运行代码，只看类型是否对得上。下面列出了每处问题的文件和行号，从第一条开始改。',
+    }),
+  },
+  {
+    test: ({ kind }) => kind === 'format',
+    explain: () => ({
+      title: '代码格式和项目规则不一致',
+      detail: '格式检查只看排版（缩进、引号、换行），不影响功能。用项目的格式化命令（比如 npm run format）一键改好再运行。',
+    }),
+  },
+  {
     test: ({ kind }) => kind === 'build',
     explain: () => ({
       title: '项目没能构建成功',
@@ -83,7 +97,7 @@ const RULES: { test: (input: FailureInput) => boolean; explain: (input: FailureI
     }),
   },
   {
-    test: ({ kind }) => kind === 'smoke',
+    test: ({ kind }) => kind === 'custom:smoke',
     explain: () => ({
       title: '冒烟测试失败：程序没能正常启动或响应',
       detail: '冒烟测试只检查程序能不能跑起来。看输出里的第一条报错，常见是启动时就抛了异常，或者端口被占用。',

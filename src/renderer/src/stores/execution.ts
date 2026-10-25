@@ -49,7 +49,11 @@ export const TRANSITION_CONFIRMS: Partial<Record<packageTypes.HumanTransition, C
   revert_replan: { title: '撤销重新规划？', body: '恢复 Architect 修订前的计划和执行进度，偏差记录会保留。', accept: '撤销' },
 };
 
-export const VERIFY_LABELS: Record<workspaceTypes.CheckKind, string> = { test: '测试', lint: '代码检查', build: '构建', smoke: '冒烟测试' };
+const DEFAULT_VERIFY_STEPS: { id: workspaceTypes.CheckKind; label: string | null }[] = [
+  { id: 'test', label: null },
+  { id: 'lint', label: null },
+  { id: 'build', label: null },
+];
 
 export const REVIEW_POLL_MS = 1500;
 export const BASELINE_POLL_MS = 1000;
@@ -103,7 +107,7 @@ export const useExecutionStore = defineStore('execution', () => {
     deviationOpen.value = false;
     watchReview();
     watchBaseline();
-    await refreshDiff();
+    await Promise.all([refreshDiff(), loadVerifySteps()]);
   };
 
   // Leaves the execution view; stops any polling.
@@ -320,6 +324,18 @@ export const useExecutionStore = defineStore('execution', () => {
   const diffFile = (taskId: string, path: string) => call(window.taskpilot.diff.file(taskId, path));
 
   // ========== Verification ==========
+  // The steps that run in this repository, for the verify buttons; the
+  // fixed ones until the workspace answers.
+  const verifySteps = ref<{ id: workspaceTypes.CheckKind; label: string | null }[]>(DEFAULT_VERIFY_STEPS);
+  const loadVerifySteps = async () => {
+    try {
+      const view = await call(window.taskpilot.workspace.get());
+      verifySteps.value = view.steps.filter((step) => step.effective && step.id !== 'setup').map((step) => ({ id: step.id, label: step.label }));
+    } catch (error) {
+      console.error(error);
+      verifySteps.value = DEFAULT_VERIFY_STEPS;
+    }
+  };
   const verifyKind = ref<workspaceTypes.CheckKind | null>(null);
   const verifyRunning = ref(false);
   const verifyResult = ref<workspaceTypes.VerifyRun | null>(null);
@@ -541,6 +557,8 @@ export const useExecutionStore = defineStore('execution', () => {
     refreshDiff,
     diffFile,
     // Verification
+    verifySteps,
+    loadVerifySteps,
     verifyKind,
     verifyRunning,
     verifyResult,

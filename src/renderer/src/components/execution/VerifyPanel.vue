@@ -3,26 +3,32 @@ import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
-import { GLOSSARY } from '@/lib/glossary.ts';
 import * as reviewModel from '@/lib/review_model.ts';
-import type { IconName } from '@/lib/icons.ts';
-import { useExecutionStore, VERIFY_LABELS } from '@/stores/execution.ts';
+import { STEP_HINTS, stepIcon, stepLabel } from '@/lib/check_steps.ts';
+import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import type { StepKind } from '@shared/check_steps.ts';
+import DiagnosticList from './DiagnosticList.vue';
 import EvidenceRow from './EvidenceRow.vue';
 import FailureExplain from './FailureExplain.vue';
-
-// Each check names what it does; the tooltip explains it in plain words.
-const SEGMENTS: { kind: workspaceTypes.CheckKind; icon: IconName; label: string }[] = [
-  { kind: 'test', icon: 'flask', label: '测试' },
-  { kind: 'lint', icon: 'wand', label: '代码检查' },
-  { kind: 'build', icon: 'box', label: '构建' },
-  { kind: 'smoke', icon: 'rocket', label: '冒烟测试' },
-];
 
 const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
+
+// One button per step that runs here; the tooltip explains it in plain words.
+const segments = computed(() =>
+  execution.verifySteps.map((step) => ({
+    kind: step.id,
+    icon: stepIcon(step.id),
+    label: stepLabel(step.id, step.label),
+    hint: STEP_HINTS[step.id as StepKind] ?? '项目自定义的检查步骤',
+  })),
+);
+const runningLabel = computed(() =>
+  execution.verifyKind ? stepLabel(execution.verifyKind, execution.verifySteps.find((step) => step.id === execution.verifyKind)?.label) : '',
+);
 
 const baseline = computed(() => reviewModel.baselineText(props.task.baselineChecks));
 const result = computed(() => execution.verifyResult);
@@ -38,6 +44,12 @@ const reportNote = computed(() => {
   return reviewModel.REASONS[`report_${report.problem}`] ?? String(report.problem);
 });
 const failures = computed(() => (result.value?.results ?? []).filter((entry) => !entry.passed && !entry.skipped && !entry.todo));
+// Older main processes send no diagnostics; the failing tests stand in.
+const diagnostics = computed(
+  () =>
+    result.value?.diagnostics ??
+    failures.value.map((entry) => ({ file: null, line: null, column: null, severity: 'error' as const, message: entry.fullName ?? entry.name, rule: null })),
+);
 // A failure is explained in plain words with the log folded below; a run with
 // nothing parsed shows its log open, as the only evidence there is.
 const showOutput = computed(() => !!result.value && (!result.value.summary.ok || result.value.summary.total === 0));
@@ -67,13 +79,13 @@ const remeasure = () => {
     </div>
     <div class="segmented" role="group" aria-label="验证命令">
       <button
-        v-for="segment in SEGMENTS"
+        v-for="segment in segments"
         :key="segment.kind"
         class="segment"
         :class="{ selected: execution.verifyKind === segment.kind, running: execution.verifyRunning && execution.verifyKind === segment.kind }"
         type="button"
         :data-verify="segment.kind"
-        :title="GLOSSARY[segment.kind].meaning"
+        :title="segment.hint"
         :disabled="execution.verifyRunning"
         @click="run(segment.kind)"
       >
@@ -94,7 +106,7 @@ const remeasure = () => {
     <div class="verify-result" aria-live="polite">
       <p v-if="execution.verifyRunning && execution.verifyKind" class="empty-hint">
         <AppIcon name="spinner" class="spin" />
-        正在运行 {{ VERIFY_LABELS[execution.verifyKind] }}…
+        正在运行 {{ runningLabel }}…
       </p>
       <p v-else-if="execution.verifyError !== null" class="empty-hint">
         <AppIcon name="alert" />
@@ -114,19 +126,14 @@ const remeasure = () => {
         </div>
         <div class="verify-command">
           <AppIcon name="terminal" />
-          {{ VERIFY_LABELS[execution.verifyKind] }} · {{ result.command }}
+          {{ runningLabel }} · {{ result.command }}
         </div>
         <EvidenceRow v-if="result.evidence" :item="result.evidence" />
         <div v-if="reportNote" class="verify-note warn-text">
           <AppIcon name="alert" />
           {{ reportNote }}
         </div>
-        <div v-if="failures.length > 0" class="verify-failures">
-          <div v-for="(entry, index) in failures" :key="index">
-            <AppIcon name="x" />
-            {{ entry.fullName ?? entry.name }}
-          </div>
-        </div>
+        <DiagnosticList v-if="diagnostics.length > 0" :items="diagnostics" />
         <FailureExplain
           v-if="showOutput"
           :input="{ kind: result.kind, exitCode: result.exitCode, timedOut: result.timedOut, output: result.output, failed: failures.length }"

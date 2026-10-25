@@ -3,8 +3,9 @@
 // checks config.
 import { failWith, requireString } from '../coded_error.ts';
 import * as workspace from '../workspace.ts';
+import { formatCommandLine } from '../command_line.ts';
 import * as verification from '../verification.ts';
-import * as envSetup from '../env_setup.ts';
+import * as envSetup from '../presets/typescript_setup.ts';
 import { planEnvironment } from '../agents/pipeline.ts';
 import { toFailure, wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
@@ -79,11 +80,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       script: 'script' in step ? step.script : null,
       packages: 'packages' in step ? step.packages : [],
       replacesInstall: step.kind === 'install' && step.args[0] === 'ci' && Boolean(env.facts?.nodeModules),
-      line: workspace.formatCommandLine(step),
+      line: formatCommandLine(step),
       result: env.results[step.id] ?? null,
     })),
     configured: Object.fromEntries(
-      workspace.COMMAND_KINDS.map((kind) => [kind, workspace.formatCommandLine(getConfig().commands[kind])]),
+      envSetup.SCRIPT_KINDS.map((kind) => [kind, (getConfig().steps[kind]?.commands ?? []).map(formatCommandLine).join(' && ')]),
     ) as envTypes.EnvState['configured'],
   });
 
@@ -99,7 +100,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     const failed = envSteps().find((step) => env.results[step.id] && !env.results[step.id]?.ok);
     const result = failed && env.results[failed.id];
     if (!failed || !result) return null;
-    return { step: failed.id, command: workspace.formatCommandLine(failed), exitCode: result.exitCode, timedOut: result.timedOut, output: result.output };
+    return { step: failed.id, command: formatCommandLine(failed), exitCode: result.exitCode, timedOut: result.timedOut, output: result.output };
   };
 
   ipcMain.handle(
@@ -138,7 +139,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure });
             Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
             // Results only carry over for steps the new plan still runs unchanged.
-            const lines = new Map(envSteps().map((step) => [step.id, workspace.formatCommandLine(step)]));
+            const lines = new Map(envSteps().map((step) => [step.id, formatCommandLine(step)]));
             for (const id of Object.keys(session.results) as envTypes.EnvStepId[]) {
               if (session.results[id]?.line !== lines.get(id)) delete session.results[id];
             }
@@ -179,7 +180,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
       session.running = step.id;
       session.live = { output: '', startedAt: new Date().toISOString() };
-      const line = workspace.formatCommandLine(step);
+      const line = formatCommandLine(step);
       const run = (async () => {
         try {
           const result = await verification.run({ root: session.root, commands: { [step.kind]: { command: step.command, args: step.args } } }, step.kind, {
@@ -217,8 +218,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     }),
   );
 
-  // Copies the plan's verification scripts into workspace.json, for the
-  // kinds the user ticked. Lines are rebuilt here, as in envRunStep.
+  // Copies the plan's verification scripts into this machine's steps, for
+  // the kinds the user ticked. Lines are rebuilt here, as in envRunStep.
   ipcMain.handle(
     CHANNELS.envApply,
     wrap(async (_event, kinds): Promise<envTypes.EnvApplyResult> => {
@@ -227,17 +228,17 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         failWith('kinds must be a list of test, lint or build', 'invalid_argument');
       }
       const config = getConfig();
-      // workspace.save() normalizes the checks, filling in what is left unset.
-      const checks: Record<string, unknown> = { ...config.checks };
+      // workspace.save() normalizes the steps, filling in what is left unset.
+      const steps: Record<string, unknown> = { ...config.steps };
       for (const kind of new Set(kinds as envTypes.ScriptKind[])) {
         const name = plan.scripts[kind];
         if (!name) failWith(`The plan has no ${kind} script`, 'invalid_argument');
-        // A new command keeps the slot's stage and blocking choice; its report
-        // format resets, since the old one described a different command.
-        const kept = config.checks[kind];
-        checks[kind] = { ...envSetup.scriptCommand(name), stage: kept?.stage, blocking: kept?.blocking };
+        // A new command keeps the step's stage and blocking choice; its parser
+        // resets, since the old one described a different command.
+        const kept = config.steps[kind];
+        steps[kind] = { commands: [envSetup.scriptCommand(name)], stage: kept?.stage, blocking: kept?.blocking };
       }
-      ctx.setConfig(await ctx.repositories.saveConfig(workspace.normalize({ ...config, checks })));
+      ctx.setConfig(await ctx.repositories.saveConfig(workspace.normalize({ ...config, version: workspace.CONFIG_VERSION, steps })));
       return envView();
     }),
   );

@@ -259,13 +259,14 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     const failures: Parameters<typeof codingLoop.checksFeedback>[0] = [];
     const runs: codingTypes.CodingRun['checks'] = {};
     try {
+      const steps = await ctx.runnableSteps(config);
       const { path: envPath } = await ctx.commandPath();
-      for (const check of submitChecks(config)) {
+      for (const check of submitChecks(steps)) {
         if (controller.signal.aborted) break;
         let outcome: Parameters<typeof evidence.evaluate>[1];
         try {
-          const run = await verification.runCheck(config, check.kind, { signal: controller.signal, envPath });
-          // runCheck() echoes the kind it ran, which is a CheckKind here.
+          const run = await verification.runStep(config.root, check.step, { signal: controller.signal, envPath });
+          // runStep() echoes the step id it ran.
           runs[check.kind] = { ...run, kind: check.kind };
           outcome = run;
         } catch (error) {

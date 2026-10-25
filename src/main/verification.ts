@@ -1,27 +1,24 @@
-// Runs the workspace's configured verification commands and turns their output
-// into structured results the execution page can show.
+// Runs check steps and turns their output into structured results the
+// execution page can show.
 //
-// SECURITY: the command comes from the workspace config only (see
-// ./workspace.js), runs through execFile with an argument array, and never
-// touches a shell.
+// SECURITY: commands come from the effective steps only (see
+// ./effective_steps.ts), run through execFile with an argument array, and
+// never touch a shell.
+import path from 'node:path';
 import { execFile, type ChildProcess, type ExecFileException, type ExecFileOptions } from 'node:child_process';
 
 import { processEnv } from './env.ts';
 import * as testReport from './test_report.ts';
-import type { Check, CheckStage, CommandEntry } from './workspace.ts';
+import * as checkOutput from './check_output.ts';
+import { formatCommandLine } from './command_line.ts';
+import type { CommandEntry } from './command_line.ts';
+import type { CheckStage, CheckStep } from './step_config.ts';
+import type { TestResult } from './check_output.ts';
+import type { Diagnostic } from '../shared/check_steps.ts';
 import type { AcceptanceCriterion } from './tasks.ts';
 
 export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BUFFER = 20 * 1024 * 1024;
-
-// One test result; `fullName` (suites joined) is the key baselines use.
-export interface TestResult {
-  name: string;
-  fullName?: string;
-  passed: boolean;
-  skipped: boolean;
-  todo: boolean;
-}
 
 export interface RunSummary {
   total: number;
@@ -32,6 +29,7 @@ export interface RunSummary {
 }
 
 // What execute() reports for one command, before its output is parsed.
+// `output` is stdout and stderr together.
 export interface CommandOutcome {
   kind: string;
   command: string;
@@ -47,23 +45,24 @@ export interface RunResult extends CommandOutcome {
   summary: RunSummary;
 }
 
+// Whether the step's output could be read in its configured format.
+// `format` is the step's parser format.
 export interface ReportInfo {
-  format: 'stdout' | 'junit';
+  format: string;
   trusted: boolean;
   problem: testReport.ReportProblem | null;
 }
 
-// runCheck() result.
+// runStep() result. `kind` is the step id.
 export interface CheckRun extends RunResult {
   report: ReportInfo;
+  diagnostics: Diagnostic[];
   check: { stage: CheckStage; blocking: boolean };
 }
 
-// The part of a workspace config run()/runCheck() read; run() also accepts
-// ad hoc commands (environment setup steps) under any kind.
+// What run() executes: ad hoc commands (environment setup) under any kind.
 export interface VerificationTarget {
   root: string | null;
-  checks?: Partial<Record<string, Check | null>>;
   commands?: Partial<Record<string, CommandEntry | null>>;
 }
 
@@ -89,56 +88,6 @@ export class VerificationError extends Error {
     this.code = code;
   }
 }
-
-// Parses TAP 13/14 result lines, which is what `node --test` emits.
-// Subtests are indented; only top-level lines are collected so a suite does
-// not double-count. Returns [] for output that isn't TAP.
-export const parseTap = (output: string): TestResult[] => {
-  const results: TestResult[] = [];
-  for (const line of output.split('\n')) {
-    if (/^\s/.test(line)) continue; // subtest
-    const match = /^(not ok|ok)\s+(\d+)\s*-?\s*(.*)$/.exec(line);
-    if (!match) continue;
-    const [, verdict, , rest] = match;
-    const name = rest.replace(/\s+#\s*(SKIP|TODO).*$/i, '').trim();
-    const directive = /#\s*SKIP/i.test(rest) ? 'skip' : /#\s*TODO/i.test(rest) ? 'todo' : null;
-    results.push({
-      name,
-      passed: verdict === 'ok',
-      skipped: directive === 'skip',
-      todo: directive === 'todo',
-    });
-  }
-  return results;
-};
-
-// Node 22 switched `node --test` from TAP to its "spec" reporter, which marks
-// results with ✔/✖ and indents nested tests. Many other runners (vitest, jest)
-// print a similar shape, so this covers the common default case too.
-const SPEC_LINE = /^(?<mark>[✔✖✗×])\s+(?<name>.+?)(?:\s+\((?<ms>[\d.]+)ms\))?\s*$/;
-
-export const parseSpec = (output: string): TestResult[] => {
-  const results: TestResult[] = [];
-  for (const line of output.split('\n')) {
-    if (/^\s/.test(line)) continue; // nested test
-    const match = SPEC_LINE.exec(line.trim() === line ? line : line);
-    if (!match) continue;
-    // Both groups are mandatory in SPEC_LINE.
-    const groups = match.groups as { mark: string; name: string };
-    const name = groups.name.trim();
-    // The spec reporter repeats failures in a trailing summary block; those
-    // lines have no duration, so skip a name already recorded.
-    if (results.some((r) => r.name === name)) continue;
-    results.push({ name, passed: groups.mark === '✔', skipped: false, todo: false });
-  }
-  return results;
-};
-
-// Picks the parser that matches the output, preferring TAP when both appear.
-export const parseResults = (output: string): TestResult[] => {
-  const tap = parseTap(output);
-  return tap.length > 0 ? tap : parseSpec(output);
-};
 
 export const summarize = (results: Pick<TestResult, 'passed' | 'skipped' | 'todo'>[], exitCode: number): RunSummary => {
   const counted = results.filter((r) => !r.skipped && !r.todo);
@@ -170,13 +119,13 @@ const spawn = (command: string, args: string[], options: ExecFileOptions & { onS
     options.onSpawn?.(child);
   });
 
-// Runs {command, args} in the workspace; shared by run() and runCheck().
+// Runs {command, args} in `root`; shared by run() and runStep().
 const execute = async (
   root: string,
   entry: CommandEntry,
   kind: string,
   { signal, timeoutMs, envPath, onOutput, env = {} }: RunOptions & { env?: Record<string, string> },
-): Promise<CommandOutcome> => {
+): Promise<CommandOutcome & { stdout: string }> => {
   const startedAt = Date.now();
   const { error, stdout, stderr } = await spawn(entry.command, entry.args, {
     onSpawn: onOutput
@@ -212,59 +161,84 @@ const execute = async (
     timedOut,
     durationMs: Date.now() - startedAt,
     output,
+    stdout,
   };
 };
 
-// A configured check, or a bare command which then has none of the check fields.
-const requireEntry = (config: VerificationTarget, kind: string): { root: string; entry: CommandEntry & Partial<Check> } => {
-  const entry = config.checks?.[kind] ?? config.commands?.[kind];
-  if (!entry) throw new VerificationError(`No ${kind} command is configured`, 'not_configured');
-  if (!config.root) throw new VerificationError('No workspace root is configured', 'no_workspace');
-  return { root: config.root, entry };
-};
-
-// Executes one verification command and parses its stdout.
+// Executes one ad hoc command (an environment setup step) and parses its
+// output as tests.
 export const run = async (
   config: VerificationTarget,
   kind: string,
   { signal, timeoutMs = DEFAULT_TIMEOUT_MS, envPath, onOutput }: RunOptions = {},
 ): Promise<RunResult> => {
-  const { root, entry } = requireEntry(config, kind);
-  const outcome = await execute(root, entry, kind, { signal, timeoutMs, envPath, onOutput, env: entry.env });
-  const results = parseResults(outcome.output);
+  const entry = config.commands?.[kind];
+  if (!entry) throw new VerificationError(`No ${kind} command is configured`, 'not_configured');
+  if (!config.root) throw new VerificationError('No workspace root is configured', 'no_workspace');
+  const { stdout: _stdout, ...outcome } = await execute(config.root, entry, kind, { signal, timeoutMs, envPath, onOutput });
+  const results = checkOutput.parseResults(outcome.output);
   return { ...outcome, results, summary: summarize(results, outcome.exitCode) };
 };
 
-// Executes a configured check and reads its results from the report it is
-// configured with. Results always carry `fullName`, the key baselines use.
-// Returns run() result plus `report: {format, trusted, problem}`; for an
-// untrusted JUnit report `results` is empty.
-export const runCheck = async (config: VerificationTarget, kind: string, { signal, timeoutMs, envPath }: RunOptions = {}): Promise<CheckRun> => {
-  const { root, entry: check } = requireEntry(config, kind);
-  const report = check.report ?? { format: 'stdout' };
-  const before = report.format === 'junit' ? await testReport.statReport(root, report.path) : null;
-  const outcome = await execute(root, check, kind, {
-    signal,
-    timeoutMs: timeoutMs ?? check.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    envPath,
-    env: check.env,
-  });
-  let results: TestResult[];
-  let reportInfo: ReportInfo;
-  if (report.format === 'junit') {
-    const read = await testReport.readReport(root, report, before);
-    results = read.results;
-    reportInfo = { format: 'junit', trusted: read.trusted, problem: read.problem };
-  } else {
-    results = parseResults(outcome.output).map((r) => ({ ...r, fullName: r.fullName ?? r.name }));
-    reportInfo = { format: 'stdout', trusted: true, problem: null };
+// The step's commands in order, stopping at the first that fails. The
+// outcome is the last one run, with every command's output joined.
+const executeAll = async (cwd: string, step: CheckStep, options: RunOptions & { env: Record<string, string> }) => {
+  const outputs: string[] = [];
+  const stdouts: string[] = [];
+  let last: (CommandOutcome & { stdout: string }) | null = null;
+  let durationMs = 0;
+  for (const entry of step.commands) {
+    last = await execute(cwd, entry, step.id, options);
+    durationMs += last.durationMs;
+    outputs.push(step.commands.length > 1 ? `$ ${formatCommandLine(entry)}\n${last.output}` : last.output);
+    stdouts.push(last.stdout);
+    if (last.exitCode !== 0 || last.timedOut) break;
   }
+  // A step has at least one command (step_config.ts).
+  const { stdout: _stdout, ...outcome } = last as CommandOutcome & { stdout: string };
+  return {
+    outcome: { ...outcome, command: step.commands.map(formatCommandLine).join(' && '), durationMs, output: outputs.join('\n') },
+    stdout: stdouts.join('\n'),
+  };
+};
+
+// Executes a check step and reads its results the way its parser says.
+// Results always carry `fullName`, the key baselines use; error
+// diagnostics are results too. For an unreadable report `results` is empty
+// and `report.trusted` is false.
+export const runStep = async (root: string | null, step: CheckStep, { signal, timeoutMs, envPath }: RunOptions = {}): Promise<CheckRun> => {
+  if (!root) throw new VerificationError('No workspace root is configured', 'no_workspace');
+  const cwd = path.join(root, step.cwd);
+  const parser = step.parser;
+  const reportPath = 'path' in parser && parser.path ? path.join(step.cwd, parser.path) : null;
+  const before = reportPath ? await testReport.statReport(root, reportPath) : null;
+  const { outcome, stdout } = await executeAll(cwd, step, { signal, timeoutMs: timeoutMs ?? step.timeoutMs ?? DEFAULT_TIMEOUT_MS, envPath, env: step.env });
+  let parsed: checkOutput.ParsedOutput | null = null;
+  let problem: testReport.ReportProblem | null = null;
+  if (parser.format === 'junit') {
+    const read = await testReport.readReport(root, { path: reportPath as string }, before);
+    problem = read.problem;
+    parsed = read.trusted ? checkOutput.fromTests(read.results) : null;
+  } else {
+    let content = stdout;
+    if (reportPath) {
+      const read = await testReport.readReportFile(root, reportPath, before);
+      if (read.problem) problem = read.problem;
+      else content = read.content;
+    }
+    if (!problem) {
+      parsed = checkOutput.parseOutput(parser, { output: outcome.output, content, root, cwd: step.cwd });
+      if (!parsed) problem = 'invalid';
+    }
+  }
+  const results = (parsed?.results ?? []).map((result) => ({ ...result, fullName: result.fullName ?? result.name }));
   return {
     ...outcome,
     results,
+    diagnostics: parsed?.diagnostics ?? [],
     summary: summarize(results, outcome.exitCode),
-    report: reportInfo,
-    check: { stage: check.stage as CheckStage, blocking: check.blocking as boolean },
+    report: { format: parser.format, trusted: problem === null, problem },
+    check: { stage: step.stage, blocking: step.blocking },
   };
 };
 

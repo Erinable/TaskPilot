@@ -11,56 +11,96 @@ const tempDir = async () => {
   return dir;
 };
 
+test('save() then load() round-trips a v3 config', async () => {
+  const dir = await tempDir();
+  const saved = await workspace.save(dir, {
+    version: 3,
+    root: '/tmp/project',
+    steps: { lint: { commands: [{ command: 'npm', args: ['run', 'lint'] }], parser: { format: 'json', dialect: 'eslint' } }, coverage: { enabled: false } },
+  });
+  assert.deepEqual(saved.steps.lint?.commands, [{ command: 'npm', args: ['run', 'lint'] }]);
+  assert.deepEqual(saved.steps.lint?.parser, { format: 'json', dialect: 'eslint', path: null });
+  assert.equal(saved.steps.coverage?.enabled, false);
+  assert.deepEqual(await workspace.load(dir), saved);
+  const raw = JSON.parse(await fs.readFile(path.join(dir, workspace.CONFIG_FILENAME), 'utf8'));
+  assert.equal(raw.version, 3);
+  assert.ok(!('checks' in raw));
+});
+
+test('normalize() drops unknown keys and blank roots', () => {
+  const config = workspace.normalize({ version: 3, root: '   ', evil: true, steps: {} });
+  assert.deepEqual(config, workspace.emptyConfig());
+  assert.ok(!('evil' in config));
+});
+
+test('normalize() upgrades v1 commands with the v2 defaults', () => {
+  const config = workspace.normalize({ root: '/r', commands: { test: { command: 'npm', args: ['test'] }, lint: { command: 'npm', args: ['run', 'lint'] } } });
+  assert.equal(config.version, 3);
+  assert.deepEqual(config.steps.test, {
+    enabled: true,
+    commands: [{ command: 'npm', args: ['test'] }],
+    cwd: '',
+    stage: 'submit',
+    blocking: true,
+    parser: { format: 'tests' },
+    env: {},
+  });
+  assert.equal(config.steps.lint?.stage, 'step');
+  assert.equal(config.steps.lint?.blocking, false);
+});
+
+test('normalize() upgrades v2 checks: JUnit reports, env, timeouts, and smoke as custom:smoke', () => {
+  const config = workspace.normalize({
+    version: 2,
+    root: '/r',
+    checks: {
+      test: {
+        command: 'npx',
+        args: ['vitest'],
+        stage: 'submit',
+        blocking: false,
+        report: { format: 'junit', path: 'out/unit.xml' },
+        env: { CI: '1' },
+        timeoutMs: 60000,
+      },
+      smoke: { command: 'npm', args: ['run', 'smoke'] },
+      build: null,
+    },
+  });
+  assert.deepEqual(config.steps.test?.parser, { format: 'junit', path: 'out/unit.xml' });
+  assert.equal(config.steps.test?.blocking, false);
+  assert.deepEqual(config.steps.test?.env, { CI: '1' });
+  assert.equal(config.steps.test?.timeoutMs, 60000);
+  // v2 ran smoke before review and let it reject; it keeps doing so.
+  assert.deepEqual([config.steps['custom:smoke']?.stage, config.steps['custom:smoke']?.blocking], ['submit', true]);
+  assert.ok(!('build' in config.steps));
+});
+
+test('normalize() names the field of every step error', () => {
+  const bad = (steps: unknown, field: string) => assert.throws(() => workspace.normalize({ version: 3, steps }), { field }, field);
+  bad({ deploy: { commands: ['x'] } }, 'steps.deploy');
+  bad({ lint: { commands: [] } }, 'steps.lint.commands');
+  bad({ lint: { commands: ['eslint . | cat'] } }, 'steps.lint.commands[0]');
+  bad({ lint: { commands: ['eslint'], stage: 'deploy' } }, 'steps.lint.stage');
+  bad({ lint: { commands: ['eslint'], blocking: 'yes' } }, 'steps.lint.blocking');
+  bad({ lint: { commands: ['eslint'], cwd: '../outside' } }, 'steps.lint.cwd');
+  bad({ lint: { commands: ['eslint'], parser: { format: 'html' } } }, 'steps.lint.parser.format');
+  bad({ test: { commands: ['x'], parser: { format: 'junit', path: '/tmp/out.xml' } } }, 'steps.test.parser.path');
+  bad({ lint: { commands: ['x'], parser: { format: 'regex', pattern: '(' } } }, 'steps.lint.parser.pattern');
+  bad({ lint: { commands: ['x'], env: { PATH: '/evil' } } }, 'steps.lint.env.PATH');
+  bad({ lint: { commands: ['x'], env: { NODE_OPTIONS: '--require x' } } }, 'steps.lint.env.NODE_OPTIONS');
+  bad({ lint: { commands: ['x'], timeoutMs: 10 } }, 'steps.lint.timeoutMs');
+});
+
 test('load() returns an empty config when the file is absent', async () => {
   const config = await workspace.load(await tempDir());
   assert.deepEqual(config, workspace.emptyConfig());
-});
-
-test('save() then load() round-trips the config', async () => {
-  const dir = await tempDir();
-  const saved = await workspace.save(dir, {
-    root: '/tmp/project',
-    commands: { test: { command: 'npm', args: ['test'] } },
-  });
-  assert.deepEqual(saved.commands.test, { command: 'npm', args: ['test'] });
-  assert.deepEqual(await workspace.load(dir), saved);
 });
 
 test('load() reports invalid JSON instead of throwing a SyntaxError', async () => {
   const dir = await tempDir();
   await fs.writeFile(path.join(dir, workspace.CONFIG_FILENAME), '{ not json');
   await assert.rejects(() => workspace.load(dir), { code: 'invalid_json' });
-});
-
-test('normalize() drops unknown keys and blank roots', () => {
-  const config = workspace.normalize({ root: '   ', evil: true, commands: { nope: {} } });
-  assert.deepEqual(config, workspace.emptyConfig());
-  assert.ok(!('evil' in config));
-  assert.ok(!('nope' in config.commands));
-});
-
-test('a command must carry an executable name', () => {
-  assert.throws(() => workspace.normalizeCommand({ args: ['test'] }, 'test'), { code: 'invalid_command' });
-  assert.throws(() => workspace.normalizeCommand({ command: '  ' }, 'test'), { code: 'invalid_command' });
-  assert.throws(() => workspace.normalizeCommand('npm test', 'test'), { code: 'invalid_command' });
-});
-
-test('command args must be an array of strings', () => {
-  assert.throws(() => workspace.normalizeCommand({ command: 'npm', args: 'test' }, 'test'), { code: 'invalid_command' });
-  assert.throws(() => workspace.normalizeCommand({ command: 'npm', args: [1] }, 'test'), { code: 'invalid_command' });
-});
-
-test('a command keeps shell metacharacters as literal argv entries', () => {
-  // Nothing is parsed as an operator because execution never uses a shell.
-  const command = workspace.normalizeCommand({ command: 'npm', args: ['test', '&& rm -rf /'] }, 'test');
-  assert.deepEqual(command!.args, ['test', '&& rm -rf /']);
-});
-
-test('normalizeCommand() copies args so callers cannot mutate the config', () => {
-  const args = ['test'];
-  const command = workspace.normalizeCommand({ command: 'npm', args }, 'test');
-  args.push('--watch');
-  assert.deepEqual(command!.args, ['test']);
 });
 
 test('isInside() accepts paths within the root', () => {
@@ -73,65 +113,6 @@ test('isInside() rejects escapes, the root itself, and absolute outsiders', () =
   assert.ok(!workspace.isInside('/repo', 'src/../../secrets'));
   assert.ok(!workspace.isInside('/repo', '/etc/passwd'));
   assert.ok(!workspace.isInside('/repo', '.'));
-});
-
-test('parseCommandLine() splits on whitespace', () => {
-  assert.deepEqual(workspace.parseCommandLine('  npm   run  lint ', 'lint'), { command: 'npm', args: ['run', 'lint'] });
-});
-
-test('parseCommandLine() treats a blank line as not configured', () => {
-  assert.equal(workspace.parseCommandLine('', 'test'), null);
-  assert.equal(workspace.parseCommandLine('   ', 'test'), null);
-  assert.equal(workspace.parseCommandLine(undefined, 'test'), null);
-});
-
-test('parseCommandLine() groups quoted words and honours escapes', () => {
-  assert.deepEqual(workspace.parseCommandLine(`node --test "tests/a b.test.js" 'it''s' x\\ y ""`, 'test')!.args, [
-    '--test',
-    'tests/a b.test.js',
-    'its',
-    'x y',
-    '',
-  ]);
-  assert.deepEqual(workspace.parseCommandLine('echo "say \\"hi\\""', 'test')!.args, ['say "hi"']);
-});
-
-test('parseCommandLine() leaves $VARS and globs literal', () => {
-  // No expansion happens: these reach the program exactly as typed.
-  assert.deepEqual(workspace.parseCommandLine('jest $HOME *.ts ~', 'test')!.args, ['$HOME', '*.ts', '~']);
-});
-
-test('parseCommandLine() rejects unquoted shell operators', () => {
-  for (const line of ['npm test && npm run lint', 'npm test | tee log', 'npm test > out.txt', 'a ; b']) {
-    assert.throws(() => workspace.parseCommandLine(line, 'test'), { code: 'shell_syntax', field: 'test' }, line);
-  }
-});
-
-test('parseCommandLine() accepts a quoted operator as a literal argument', () => {
-  assert.deepEqual(workspace.parseCommandLine("grep '|' file", 'lint')!.args, ['|', 'file']);
-});
-
-test('parseCommandLine() reports an unterminated quote', () => {
-  assert.throws(() => workspace.parseCommandLine('npm "test', 'test'), { code: 'unterminated_quote', field: 'test' });
-});
-
-test('formatCommandLine() round-trips through parseCommandLine()', () => {
-  const entries = [
-    { command: 'npm', args: ['test'] },
-    { command: '/opt/my tools/run', args: ["it's", 'a b', '', '&&', 'back\\slash'] },
-  ];
-  for (const entry of entries) {
-    assert.deepEqual(workspace.parseCommandLine(workspace.formatCommandLine(entry), 'test'), entry);
-  }
-  assert.equal(workspace.formatCommandLine(null), '');
-});
-
-test('fromForm() converts command lines and tags errors with their field', () => {
-  const config = workspace.fromForm({ root: ' /repo ', commands: { test: 'npm test', lint: '', build: undefined } });
-  assert.equal(config.root, '/repo');
-  assert.deepEqual(config.commands, { test: { command: 'npm', args: ['test'] }, lint: null, build: null, smoke: null });
-  assert.deepEqual(config.checks.test, { command: 'npm', args: ['test'], stage: 'submit', blocking: true, report: { format: 'stdout' }, env: {} });
-  assert.throws(() => workspace.fromForm({ commands: { build: 'make && make install' } }), { field: 'build' });
 });
 
 test('resolveExecutable() finds a bare name through PATH', async () => {
@@ -158,62 +139,4 @@ test('resolveExecutable() skips files that are not executable', { skip: process.
   await fs.writeFile(file, 'data\n');
   await fs.chmod(file, 0o644);
   assert.equal(await workspace.resolveExecutable('not-exec', { envPath: dir, platform: 'linux' }), null);
-});
-
-test('normalize() upgrades v1 commands into checks with per-kind defaults', () => {
-  const config = workspace.normalize({ root: '/r', commands: { test: { command: 'npm', args: ['test'] }, lint: { command: 'npm', args: ['run', 'lint'] } } });
-  assert.equal(config.version, 2);
-  assert.equal(config.checks.test!.stage, 'submit');
-  assert.equal(config.checks.test!.blocking, true);
-  assert.equal(config.checks.lint!.stage, 'step');
-  assert.equal(config.checks.lint!.blocking, false);
-  assert.deepEqual(workspace.serialize(config).checks.lint!.args, ['run', 'lint']);
-  assert.equal('commands' in workspace.serialize(config), false);
-});
-
-test('normalizeCheck() validates stage, blocking, report and env', () => {
-  const ok = workspace.normalizeCheck(
-    {
-      command: 'npx',
-      args: ['vitest', 'run'],
-      stage: 'submit',
-      blocking: false,
-      report: { format: 'junit', path: '.taskpilot/reports/test.xml' },
-      env: { CI: '1' },
-      timeoutMs: 60000,
-    },
-    'test',
-  );
-  assert.deepEqual(ok!.report, { format: 'junit', path: '.taskpilot/reports/test.xml' });
-  assert.deepEqual(ok!.env, { CI: '1' });
-  const bad = (value, code) => assert.throws(() => workspace.normalizeCheck({ command: 'npm', args: [], ...value }, 'test'), { code, field: 'test' });
-  bad({ stage: 'deploy' }, 'invalid_check');
-  bad({ blocking: 'yes' }, 'invalid_check');
-  bad({ report: { format: 'html' } }, 'invalid_report');
-  bad({ report: { format: 'junit', path: '../out.xml' } }, 'invalid_report');
-  bad({ report: { format: 'junit', path: '/tmp/out.xml' } }, 'invalid_report');
-  bad({ env: { PATH: '/evil' } }, 'invalid_check');
-  bad({ env: { NODE_OPTIONS: '--require x' } }, 'invalid_check');
-  bad({ env: { lower: '1' } }, 'invalid_check');
-  bad({ timeoutMs: 10 }, 'invalid_check');
-});
-
-test('fromForm() applies stage, blocking and report options and keeps hidden settings', () => {
-  const previous = workspace.normalize({ checks: { test: { command: 'npm', args: ['test'], env: { CI: '1' }, timeoutMs: 120000 } } });
-  const config = workspace.fromForm(
-    {
-      root: '/r',
-      commands: { test: 'npm test', smoke: 'npm run smoke' },
-      options: { test: { stage: 'submit', blocking: true, reportPath: 'reports/unit.xml' }, smoke: { stage: 'step', blocking: false } },
-    },
-    previous,
-  );
-  assert.deepEqual(config.checks.test!.report, { format: 'junit', path: 'reports/unit.xml' });
-  assert.deepEqual(config.checks.test!.env, { CI: '1' });
-  assert.equal(config.checks.test!.timeoutMs, 120000);
-  assert.equal(config.checks.smoke!.stage, 'step');
-  const form = workspace.toForm(config);
-  assert.equal(form.commands.smoke, 'npm run smoke');
-  assert.deepEqual(form.options.test, { stage: 'submit', blocking: true, reportPath: 'reports/unit.xml' });
-  assert.deepEqual(form.options.build, { stage: 'step', blocking: false, reportPath: '' });
 });

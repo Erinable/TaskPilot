@@ -166,7 +166,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       // Answers submitted with the plan request are saved first, in one step.
       if (answers !== undefined) await requireRequirements().setAnswers(rid, answers);
       // Linked tests are checked against the submit-stage test run only.
-      const linkTests = ctx.getConfig().checks?.test?.stage === 'submit';
+      const linkTests = (await ctx.runnableSteps().catch(() => [])).some((step) => step.id === 'test' && step.stage === 'submit');
       return startRun(
         rid,
         'planning',

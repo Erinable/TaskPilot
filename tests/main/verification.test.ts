@@ -4,6 +4,20 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as verification from '../../src/main/verification.ts';
+import * as checkOutput from '../../src/main/check_output.ts';
+import type { CheckStep } from '../../src/main/step_config.ts';
+
+const step = (overrides: Partial<CheckStep> = {}): CheckStep => ({
+  id: 'test',
+  label: null,
+  commands: [{ command: process.execPath, args: ['-e', 'process.exit(0)'] }],
+  cwd: '',
+  stage: 'submit',
+  blocking: true,
+  parser: { format: 'tests' },
+  env: {},
+  ...overrides,
+});
 
 const workspaceWith = async (commands) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-verify-'));
@@ -12,7 +26,7 @@ const workspaceWith = async (commands) => {
 };
 
 test('parseTap() reads pass, fail, skip, and todo lines', () => {
-  const results = verification.parseTap(
+  const results = checkOutput.parseTap(
     ['TAP version 13', 'ok 1 - first passes', 'not ok 2 - second fails', 'ok 3 - third # SKIP not ready', 'ok 4 - fourth # TODO later'].join('\n'),
   );
 
@@ -29,7 +43,7 @@ test('parseTap() reads pass, fail, skip, and todo lines', () => {
 });
 
 test('parseTap() ignores indented subtest lines so suites are not double-counted', () => {
-  const results = verification.parseTap(['    ok 1 - inner', 'ok 1 - outer suite'].join('\n'));
+  const results = checkOutput.parseTap(['    ok 1 - inner', 'ok 1 - outer suite'].join('\n'));
   assert.deepEqual(
     results.map((r) => r.name),
     ['outer suite'],
@@ -37,7 +51,7 @@ test('parseTap() ignores indented subtest lines so suites are not double-counted
 });
 
 test('parseTap() returns nothing for output that is not TAP', () => {
-  assert.deepEqual(verification.parseTap('Compiling...\nBuild succeeded in 2s\n'), []);
+  assert.deepEqual(checkOutput.parseTap('Compiling...\nBuild succeeded in 2s\n'), []);
 });
 
 test('summarize() excludes skipped and todo tests from the counts', () => {
@@ -93,6 +107,7 @@ test('run() rejects a kind with no configured command', async () => {
 test('run() rejects when no workspace root is set', async () => {
   const config = { root: null, commands: { test: { command: 'node', args: [] } } };
   await assert.rejects(() => verification.run(config, 'test'), { code: 'no_workspace' });
+  await assert.rejects(() => verification.runStep(null, step()), { code: 'no_workspace' });
 });
 
 test('run() reports a missing executable distinctly', async () => {
@@ -130,7 +145,7 @@ test('run() does not interpret arguments through a shell', async () => {
 });
 
 test('parseSpec() reads the reporter node --test uses by default', () => {
-  const results = verification.parseSpec(['✔ first passes (1.2ms)', '✖ second fails (0.5ms)', '    ✔ nested subtest (0.1ms)'].join('\n'));
+  const results = checkOutput.parseSpec(['✔ first passes (1.2ms)', '✖ second fails (0.5ms)', '    ✔ nested subtest (0.1ms)'].join('\n'));
   assert.deepEqual(
     results.map((r) => r.name),
     ['first passes', 'second fails'],
@@ -142,20 +157,20 @@ test('parseSpec() reads the reporter node --test uses by default', () => {
 });
 
 test('parseSpec() does not double-count a failure repeated in the summary', () => {
-  const results = verification.parseSpec(['✖ broken (1ms)', '✖ broken'].join('\n'));
+  const results = checkOutput.parseSpec(['✖ broken (1ms)', '✖ broken'].join('\n'));
   assert.equal(results.length, 1);
 });
 
 test('parseResults() picks TAP when present and falls back to spec', () => {
   assert.deepEqual(
-    verification.parseResults('ok 1 - tap style').map((r) => r.name),
+    checkOutput.parseResults('ok 1 - tap style').map((r) => r.name),
     ['tap style'],
   );
   assert.deepEqual(
-    verification.parseResults('✔ spec style (1ms)').map((r) => r.name),
+    checkOutput.parseResults('✔ spec style (1ms)').map((r) => r.name),
     ['spec style'],
   );
-  assert.deepEqual(verification.parseResults('Build finished.'), []);
+  assert.deepEqual(checkOutput.parseResults('Build finished.'), []);
 });
 
 test('run() parses the default node --test output end to end', async () => {
@@ -191,25 +206,17 @@ test('matchAcceptance() marks a criterion without a test as manual, never auto-v
   assert.equal(matched[0].verified, false);
 });
 
-test('runCheck() reads a fresh JUnit report and ignores a stale one', async () => {
+test('runStep() reads a fresh JUnit report and ignores a stale one', async () => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-check-')));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   const xml = '<testsuite name="s"><testcase name="a"/><testcase name="b"><failure/></testcase></testsuite>';
   const writer = `require('fs').mkdirSync('out',{recursive:true});require('fs').writeFileSync('out/r.xml',${JSON.stringify(xml)});process.exit(1)`;
-  const config: any = {
-    root,
-    checks: {
-      test: {
-        command: process.execPath,
-        args: ['-e', writer],
-        stage: 'submit',
-        blocking: true,
-        report: { format: 'junit', path: 'out/r.xml' },
-        env: { TP_MARK: '1' },
-      },
-    },
-  };
-  const fresh = await verification.runCheck(config, 'test');
+  const junit = step({
+    commands: [{ command: process.execPath, args: ['-e', writer] }],
+    parser: { format: 'junit', path: 'out/r.xml' },
+    env: { TP_MARK: '1' },
+  });
+  const fresh = await verification.runStep(root, junit);
   assert.deepEqual(fresh.report, { format: 'junit', trusted: true, problem: null });
   assert.deepEqual(
     fresh.results.map((r) => [r.fullName, r.passed]),
@@ -219,28 +226,83 @@ test('runCheck() reads a fresh JUnit report and ignores a stale one', async () =
     ],
   );
   assert.equal(fresh.summary.failed, 1);
+  assert.deepEqual(fresh.diagnostics, [{ file: null, line: null, column: null, severity: 'error', message: 's › b', rule: null }]);
 
   // A command that does not rewrite the report leaves the old one behind.
-  config.checks.test.args = ['-e', 'process.exit(0)'];
-  const stale = await verification.runCheck(config, 'test');
+  const stale = await verification.runStep(root, { ...junit, commands: [{ command: process.execPath, args: ['-e', 'process.exit(0)'] }] });
   assert.deepEqual(stale.report, { format: 'junit', trusted: false, problem: 'stale' });
   assert.deepEqual(stale.results, []);
 });
 
-test('runCheck() passes the check env but never lets it replace PATH', async () => {
-  const config: any = {
-    root: process.cwd(),
-    checks: {
-      test: {
-        command: process.execPath,
-        args: ['-e', 'console.log(process.env.TP_MARK + "|" + process.env.PATH)'],
-        report: { format: 'stdout' },
-        env: { TP_MARK: 'yes', PATH: '/evil' },
-      },
-    },
-  };
-  const result = await verification.runCheck(config, 'test', { envPath: '/tp/bin' });
+test('runStep() passes the step env but never lets it replace PATH', async () => {
+  const result = await verification.runStep(
+    process.cwd(),
+    step({
+      commands: [{ command: process.execPath, args: ['-e', 'console.log(process.env.TP_MARK + "|" + process.env.PATH)'] }],
+      env: { TP_MARK: 'yes', PATH: '/evil' },
+    }),
+    { envPath: '/tp/bin' },
+  );
   assert.equal(result.output.trim(), 'yes|/tp/bin');
+});
+
+test("runStep() runs a step's commands in order and stops at the first failure", async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-step-')));
+  onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+  const node = (code: string) => ({ command: process.execPath, args: ['-e', code] });
+  const result = await verification.runStep(
+    root,
+    step({ commands: [node("console.log('first')"), node('process.exit(4)'), node("console.log('never')")], parser: { format: 'exitcode' } }),
+  );
+  assert.equal(result.exitCode, 4);
+  assert.match(result.output, /first/);
+  assert.doesNotMatch(result.output, /never/);
+  assert.equal(result.command.split(' && ').length, 3);
+  assert.deepEqual(result.report, { format: 'exitcode', trusted: true, problem: null });
+});
+
+test("runStep() runs in the step's directory and maps diagnostics back to the repository root", async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-step-')));
+  onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'app'));
+  const printer = "console.log(process.cwd().endsWith('app') ? 'src/a.ts:3:7: Bad thing' : 'wrong dir'); process.exit(1)";
+  const result = await verification.runStep(
+    root,
+    step({
+      id: 'lint',
+      cwd: 'app',
+      commands: [{ command: process.execPath, args: ['-e', printer] }],
+      parser: { format: 'regex', pattern: '^(?<file>[^:]+):(?<line>\\d+):(?<column>\\d+): (?<message>.+)$', severity: 'error' },
+    }),
+  );
+  assert.deepEqual(result.diagnostics, [{ file: 'app/src/a.ts', line: 3, column: 7, severity: 'error', message: 'Bad thing', rule: null }]);
+  assert.deepEqual(
+    result.results.map((r) => [r.name, r.passed]),
+    [['app/src/a.ts › Bad thing', false]],
+  );
+});
+
+test('runStep() reads JSON from stdout past a banner, and flags output that is not JSON', async () => {
+  const report = JSON.stringify({ diagnostics: [{ file: 'a.ts', line: 1, severity: 'warning', message: 'w' }] });
+  const ok = await verification.runStep(
+    process.cwd(),
+    step({
+      commands: [{ command: process.execPath, args: ['-e', `console.log('> banner'); console.log(${JSON.stringify(report)})`] }],
+      parser: { format: 'json', dialect: 'diagnostics', path: null },
+    }),
+  );
+  assert.equal(ok.report.trusted, true);
+  assert.deepEqual(
+    ok.diagnostics.map((d) => [d.file, d.severity]),
+    [['a.ts', 'warning']],
+  );
+  // A warning is listed but is not a failure.
+  assert.deepEqual(ok.results, []);
+  const bad = await verification.runStep(
+    process.cwd(),
+    step({ commands: [{ command: process.execPath, args: ['-e', "console.log('nope')"] }], parser: { format: 'json', dialect: 'diagnostics', path: null } }),
+  );
+  assert.deepEqual(bad.report, { format: 'json', trusted: false, problem: 'invalid' });
 });
 
 // A check that reads stdin (here `cat`, like a fake CLI in a test script or a

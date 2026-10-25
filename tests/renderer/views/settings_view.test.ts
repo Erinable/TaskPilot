@@ -181,18 +181,57 @@ test('search hides unmatched pages, their group labels, and shows the empty hint
   wrapper.unmount();
 });
 
-test('a save error lands beside its input and focuses it', async () => {
+test('a save error lands beside its step and focuses its command input', async () => {
   const wrapper = await mountView('commands');
-  await wrapper.get('#commandLint').setValue('eslint . | cat');
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
+  await wrapper.get('[data-step="lint"] [data-mode="override"]').trigger('click');
+  await flushPromises();
   expect(isShown(wrapper.get('#checkSettings'))).toBe(true);
-  api.workspace.check.mockReturnValueOnce(fail('shell_syntax', 'bad', 'lint'));
+  api.workspace.check.mockReturnValueOnce(fail('shell_syntax', 'steps.lint.commands[0]: command uses shell syntax "|"', 'steps.lint.commands[0]'));
   await wrapper.get('#saveSettings').trigger('click');
   await flushPromises();
-  expect(wrapper.get('#statusLint').classes()).toContain('error');
-  expect(wrapper.get('#statusLint').text()).toBe('不支持 shell 语法，请改用 package.json 脚本。');
-  expect(wrapper.get('#commandLint').attributes('aria-invalid')).toBe('true');
-  expect(document.activeElement?.id).toBe('commandLint');
+  expect(wrapper.get('#step-lint-status').classes()).toContain('error');
+  expect(wrapper.get('#step-lint-status').text()).toContain('shell syntax');
+  expect(document.activeElement?.id).toBe('step-lint-command');
   expect(api.workspace.set).not.toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+test('the steps page lists every fixed step and offers to create taskpilot.toml', async () => {
+  const wrapper = await mountView('commands');
+  // Grouped by what happens: the submit step first, then what is not set up.
+  expect(wrapper.findAll('[data-step-group]').map((node) => node.attributes('data-step-group'))).toEqual(['submit', 'skipped']);
+  expect(wrapper.findAll('[data-step]').map((node) => node.attributes('data-step'))).toEqual([
+    'test',
+    'setup',
+    'build',
+    'format',
+    'lint',
+    'typecheck',
+    'coverage',
+  ]);
+  expect(wrapper.get('[data-step="lint"]').text()).toContain('未配置，会跳过');
+  // Rows start folded and open on click.
+  expect(wrapper.find('[data-step="lint"] [data-mode]').exists()).toBe(false);
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
+  expect(wrapper.get('[data-step="lint"] [data-edit]').attributes('aria-expanded')).toBe('true');
+  expect(wrapper.get('#projectFile').text()).toContain('推荐「TypeScript / JavaScript」预设');
+  expect(wrapper.get('#createProject').text()).toContain('用推荐预设创建');
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  await wrapper.get('#createProject').trigger('click');
+  await flushPromises();
+  expect(api.workspace.createProject).toHaveBeenCalledWith('typescript');
+  expect(wrapper.get('#projectFile').text()).toMatch(/预设：\s*TypeScript \/ JavaScript/);
+  wrapper.unmount();
+});
+
+test('a lint override offers the preset command as an option', async () => {
+  const wrapper = await mountView('commands');
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
+  await wrapper.get('[data-step="lint"] [data-mode="override"]').trigger('click');
+  await flushPromises();
+  expect(useSettingsStore().workspaceDraft?.steps.lint).toMatchObject({ mode: 'override', lines: ['npm run lint'] });
+  expect(useSettingsStore().dirtyPages.commands).toBe(true);
   wrapper.unmount();
 });
 

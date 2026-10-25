@@ -11,7 +11,7 @@ import { JsonWriteQueue } from './atomic_json_file.ts';
 import type { Actor, TransitionName, WorkPackageStatus } from './work_package_status.ts';
 import type { TaskDefinition, TaskRevisionDefinition } from './tasks.ts';
 import type { AttentionItem, BaselineCheck, CriterionResult, EvidenceItem } from './evidence.ts';
-import type { CheckKind } from './workspace.ts';
+import type { StepId as CheckKind } from '../shared/check_steps.ts';
 
 import type { CodingRun } from '../shared/coding_types.ts';
 import type { ExecutionMode, Grade, ReferenceRun } from '../shared/ipc/packages.ts';

@@ -61,6 +61,8 @@ const api = {
     check: (form: workspaceTypes.WorkspaceForm) => invoke<workspaceTypes.WorkspaceCheck>(CHANNELS.workspaceCheck, form),
     pickRoot: () => invoke<string | null>(CHANNELS.workspacePickRoot),
     info: () => invoke<workspaceTypes.WorkspaceInfo>(CHANNELS.workspaceInfo),
+    // Writes taskpilot.toml naming `preset`; refuses when one exists.
+    createProject: (preset: string) => invoke<workspaceTypes.WorkspaceView>(CHANNELS.workspaceCreateProject, preset),
     openFile: (filePath: string, line: number | null = null) => invoke<workspaceTypes.OpenedWith>(CHANNELS.workspaceOpenFile, filePath, line),
   },
 

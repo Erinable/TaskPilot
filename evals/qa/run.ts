@@ -44,8 +44,9 @@ const testRun = (names: string[]) => ({
   durationMs: 100,
   output: names.map((name, index) => `ok ${index + 1} - ${name}`).join('\n'),
   results: names.map((name) => ({ name, passed: true, skipped: false, todo: false })),
+  diagnostics: [],
   summary: { total: names.length, passed: names.length, failed: 0, skipped: 0, ok: true },
-  report: { format: 'stdout' as const, trusted: true, problem: null },
+  report: { format: 'tests', trusted: true, problem: null },
   check: { stage: 'submit' as const, blocking: true },
 });
 

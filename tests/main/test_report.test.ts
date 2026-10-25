@@ -46,7 +46,7 @@ test('parseJunit() refuses text that is not a JUnit report', () => {
 
 test('readReport() trusts only a fresh regular file inside the workspace', async () => {
   const root = await tempRoot();
-  const report = { format: 'junit', path: 'reports/unit.xml' };
+  const report = { path: 'reports/unit.xml' };
   assert.equal((await testReport.readReport(root, report, null)).problem, 'missing');
 
   await fs.mkdir(path.join(root, 'reports'));
@@ -68,10 +68,10 @@ test('readReport() refuses symlinks, including a symlinked directory out of the 
   await fs.writeFile(path.join(outside, 'unit.xml'), JUNIT);
 
   await fs.symlink(path.join(outside, 'unit.xml'), path.join(root, 'link.xml'));
-  assert.equal((await testReport.readReport(root, { format: 'junit', path: 'link.xml' }, null)).problem, 'not_a_file');
+  assert.equal((await testReport.readReport(root, { path: 'link.xml' }, null)).problem, 'not_a_file');
 
   await fs.symlink(outside, path.join(root, 'out'));
-  assert.equal((await testReport.readReport(root, { format: 'junit', path: 'out/unit.xml' }, null)).problem, 'outside');
+  assert.equal((await testReport.readReport(root, { path: 'out/unit.xml' }, null)).problem, 'outside');
 });
 
 test('readReport() refuses oversized reports', async () => {
@@ -79,5 +79,5 @@ test('readReport() refuses oversized reports', async () => {
   const handle = await fs.open(path.join(root, 'big.xml'), 'w');
   await handle.truncate(testReport.MAX_REPORT_BYTES + 1);
   await handle.close();
-  assert.equal((await testReport.readReport(root, { format: 'junit', path: 'big.xml' }, null)).problem, 'too_large');
+  assert.equal((await testReport.readReport(root, { path: 'big.xml' }, null)).problem, 'too_large');
 });

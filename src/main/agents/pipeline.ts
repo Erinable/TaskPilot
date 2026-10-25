@@ -11,7 +11,7 @@ import * as envSteward from './env_steward.ts';
 import * as releaseManager from './release_manager.ts';
 import * as git from '../git.ts';
 import { looksSecret } from '../repo_reader.ts';
-import * as envSetup from '../env_setup.ts';
+import * as envSetup from '../presets/typescript_setup.ts';
 import { readTracked } from '../repo_reader.ts';
 import { collectChanges } from '../review_diff.ts';
 import * as evidence from '../evidence.ts';
@@ -21,7 +21,7 @@ import type { AdjudicationResult, AdjudicationTask, DeviationRecord, InterfaceSu
 import type { CompactRun, RejectReason, ReviewReport, ReviewTask } from './qa.ts';
 import type { EnvFailure, EnvPlan } from './env_steward.ts';
 import type { ReleaseInput, ReleasePlan } from './release_manager.ts';
-import type { Blocker, EnvFacts } from '../env_setup.ts';
+import type { Blocker, EnvFacts } from '../presets/typescript_setup.ts';
 import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../evidence.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
 

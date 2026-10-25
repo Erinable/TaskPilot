@@ -79,8 +79,10 @@ export type BlockedPatch = CodingPatchPreview['blocked'][number];
 const execFileAsync = promisify(execFile);
 const defaultSpawn: WorkspaceSpawnFn = (command, args, options) => nodeSpawn(command, [...args], options as never) as unknown as Child;
 const safeName = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// taskpilot.toml decides which commands the checks run, so like the
+// manifests it is the developer's to change.
 const highRiskName =
-  /^(?:\.git(?:\/|$)|\.hooks(?:\/|$)|package\.json$|package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.npmrc$|(?:test|tests|spec|__tests__|build|dist)(?:[./]|\/|$)|(?:Makefile|makefile|make\.bat)$|(?:\.github|\.gitlab|\.circleci)(?:\/|$))/i;
+  /^(?:\.git(?:\/|$)|\.hooks(?:\/|$)|taskpilot\.toml$|package\.json$|package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.npmrc$|(?:test|tests|spec|__tests__|build|dist)(?:[./]|\/|$)|(?:Makefile|makefile|make\.bat)$|(?:\.github|\.gitlab|\.circleci)(?:\/|$))/i;
 const secretName = /(?:^|\/)(?:\.env(?:\.|$)|\.npmrc$|(?:id|identity)_rsa(?:\.pub)?$|.*\.(?:pem|key|p12|pfx)$|credentials?(?:\.|\/|$))/i;
 const forbiddenMode = /(?:^|\s)(?:new file mode|old mode) (?:120000|160000)\s*$/m;
 const resolveRunName = (runName: string, runRoot: string): string => {

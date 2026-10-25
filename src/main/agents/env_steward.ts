@@ -3,11 +3,11 @@
 // dependencies and which package.json scripts verify the project.
 //
 // It never writes a command. The plan selects from fixed choices that
-// ../env_setup.ts turns into argument arrays, and validatePlan() drops any
+// ../presets/typescript_setup.ts turns into argument arrays, and validatePlan() drops any
 // script the manifest does not define.
 import { AgentOutputError, isObject } from './product_lead.ts';
-import { INSTALL_MODES, SCRIPT_KINDS, SCRIPT_NAME } from '../env_setup.ts';
-import type { EnvFacts, InstallMode, ScriptKind } from '../env_setup.ts';
+import { INSTALL_MODES, SCRIPT_KINDS, SCRIPT_NAME } from '../presets/typescript_setup.ts';
+import type { EnvFacts, InstallMode, ScriptKind } from '../presets/typescript_setup.ts';
 
 export const MAX_ISSUES = 6;
 const OUTPUT_TAIL_CHARS = 3000;

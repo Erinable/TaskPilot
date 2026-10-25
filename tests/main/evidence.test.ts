@@ -1,7 +1,8 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as evidence from '../../src/main/evidence.ts';
-import type { ReportInfo, TestResult } from '../../src/main/verification.ts';
+import type { ReportInfo } from '../../src/main/verification.ts';
+import type { TestResult } from '../../src/main/check_output.ts';
 
 const CHECK: any = { kind: 'test', stage: 'submit', blocking: true };
 const r = (name, passed): TestResult => ({ name, fullName: `suite › ${name}`, passed, skipped: false, todo: false });
@@ -107,7 +108,7 @@ test('attention() collects what a human should look at', () => {
   const base = baseline(run({ exitCode: 1, results: [r('old', false)] }));
   const items = [
     evidence.evaluate(CHECK, run({ exitCode: 1, results: [r('old', false)] }), base),
-    evidence.evaluate({ kind: 'smoke', stage: 'submit', blocking: true }, run({ exitCode: 3 }), baseline(run({ exitCode: 3 }))),
+    evidence.evaluate({ kind: 'custom:smoke', stage: 'submit', blocking: true }, run({ exitCode: 3 }), baseline(run({ exitCode: 3 }))),
   ];
   const codes = evidence.attention(items, [{ status: 'manual' }]).map((a) => a.code);
   assert.deepEqual(codes, ['preexisting_failures', 'check_unverifiable', 'criterion_manual']);

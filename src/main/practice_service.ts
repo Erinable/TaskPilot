@@ -105,7 +105,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     if (!review) failWith('QA has not judged this submission yet', 'review_not_finished');
     if (backgroundRuns.has('grade', id)) return ctx.viewOf(task, state);
     const root = requireRoot();
-    const collected = await collectChanges(root, requireBaseline(id), { ignore: reportIgnore(ctx.getConfig()) });
+    const collected = await collectChanges(root, requireBaseline(id), { ignore: reportIgnore(await ctx.runnableSteps().catch(() => [])) });
     const submission = collected.files.map((file) => ({ path: file.path, patch: file.patch }));
     const diffDigest = practice.submissionDigest(submission);
     if (!force && practice.alreadyGraded(state.grade, diffDigest)) return ctx.viewOf(task, state);

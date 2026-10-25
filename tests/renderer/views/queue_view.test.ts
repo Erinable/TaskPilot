@@ -174,7 +174,29 @@ describe('QueueView', () => {
     api.workspace.info.mockImplementation(
       () => Promise.resolve({ ok: true, data: { configured: true, root: '/r', commit: 'a', branch: 'main', dirty: false, changedFiles: 0 } }) as never,
     );
-    api.workspace.get.mockImplementation(() => Promise.resolve({ ok: true, data: { lines: { test: 'npm test' } } }) as never);
+    api.workspace.get.mockImplementation(
+      () =>
+        Promise.resolve({
+          ok: true,
+          data: {
+            root: '/r',
+            steps: [
+              {
+                id: 'test',
+                label: null,
+                effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
+                source: 'local',
+                skipped: null,
+                local: null,
+                suggestions: [],
+              },
+            ],
+            project: { status: 'missing' },
+            detected: [],
+            presets: [],
+          },
+        }) as never,
+    );
     await useAppStore().refreshWorkspaceStatus();
     await useRequirementsStore().refreshList();
     const wrapper = render();

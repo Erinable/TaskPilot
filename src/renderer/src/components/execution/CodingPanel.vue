@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
 import { useCodingStore } from '@/stores/coding.ts';
-import { VERIFY_LABELS } from '@/stores/execution.ts';
+import { stepLabel } from '@/lib/check_steps.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
@@ -357,7 +357,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       <div v-if="checks.length" class="coding-checks" aria-label="编码前置检查">
         <strong>前置检查</strong>
         <div v-for="entry in checks" :key="entry.kind">
-          <span>{{ VERIFY_LABELS[entry.kind] }}</span>
+          <span>{{ stepLabel(entry.kind) }}</span>
           <span :class="entry.check.summary.ok ? 'check-pass' : 'check-fail'">{{ entry.check.summary.ok ? '通过' : '失败' }}</span>
         </div>
       </div>

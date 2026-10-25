@@ -1,7 +1,7 @@
-// Reads a test report a verification command wrote into the workspace.
+// Reads a report file a check step wrote into the workspace.
 //
 // SECURITY: the report is data produced by code under review. It is read
-// only from the path configured in workspace.json, must be a regular file
+// only from the path the step is configured with, must be a regular file
 // inside the workspace (no symlinks), is size-capped, and is parsed by a small
 // tokenizer that understands just the JUnit elements below. Nothing in it is
 // executed, and text from it reaches the model only as fenced data.
@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Stats } from 'node:fs';
 
-import type { TestResult } from './verification.ts';
+import type { TestResult } from './check_output.ts';
 
 export const MAX_REPORT_BYTES = 5 * 1024 * 1024;
 export const MAX_CASES = 20000;
@@ -115,25 +115,33 @@ export const statReport = async (root: string, relativePath: string): Promise<St
 // Reads the report a run produced. `before` is statReport() taken before the
 // run started: a report whose size and mtime did not change is stale, left
 // from an earlier run, and is not trusted.
-// problem is one of missing | stale | not_a_file | outside | too_large | invalid
-export const readReport = async (root: string, report: { format?: string; path: string }, before: Stats | null): Promise<ReportRead> => {
-  const untrusted = (problem: ReportProblem): ReportRead => ({ trusted: false, problem, results: [] });
-  const after = await statReport(root, report.path);
-  if (!after) return untrusted('missing');
-  if (!after.isFile() || after.isSymbolicLink()) return untrusted('not_a_file');
-  if (after.size > MAX_REPORT_BYTES) return untrusted('too_large');
-  if (before && before.mtimeMs === after.mtimeMs && before.size === after.size) return untrusted('stale');
+// problem is one of missing | stale | not_a_file | outside | too_large
+export const readReportFile = async (
+  root: string,
+  relativePath: string,
+  before: Stats | null,
+): Promise<{ problem: ReportProblem } | { problem: null; content: string }> => {
+  const after = await statReport(root, relativePath);
+  if (!after) return { problem: 'missing' };
+  if (!after.isFile() || after.isSymbolicLink()) return { problem: 'not_a_file' };
+  if (after.size > MAX_REPORT_BYTES) return { problem: 'too_large' };
+  if (before && before.mtimeMs === after.mtimeMs && before.size === after.size) return { problem: 'stale' };
 
   // A directory on the way could be a symlink pointing out of the workspace.
   const realRoot = await fs.realpath(root);
-  const realFile = await fs.realpath(path.join(root, report.path));
+  const realFile = await fs.realpath(path.join(root, relativePath));
   const relative = path.relative(realRoot, realFile);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return untrusted('outside');
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return { problem: 'outside' };
+  return { problem: null, content: await fs.readFile(realFile, 'utf8') };
+};
 
+// A JUnit report; `invalid` when it is not one.
+export const readReport = async (root: string, report: { path: string }, before: Stats | null): Promise<ReportRead> => {
+  const read = await readReportFile(root, report.path, before);
+  if (read.problem) return { trusted: false, problem: read.problem, results: [] };
   try {
-    const results = parseJunit(await fs.readFile(realFile, 'utf8'));
-    return { trusted: true, problem: null, results };
+    return { trusted: true, problem: null, results: parseJunit(read.content) };
   } catch {
-    return untrusted('invalid');
+    return { trusted: false, problem: 'invalid', results: [] };
   }
 };

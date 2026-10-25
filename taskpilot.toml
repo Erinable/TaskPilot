@@ -1,0 +1,18 @@
+# TaskPilot checks for this repository. Steps: setup, build, format, lint,
+# typecheck, test, coverage. The preset fills in every step not set here;
+# settings on a developer's machine override this file.
+preset = "typescript"
+
+# ESLint's own JSON, so every finding carries its file, line and rule.
+[steps.lint]
+commands = ["npx eslint . -f json"]
+parser = { format = "json", dialect = "eslint" }
+
+# Static analysis: functions whose complexity grew past the limit compared
+# with HEAD. scripts/analyze_complexity.ts prints each regression as
+# `file:line function: before -> after` and exits 1 when there is one.
+[custom.complexity]
+label = "复杂度"
+commands = ["npm run --silent check:complexity"]
+timeout = 300
+parser = { format = "regex", pattern = '^(?<file>src/[^:\s]+):(?<line>\d+) (?<message>.+: (?:new|\d+) -> \d+)$', severity = "error" }

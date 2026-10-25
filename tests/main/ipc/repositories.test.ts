@@ -58,7 +58,10 @@ test('repositories:add normalizes a subdirectory to the repository root', async 
 
 test('repositories: each repository keeps its own requirements, progress and commands', async () => {
   const { call, root } = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  await call(CHANNELS.workspaceSet, { root, commands: { test: 'npm test' } });
+  await call(CHANNELS.workspaceSet, {
+    root,
+    steps: { test: { enabled: true, lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null } },
+  });
   await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
   const { data: created } = await call(CHANNELS.requirementsCreate, { text: 'first repo' });
   await fixtures.settle(call, created.id);
@@ -69,7 +72,7 @@ test('repositories: each repository keeps its own requirements, progress and com
   assert.equal(added.repositories.find((repo) => repo.current).root, await git.topLevel(other));
   assert.deepEqual((await call(CHANNELS.requirementsList)).data, []);
   assert.deepEqual((await call(CHANNELS.listTasks)).data, []);
-  assert.equal((await call(CHANNELS.workspaceGet)).data.lines.test, '');
+  assert.equal((await call(CHANNELS.workspaceGet)).data.steps.find((step) => step.id === 'test').effective, null);
   assert.equal((await call(CHANNELS.workspaceInfo)).data.root, await git.topLevel(other));
 
   const first = added.repositories.find((repo) => !repo.current);
@@ -78,7 +81,7 @@ test('repositories: each repository keeps its own requirements, progress and com
     (await call(CHANNELS.requirementsList)).data.map((item) => item.text),
     ['first repo', SAMPLE_REQUIREMENT.text],
   );
-  assert.equal((await call(CHANNELS.workspaceGet)).data.lines.test, 'npm test');
+  assert.deepEqual((await call(CHANNELS.workspaceGet)).data.steps.find((step) => step.id === 'test').effective.lines, ['npm test']);
 });
 
 test('repositories: switching cancels running work and waits for its writes', async () => {

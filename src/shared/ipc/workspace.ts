@@ -2,12 +2,14 @@
 // workspace configuration (workspace:*, diff:*, verify:run).
 
 import type { ErrorInfo } from './envelope.ts';
+import type { CheckParser, Diagnostic, StepId, StepSource } from '../check_steps.ts';
 
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
 // ========== checks and evidence ==========
 
-export type CheckKind = 'test' | 'lint' | 'build' | 'smoke';
+// A check step: one of the fixed steps or a project's custom step.
+export type CheckKind = StepId;
 export type CheckStage = 'step' | 'submit';
 
 // One parsed test result; `fullName` is the key baselines compare by.
@@ -17,9 +19,10 @@ export type RunSummary = { total: number; passed: number; failed: number; skippe
 
 export type ReportProblem = 'missing' | 'stale' | 'not_a_file' | 'outside' | 'too_large' | 'invalid';
 
-export type ReportInfo = { format: 'stdout' | 'junit'; trusted: boolean; problem: ReportProblem | null };
+// Whether the output could be read in the step's parser format.
+export type ReportInfo = { format: string; trusted: boolean; problem: ReportProblem | null };
 
-// verification.runCheck(): one run of a configured check.
+// verification.runStep(): one run of a check step.
 export type CheckRun = {
   kind: CheckKind;
   command: string;
@@ -28,6 +31,8 @@ export type CheckRun = {
   durationMs: number;
   output: string;
   results: TestResult[];
+  // Every finding as file / line / severity / message, whatever the tool.
+  diagnostics: Diagnostic[];
   summary: RunSummary;
   report: ReportInfo;
   check: { stage: CheckStage; blocking: boolean };
@@ -125,43 +130,68 @@ export type DiffFile = string;
 
 export type CommandEntry = { command: string; args: string[] };
 
-export type CheckReport = { format: 'stdout' } | { format: 'junit'; path: string };
-
-export type WorkspaceCheckConfig = CommandEntry & {
+// One step as the settings page edits it. `lines` are the command lines
+// this machine sets ('' or [] leaves the step to taskpilot.toml or the
+// preset); `enabled: false` turns it off here.
+export type StepForm = {
+  enabled: boolean;
+  lines: string[];
+  cwd: string;
   stage: CheckStage;
   blocking: boolean;
-  report: CheckReport;
-  env: Record<string, string>;
-  timeoutMs?: number;
+  parser: CheckParser;
+  timeoutSeconds: number | null;
 };
 
-// Per-kind options the settings form edits; reportPath '' means stdout.
-export type CheckOptions = { stage: CheckStage; blocking: boolean; reportPath: string };
-
-// What the settings page sends to workspace:set and workspace:check. A blank
-// command line means the kind is not configured.
+// What the settings page sends to workspace:set and workspace:check. A step
+// left out keeps nothing on this machine.
 export type WorkspaceForm = {
   root: string;
-  commands: Partial<Record<CheckKind, string>>;
-  options?: Partial<Record<CheckKind, Partial<CheckOptions>>>;
+  steps: Partial<Record<StepId, StepForm>>;
 };
 
-// The config plus the command lines and options the form edits.
+// One step as it will run: merged from the preset, taskpilot.toml and this
+// machine. `local` is what this machine sets, null when nothing.
+export type StepView = {
+  id: StepId;
+  label: string | null;
+  // Null when the step does not run; `skipped` then says why.
+  effective: { lines: string[]; cwd: string; stage: CheckStage; blocking: boolean; parser: CheckParser; timeoutSeconds: number | null } | null;
+  source: StepSource | null;
+  skipped: 'disabled' | 'not_configured' | null;
+  local: StepForm | null;
+  suggestions: string[];
+};
+
+// taskpilot.toml as found in the repository root.
+export type ProjectFileState =
+  { status: 'missing' } | { status: 'invalid'; error: { code: string; message: string; field: string | null } } | { status: 'ok'; preset: string | null };
+
+// A recognised language; `preset` is null when TaskPilot has none for it yet.
+export type DetectedLanguage = { manifest: string; language: string; preset: string | null };
+
+export type PresetInfo = { id: string; label: string };
+
+// A tool the preset needs, found on PATH or not, with how to install it.
+export type ToolStatus = { command: string; version: string | null; install: string };
+
 export type WorkspaceView = {
   root: string | null;
-  commands: Record<CheckKind, CommandEntry | null>;
-  checks: Record<CheckKind, WorkspaceCheckConfig | null>;
-  lines: Record<CheckKind, string>;
-  options: Record<CheckKind, CheckOptions>;
+  steps: StepView[];
+  project: ProjectFileState;
+  detected: DetectedLanguage[];
+  presets: PresetInfo[];
 };
 
 export type RepoInfo = { commit: string; branch: string | null; dirty: boolean; changedFiles: number };
 
-// workspace:check: validation plus a PATH lookup, nothing written.
+// workspace:check: validation plus a PATH lookup per step's first command,
+// nothing written.
 export type WorkspaceCheck = {
   root: string | null;
   repo: RepoInfo | null;
-  commands: Record<CheckKind, { configured: boolean; resolved: string | null }>;
+  steps: Partial<Record<StepId, { configured: boolean; resolved: string | null }>>;
+  tools: ToolStatus[];
 };
 
 export type WorkspaceInfo = { configured: false } | ({ configured: true; root: string } & RepoInfo);
