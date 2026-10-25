@@ -153,3 +153,24 @@ test("main's agentOf() names the same member the feed shows for every event", ()
     assert.equal(agentOf(record), shown, `${record.kind} ${'transition' in record ? record.transition : ''}`);
   }
 });
+
+test('members sort working, then online, then offline, keeping TEAM order within each', () => {
+  const members = activity.TEAM.map(({ agent }, index) => ({ agent, presence: (['offline', 'busy', 'online', 'busy', 'online'] as const)[index] }));
+  assert.deepEqual(
+    activity.sortByPresence(members).map((member) => member.agent),
+    ['architect', 'release-manager', 'qa', 'coding-agent', 'product-lead'],
+  );
+});
+
+test('the sidebar work line names one worker, or the first and a count', () => {
+  const availableByAgent = { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': true };
+  const team = (busy: TeamStatus['busy'], work: TeamStatus['work'] = []): TeamStatus => ({ available: true, availableByAgent, busy, work });
+  assert.equal(activity.teamWorkSummary(null), null);
+  assert.equal(activity.teamWorkSummary(team([])), null);
+  assert.equal(activity.teamWorkSummary(team(['architect'], [{ agent: 'architect', kind: 'review', label: 'x' }])), 'Architect 正在审查工作包…');
+  assert.equal(activity.teamWorkSummary(team(['architect'])), 'Architect 正在工作…');
+  // Named in TEAM order, whatever order the busy list arrives in.
+  assert.equal(activity.teamWorkSummary(team(['qa', 'architect'])), 'Architect 等 2 人正在工作');
+  // A member that is busy but unavailable counts as offline.
+  assert.equal(activity.teamWorkSummary({ ...team(['qa']), available: false }), null);
+});

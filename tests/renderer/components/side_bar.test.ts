@@ -8,6 +8,7 @@ import { SIDEBAR_STORAGE_KEY, useAppStore } from '../../../src/renderer/src/stor
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { installApi } from '../requirements_fakes.ts';
 import { taskView } from '../execution_fakes.ts';
+import type { ActivityAgent, ActivityOverview, TeamStatus } from '../../../src/shared/ipc/activity.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   showToast: vi.fn(),
@@ -71,11 +72,41 @@ describe('SideBar', () => {
     const labels = wrapper.findAll('.nav-item .nav-label').map((node) => node.text());
     expect(labels).not.toContain('活动记录');
     expect(labels).not.toContain('成本');
-    const team = wrapper.findAll('.nav-item').find((node) => node.text().includes('团队概览'))!;
+    const team = wrapper.find('button.team-entry');
+    expect(team.text()).toBe('AI 团队');
     for (const view of ['team', 'activity', 'costs'] as const) {
       useAppStore().view = view;
       await wrapper.vm.$nextTick();
       expect(team.classes()).toContain('active');
     }
+  });
+
+  test('the team is one entry; a status line appears only while someone works', async () => {
+    const app = useAppStore();
+    const team = (busy: ActivityAgent[], work: TeamStatus['work'] = []): TeamStatus => ({
+      available: true,
+      availableByAgent: { 'product-lead': true, architect: true, qa: true, 'release-manager': true, 'coding-agent': false },
+      busy,
+      work,
+    });
+    app.activity = { team: team([]) } as ActivityOverview;
+    const wrapper = mount(SideBar);
+    expect(wrapper.findAll('button.team-member')).toHaveLength(0);
+    expect(wrapper.findAll('.team-stack-avatar')).toHaveLength(5);
+    expect(wrapper.find('.team-stack-avatar.code').classes()).toContain('offline');
+    expect(wrapper.find('.team-entry-work').exists()).toBe(false);
+    expect(wrapper.find('button.team-entry').attributes('aria-label')).toBe('AI 团队：4 个 AI 成员在线');
+
+    app.activity = { team: team(['architect'], [{ agent: 'architect', kind: 'adjudication', label: 'x' }]) } as ActivityOverview;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('.team-entry-work').text()).toBe('Architect 正在裁决偏差…');
+    expect(wrapper.find('.team-stack-avatar.arch').classes()).toContain('busy');
+    expect(wrapper.findAll('.team-stack .presence.busy')).toHaveLength(1);
+
+    app.toggleSidebar();
+    await wrapper.vm.$nextTick();
+    const entry = wrapper.find('button.team-entry');
+    expect(entry.attributes('title')).toBe('AI 团队：Architect 正在裁决偏差…');
+    expect(entry.attributes('aria-label')).toBe('AI 团队：Architect 正在裁决偏差…');
   });
 });
