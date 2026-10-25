@@ -5,7 +5,6 @@ import path from 'node:path';
 import { registerIpcHandlers } from './ipc.ts';
 import type { IpcHandle } from './ipc.ts';
 import { WorkPackageStore } from './work_package_store.ts';
-import { listTasks, setGeneratedTasks } from './tasks.ts';
 import { RequirementStore } from './requirement_store.ts';
 import { ReleaseStore } from './release_store.ts';
 import * as preferences from './preferences.ts';
@@ -99,11 +98,10 @@ app.whenReady().then(async () => {
   const repoDir = repositories.dataDir();
   let config = await repositories.loadConfig();
   let prefs = await preferences.load(configDir);
-  // Generated packages must be known before the work package store loads, or
+  // Published packages must be known before the work package store loads, or
   // their saved progress would be dropped as unknown ids.
   const requirements = await new RequirementStore(repoDir).load();
-  setGeneratedTasks(requirements.publishedPackages());
-  const store = await new WorkPackageStore(repoDir).load(listTasks());
+  const store = await new WorkPackageStore(repoDir).load(requirements.listTasks());
   const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();

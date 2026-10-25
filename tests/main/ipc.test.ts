@@ -39,9 +39,8 @@ type CodingOverrides = Partial<
 >;
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { WorkPackageStore } from '../../src/main/work_package_store.ts';
-import { listTasks, setGeneratedTasks } from '../../src/main/tasks.ts';
-import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
-import { RequirementStore } from '../../src/main/requirement_store.ts';
+import { SAMPLE_REQUIREMENT, SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
+import { REQUIREMENTS_FILENAME, RequirementStore } from '../../src/main/requirement_store.ts';
 import { ActivityLog } from '../../src/main/activity_log.ts';
 import { ReleaseStore } from '../../src/main/release_store.ts';
 import { STATE_FILENAME } from '../../src/main/work_package_store.ts';
@@ -90,11 +89,6 @@ const harness = async ({
     await ipc?.shutdown();
     await fs.rm(configDir, { recursive: true, force: true });
   });
-  // Generated packages are module state in tasks.ts; start each test with
-  // the sample packages and clear them afterwards.
-  setGeneratedTasks(SAMPLE_TASKS);
-  onTestFinished(() => setGeneratedTasks([]));
-
   const root = withRepo ? await gitRepo() : null;
 
   // As at startup: the test repository is added and open, and its data lives
@@ -104,19 +98,21 @@ const harness = async ({
   const repoDir = repositories.dataDir();
   await fs.mkdir(repoDir, { recursive: true });
 
+  // The sample packages, published in an earlier session.
+  await fs.writeFile(path.join(repoDir, REQUIREMENTS_FILENAME), JSON.stringify([SAMPLE_REQUIREMENT]));
   // Saved package state, as if from an earlier session.
   if (seedState) await fs.writeFile(path.join(repoDir, STATE_FILENAME), JSON.stringify(seedState));
 
   let config = await repositories.loadConfig();
   const handlers = new Map<Channel, (event: unknown, ...args: unknown[]) => any>();
-  const store = await new WorkPackageStore(repoDir).load(listTasks());
+  const requirements = await new RequirementStore(repoDir).load();
+  const store = await new WorkPackageStore(repoDir).load(requirements.listTasks());
   // The coding tests below fake the separate-user wrapper; sandbox mode has its own tests.
   let prefs: preferences.Preferences = { ...preferences.defaults(), coding: { isolation: 'separate-user', extraRead: [], extraWrite: [], timeoutMinutes: 30 } };
   const changes: { next: preferences.Preferences; previous: preferences.Preferences }[] = [];
   const revealed: string[] = [];
   const launched: { file: string; args: string[] }[] = [];
   let shellReads = 0;
-  const requirements = await new RequirementStore(repoDir).load();
   const activity = new ActivityLog(repoDir, { timeZone: 'Asia/Shanghai' });
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();
@@ -586,9 +582,10 @@ test('requirements: create clarifies, plan publishes into the work queue', async
 
   const published = await call(CHANNELS.requirementsPublish, item.id);
   assert.equal(published.data.status, 'published');
-  const queue = (await call(CHANNELS.listTasks)).data;
-  assert.equal(queue[0].id, `${item.id}-wp1`, 'generated packages lead the queue');
-  assert.deepEqual(queue[0].humanTransitions, ['claim']);
+  // Queued after the sample packages, which an older requirement published.
+  const generated = (await call(CHANNELS.listTasks)).data.filter((task) => task.requirementId === item.id);
+  assert.equal(generated[0].id, `${item.id}-wp1`);
+  assert.deepEqual(generated[0].humanTransitions, ['claim']);
 
   // The new package is a real work package: it can be claimed.
   const claimed = await call(CHANNELS.transition, `${item.id}-wp1`, 'claim');
@@ -833,7 +830,7 @@ test('handlers return {ok:true,data} instead of throwing', async () => {
   const { call } = await harness();
   const response = await call(CHANNELS.listTasks);
   assert.equal(response.ok, true);
-  assert.equal(response.data.length, listTasks().length);
+  assert.equal(response.data.length, SAMPLE_TASKS.length);
 });
 
 test('a task view merges the definition with runtime state', async () => {
@@ -1919,7 +1916,7 @@ test('repositories: each repository keeps its own requirements, progress and com
   await call(CHANNELS.repositoriesSwitch, first.id);
   assert.deepEqual(
     (await call(CHANNELS.requirementsList)).data.map((item) => item.text),
-    ['first repo'],
+    ['first repo', SAMPLE_REQUIREMENT.text],
   );
   assert.equal((await call(CHANNELS.workspaceGet)).data.lines.test, 'npm test');
 });
@@ -3067,7 +3064,7 @@ test('repositories: a switch drops the coding events and tutor failures of the r
   const agent: FakeAgent = async () => ({ output: { explanation: '', hints: [], snippet: null, terms: [] }, costUsd: 0 });
   const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   onTestFinished(() => errors.mockRestore());
-  const { call, store, repoDir } = await harness({
+  const { call } = await harness({
     agent,
     seedState: {
       'auth-edge-tests': { status: 'in_progress', baseline: 'HEAD', claimedAt: new Date().toISOString(), completedSteps: [], deviations: [], review: null },
@@ -3095,9 +3092,6 @@ test('repositories: a switch drops the coding events and tutor failures of the r
   const first = (await call(CHANNELS.repositoriesList)).data.current;
   await call(CHANNELS.repositoriesAdd, await gitRepo(), true);
   await call(CHANNELS.repositoriesSwitch, first);
-  // The sample packages are not published from a requirement, so the switch dropped them.
-  setGeneratedTasks(SAMPLE_TASKS);
-  await store.open(repoDir, listTasks());
   assert.equal((await call(CHANNELS.codingGet, 'auth-edge-tests')).data.codingRun?.status, 'ready');
   assert.deepEqual((await call(CHANNELS.codingEvents, 'auth-edge-tests', -1)).data.events, []);
   assert.equal((await call(CHANNELS.tutorGet, 'auth-edge-tests', 0)).data.status, 'idle');

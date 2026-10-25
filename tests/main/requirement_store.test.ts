@@ -53,7 +53,7 @@ test('the full flow: clarify, answer, plan, publish', async () => {
   item = await store.publish(id, [{ id: `${id}-wp1` } as any]);
   assert.equal(item.status, 'published');
   assert.deepEqual(
-    store.publishedPackages().map((p) => p.id),
+    store.listTasks().map((p) => p.id),
     ['req-1-wp1'],
   );
 });
@@ -141,4 +141,61 @@ test('list() is newest first and survives a reload; corrupt files load empty', a
   await fs.writeFile(path.join(configDir, REQUIREMENTS_FILENAME), '{ nope');
   const { store: empty } = await newStore(configDir);
   assert.deepEqual(empty.list(), []);
+});
+
+// Runs a requirement up to reviewing, ready to publish.
+const reviewing = async (store: RequirementStore, text: string) => {
+  const { id } = await store.create({ text });
+  await store.begin(id, 'clarifying');
+  await store.finishClarify(id, clarified, 0);
+  await store.begin(id, 'planning');
+  await store.finishPlan(id, plan, 0);
+  return id;
+};
+
+test('the catalog follows publish, remove and open, oldest requirement first', async () => {
+  const { store, configDir } = await newStore();
+  assert.deepEqual(store.listTasks(), []);
+  const first = await reviewing(store, 'a');
+  const second = await reviewing(store, 'b');
+  const draft = await store.create({ text: 'c' });
+  await store.publish(second, [{ id: 'b-wp1', requirementId: second } as any]);
+  await store.publish(first, [{ id: 'a-wp1', requirementId: first } as any]);
+  assert.deepEqual(
+    store.listTasks().map((task) => task.id),
+    ['a-wp1', 'b-wp1'],
+  );
+  assert.equal(store.getTask('b-wp1')?.requirementId, second);
+  assert.equal(store.getTask('nope'), null);
+
+  // Removing an unpublished requirement leaves the published ones.
+  await store.remove(draft.id);
+  assert.equal(store.listTasks().length, 2);
+
+  // Another repository has its own catalog; reopening restores this one.
+  const other = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-req-'));
+  onTestFinished(() => fs.rm(other, { recursive: true, force: true }));
+  await store.open(other);
+  assert.deepEqual(store.listTasks(), []);
+  await store.open(configDir);
+  assert.deepEqual(
+    store.listTasks().map((task) => task.id),
+    ['a-wp1', 'b-wp1'],
+  );
+});
+
+test('catalog reads share frozen definitions that callers cannot change', async () => {
+  const { store } = await newStore();
+  const id = await reviewing(store, 'a');
+  await store.publish(id, [{ id: 'a-wp1', title: 't', steps: ['s'] } as any]);
+  assert.equal(store.listTasks(), store.listTasks(), 'no copy per read');
+  const task = store.getTask('a-wp1')!;
+  assert.throws(() => {
+    (task as { title: string }).title = 'mutated';
+  }, TypeError);
+  assert.throws(() => (task.steps as string[]).push('extra'), TypeError);
+  // The stored requirement is not frozen with it.
+  const saved = store.get(id);
+  saved.packages[0].title = 'edited copy';
+  assert.equal(store.getTask('a-wp1')?.title, 't');
 });

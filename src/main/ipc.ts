@@ -331,6 +331,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     tutor = null,
     notes = null,
   } = deps;
+  // Published package definitions; without requirements nothing is published.
+  const catalog: tasks.TaskCatalog = requirements ?? tasks.EMPTY_CATALOG;
   const { codingProbe, codingPrepare, codingRun, codingReadPatch, codingPreviewMerge, codingApplyPatch, codingClean, codingSnapshot } =
     codingDependencies(deps);
 
@@ -420,7 +422,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   // The definition as currently planned, including Architect's replans.
   const effectiveTask = (id: string) => {
-    const task = tasks.getTask(id);
+    const task = catalog.getTask(id);
     return task ? store.effective(task) : null;
   };
 
@@ -445,7 +447,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     actor: 'human' | 'agent' | 'coding-agent',
   ) => {
     if (before === after.status) return;
-    record({ kind: 'package_transition', packageId: id, title: tasks.getTask(id)?.title ?? id, transition, actor, from: before, to: after.status });
+    record({ kind: 'package_transition', packageId: id, title: catalog.getTask(id)?.title ?? id, transition, actor, from: before, to: after.status });
   };
 
   const requireTask = (id: string) => {
@@ -459,7 +461,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // package no longer exists cannot be finished, so it never blocks.
   const dependenciesOf = (task: TaskDefinition, state: PackageState): ipc.PackageDependency[] =>
     (task.dependsOn ?? []).map((id) => {
-      const dependency = tasks.getTask(id);
+      const dependency = catalog.getTask(id);
       const status = dependency ? store.get(id).status : null;
       const waived = state.waivedDependencies.includes(id);
       return { id, title: dependency?.title ?? null, status, waived, blocking: Boolean(dependency) && status !== 'done' && !waived };
@@ -489,7 +491,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     CHANNELS.listTasks,
     wrap((): ipc.TaskView[] => {
       const state = store.all();
-      return tasks.listTasks().map((task) => viewOf(store.effective(task), state[task.id]));
+      return catalog.listTasks().map((task) => viewOf(store.effective(task), state[task.id]));
     }),
   );
 
@@ -504,7 +506,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // Every background run and its promise, so a switch, a reset or shutdown
   // (and tests) can cancel them and wait for their writes.
   const backgroundRuns = new BackgroundRuns();
-  const packageLabel = (id: string) => () => tasks.getTask(id)?.title ?? id;
+  const packageLabel = (id: string) => () => catalog.getTask(id)?.title ?? id;
 
   const codingRuns = new Map<string, CodingRuntime>();
   const codingEventHistory = new Map<string, ipc.CodingEvent[]>();
@@ -910,7 +912,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     wrap((): ipc.CodingActiveRun[] =>
       [...new Set([...backgroundRuns.keys('coding'), ...backgroundRuns.keys('coding-checks')])].map((packageId) => ({
         packageId,
-        title: tasks.getTask(packageId)?.title ?? packageId,
+        title: catalog.getTask(packageId)?.title ?? packageId,
       })),
     ),
   );
@@ -981,7 +983,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // QA: reviews a package once it is submitted.
 
   // The Architect summary of the requirement a package came from, if any.
-  const interfacesFor = (task: TaskDefinition & { requirementId?: string }) => {
+  const interfacesFor = (task: TaskDefinition) => {
     if (!requirements || !task.requirementId) return null;
     try {
       return requirements.get(task.requirementId).interfaces?.text ?? null;
@@ -1764,7 +1766,6 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       if (item.status !== 'reviewing' || !item.plan) return failWith('There is no plan to publish', 'invalid_state');
       const definitions = productLead.toTaskDefinitions(item, item.plan.packages);
       const published = await store.publish(item.id, definitions);
-      tasks.setGeneratedTasks(store.publishedPackages());
       workPackages.add(definitions);
       onPackagesPublished?.(definitions);
       record({ kind: 'requirement_published', requirementId: item.id, title: published.title || item.text.slice(0, 40), packageCount: definitions.length });
@@ -1858,7 +1859,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
         prices: table,
         now: new Date(),
         timeZone: activity.timeZone,
-        titleOf: (kind, id) => (kind === 'package' ? (tasks.getTask(id)?.title ?? id) : requirementTitle(id)),
+        titleOf: (kind, id) => (kind === 'package' ? (catalog.getTask(id)?.title ?? id) : requirementTitle(id)),
       });
     }),
   );
@@ -2349,7 +2350,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // first, nearest target date first; released ones after, newest first.
   const milestoneViews = (store: ReleaseStore): ipc.MilestoneView[] => {
     const state = workPackages.all();
-    const packagesOf = (requirementId: string) => tasks.listTasks().filter((task) => (task as { requirementId?: string }).requirementId === requirementId);
+    const packagesOf = (requirementId: string) => catalog.listTasks().filter((task) => task.requirementId === requirementId);
     const views = store.milestones().map((milestone): ipc.MilestoneView => {
       const items = milestone.requirementIds.map((id) => {
         const packages = packagesOf(id);
@@ -2418,7 +2419,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   // activity log's retention window.
   const unreleasedPackages = (store: ReleaseStore): ReleasePackage[] => {
     const state = workPackages.all();
-    return tasks
+    return catalog
       .listTasks()
       .filter((task) => state[task.id]?.status === 'done' && !store.isReleased(task.id))
       .slice(0, MAX_RELEASE_PACKAGES)
@@ -2868,7 +2869,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
     // The open repository from memory, so the counts match the queue.
     const openCounts = () => {
       const states = store.all();
-      return countStatuses(tasks.listTasks().map((task) => states[task.id]?.status ?? task.status));
+      return countStatuses(catalog.listTasks().map((task) => states[task.id]?.status ?? task.status));
     };
     const counts = await Promise.all(entries.map((entry) => (entry.id === current ? openCounts() : readCounts(repositories.dataDir(entry.id)))));
     return {
@@ -2886,26 +2887,24 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   };
 
   // [人工决策-2026-10-07 14:31:37] 切换仓库时有后台任务：渲染层先弹窗列出、用户确认后，这里取消全部任务再切；内存里同时只有一个仓库的数据。
-  // Order matters: the generated package list must be in place before the
-  // work package store loads, or saved progress is dropped as unknown ids.
+  // Order matters: requirements must be open (their published packages are
+  // the catalog) before the work package store loads, or saved progress is
+  // dropped as unknown ids.
   const openRepository = async (id: string) => {
     await cancelAll();
     await flushStores();
     await repositories.open(id);
     const dir = repositories.dataDir();
     setConfig(await repositories.loadConfig());
-    if (requirements) {
-      await requirements.open(dir);
-      tasks.setGeneratedTasks(requirements.publishedPackages());
-    }
-    await store.open(dir, tasks.listTasks());
+    await requirements?.open(dir);
+    await store.open(dir, catalog.listTasks());
     await releases?.open(dir);
     await activity?.open(dir);
     await tutor?.open(dir);
     activity?.prune().catch((error) => console.error('[activity] prune failed', error));
     // The steward's plan described the previous repository's toolchain.
     env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null, live: null };
-    console.debug(`[repositories] switched id=${id} packages=${tasks.listTasks().length}`);
+    console.debug(`[repositories] switched id=${id} packages=${catalog.listTasks().length}`);
   };
 
   ipcMain.handle(
