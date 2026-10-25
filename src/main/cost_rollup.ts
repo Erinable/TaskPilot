@@ -28,10 +28,10 @@ export type CostRow = {
 };
 
 // Dollars to integer micro-dollars, the unit every cost sum uses.
-export const toMicros = (usd: number): number => Math.round(usd * 1_000_000);
+const toMicros = (usd: number): number => Math.round(usd * 1_000_000);
 
-const emptyTokens = (): TokenUsage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-const keyOf = (row: Pick<CostRow, 'day' | 'agent' | 'cli' | 'provider' | 'model'>) =>
+export const emptyTokens = (): TokenUsage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+export const keyOf = (row: Pick<CostRow, 'day' | 'agent' | 'cli' | 'provider' | 'model'>) =>
   [row.day, row.agent, row.cli ?? '', row.provider ?? '', row.model ?? ''].join('\u0000');
 
 // Groups cost records into rows; `dayOf` gives each record's business day.
@@ -53,19 +53,30 @@ export const foldCosts = <Extra extends Record<string, string | null> = Record<n
       row = { ...identity, actualCalls: 0, actualMicros: 0, tokenCalls: 0, tokens: emptyTokens(), unknownCalls: 0, ...extra };
       rows.set(key, row);
     }
-    const cost = record.costUsd;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) {
-      row.actualCalls += 1;
-      row.actualMicros += toMicros(cost);
-    } else if (call?.tokens) {
-      row.tokenCalls += 1;
-      row.tokens.input += call.tokens.input;
-      row.tokens.output += call.tokens.output;
-      row.tokens.cacheRead += call.tokens.cacheRead;
-      row.tokens.cacheWrite += call.tokens.cacheWrite;
-    } else row.unknownCalls += 1;
+    addCall(row, record);
   }
   return [...rows.values()];
+};
+
+// Counts one call into its row and reports which of the three groups it fell in.
+export const addCall = (row: CostRow, record: LoggedRecord & { kind: 'agent_cost' }): 'actual' | 'tokens' | 'unknown' => {
+  const cost = record.costUsd;
+  const tokens = record.call?.tokens;
+  if (typeof cost === 'number' && Number.isFinite(cost) && cost > 0) {
+    row.actualCalls += 1;
+    row.actualMicros += toMicros(cost);
+    return 'actual';
+  }
+  if (!tokens) {
+    row.unknownCalls += 1;
+    return 'unknown';
+  }
+  row.tokenCalls += 1;
+  row.tokens.input += tokens.input;
+  row.tokens.output += tokens.output;
+  row.tokens.cacheRead += tokens.cacheRead;
+  row.tokens.cacheWrite += tokens.cacheWrite;
+  return 'tokens';
 };
 
 // Rows for `days` replace whatever the rollup held for those days, so folding
