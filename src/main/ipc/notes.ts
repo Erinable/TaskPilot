@@ -58,7 +58,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const note = store.get(id);
       if (note.version !== baseVersion) return failWith('The note changed on disk since it was opened', 'note_conflict');
       if (backgroundRuns.has('note-summary', id)) return failWith('A summary of this note is already being written', 'invalid_state');
-      const controller = backgroundRuns.start({ kind: 'note-summary', key: id, busy: 'tutor', label: () => '笔记总结', once: true });
+      const controller = backgroundRuns.start({ kind: 'note-summary', key: id, busy: 'tutor', agent: () => 'tutor', label: () => '笔记总结', once: true });
       const { path: envPath } = await ctx.commandPath();
       console.debug(`[notes] summarize id=${id} length=${note.body.length}`);
       const run = (async () => {

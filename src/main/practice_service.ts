@@ -33,7 +33,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     const baseline = requireBaseline(id);
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
-    const controller = backgroundRuns.start({ kind: 'reference', key: id, busy: 'reference', label: ctx.packageLabel(id) });
+    const controller = backgroundRuns.start({ kind: 'reference', key: id, busy: 'reference', agent: () => 'coding-agent', label: ctx.packageLabel(id) });
     const runId = codingExec.codingRunId();
     const initial: packageTypes.ReferenceRun = {
       id: runId,
@@ -128,7 +128,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       return ctx.viewOf(task, store.get(id));
     }
     const referencePatch = reference?.status === 'ready' ? await fs.readFile(referenceFile(id), 'utf8').catch(() => null) : null;
-    const controller = backgroundRuns.start({ kind: 'grade', key: id, busy: 'grade', label: ctx.packageLabel(id) });
+    const controller = backgroundRuns.start({ kind: 'grade', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) });
     await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = ctx.runnerFor('tutor', { kind: 'package', id });
     const { path: envPath } = await ctx.commandPath();

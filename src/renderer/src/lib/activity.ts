@@ -1,29 +1,32 @@
 // Wording for the activity feed, the queue metrics and team presence.
+import { AGENT_IDS, AGENT_LABELS } from '@shared/agent_runtime.ts';
+import type { AgentId } from '@shared/agent_runtime.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as repositoryTypes from '@shared/ipc/repositories.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import { businessDay, previousDay } from './time_zone.ts';
 
-export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'code' | 'you'; initials: string; name: string };
+export type FeedActor = { avatar: 'pm' | 'arch' | 'qa' | 'rel' | 'env' | 'tutor' | 'code' | 'you'; initials: string; name: string };
 
 export type FeedItem = { key: string; actor: FeedActor; what: string; detail: string; at: string };
 
-const AGENTS: Record<activityTypes.ActivityAgent, FeedActor> = {
-  'product-lead': { avatar: 'pm', initials: 'PM', name: 'Product Lead' },
-  architect: { avatar: 'arch', initials: 'AR', name: 'Architect' },
-  qa: { avatar: 'qa', initials: 'QA', name: 'QA Partner' },
-  'release-manager': { avatar: 'rel', initials: 'RM', name: 'Release Manager' },
-  'coding-agent': { avatar: 'code', initials: 'CA', name: 'Coding Agent' },
+// Names come from AGENT_LABELS; a new role in AGENT_IDS fails typecheck here
+// until it has an avatar and a role note, then shows everywhere the team does.
+const AVATARS: Record<AgentId, Omit<FeedActor, 'name'>> = {
+  'product-lead': { avatar: 'pm', initials: 'PM' },
+  architect: { avatar: 'arch', initials: 'AR' },
+  qa: { avatar: 'qa', initials: 'QA' },
+  'release-manager': { avatar: 'rel', initials: 'RM' },
+  'env-steward': { avatar: 'env', initials: 'ES' },
+  tutor: { avatar: 'tutor', initials: 'TU' },
+  'coding-agent': { avatar: 'code', initials: 'CA' },
 };
+const AGENTS = Object.fromEntries(AGENT_IDS.map((agent) => [agent, { ...AVATARS[agent], name: AGENT_LABELS[agent] }])) as Record<AgentId, FeedActor>;
 const YOU: FeedActor = { avatar: 'you', initials: '你', name: '你' };
 
-export const TEAM: { agent: activityTypes.ActivityAgent; actor: FeedActor }[] = (
-  ['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const
-).map((agent) => ({
-  agent,
-  actor: AGENTS[agent],
-}));
+// Every member, in AGENT_IDS order: the sidebar and the team page list these.
+export const TEAM: { agent: AgentId; actor: FeedActor }[] = AGENT_IDS.map((agent) => ({ agent, actor: AGENTS[agent] }));
 
 // What a transition reads as, and who did it.
 const TRANSITION_TEXT: Record<packageTypes.HumanTransition | packageTypes.AgentTransition | packageTypes.CodingTransition, { by: FeedActor; what: string }> = {
@@ -118,7 +121,7 @@ export const durationTrend = ({ averageHours, averageHoursPrevious }: activityTy
 
 export type Presence = 'online' | 'busy' | 'offline';
 
-export const presenceOf = (team: activityTypes.TeamStatus | null, agent: activityTypes.ActivityAgent): Presence => {
+export const presenceOf = (team: activityTypes.TeamStatus | null, agent: AgentId): Presence => {
   if (!team || !team.available || !team.availableByAgent[agent]) return 'offline';
   return team.busy.includes(agent) ? 'busy' : 'online';
 };
@@ -134,11 +137,13 @@ export const presenceSummary = (team: activityTypes.TeamStatus | null) => {
 };
 
 // What each member does, in plain words for people new to the workflow.
-export const ROLES: Record<activityTypes.ActivityAgent, string> = {
+export const ROLES: Record<AgentId, string> = {
   'product-lead': '把你的需求问清楚，再拆成一个个能直接动手的工作包。',
   architect: '先读相关代码，告诉团队接口长什么样；你发现计划和代码对不上时，由它决定怎么改。',
   qa: '你提交工作包后检查代码和测试，确认验收条件都做到了。',
   'release-manager': '根据最近的提交和完成的工作包，起草版本号、更新说明和发布清单。',
+  'env-steward': '查看仓库用到的语言和工具，规划装依赖、跑测试要执行的命令，每条命令都等你点了才执行。',
+  tutor: '讲解执行步骤、给提示，练习模式下给你的改动判卷，还会帮你总结笔记。',
   'coding-agent': '在隔离运行目录里执行编码工作，产出变更供你审查和应用。',
 };
 const WORK_TEXT: Record<activityTypes.AgentWork['kind'], string> = {
@@ -146,7 +151,11 @@ const WORK_TEXT: Record<activityTypes.AgentWork['kind'], string> = {
   review: '正在审查工作包',
   adjudication: '正在裁决偏差',
   release: '正在起草',
+  environment: '正在规划',
+  tutor: '正在辅导',
   coding: '正在编码工作包',
+  reference: '正在写参考答案',
+  grade: '正在判卷',
 };
 
 // What a run with no subject of its own (label null) is called, by kind.
@@ -154,7 +163,7 @@ const UNTITLED_RUNS: Partial<Record<repositoryTypes.BusyKind, string>> = { relea
 export const runLabel = (run: { kind: repositoryTypes.BusyKind; label: string | null }) => run.label ?? UNTITLED_RUNS[run.kind] ?? run.kind;
 
 // "正在审查工作包「登录接口」"; null when the member is not running anything.
-export const workText = (team: activityTypes.TeamStatus | null, agent: activityTypes.ActivityAgent) => {
+export const workText = (team: activityTypes.TeamStatus | null, agent: AgentId) => {
   const work = team?.work.find((item) => item.agent === agent);
   return work ? `${WORK_TEXT[work.kind]}「${runLabel(work)}」` : null;
 };

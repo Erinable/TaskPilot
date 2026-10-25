@@ -153,7 +153,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
 .sidebar.collapsed .team-entry-wrap {
   margin-top: var(--space-6);
 }
-/* Five small avatars overlap; working members stand out, offline ones fade. */
+/* One small avatar per member, overlapping; working members stand out, offline ones fade. */
 .team-stack {
   display: flex;
   margin-left: auto;

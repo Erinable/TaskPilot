@@ -1,9 +1,9 @@
 // Runtime choices are per role, not per repository. Execution identity and paths
 // are fixed by TaskPilot; users only choose the CLI, model and thinking level.
 export const AGENT_IDS = ['product-lead', 'architect', 'qa', 'release-manager', 'env-steward', 'tutor', 'coding-agent'] as const;
+// Every role is a member of the AI team: the sidebar, the team page, the
+// activity feed and spend all list these, in this order.
 export type AgentId = (typeof AGENT_IDS)[number];
-// The members the team page, the activity feed and spend are shown for.
-export const TEAM_AGENT_IDS = ['product-lead', 'architect', 'qa', 'release-manager', 'coding-agent'] as const satisfies readonly AgentId[];
 export const CLI_IDS = ['claude', 'pi', 'grok', 'codex', 'opencode'] as const;
 export type CliId = (typeof CLI_IDS)[number];
 export const THINKING_LEVELS = ['default', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -39,7 +39,7 @@ export type CliModelsRequest = { cli: CliId; scope: CliModelScope; refresh?: boo
 export const AGENT_LABELS: Record<AgentId, string> = {
   'product-lead': 'Product Lead',
   architect: 'Architect',
-  qa: 'QA',
+  qa: 'QA Partner',
   'release-manager': 'Release Manager',
   'env-steward': 'Environment Steward',
   tutor: 'Tutor',

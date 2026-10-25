@@ -1,11 +1,9 @@
 // The activity feed and overview, model spend and the engineering map (activity:*,
 // costs:*, engineering-map:get).
 
-import type { AgentId, CliId, TEAM_AGENT_IDS } from '../agent_runtime.ts';
+import type { AgentId, CliId } from '../agent_runtime.ts';
 import type * as packageTypes from './packages.ts';
 import type { InterfaceModule, RequirementStep } from './requirements.ts';
-
-export type ActivityAgent = (typeof TEAM_AGENT_IDS)[number];
 
 export type ActivityEvent =
   | {
@@ -31,15 +29,19 @@ export type QueueMetrics = { doneThisWeek: number; donePreviousWeek: number; ave
 // What an agent is running right now. `label` is the requirement or package
 // title; null for a run with no subject of its own (a release draft), which
 // the renderer names by kind.
-export type AgentWork = { agent: ActivityAgent; kind: 'requirement' | 'review' | 'adjudication' | 'release' | 'coding'; label: string | null };
+export type AgentWork = {
+  agent: AgentId;
+  kind: 'requirement' | 'review' | 'adjudication' | 'release' | 'environment' | 'tutor' | 'coding' | 'reference' | 'grade';
+  label: string | null;
+};
 
 // Which agents are busy right now; availability is tracked per runtime.
-export type TeamStatus = { available: boolean; availableByAgent: Record<ActivityAgent, boolean>; busy: ActivityAgent[]; work: AgentWork[] };
+export type TeamStatus = { available: boolean; availableByAgent: Record<AgentId, boolean>; busy: AgentId[]; work: AgentWork[] };
 
 // Model spend per agent over the metrics week. Spend is recorded from
 // 2026-10-07; `since` is the earliest recorded run in the retention window
 // (null if none), so a week that starts before it is only partly counted.
-export type AgentCosts = { byAgent: Record<ActivityAgent, number>; since: string | null; partial: boolean };
+export type AgentCosts = { byAgent: Record<AgentId, number>; since: string | null; partial: boolean };
 // ========== model usage ==========
 
 // Token counts one model call reported, normalized across CLIs. `input`
@@ -82,7 +84,7 @@ export type ActivityOverview = {
   metrics: QueueMetrics;
   team: TeamStatus;
   costs: AgentCosts;
-  teamRecent: Record<ActivityAgent, ActivityRecord[]>;
+  teamRecent: Record<AgentId, ActivityRecord[]>;
   timeZone: string;
 };
 

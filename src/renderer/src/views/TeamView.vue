@@ -8,7 +8,7 @@ import { businessDay } from '@/lib/time_zone.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { CLI_OPTIONS } from '@shared/agent_runtime.ts';
-import type * as activityTypes from '@shared/ipc/activity.ts';
+import type { AgentId } from '@shared/agent_runtime.ts';
 
 const app = useAppStore();
 const settings = useSettingsStore();
@@ -49,9 +49,9 @@ const members = computed(() => {
 });
 
 // Working members always show the full card; the others open on request.
-const expanded = reactive(new Set<activityTypes.ActivityAgent>());
-const rolesOpen = reactive(new Set<activityTypes.ActivityAgent>());
-const toggle = (set: Set<activityTypes.ActivityAgent>, agent: activityTypes.ActivityAgent) => (set.has(agent) ? set.delete(agent) : set.add(agent));
+const expanded = reactive(new Set<AgentId>());
+const rolesOpen = reactive(new Set<AgentId>());
+const toggle = (set: Set<AgentId>, agent: AgentId) => (set.has(agent) ? set.delete(agent) : set.add(agent));
 const openAgents = () => settings.open('agents').catch((caught) => console.error(caught));
 </script>
 

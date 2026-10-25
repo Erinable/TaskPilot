@@ -2,6 +2,7 @@
 // step that outlives its IPC call registers here. A repository switch or quit
 // cancels them all and waits for their last writes, and "who is busy" (the
 // switch dialog, the team view) is read from the same entries.
+import type { AgentId } from '../shared/agent_runtime.ts';
 import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as repositoryTypes from '../shared/ipc/repositories.ts';
 
@@ -23,7 +24,7 @@ const RUN_KINDS = [
 export type RunKind = (typeof RUN_KINDS)[number];
 
 // Only kinds the team view knows can name an agent.
-type Listing = { busy: repositoryTypes.BusyKind; agent?: undefined } | { busy: activityTypes.AgentWork['kind']; agent: () => activityTypes.ActivityAgent };
+type Listing = { busy: repositoryTypes.BusyKind; agent?: undefined } | { busy: activityTypes.AgentWork['kind']; agent: () => AgentId };
 
 export type RunInfo = Listing & {
   kind: RunKind;
