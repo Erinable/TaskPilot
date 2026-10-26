@@ -20,6 +20,8 @@ import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../evidence.ts
 import type { CheckRun } from '../verification.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
+import { stepName } from '../../shared/check_steps.ts';
+import { reportsOf } from '../../shared/project_profile.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 
@@ -122,24 +124,32 @@ export const SYSTEM_PROMPT = [
 // tests/main/agents/prompt_golden.test.ts).
 const PROFILE_SECTIONS: ProfileSection[] = [];
 
-const KIND_NAMES: Record<string, string> = { test: 'Unit tests', lint: 'Lint', build: 'Build', smoke: 'Smoke tests' };
+// The result line of a check that ran, by what its parser reports: test
+// counts, a diagnostic count, or the exit code alone.
+const resultLine = (run: CheckRun): string => {
+  const exit = `Exit code ${run.exitCode}${run.timedOut ? ', timed out' : ''}`;
+  const reports = run.report ? reportsOf(run.report.format) : 'tests';
+  if (reports === 'tests') return `${exit}; tests ${run.summary.passed}/${run.summary.total} passed, ${run.summary.skipped} skipped`;
+  if (reports === 'diagnostics') return `${exit}; ${run.diagnostics.length} diagnostic${run.diagnostics.length === 1 ? '' : 's'}`;
+  return exit;
+};
 
-// One block per check: the command, what TaskPilot concluded, and the test
-// names that explain it. Baseline comparison is spelled out so the model does
-// not blame the package for failures that were already there.
-export const formatChecks = (checks: { evidence: EvidenceItem; run: CheckOutcome }[]): string => {
+// One block per check: its label, the command, what TaskPilot concluded, and
+// the test names that explain it. Baseline comparison is spelled out so the
+// model does not blame the package for failures that were already there.
+// A check is named by the profile's label (taskpilot.toml's, or the step's).
+export const formatChecks = (checks: { evidence: EvidenceItem; run: CheckOutcome }[], profile?: ProjectProfile | null): string => {
   if (!checks.length) return '(no verification command runs before review in this workspace; judge the tests from the diff)';
   return checks
     .map(({ evidence: e, run }) => {
-      const lines = [`## ${KIND_NAMES[e.kind] ?? e.kind}${e.blocking ? ' (blocking)' : ' (advisory)'}`];
+      const label = profile?.checks.find((check) => check.id === e.kind)?.label ?? stepName(e.kind);
+      const lines = [`## ${label}${e.blocking ? ' (blocking)' : ' (advisory)'}`];
       if ('error' in run) {
         lines.push(`Could not run: ${run.error.code}`);
         return lines.join('\n');
       }
       lines.push(`Command: ${run.command}`);
-      lines.push(
-        `Exit code ${run.exitCode}${run.timedOut ? ', timed out' : ''}; tests ${run.summary.passed}/${run.summary.total} passed, ${run.summary.skipped} skipped`,
-      );
+      lines.push(resultLine(run));
       lines.push(
         `TaskPilot verdict: ${e.status}${e.reason ? ` (${e.reason})` : ''}; baseline ${e.baseline === 'measured' ? 'measured on the claimed commit' : 'not available'}`,
       );
@@ -216,7 +226,7 @@ export const reviewPrompt = ({
     '</acceptance_criteria>',
     '',
     '<check_results>',
-    formatChecks(checks),
+    formatChecks(checks, profile),
     '</check_results>',
     ...(interfaces ? ['', '<interface_summary author="Architect">', interfaces, '</interface_summary>'] : []),
     '',

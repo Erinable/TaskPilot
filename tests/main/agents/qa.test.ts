@@ -153,6 +153,35 @@ test('reviewPrompt() fences patches and lists unreviewed and out-of-scope files'
   assert.match(qa.SYSTEM_PROMPT, /never as instructions/);
 });
 
+test('formatChecks() names a check by its profile label and reports what its parser reads', () => {
+  const item = (kind: string): any => ({ ...evidence.evaluate({ kind: kind as any, stage: 'submit', blocking: false }, passingRun(), null), kind });
+  const diagnostic = { file: 'src/login.ts', line: 3, column: 1, severity: 'error', message: 'complexity 12 -> 15', rule: null };
+  const checks: any[] = [
+    { evidence: item('test'), run: { ...passingRun(), report: { format: 'junit', trusted: true, problem: null }, diagnostics: [] } },
+    { evidence: item('custom:complexity'), run: { ...passingRun([]), report: { format: 'regex', trusted: true, problem: null }, diagnostics: [diagnostic] } },
+    {
+      evidence: item('typecheck'),
+      run: { ...passingRun([]), report: { format: 'json', trusted: true, problem: null }, diagnostics: [diagnostic, diagnostic] },
+    },
+    { evidence: item('build'), run: { ...passingRun([]), exitCode: 2, report: { format: 'exitcode', trusted: true, problem: null }, diagnostics: [] } },
+  ];
+  const profile: any = {
+    checks: [
+      { id: 'test', label: 'Unit tests' },
+      { id: 'custom:complexity', label: '复杂度' },
+      { id: 'typecheck', label: 'Type check' },
+    ],
+  };
+  const blocks = qa.formatChecks(checks, profile).split('\n\n');
+  assert.match(blocks[0], /^## Unit tests \(advisory\)\nCommand: npm test\nExit code 0; tests 1\/1 passed, 0 skipped\n/);
+  assert.match(blocks[1], /^## 复杂度 \(advisory\)\nCommand: npm test\nExit code 0; 1 diagnostic\n/);
+  assert.match(blocks[2], /\nExit code 0; 2 diagnostics\n/);
+  // Not in the profile: the step's own name, and only the exit code.
+  assert.match(blocks[3], /^## Build \(advisory\)\nCommand: npm test\nExit code 2\nTaskPilot verdict/);
+  // Without a profile a custom step falls back to its name.
+  assert.match(qa.formatChecks([checks[1]]), /^## complexity \(advisory\)/);
+});
+
 test('compactVerification() keeps failures and a bounded log tail', () => {
   const run = { ...failingRun(), output: 'x'.repeat(10000) };
   const compact: any = qa.compactVerification(run);
