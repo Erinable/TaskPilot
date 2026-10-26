@@ -15,6 +15,7 @@ import CourseEditor from '@/components/courses/CourseEditor.vue';
 import CoursePreviewDialog from '@/components/courses/CoursePreviewDialog.vue';
 import { SOURCE_LABELS, TRUST_LABELS, changeText, copyIdFor, languageMismatch, sourcePath } from '@/lib/course_model.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
+import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { isCourseId } from '@shared/course_pack.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -87,6 +88,7 @@ const submitCopy = async () => {
 };
 
 const openSettings = () => run(useSettingsStore().open('courses'));
+const learn = () => run(useRequirementsStore().open({ compose: 'course' }));
 
 onMounted(() => run(courses.loadView()));
 </script>
@@ -99,6 +101,10 @@ onMounted(() => run(courses.loadView()));
         <p>课程包决定 Product Lead 怎么规划、导师怎么讲解和按哪些维度判卷。内置包只读，想改就复制一份。</p>
       </div>
       <div class="heading-actions">
+        <button class="primary-button" type="button" data-action="learn" @click="learn">
+          <AppIcon name="flask" />
+          我想学…
+        </button>
         <button class="secondary-button" type="button" data-action="settings" @click="openSettings">
           <AppIcon name="settings" />
           确认与导入

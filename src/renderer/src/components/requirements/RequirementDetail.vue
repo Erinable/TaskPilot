@@ -13,6 +13,7 @@ import AgentBubble from './AgentBubble.vue';
 import InterfacesPanel from './InterfacesPanel.vue';
 import PlanPackageCard from './PlanPackageCard.vue';
 import MilestonePicker from './MilestonePicker.vue';
+import CourseInterview from './CourseInterview.vue';
 import * as model from './requirement_model.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
@@ -36,9 +37,18 @@ const now = useNow();
 // The step that runs started at the requirement's last update.
 const elapsed = computed(() => (running.value ? elapsedSince(props.item.updatedAt, now.value) : null));
 const architectRunning = computed(() => running.value && props.item.phase === 'architect');
-const runningLabel = computed(() =>
-  props.item.status === 'planning' ? '正在拆解工作包…' : props.item.phase === 'architect' ? 'Architect 正在阅读相关代码…' : '正在阅读需求，准备澄清问题…',
-);
+const course = computed(() => (model.isCourse(props.item) ? (props.item.course ?? null) : null));
+const steps = computed(() => (course.value ? model.COURSE_STEPS : model.STEPS));
+const drafting = computed(() => Boolean(course.value?.choice && 'draft' in course.value.choice));
+const runningLabel = computed(() => {
+  if (course.value) return props.item.status === 'planning' ? (drafting.value ? '正在起草课程包…' : '正在规划学习路径…') : '正在看你的目标，挑选课程包…';
+  return props.item.status === 'planning'
+    ? '正在拆解工作包…'
+    : props.item.phase === 'architect'
+      ? 'Architect 正在阅读相关代码…'
+      : '正在阅读需求，准备澄清问题…';
+});
+const bubbleAgent = computed(() => (props.item.phase === 'architect' ? 'arch' : course.value ? 'tutor' : 'pm'));
 const failedStep = computed(() => (props.item.failedStep === 'planning' ? 'plan' : 'clarify'));
 
 const plan = computed(() => props.item.plan);
@@ -67,10 +77,11 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
     <header class="req-header">
       <div class="req-title-row">
         <span class="status-pill" :class="model.STATUS_TONES[item.status]">{{ model.STATUS_LABELS[item.status] }}</span>
-        <h2>{{ item.title || '未命名需求' }}</h2>
+        <h2>{{ item.title || (course ? '未命名的学习目标' : '未命名需求') }}</h2>
+        <span v-if="course" class="scope-badge selected">我想学</span>
       </div>
       <ol class="req-stepper" aria-label="进度">
-        <li v-for="entry in model.STEPS" :key="entry.step" :data-step="entry.step" :class="model.stepClasses(item, entry.step)">
+        <li v-for="entry in steps" :key="entry.step" :data-step="entry.step" :class="model.stepClasses(item, entry.step)">
           <span class="step-dot"></span>
           {{ entry.label }}
         </li>
@@ -80,7 +91,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
     <details class="req-original glass">
       <summary>
         <AppIcon name="file" />
-        原始需求
+        {{ course ? '学习目标' : '原始需求' }}
       </summary>
       <p>{{ item.text }}</p>
     </details>
@@ -90,7 +101,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
       <InterfacesPanel v-if="item.interfaces && !architectRunning" :info="item.interfaces" />
 
       <template v-if="running">
-        <AgentBubble tone="running" :agent="item.phase === 'architect' ? 'arch' : 'pm'">
+        <AgentBubble tone="running" :agent="bubbleAgent">
           <div class="agent-running">
             <AppIcon name="spinner" class="spin" />
             <span>{{ runningLabel }}</span>
@@ -104,7 +115,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
       </template>
 
       <template v-else-if="item.status === 'failed'">
-        <AgentBubble :text="describeErrorInfo(item.error)" tone="failed" icon-name="alert">
+        <AgentBubble :text="describeErrorInfo(item.error)" tone="failed" icon-name="alert" :agent="bubbleAgent">
           <code v-if="item.error?.message && item.error.code !== 'agent_cancelled'" class="agent-error-detail">{{ item.error.message }}</code>
         </AgentBubble>
         <div class="req-actions">
@@ -116,7 +127,7 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             @click="report(store.runStep(item, failedStep))"
           >
             <AppIcon :name="store.acting === failedStep ? 'spinner' : 'refresh'" :class="{ spin: store.acting === failedStep }" />
-            {{ failedStep === 'plan' ? '重新拆解' : '重新澄清' }}
+            {{ failedStep === 'plan' ? (course ? '重试' : '重新拆解') : course ? '重新访谈' : '重新澄清' }}
           </button>
           <button
             v-if="failedStep === 'plan'"
@@ -127,10 +138,12 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             @click="report(store.editAnswers(item))"
           >
             <AppIcon :name="store.acting === 'edit' ? 'spinner' : 'arrow-left'" :class="{ spin: store.acting === 'edit' }" />
-            修改回答
+            {{ course ? '重新选择' : '修改回答' }}
           </button>
         </div>
       </template>
+
+      <CourseInterview v-else-if="course" :item="item" :course="course" />
 
       <template v-else-if="item.status === 'answering' || item.status === 'draft'">
         <AgentBubble v-if="item.summary" :text="`我理解的需求：${item.summary}`" />

@@ -14,6 +14,7 @@ import type * as settingsTypes from '../shared/ipc/settings.ts';
 import type * as tutorTypes from '../shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../shared/ipc/workspace.ts';
 import type { CoursePack } from '../shared/course_pack.ts';
+import type { PathEntry } from '../shared/course_plan.ts';
 declare const api: {
   businessTimeZone: string;
   onFullScreen: (listener: (fullScreen: boolean) => void) => void;
@@ -71,10 +72,17 @@ declare const api: {
     create: (input: requirementTypes.RequirementInput) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     clarify: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     answer: (id: string, answers: requirementTypes.RequirementAnswers) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
-    plan: (id: string, answers?: requirementTypes.RequirementAnswers) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    plan: (
+      id: string,
+      answers?: requirementTypes.RequirementAnswers,
+      choice?: requirementTypes.CourseChoice,
+    ) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     publish: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     remove: (id: string) => Promise<envelopeTypes.IpcResult<true>>;
     cancel: (id: string) => Promise<envelopeTypes.IpcResult<boolean>>;
+    coursePath: (id: string, path: PathEntry[]) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    courseSaveDraft: (id: string, pack: CoursePack) => Promise<envelopeTypes.IpcResult<requirementTypes.CourseDraftSaved>>;
+    courseConfirmDraft: (id: string, contentHash: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
   };
   agent: {
     status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;

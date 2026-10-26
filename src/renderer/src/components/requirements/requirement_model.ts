@@ -2,6 +2,7 @@
 // and validation. Kept free of Vue and IPC so tests can call them directly.
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
+import type { CourseLevel, CourseTarget, PathStatus } from '@shared/course_plan.ts';
 
 export const STATUS_LABELS: Record<requirementTypes.RequirementStatus, string> = {
   draft: '草稿',
@@ -92,3 +93,39 @@ export const rowDate = (updatedAt: string) => new Date(updatedAt).toLocaleDateSt
 
 // Status plus phase, so the Architect -> Product Lead handoff re-renders too.
 export const pollKey = (item: Pick<requirementTypes.Requirement, 'status' | 'phase'>) => `${item.status}:${item.phase ?? ''}`;
+
+// ========== Course interview ==========
+// The form's options: every field is picked; the environment also takes a
+// typed value.
+export const LEVEL_OPTIONS: { value: CourseLevel; label: string }[] = [
+  { value: 'new', label: '零基础' },
+  { value: 'basic', label: '会一些基础' },
+  { value: 'solid', label: '基础扎实' },
+];
+export const TARGET_OPTIONS: { value: CourseTarget; label: string }[] = [
+  { value: 'concept', label: '理解原理' },
+  { value: 'implement', label: '能写出来' },
+];
+export const ENVIRONMENT_OPTIONS = ['macOS，本机 C 编译器', 'Linux，本机 C 编译器', 'Windows + WSL', '已装 xv6 工具链（RISC-V gcc + qemu）', '本机 Python 3'];
+export const HOURS_OPTIONS = [2, 4, 6, 8, 12];
+
+export const COURSE_STEPS: { step: StepName; label: string }[] = [
+  { step: 'clarify', label: '访谈' },
+  { step: 'answer', label: '选课程包' },
+  { step: 'plan', label: '规划路径' },
+  { step: 'publish', label: '确认路径' },
+];
+
+export const PATH_STATUS_LABELS: Record<PathStatus, string> = { planned: '要学', known: '已会', skipped: '跳过' };
+
+export const isCourse = (item: Pick<requirementTypes.Requirement, 'kind'>) => item.kind === 'course';
+
+// A concept on the path: its label and summary from the skeleton or the
+// extras; an id neither has (never stored, but the page must not break) as is.
+export const pathConcept = (course: requirementTypes.CourseInterview, conceptId: string) =>
+  [...course.pathConcepts, ...(course.plan?.extraConcepts ?? [])].find((concept) => concept.id === conceptId) ?? {
+    id: conceptId,
+    label: conceptId,
+    summary: '',
+    prerequisites: [],
+  };

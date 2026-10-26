@@ -9,6 +9,7 @@ vi.setConfig({ testTimeout: 20_000 });
 import CourseView from '@/views/CourseView.vue';
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
+import { useRequirementsStore } from '@/stores/requirements.ts';
 import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -273,4 +274,12 @@ test('the settings button opens the course page of settings', async () => {
   await wrapper.get('[data-action="settings"]').trigger('click');
   await flushPromises();
   expect(useAppStore().view).toBe('settings');
+});
+
+test('我想学… opens the requirement center on the course form', async () => {
+  const wrapper = await mountView();
+  const requirements = useRequirementsStore();
+  const open = vi.spyOn(requirements, 'open').mockResolvedValue(undefined);
+  await wrapper.get('[data-action="learn"]').trigger('click');
+  expect(open).toHaveBeenCalledWith({ compose: 'course' });
 });

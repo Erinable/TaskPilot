@@ -6,6 +6,7 @@
 import { createAppContext } from './app_context.ts';
 import { createCodingRuntime } from './coding_runtime.ts';
 import { createCodingService } from './coding_service.ts';
+import { createCourseInterviewService } from './course_interview_service.ts';
 import { createPracticeService } from './practice_service.ts';
 import { createReviewService } from './review_service.ts';
 import * as activityIpc from './ipc/activity.ts';
@@ -47,7 +48,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });
-  requirementsIpc.register(ipcMain, ctx);
+  requirementsIpc.register(ipcMain, ctx, { courseInterview: createCourseInterviewService(ctx) });
   activityIpc.register(ipcMain, ctx, { runtime });
   environmentIpc.register(ipcMain, ctx);
   releaseIpc.register(ipcMain, ctx);

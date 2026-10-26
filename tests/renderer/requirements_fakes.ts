@@ -8,6 +8,7 @@ import type * as requirementTypes from '../../src/shared/ipc/requirements.ts';
 import type * as settingsTypes from '../../src/shared/ipc/settings.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
+import type { PathEntry } from '../../src/shared/course_plan.ts';
 
 export const requirement = (overrides: Partial<requirementTypes.Requirement> = {}): requirementTypes.Requirement => ({
   id: 'r1',
@@ -45,6 +46,39 @@ export const planPackage = (overrides: Partial<requirementTypes.PlanPackage> = {
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
+// ========== Course interview ==========
+const concept = (id: string, label: string, prerequisites: string[] = []) => ({ id, label, summary: `${label}。`, prerequisites });
+const PATH_CONCEPTS = [concept('process-state', '进程状态'), concept('fcfs', '先来先服务', ['process-state']), concept('round-robin', '时间片轮转', ['fcfs'])];
+
+export const courseInterview = (overrides: Partial<requirementTypes.CourseInterview> = {}): requirementTypes.CourseInterview => ({
+  form: { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4 },
+  pick: { course: 'os', reason: 'os 包的骨架覆盖调度。', options: [{ id: 'os', title: '操作系统实验' }] },
+  choice: null,
+  plan: null,
+  pathConcepts: [],
+  draft: null,
+  ...overrides,
+});
+
+export const coursePathInterview = (
+  path: PathEntry[] = [
+    { conceptId: 'process-state', status: 'known' },
+    { conceptId: 'fcfs', status: 'planned' },
+    { conceptId: 'round-robin', status: 'planned' },
+  ],
+): requirementTypes.CourseInterview =>
+  courseInterview({
+    choice: { course: 'os' },
+    pathConcepts: PATH_CONCEPTS,
+    plan: {
+      course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' },
+      goal: { kind: 'course', goal: '调度', level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4, knownConcepts: ['process-state'] },
+      summary: '从进程状态到时间片轮转。',
+      path,
+      extraConcepts: [],
+    },
+  });
+
 // Installs window.taskpilot; `list` is what requirements.list() returns now.
 export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
   const api = {
@@ -61,6 +95,16 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
       ),
       remove: vi.fn(() => ok(true as const)),
       cancel: vi.fn(() => ok(true)),
+      coursePath: vi.fn((id: string, path: PathEntry[]) => ok(requirement({ id, kind: 'course', status: 'reviewing', course: coursePathInterview(path) }))),
+      courseSaveDraft: vi.fn((id: string) =>
+        ok<requirementTypes.CourseDraftSaved>({
+          requirement: requirement({ id, kind: 'course', status: 'reviewing', course: { ...courseInterview(), choice: { course: 'lexing' } } }),
+          ref: { id: 'lexing', version: '0.1.0', contentHash: 'saved-hash', source: 'user' },
+        }),
+      ),
+      courseConfirmDraft: vi.fn((id: string) =>
+        ok(requirement({ id, kind: 'course', status: 'reviewing', course: { ...courseInterview(), choice: { course: 'lexing' } } })),
+      ),
     },
     // MilestonePicker loads the release state when a requirement detail mounts.
     release: {
