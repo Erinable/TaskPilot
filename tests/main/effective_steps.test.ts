@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import * as effectiveSteps from '../../src/main/effective_steps.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import { detectLanguages } from '../../src/main/presets/index.ts';
-import { typescriptPreset } from '../../src/main/presets/typescript.ts';
+import { VITEST_REPORT, typescriptPreset } from '../../src/main/presets/typescript.ts';
 import { parseManifest } from '../../src/main/presets/typescript_setup.ts';
 import type { StepPatch } from '../../src/main/step_config.ts';
 
@@ -114,7 +114,9 @@ test('taskpilot.toml with the typescript preset fills the steps from package.jso
   assert.equal(byId.lint.source, 'project');
   assert.equal(byId.typecheck.step?.parser.format, 'regex');
   assert.deepEqual(byId.format.step?.commands, [npm('run', '--silent', 'format:check')]);
-  assert.deepEqual(byId.test.step?.commands, [npm('test')]);
+  // `vitest run` writes its JUnit report.
+  assert.deepEqual(byId.test.step?.commands, [npm('test', '--', '--reporter=default', '--reporter=junit', `--outputFile=${VITEST_REPORT}`)]);
+  assert.deepEqual(byId.test.step?.parser, { format: 'junit', path: VITEST_REPORT });
   assert.equal(byId.build.skipped, 'disabled');
   assert.equal(byId.build.source, 'local');
   assert.equal(byId.coverage.skipped, 'disabled');

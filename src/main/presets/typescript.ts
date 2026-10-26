@@ -47,6 +47,32 @@ const packageVersion = (content: string | null) => {
 
 const TSC_LINE = '^(?<file>[^\\s(][^(]*)\\((?<line>\\d+),(?<column>\\d+)\\): (?<severity>error|warning) (?<rule>TS\\d+): (?<message>.+)$';
 
+// vitest writes its JUnit report here; .taskpilot/ is never part of a package.
+export const VITEST_REPORT = '.taskpilot/reports/vitest.xml';
+
+// [人工决策-2026-10-26 13:15:53] vitest 仓库读 JUnit 报告判定测试结果，与 pytest 一致（CARM-22 方案 1）。
+// A test script that is vitest alone: `vitest`, `vitest run` or `npx vitest`,
+// then flags only. `npm test -- <args>` appends to the end of the script, so
+// a chained script (`a && vitest run`) could hand them to another command;
+// a subcommand or positional (`vitest bench`, `vitest src`), an env prefix
+// or the script's own reporter, output file or watch flag keeps the default
+// step, whose results come from the output.
+const VITEST_ALONE = /^(?:npx )?vitest(?: run)?(?: --?[\w-]+(?:=[\w./:@-]+)?)*$/;
+const VITEST_OWN_FLAGS = /(?:^| )--?(?:reporter|outputFile|watch|w)(?:[=. ]|$)/;
+
+export const runsVitestAlone = (script: string) => {
+  const line = script.trim().replace(/\s+/g, ' ');
+  return VITEST_ALONE.test(line) && !VITEST_OWN_FLAGS.test(line);
+};
+
+const testStep = (script: string): StepPatch =>
+  runsVitestAlone(script)
+    ? {
+        commands: [{ command: 'npm', args: ['test', '--', '--reporter=default', '--reporter=junit', `--outputFile=${VITEST_REPORT}`] }],
+        parser: { format: 'junit', path: VITEST_REPORT },
+      }
+    : { commands: [npm('test')], parser: { format: 'tests' } };
+
 export const typescriptPreset: Preset<TypeScriptFacts> = {
   id: 'typescript',
   label: 'TypeScript / JavaScript',
@@ -63,12 +89,11 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
     for (const [kind, names] of Object.entries(SCRIPTS) as [StepKind, string[]][]) {
       const name = names.find((candidate) => Object.hasOwn(scripts, candidate) && SCRIPT_NAME.test(candidate));
       if (!name) continue;
-      const parser =
-        kind === 'test'
-          ? { format: 'tests' as const }
-          : kind === 'typecheck'
-            ? { format: 'regex' as const, pattern: TSC_LINE, severity: 'error' as const }
-            : { format: 'exitcode' as const };
+      if (kind === 'test') {
+        steps.test = testStep(scripts[name]);
+        continue;
+      }
+      const parser = kind === 'typecheck' ? { format: 'regex' as const, pattern: TSC_LINE, severity: 'error' as const } : { format: 'exitcode' as const };
       steps[kind] = { commands: [npm(name)], parser };
     }
     if (Object.hasOwn(scripts, 'build') || Object.hasOwn(scripts, 'test'))
