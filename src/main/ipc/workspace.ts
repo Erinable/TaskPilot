@@ -124,8 +124,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     }),
   );
 
-  // Confirms the repository's course pack on this machine, after the user
-  // read it. `contentHash` is the one they were shown: a pack that changed
+  // Confirms the pending course pack (the repository's or an imported one)
+  // on this machine, after the user read it. `contentHash` is the one they were shown: a pack that changed
   // in between is refused, so nobody confirms content they did not see.
   ipcMain.handle(
     CHANNELS.workspaceConfirmCourse,
@@ -136,7 +136,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const { state } = await ctx.course();
       if (state.status !== 'pending' || state.ref.id !== id) failWith(`Course pack ${id} is not waiting for confirmation`, 'course_not_pending', 'course');
       if (state.ref.contentHash !== contentHash) failWith(`Course pack ${id} changed since it was shown`, 'course_changed', 'course');
-      await courses.confirm(ctx.repositories.dataDir(), state.ref);
+      await courses.confirm(ctx.coursePlaces(), state.pack, state.ref);
       return viewOf(getConfig());
     }),
   );

@@ -2,6 +2,7 @@ import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
 import type * as codingTypes from '../shared/coding_types.ts';
 import type * as commitTypes from '../shared/ipc/commit.ts';
+import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
@@ -155,6 +156,13 @@ declare const api: {
     reveal: () => Promise<envelopeTypes.IpcResult<boolean>>;
     openUrl: (url: string) => Promise<envelopeTypes.IpcResult<boolean>>;
     courses: () => Promise<envelopeTypes.IpcResult<noteTypes.NoteCourses>>;
+  };
+  courses: {
+    list: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
+    preview: (id: string) => Promise<envelopeTypes.IpcResult<courseTypes.CoursePreview>>;
+    select: (id: string | null) => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
+    pickImport: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseImport | null>>;
+    import: (contentHash: string) => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
   };
 };
 

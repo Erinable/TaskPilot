@@ -1,0 +1,124 @@
+// Course pack channels: the packs the open repository can pick from, a
+// pack's full content (with what changed since this machine confirmed it),
+// picking one in workspace.json, and importing a file into userData/courses/.
+// Confirming the pack in use is workspace:confirm-course (./workspace.ts).
+//
+// [人工决策-2026-10-26 15:38:21] 切换课程包只写本机 workspace.json 的 course，只影响之后的规划和判卷；
+// 已有的计划、工作包和判卷记录带着各自的 CourseRef / rubric 快照，不改写。
+import fs from 'node:fs/promises';
+
+import { failWith, requireString } from '../coded_error.ts';
+import * as courses from '../courses.ts';
+import { wrap } from './handler.ts';
+import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { courseChanges } from '../../shared/course_changes.ts';
+import type * as courseTypes from '../../shared/ipc/courses.ts';
+import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
+import type { AppContext } from '../app_context.ts';
+import type { IpcMainLike } from './handler.ts';
+
+export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
+  const { configDir, shell } = ctx;
+  // The file the developer last picked in the native dialog, validated: the
+  // only content courses:import copies, so the renderer never names a path.
+  let pickedImport: { text: string; pack: CoursePack; ref: CourseRef } | null = null;
+
+  // What this machine confirmed before, against `pack`'s content now.
+  const previousOf = async (pack: CoursePack, ref: CourseRef): Promise<Pick<courseTypes.CoursePreview, 'previous' | 'changes'>> => {
+    const confirmation = await courses.confirmationFor(ctx.coursePlaces(), ref);
+    if (!confirmation) return { previous: 'none', changes: [] };
+    if (!confirmation.pack) return { previous: 'unknown', changes: [] };
+    return { previous: 'known', changes: courseChanges(confirmation.pack, pack) };
+  };
+
+  const list = async (): Promise<courseTypes.CourseList> => {
+    const places = ctx.coursePlaces();
+    const [{ pack: _pack, ...current }, profile] = await Promise.all([ctx.course(), ctx.profile()]);
+    const entries = await Promise.all(
+      current.available.map(async (entry): Promise<courseTypes.CourseEntry> => {
+        try {
+          const { pack, ref } = await courses.loadCourse(places, entry);
+          const languages = pack.appliesTo?.languages ?? null;
+          return { ...entry, title: pack.title, version: pack.version, languages, trust: await courses.trustOf(places, ref), error: null };
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'invalid_course') throw error;
+          return { ...entry, title: null, version: null, languages: null, trust: 'invalid', error: (error as Error).message };
+        }
+      }),
+    );
+    return { current, entries, languages: profile?.languages.map((language) => language.id) ?? [], userDir: courses.userCoursesDir(configDir) };
+  };
+
+  const entryOf = async (rawId: unknown) => {
+    const id = requireString(rawId, 'id');
+    const entry = (await courses.availableCourses(ctx.coursePlaces())).find((candidate) => candidate.id === id);
+    return entry ?? failWith(`Course pack ${id} is not available here`, 'unknown_course', 'course');
+  };
+
+  ipcMain.handle(
+    CHANNELS.coursesList,
+    wrap(() => list()),
+  );
+
+  ipcMain.handle(
+    CHANNELS.coursesPreview,
+    wrap(async (_event, rawId): Promise<courseTypes.CoursePreview> => {
+      const places = ctx.coursePlaces();
+      const { pack, ref } = await courses.loadCourse(places, await entryOf(rawId));
+      return { pack, ref, trust: await courses.trustOf(places, ref), ...(await previousOf(pack, ref)) };
+    }),
+  );
+
+  // Writes this machine's choice to workspace.json; null leaves it to
+  // taskpilot.toml. A pack that needs confirming is picked as it is and
+  // reported pending, so programming stays in use until it is confirmed.
+  ipcMain.handle(
+    CHANNELS.coursesSelect,
+    wrap(async (_event, rawId): Promise<courseTypes.CourseList> => {
+      ctx.requireRoot();
+      const course = rawId === null ? null : (await entryOf(rawId)).id;
+      const saved = await ctx.repositories.saveConfig({ ...ctx.getConfig(), course });
+      ctx.setConfig(saved);
+      console.debug(`[courses] selected id=${course ?? '(taskpilot.toml)'}`);
+      return list();
+    }),
+  );
+
+  // Picks a pack file and validates it, writing nothing. The preview is
+  // shown in full before courses:import copies it.
+  ipcMain.handle(
+    CHANNELS.coursesPickImport,
+    wrap(async (): Promise<courseTypes.CourseImport | null> => {
+      if (!shell.pickFile) return failWith('File picker is unavailable', 'unsupported');
+      pickedImport = null;
+      const file = await shell.pickFile(null, [{ name: 'Course pack', extensions: ['toml'] }]);
+      if (file === null) return null;
+      const stat = await fs.stat(file);
+      if (!stat.isFile()) return failWith('The course pack must be a file', 'invalid_course', 'toml');
+      if (stat.size > courses.MAX_COURSE_BYTES) return failWith('The course pack is larger than 64 KB', 'invalid_course', 'toml');
+      const text = await fs.readFile(file, 'utf8');
+      const { pack, ref } = courses.parseCourseText(text, 'user', 'The course pack');
+      if (courses.isBuiltinCourse(pack.id)) return failWith(`id: "${pack.id}" is a built-in course pack`, 'invalid_course', 'id');
+      const replaces = (await courses.listUserCourses(configDir)).includes(pack.id);
+      const root = ctx.getConfig().root;
+      const shadowed = root ? (await courses.listRepositoryCourses(root)).includes(pack.id) : false;
+      pickedImport = { text, pack, ref };
+      console.debug(`[courses] picked import id=${pack.id} replaces=${replaces} shadowed=${shadowed}`);
+      return { pack, ref, trust: await courses.trustOf(ctx.coursePlaces(), ref), ...(await previousOf(pack, ref)), replaces, shadowed };
+    }),
+  );
+
+  // Copies the picked file into the global folder. `contentHash` is the one
+  // shown; importing never confirms the pack.
+  ipcMain.handle(
+    CHANNELS.coursesImport,
+    wrap(async (_event, rawHash): Promise<courseTypes.CourseList> => {
+      const contentHash = requireString(rawHash, 'contentHash');
+      if (!pickedImport || pickedImport.ref.contentHash !== contentHash)
+        return failWith('Choose the course pack file with the file picker', 'invalid_argument', 'contentHash');
+      await courses.importCourse(configDir, pickedImport.text, pickedImport.ref);
+      pickedImport = null;
+      return list();
+    }),
+  );
+};

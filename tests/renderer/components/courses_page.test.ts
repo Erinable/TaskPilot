@@ -1,0 +1,143 @@
+// @vitest-environment happy-dom
+import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
+import { flushPromises, mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import ElementPlus from 'element-plus';
+
+vi.setConfig({ testTimeout: 20_000 });
+
+import SettingsView from '@/views/SettingsView.vue';
+import { useSettingsStore } from '@/stores/settings.ts';
+import { courseList, coursePreview, defaultCourse, installApi, ok } from '../settings_fakes.ts';
+import { OS_COURSE } from '@shared/course_pack.ts';
+import type * as courseTypes from '@shared/ipc/courses.ts';
+
+vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
+
+let api: ReturnType<typeof installApi>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  api = installApi();
+});
+
+const mountPage = async () => {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  const wrapper = mount(SettingsView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+  onTestFinished(() => wrapper.unmount());
+  await useSettingsStore().open('courses');
+  await flushPromises();
+  return wrapper;
+};
+
+const dialog = () => document.querySelector<HTMLElement>('.course-preview-dialog');
+const acceptButton = () => document.querySelector<HTMLButtonElement>('[data-action="accept-course"]');
+
+const oslab = (): courseTypes.CourseEntry => ({
+  id: 'oslab',
+  source: 'repository',
+  title: '操作系统实验',
+  version: '0.1.0',
+  languages: null,
+  trust: 'pending',
+  error: null,
+});
+const pending = () => {
+  const ref = { id: 'oslab', version: '0.1.0', contentHash: 'b'.repeat(64), source: 'repository' as const };
+  return courseList({
+    current: { ...defaultCourse(), selected: { id: 'oslab', from: 'project' }, state: { status: 'pending', pack: { ...OS_COURSE, id: 'oslab' }, ref } },
+    entries: [...courseList().entries, oslab()],
+  });
+};
+
+test('the page shows the pack in use, its source and every pack to pick', async () => {
+  const wrapper = await mountPage();
+  expect(api.courses.list).toHaveBeenCalled();
+  expect(wrapper.get('#courseState').text()).toContain('正在使用：编程');
+  expect(wrapper.get('#courseState').text()).toContain('选择来自默认');
+  expect(wrapper.findAll('[data-course]').map((row) => row.attributes('data-course'))).toEqual(['programming', 'os']);
+  // The os pack is written for C and Rust; this repository is TypeScript.
+  expect(wrapper.get('[data-course="os"]').text()).toContain('和仓库语言不匹配');
+  expect(wrapper.find('#courseLanguageWarning').exists()).toBe(false);
+});
+
+test('picking a pack for another language warns about the mismatch', async () => {
+  api.courses.list.mockReturnValue(
+    ok(courseList({ current: { ...defaultCourse(), selected: { id: 'os', from: 'local' }, ref: { ...defaultCourse().ref, id: 'os' } } })),
+  );
+  const wrapper = await mountPage();
+  expect(wrapper.get('#courseLanguageWarning').text()).toContain('c, rust');
+  expect(wrapper.find('#clearCourse').exists()).toBe(true);
+});
+
+test('选用 writes the choice through courses:select', async () => {
+  const wrapper = await mountPage();
+  await wrapper.get('[data-course="os"] [data-action="select"]').trigger('click');
+  await flushPromises();
+  expect(api.courses.select).toHaveBeenCalledWith('os');
+});
+
+test('a pending pack is confirmed from a preview of its whole content', async () => {
+  api.courses.list.mockReturnValue(ok(pending()));
+  api.courses.preview.mockReturnValue(ok(coursePreview('oslab', { pack: { ...OS_COURSE, id: 'oslab' } })));
+  const wrapper = await mountPage();
+  expect(wrapper.get('#courseState').text()).toContain('课程包待确认');
+  await wrapper.get('#confirmCourse').trigger('click');
+  await flushPromises();
+  const text = dialog()!.textContent!;
+  for (const line of [...OS_COURSE.tutorGuide, ...OS_COURSE.difficultyGuide, ...OS_COURSE.practiceGuide, OS_COURSE.referenceGuide, OS_COURSE.learner])
+    expect(text).toContain(line);
+  for (const item of OS_COURSE.rubric) expect(text).toContain(item.description);
+  expect(text).toContain(OS_COURSE.rubric[0].examples![0].betterWay);
+  expect(text).toContain('.taskpilot/courses/oslab.toml');
+  acceptButton()!.click();
+  await flushPromises();
+  expect(api.workspace.confirmCourse).toHaveBeenCalledWith('oslab', 'b'.repeat(64));
+});
+
+test('a changed pack lists and marks what changed, and needs the changes ticked before confirming', async () => {
+  api.courses.list.mockReturnValue(ok(pending()));
+  const changes = [
+    { field: 'tutorGuide', kind: 'changed' as const },
+    { field: 'rubric.concept.description', kind: 'changed' as const },
+  ];
+  api.courses.preview.mockReturnValue(ok(coursePreview('oslab', { pack: { ...OS_COURSE, id: 'oslab' }, previous: 'known', changes })));
+  const wrapper = await mountPage();
+  await wrapper.get('#confirmCourse').trigger('click');
+  await flushPromises();
+  const listed = [...document.querySelectorAll('#courseChanges li')].map((item) => item.textContent);
+  expect(listed).toEqual(['修改 讲解指引', '修改 判卷维度 concept 的说明']);
+  expect(document.querySelector('[data-rubric="concept"]')!.classList.contains('changed')).toBe(true);
+  expect(document.querySelector('[data-rubric="mechanism"]')!.classList.contains('changed')).toBe(false);
+  expect(acceptButton()!.disabled).toBe(true);
+  const tick = document.querySelector<HTMLInputElement>('#courseChangesRead')!;
+  tick.checked = true;
+  tick.dispatchEvent(new Event('change'));
+  await flushPromises();
+  expect(acceptButton()!.disabled).toBe(false);
+});
+
+test('a preview of a built-in pack only shows it', async () => {
+  const wrapper = await mountPage();
+  await wrapper.get('[data-course="os"] [data-action="preview"]').trigger('click');
+  await flushPromises();
+  expect(dialog()!.textContent).toContain(OS_COURSE.summary);
+  expect(acceptButton()).toBeNull();
+});
+
+test('importing shows the picked file before copying it', async () => {
+  api.courses.pickImport.mockReturnValue(
+    ok({ ...coursePreview('net'), ref: { ...coursePreview('net').ref, source: 'user' }, replaces: true, shadowed: false }),
+  );
+  const wrapper = await mountPage();
+  expect(wrapper.get('#courseUserDir').text()).toBe('/config/courses');
+  await wrapper.get('#importCourse').trigger('click');
+  await flushPromises();
+  expect(dialog()!.textContent).toContain('导入会替换它');
+  expect(api.courses.import).not.toHaveBeenCalled();
+  acceptButton()!.click();
+  await flushPromises();
+  expect(api.courses.import).toHaveBeenCalledWith('b'.repeat(64));
+});

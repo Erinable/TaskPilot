@@ -11,6 +11,7 @@ import { createReviewService } from './review_service.ts';
 import * as activityIpc from './ipc/activity.ts';
 import * as codingIpc from './ipc/coding.ts';
 import * as commitIpc from './ipc/commit.ts';
+import * as coursesIpc from './ipc/courses.ts';
 import * as environmentIpc from './ipc/environment.ts';
 import * as notesIpc from './ipc/notes.ts';
 import * as packagesIpc from './ipc/packages.ts';
@@ -53,6 +54,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   commitIpc.register(ipcMain, ctx);
   tutorIpc.register(ipcMain, ctx);
   notesIpc.register(ipcMain, ctx);
+  coursesIpc.register(ipcMain, ctx);
   repositoriesIpc.register(ipcMain, ctx);
 
   return {

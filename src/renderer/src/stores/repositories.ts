@@ -11,6 +11,7 @@ import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { useActivityFeedStore } from './activity_feed.ts';
 import { useAppStore } from './app.ts';
 import { useCommitStore } from './commit.ts';
+import { useCoursesStore } from './courses.ts';
 import { useEngineeringMapStore } from './engineering_map.ts';
 import { useExecutionStore } from './execution.ts';
 import { useNotificationsStore } from './notifications.ts';
@@ -82,6 +83,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     // What the views read for the old repository; each view reloads on remount.
     useActivityFeedStore().reset();
     useCommitStore().reset();
+    useCoursesStore().reset();
     useEngineeringMapStore().reset();
     useOnboardingStore().reset();
     useTutorStore().reset();

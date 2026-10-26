@@ -44,6 +44,8 @@ type RunAgent = claudeCli.RunAgent;
 // The operating system's dialogs and shell; each is unavailable when left out.
 export type ShellDeps = {
   pickDirectory?: (defaultPath: string | null) => Promise<string | null>;
+  // Picks one file of the given extensions; null when cancelled.
+  pickFile?: (defaultPath: string | null, filters: { name: string; extensions: string[] }[]) => Promise<string | null>;
   // Opens a folder in the OS.
   revealPath?: (dir: string) => Promise<void>;
   // Shows a workspace file in the OS file manager (shell.showItemInFolder).
@@ -204,6 +206,13 @@ export const createAppContext = (deps: AppDeps) => {
     return cachedProfile.profile;
   };
 
+  // Where course packs and their confirmations live for `config`'s repository.
+  const coursePlaces = (config: workspace.WorkspaceConfig = getConfig()): courses.CoursePlaces => ({
+    root: config.root,
+    dataDir: repositories.dataDir(),
+    configDir,
+  });
+
   // The course pack the open repository teaches with (./courses.ts). Read
   // fresh each time, like the steps. A broken taskpilot.toml names no pack;
   // the steps report its error.
@@ -217,7 +226,7 @@ export const createAppContext = (deps: AppDeps) => {
         if (!(error instanceof WorkspaceError)) throw error;
       }
     }
-    return courses.resolveCourse(config.root, repositories.dataDir(), { local: config.course, project });
+    return courses.resolveCourse(coursePlaces(config), { local: config.course, project });
   };
 
   // Activity is a side record: a failed append is logged and never fails the
@@ -403,6 +412,7 @@ export const createAppContext = (deps: AppDeps) => {
     resolveSteps,
     runnableSteps,
     profile,
+    coursePlaces,
     course,
     record,
     recordCall,
