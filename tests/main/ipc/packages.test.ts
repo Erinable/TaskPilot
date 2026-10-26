@@ -200,7 +200,13 @@ test('baseline: a dirty tree is not measured, and can be re-measured once clean'
   assert.equal(dirty.reason, 'dirty_tree');
 
   await fixtures.run('git', ['checkout', '--', '.'], { cwd: h.root });
-  const started = await h.call(CHANNELS.baselineMeasure, 'auth-edge-tests');
+  // The first run records 'unavailable' just before it leaves the run
+  // registry, so a re-measure right after can still find it running.
+  let started = await h.call(CHANNELS.baselineMeasure, 'auth-edge-tests');
+  for (let i = 0; i < 400 && started.error?.code === 'baseline_running'; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    started = await h.call(CHANNELS.baselineMeasure, 'auth-edge-tests');
+  }
   assert.equal(started.ok, true, JSON.stringify(started.error));
   // Wait past the 'unavailable' record left by the first attempt.
   for (let i = 0; i < 400; i += 1) {

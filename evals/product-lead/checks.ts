@@ -125,5 +125,16 @@ export const check = (testCase: Pick<EvalCase, 'files' | 'expect'>, run: Pick<Ev
     };
   }
 
+  // The course pack's mode guide: the core mechanism is practised. Judged
+  // on the packages that touch each file.
+  if (expect.practiceFiles) {
+    const modeOf = (file: string) => packages.filter((pkg) => pkg.fileScope.includes(file)).map((pkg) => pkg.recommendedMode?.mode ?? 'none');
+    const wrong = expect.practiceFiles.filter((file) => !modeOf(file).includes('practice'));
+    results.practiceMode = {
+      pass: wrong.length === 0,
+      detail: wrong.length ? wrong.map((file) => `${file}: ${modeOf(file).join('/') || 'untouched'}`).join(', ') : 'ok',
+    };
+  }
+
   return results;
 };

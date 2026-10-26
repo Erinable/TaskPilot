@@ -32,12 +32,12 @@ export interface QaCase {
   };
 }
 
-const REPO = 'src/auth/user-repository.ts';
-const REPO_TEST = 'tests/auth/user-repository.test.ts';
+export const REPO = 'src/auth/user-repository.ts';
+export const REPO_TEST = 'tests/auth/user-repository.test.ts';
 const base = TS_API[REPO];
 const baseTest = TS_API[REPO_TEST];
 
-const FIND_BY_EMAIL_TASK: QaCase['task'] = {
+export const FIND_BY_EMAIL_TASK: QaCase['task'] = {
   title: '给 UserRepository 加 findByEmail',
   description: '按邮箱查找用户，比较忽略大小写，找不到返回 null。',
   steps: [
@@ -52,7 +52,7 @@ const FIND_BY_EMAIL_TASK: QaCase['task'] = {
   ],
 };
 
-const withMethod = (method: string) => base.replace(/\n}\n$/, `\n${method}}\n`);
+export const withMethod = (method: string) => base.replace(/\n}\n$/, `\n${method}}\n`);
 // The planted-bug cases keep this weak suite on purpose: fakeDb returns its
 // rows for any SQL, so these tests pass whatever the query says, and QA has
 // to read the code. Clean cases use STRONG_TESTS instead.
@@ -74,7 +74,7 @@ describe('UserRepository.findByEmail', () => {
 });
 `;
 // The same three tests, with the case test checking the query itself.
-const STRONG_TESTS = TESTS.replace(
+export const STRONG_TESTS = TESTS.replace(
   `  it('finds a user regardless of email case', async () => {
     const db = fakeDb([{ id: 'u1', email: 'a@example.com' }]);
     expect((await new UserRepository(db).findByEmail('A@Example.com'))?.id).toBe('u1');
@@ -94,7 +94,7 @@ const STRONG_TESTS = TESTS.replace(
 ).replace("import { fakeDb } from '../helpers/fake-db';", "import { fakeDb } from '../helpers/fake-db';\nimport type { Db } from '../../src/db/client';");
 const PASSING = ['finds a user by email', 'finds a user regardless of email case', 'returns null for an unknown email'];
 
-const GOOD_METHOD = `
+export const GOOD_METHOD = `
   async findByEmail(email: string): Promise<User | null> {
     const rows = await this.db.query<User>(\`SELECT \${COLUMNS} FROM users WHERE lower(email) = lower($1)\`, [email]);
     return rows[0] ?? null;

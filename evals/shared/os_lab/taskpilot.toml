@@ -1,0 +1,9 @@
+# A small operating systems lab: four programs that use system calls
+# directly. `make grade` builds them and prints one TAP line per test.
+course = "os"
+
+[custom.grade]
+label = "评分"
+commands = ["make grade"]
+timeout = 120
+required = true

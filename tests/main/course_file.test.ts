@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as courseFile from '../../src/main/course_file.ts';
-import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { OS_COURSE, PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
 
 // A valid pack as TOML; `extra` is appended, `drop` removes top-level lines.
 const OS_PACK = `
@@ -59,8 +59,13 @@ test('a full pack parses with every field', () => {
   assert.equal(pack.rubric[1].examples, undefined);
 });
 
-test('the built-in programming pack passes the same validation', () => {
-  assert.deepEqual(courseFile.normalizeCourse(structuredClone(PROGRAMMING_COURSE)), PROGRAMMING_COURSE);
+test('the built-in packs pass the same validation, with their fields in the file order', () => {
+  for (const pack of [PROGRAMMING_COURSE, OS_COURSE]) {
+    const normalized = courseFile.normalizeCourse(structuredClone(pack));
+    assert.deepEqual(normalized, pack);
+    // So a built-in pack hashes the same as the same content in a file.
+    assert.equal(JSON.stringify(normalized), JSON.stringify(pack));
+  }
 });
 
 test('a TOML syntax error names its line', () => {

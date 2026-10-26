@@ -63,18 +63,28 @@ test('notes: the packs that name categories are the built-in ones and the confir
           { id: 'style', label: '风格', dimension: 'style' },
         ],
       },
+      {
+        id: 'os',
+        title: '操作系统实验',
+        rubric: [
+          { id: 'concept', label: '原理', dimension: 'thinking' },
+          { id: 'mechanism', label: '实现', dimension: 'writing' },
+          { id: 'safety', label: '并发与安全', dimension: 'style' },
+        ],
+      },
     ],
   });
   await fixtures.useOsPack(h, { confirm: false });
   assert.equal((await h.call(CHANNELS.notesCourses)).data.current, 'programming', 'an unconfirmed pack is not in use');
   await fixtures.useOsPack(h);
   const confirmed = (await h.call(CHANNELS.notesCourses)).data;
-  assert.equal(confirmed.current, 'os');
+  assert.equal(confirmed.current, 'oslab');
   assert.deepEqual(
     confirmed.packs.map((pack) => [pack.id, pack.rubric.map((item) => `${item.id}:${item.dimension}`)]),
     [
       ['programming', ['thinking:thinking', 'writing:writing', 'style:style']],
-      ['os', ['concept:thinking', 'mechanism:writing']],
+      ['os', ['concept:thinking', 'mechanism:writing', 'safety:style']],
+      ['oslab', ['concept:thinking', 'mechanism:writing']],
     ],
   );
 });

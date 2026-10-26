@@ -16,7 +16,7 @@ import path from 'node:path';
 import { jsonText, writeFileAtomic } from './atomic_json_file.ts';
 import { WorkspaceError } from './command_line.ts';
 import * as courseFile from './course_file.ts';
-import { PROGRAMMING_COURSE, isCourseId } from '../shared/course_pack.ts';
+import { BUILTIN_COURSES, PROGRAMMING_COURSE, isCourseId } from '../shared/course_pack.ts';
 import type { CoursePack, CourseRef } from '../shared/course_pack.ts';
 import type { CourseState, CourseView } from '../shared/ipc/workspace.ts';
 import type { LooseJson } from './loose_json.ts';
@@ -30,17 +30,12 @@ const MAX_COURSE_FILES = 32;
 
 const builtinRef = (pack: CoursePack): CourseRef => ({ id: pack.id, version: pack.version, contentHash: courseFile.contentHash(pack), source: 'builtin' });
 
-// [人工决策-2026-10-26 15:38:21] 本期内置包只有 programming，OS 包在 T7e 加入。
-const BUILTIN: ReadonlyMap<string, { pack: CoursePack; ref: CourseRef }> = new Map(
-  [PROGRAMMING_COURSE].map((pack) => [pack.id, { pack, ref: builtinRef(pack) }]),
-);
+// [人工决策-2026-10-26 15:38:21] 内置包：programming（默认）和 os（T7e 加入，用来验证结构）；仓库里的同名文件不能替换内置包。
+const BUILTIN: ReadonlyMap<string, { pack: CoursePack; ref: CourseRef }> = new Map(BUILTIN_COURSES.map((pack) => [pack.id, { pack, ref: builtinRef(pack) }]));
 
-// The packs whose rubrics name note categories here: every built-in pack
-// and the one in use.
-export const knownPacks = (inUse: CoursePack): CoursePack[] => [
-  ...[...BUILTIN.values()].map((entry) => entry.pack).filter((pack) => pack.id !== inUse.id),
-  inUse,
-];
+// The packs whose rubrics name note categories here: every built-in pack,
+// in registry order, then the one in use when it is the repository's.
+export const knownPacks = (inUse: CoursePack): CoursePack[] => (BUILTIN.has(inUse.id) ? [...BUILTIN_COURSES] : [...BUILTIN_COURSES, inUse]);
 
 // The pack in use, and how the repository's choice resolved.
 export type CourseResolution = CourseView & { pack: CoursePack };

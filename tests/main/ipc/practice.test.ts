@@ -225,7 +225,7 @@ test('practice: grading uses the rubric of the course pack in use and snapshots 
   assert.deepEqual(
     { ...graded.grade!.course!, rubric: graded.grade!.course!.rubric.map((item) => [item.id, item.label]) },
     {
-      id: 'os',
+      id: 'oslab',
       version: '0.1.0',
       contentHash: shown.contentHash,
       rubric: [
@@ -236,13 +236,49 @@ test('practice: grading uses the rubric of the course pack in use and snapshots 
   );
 });
 
+// [人工决策-2026-10-26 15:38:21] 内置 os 包不需要本机确认；判卷按它的三个维度输出。
+test('practice: with course = "os" a grade marks concept, mechanism and safety, without confirming', async () => {
+  const comments = ['concept', 'mechanism', 'safety'].map((category) => ({
+    category,
+    file: null,
+    line: null,
+    observation: '看到的。',
+    betterWay: '更好的。',
+    repeated: false,
+  }));
+  const h = await practiceHarness({ agent: fixtures.fakeAgent({ grade: { summary: '能跑。', strengths: [], comments } }) });
+  await fs.writeFile(path.join(h.root, 'taskpilot.toml'), 'course = "os"\n');
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  const call = fixtures.callFor(h.agentCalls, 'grade');
+  assert.deepEqual(call.schema.properties.comments.items.properties.category.enum, ['concept', 'mechanism', 'safety']);
+  assert.match(call.systemPrompt, /a student learning operating systems who can already write basic C practises real work packages/);
+  assert.match(call.systemPrompt, /\n {2}- Example for concept: what was seen "在 trap 处理中直接读用户指针"/);
+  assert.deepEqual(
+    graded.grade!.report!.comments.map((comment) => comment.category),
+    ['concept', 'mechanism', 'safety'],
+  );
+  assert.equal(graded.grade!.course!.id, 'os');
+  assert.deepEqual(
+    graded.grade!.course!.rubric.map((item) => [item.id, item.label, item.dimension]),
+    [
+      ['concept', '原理', 'thinking'],
+      ['mechanism', '实现', 'writing'],
+      ['safety', '并发与安全', 'style'],
+    ],
+  );
+});
+
 test('practice: grading an OS package reads OS notes first, then other packs on a dimension OS has', async () => {
   const osComment = { category: 'concept', file: null, line: null, observation: '锁拿晚了。', betterWay: '先拿锁再读。', repeated: false };
   const h = await practiceHarness({ agent: fixtures.fakeAgent({ grade: { summary: '能跑。', strengths: [], comments: [osComment] } }) });
   await fixtures.useOsPack(h);
   await h.notes.create({ title: '先拆问题', body: '先拆', category: 'thinking', tags: [], source: null });
   await h.notes.create({ title: '命名要完整', body: '命名', category: 'style', tags: [], source: null });
-  await h.notes.create({ title: '锁的顺序', body: '先拿锁', category: 'concept', course: 'os', tags: [], source: null });
+  await h.notes.create({ title: '锁的顺序', body: '先拿锁', category: 'concept', course: 'oslab', tags: [], source: null });
   await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
   await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
   await writeSubmission(h.root);
