@@ -154,6 +154,7 @@ declare const api: {
     pickDirectory: () => Promise<envelopeTypes.IpcResult<string | null>>;
     reveal: () => Promise<envelopeTypes.IpcResult<boolean>>;
     openUrl: (url: string) => Promise<envelopeTypes.IpcResult<boolean>>;
+    courses: () => Promise<envelopeTypes.IpcResult<noteTypes.NoteCourses>>;
   };
 };
 

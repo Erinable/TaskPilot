@@ -1,22 +1,58 @@
 // Pure logic of the notes page: filtering, link resolution, backlinks,
 // [[ completion and the labels it shows.
 import { businessDay, businessTimeZone } from '@/lib/time_zone.ts';
+import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS, PROGRAMMING_COURSE } from '@shared/course_pack.ts';
 import * as markdown from '@shared/note_markdown.ts';
+import * as noteCourses from '@shared/note_courses.ts';
+import type { CourseDimension } from '@shared/course_pack.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
-import type * as packageTypes from '@shared/ipc/packages.ts';
 
-export type NoteFilter = { query: string; category: packageTypes.GradeCategory | null; tag: string | null };
+// One rubric item of one pack, or a dimension across every pack.
+export type CategoryFilter = { course: string; category: string } | { dimension: CourseDimension };
+export type NoteFilter = { query: string; category: CategoryFilter | null; tag: string | null };
 
-export const CATEGORY_LABELS: Record<packageTypes.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
+// What the page knows before the main process answers: only the built-in programming pack.
+export const DEFAULT_COURSES: noteTypes.NoteCourses = {
+  current: PROGRAMMING_COURSE.id,
+  packs: [{ id: PROGRAMMING_COURSE.id, title: PROGRAMMING_COURSE.title, rubric: PROGRAMMING_COURSE.rubric }],
+};
+
+export const currentPack = (courses: noteTypes.NoteCourses) => courses.packs.find((pack) => pack.id === courses.current)!;
+
+// The rubric item's label in the note's pack; a category no known pack has
+// is shown as written.
+// [人工决策-2026-10-26 15:38:21] 不认识的维度显示原 id 加「未知维度」，不报错。
+export const categoryLabel = (note: Pick<noteTypes.NoteMeta, 'category' | 'course'>, courses: noteTypes.NoteCourses): string | null => {
+  if (note.category === null) return null;
+  const item = noteCourses.rubricItemOf(note, courses.packs);
+  if (item) return item.label;
+  return noteCourses.isDimension(note.category) ? COURSE_DIMENSION_LABELS[note.category] : `${note.category}（未知维度）`;
+};
+
+export const categoryFilterOf = (note: Pick<noteTypes.NoteMeta, 'category' | 'course'>): CategoryFilter | null =>
+  note.category === null ? null : { course: noteCourses.noteCourseId(note), category: note.category };
+
+export const filterLabel = (filter: CategoryFilter, courses: noteTypes.NoteCourses) =>
+  'dimension' in filter ? `${COURSE_DIMENSION_LABELS[filter.dimension]}（通用维度）` : categoryLabel(filter, courses)!;
+
+const matchesCategory = (note: noteTypes.NoteMeta, filter: CategoryFilter, courses: noteTypes.NoteCourses) =>
+  'dimension' in filter
+    ? noteCourses.dimensionOf(note, courses.packs) === filter.dimension
+    : note.category === filter.category && noteCourses.noteCourseId(note) === filter.course;
 
 export const allTags = (note: noteTypes.NoteMeta) => [...new Set([...note.tags, ...note.inlineTags])];
 
 // Search matches the title, tags, excerpt and source here, plus the bodies
 // the main process found (bodyMatches), case-insensitively.
-export const filterNotes = (notes: noteTypes.NoteMeta[], { query, category, tag }: NoteFilter, bodyMatches: Set<string> = new Set()): noteTypes.NoteMeta[] => {
+export const filterNotes = (
+  notes: noteTypes.NoteMeta[],
+  { query, category, tag }: NoteFilter,
+  courses: noteTypes.NoteCourses,
+  bodyMatches: Set<string> = new Set(),
+): noteTypes.NoteMeta[] => {
   const needle = query.trim().toLowerCase();
   return notes.filter((note) => {
-    if (category && note.category !== category) return false;
+    if (category && !matchesCategory(note, category, courses)) return false;
     if (tag && !allTags(note).includes(tag)) return false;
     if (!needle || bodyMatches.has(note.id)) return true;
     const haystack = [note.title, note.excerpt, note.summary, ...allTags(note), note.source?.packageTitle, note.source?.file, note.source?.repositoryName]
@@ -96,10 +132,42 @@ export const tagCounts = (notes: noteTypes.NoteMeta[]) => {
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 };
 
-export const categoryCounts = (notes: noteTypes.NoteMeta[]) => {
-  const counts: Partial<Record<packageTypes.GradeCategory, number>> = {};
-  for (const note of notes) if (note.category) counts[note.category] = (counts[note.category] ?? 0) + 1;
-  return counts;
+// The pack in use's rubric items with how many of its notes carry each.
+export const rubricCounts = (notes: noteTypes.NoteMeta[], courses: noteTypes.NoteCourses) => {
+  const pack = currentPack(courses);
+  return pack.rubric.map((item) => ({
+    filter: { course: pack.id, category: item.id },
+    label: item.label,
+    count: notes.filter((note) => note.category === item.id && noteCourses.noteCourseId(note) === pack.id).length,
+  }));
+};
+
+// The shared dimensions with how many notes of every pack map onto each.
+export const dimensionCounts = (notes: noteTypes.NoteMeta[], courses: noteTypes.NoteCourses) =>
+  COURSE_DIMENSIONS.map((dimension) => ({
+    filter: { dimension },
+    label: COURSE_DIMENSION_LABELS[dimension],
+    count: notes.filter((note) => noteCourses.dimensionOf(note, courses.packs) === dimension).length,
+  }));
+
+// The dimensions only say something the rubric does not when the pack's
+// items are not the dimensions themselves, or some notes are of another pack.
+export const showDimensions = (notes: noteTypes.NoteMeta[], courses: noteTypes.NoteCourses) =>
+  currentPack(courses).rubric.some((item) => item.id !== item.dimension) ||
+  notes.some((note) => note.category && noteCourses.noteCourseId(note) !== courses.current);
+
+// The editor's category choices: the rubric of the note's pack when it is
+// known here (a note with neither category nor course is new to the pack in
+// use), else of the pack in use, plus the note's own category when neither
+// has it, so it is never dropped by opening the editor. `course` is the pack
+// a picked category belongs to.
+export const categoryOptions = (draft: { category: string | null; course: string | null }, courses: noteTypes.NoteCourses) => {
+  const own = draft.category === null && draft.course === null ? null : courses.packs.find((entry) => entry.id === noteCourses.noteCourseId(draft));
+  const pack = own ?? currentPack(courses);
+  const options = pack.rubric.map((item) => ({ value: item.id, label: item.label }));
+  if (draft.category !== null && !options.some((option) => option.value === draft.category))
+    options.push({ value: draft.category, label: categoryLabel(draft, courses)! });
+  return { course: pack.id, options };
 };
 
 // How the editor lays out Markdown and its preview, as in Obsidian / VS Code:

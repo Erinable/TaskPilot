@@ -12,11 +12,10 @@ import { confirmAction, confirmChoice } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
 import { useNotesStore } from '@/stores/notes.ts';
 import * as markdown from '@shared/note_markdown.ts';
-import type * as packageTypes from '@shared/ipc/packages.ts';
+import { noteCourseId } from '@shared/note_courses.ts';
 
 const notes = useNotesStore();
 
-const CATEGORY_OPTIONS = (Object.keys(model.CATEGORY_LABELS) as packageTypes.GradeCategory[]).map((value) => ({ value, label: model.CATEGORY_LABELS[value] }));
 // Remembered on this machine, like the queue's board / list choice.
 const storedMode = ref<model.EditorMode>(model.readEditorMode(globalThis.localStorage));
 const mode = computed({
@@ -29,6 +28,11 @@ const mode = computed({
 
 const note = computed(() => notes.current!);
 const draft = computed(() => notes.draft!);
+const categories = computed(() => model.categoryOptions(draft.value, notes.courses));
+// A category picked from another pack's rubric moves the note to that pack.
+const pickCategory = (value: string | null | undefined) => {
+  if (value && categories.value.course !== noteCourseId(draft.value)) draft.value.course = categories.value.course;
+};
 const titleError = computed(() => markdown.titleProblem(draft.value.title));
 const inlineTags = computed(() => markdown.scanBody(draft.value.body).tags);
 // Links in the preview only show whether they resolve; following one waits for reading mode.
@@ -142,8 +146,8 @@ const summaryText = computed({
     </div>
 
     <div class="note-props">
-      <el-select v-model="draft.category" class="note-prop-category" placeholder="不分类" clearable aria-label="分类">
-        <el-option v-for="option in CATEGORY_OPTIONS" :key="option.value" :value="option.value" :label="option.label" />
+      <el-select v-model="draft.category" class="note-prop-category" placeholder="不分类" clearable aria-label="分类" @change="pickCategory">
+        <el-option v-for="option in categories.options" :key="option.value" :value="option.value" :label="option.label" />
       </el-select>
       <el-select
         v-model="draft.tags"

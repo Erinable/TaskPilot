@@ -1,5 +1,6 @@
 // Learning notes (notes:*).
 
+import type { RubricItem } from '../course_pack.ts';
 import type { GradeCategory } from './packages.ts';
 
 // Where a note came from; every part is optional (a hand-written note has none).
@@ -13,15 +14,21 @@ export type NoteSource = {
 };
 // A note is one Markdown file in the notes folder: the title is its file
 // name, the body is Markdown, and the other fields live in its frontmatter.
-// category: set when saved from a grade comment, or chosen by hand.
+// category: set when saved from a grade comment, or chosen by hand; a rubric
+// item id of the note's course pack, kept as written even when no known pack
+// has it.
+// course: the pack the category belongs to; absent means programming (notes
+// written before packs existed have none).
 // tags: the frontmatter list; #tags written in the body are inlineTags.
 // summary: what Tutor reads when grading instead of the body, written on
 // request (by Tutor or by hand); stale once the body changed after it.
-export type NoteInput = { title: string; body: string; category: GradeCategory | null; tags: string[]; source: NoteSource | null };
+export type NoteInput = { title: string; body: string; category: GradeCategory | null; course?: string | null; tags: string[]; source: NoteSource | null };
 export type NoteEdit = {
   title: string;
   body: string;
   category: GradeCategory | null;
+  // Left out to keep the saved one.
+  course?: string | null;
   tags: string[];
   // Left out to keep the saved one; null removes it.
   summary?: string | null;
@@ -37,6 +44,7 @@ export type NoteMeta = {
   id: string;
   title: string;
   category: GradeCategory | null;
+  course: string | null;
   tags: string[];
   inlineTags: string[];
   source: NoteSource | null;
@@ -58,3 +66,7 @@ export type Note = NoteMeta & { body: string };
 // truncated: the folder holds more notes than TaskPilot reads.
 export type NoteList = { revision: number; directory: string; custom: boolean; unavailable: string | null; truncated: boolean; notes: NoteMeta[] };
 export type NoteSaved = { revision: number; note: Note; relinked: number };
+// The packs whose categories the notes page can name: the built-in ones and
+// the one the open repository uses (`current`).
+export type NoteCourse = { id: string; title: string; rubric: Pick<RubricItem, 'id' | 'label' | 'dimension'>[] };
+export type NoteCourses = { current: string; packs: NoteCourse[] };

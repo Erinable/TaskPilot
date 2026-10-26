@@ -80,6 +80,52 @@ test('files written by other programs keep the fields TaskPilot does not know', 
   assert.match(raw, /---\n新正文\n$/);
 });
 
+test('a note before course packs keeps its category and gains no course through load, save and summary', async () => {
+  const configDir = await dir();
+  await fs.mkdir(notesDir(configDir), { recursive: true });
+  const file = path.join(notesDir(configDir), '旧笔记.md');
+  await fs.writeFile(file, '---\ncategory: thinking\ntags: [a]\n---\n正文\n');
+  const store = await open(configDir);
+  const note = store.get('旧笔记.md');
+  assert.equal(note.category, 'thinking');
+  assert.equal(note.course, null, 'no course is programming');
+  const saved = (await store.update(note.id, edit(note, { title: '旧笔记', body: '新正文\n', category: 'thinking', course: 'programming', tags: ['a'] }))).note;
+  await store.setSummary(note.id, '一句总结', saved.version);
+  const raw = await fs.readFile(file, 'utf8');
+  assert.match(raw, /^---\ncategory: thinking\n/);
+  assert.equal(raw.includes('course'), false, 'saving programming over no course writes nothing');
+});
+
+test('a category or course written elsewhere is kept as written, known to TaskPilot or not', async () => {
+  const configDir = await dir();
+  await fs.mkdir(notesDir(configDir), { recursive: true });
+  const unknown = path.join(notesDir(configDir), '外部.md');
+  const odd = path.join(notesDir(configDir), '怪值.md');
+  await fs.writeFile(unknown, '---\ncategory: concurrency\ncourse: os\n---\n正文\n');
+  await fs.writeFile(odd, '---\ncategory: [1, 2]\ncourse: 3\n---\n正文\n');
+  const store = await open(configDir);
+  assert.deepEqual([store.get('外部.md').category, store.get('外部.md').course], ['concurrency', 'os']);
+  assert.deepEqual([store.get('怪值.md').category, store.get('怪值.md').course], [null, null], 'values TaskPilot cannot read show as none');
+  const first = store.get('外部.md');
+  await store.update(first.id, edit(first, { title: '外部', body: '改了\n', category: 'concurrency', tags: [] }));
+  assert.equal(await fs.readFile(unknown, 'utf8'), '---\ncategory: concurrency\ncourse: os\n---\n改了\n');
+  const second = store.get('怪值.md');
+  await store.update(second.id, edit(second, { title: '怪值', body: '改了\n', category: null, course: null, tags: [] }));
+  assert.equal(await fs.readFile(odd, 'utf8'), '---\ncategory: [ 1, 2 ]\ncourse: 3\n---\n改了\n', 'unchanged fields are not rewritten');
+  const third = store.get('外部.md');
+  const moved = (await store.update(third.id, edit(third, { title: '外部', body: '改了\n', category: 'style', course: null, tags: [] }))).note;
+  assert.deepEqual([moved.category, moved.course], ['style', null]);
+  assert.equal(await fs.readFile(unknown, 'utf8'), '---\ncategory: style\n---\n改了\n');
+});
+
+test('a note saved from an OS grade records its pack and category', async () => {
+  const configDir = await dir();
+  const store = await open(configDir);
+  const { note } = await store.create(input({ category: 'concurrency', course: 'os' }));
+  assert.deepEqual([note.category, note.course], ['concurrency', 'os']);
+  assert.match(await fs.readFile(path.join(notesDir(configDir), note.id), 'utf8'), /^---\ncategory: concurrency\ncourse: os\n/);
+});
+
 test('a save refuses to overwrite a file another program changed, unless forced', async () => {
   const configDir = await dir();
   const store = await open(configDir);
@@ -142,7 +188,8 @@ test('bad input is refused field by field', () => {
     [input({ title: '[[x]]' }), 'title'],
     [input({ title: 'x'.repeat(81) }), 'title'],
     [input({ body: 'a‮b' }), 'body'],
-    [input({ category: 'mood' }), 'category'],
+    [input({ category: 'Mood!' }), 'category'],
+    [input({ course: '../os' }), 'course'],
     [input({ tags: Array(9).fill('t') }), 'tags'],
     [input({ source: { line: 0 } }), 'source.line'],
     [input({ source: 'x' }), 'source'],

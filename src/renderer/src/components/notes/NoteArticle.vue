@@ -75,8 +75,8 @@ const remove = async () => {
         <div class="article-meta">
           <time>{{ model.formatDay(note.createdAt) }}</time>
           <span v-if="model.formatDay(note.updatedAt) !== model.formatDay(note.createdAt)">更新于 {{ model.formatDay(note.updatedAt) }}</span>
-          <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: note.category }))">
-            {{ model.CATEGORY_LABELS[note.category] }}
+          <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))">
+            {{ notes.categoryLabel(note) }}
           </a>
           <a v-for="tag in model.allTags(note)" :key="tag" class="post-tag" role="link" tabindex="0" @click="run(notes.goIndex({ tag }))">#{{ tag }}</a>
         </div>

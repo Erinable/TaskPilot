@@ -210,6 +210,8 @@ const api = {
     reveal: () => invoke<boolean>(CHANNELS.notesReveal),
     // http(s) and mailto links only, opened by the system.
     openUrl: (url: string) => invoke<boolean>(CHANNELS.notesOpenUrl, url),
+    // The packs whose categories the notes page names, and the one in use.
+    courses: () => invoke<noteTypes.NoteCourses>(CHANNELS.notesCourses),
   },
 };
 

@@ -2,6 +2,7 @@
 // every field.
 import { failWith, requireString } from '../coded_error.ts';
 import * as tutorAgent from '../agents/tutor.ts';
+import * as courses from '../courses.ts';
 import { throwIfCancelled } from '../agents/pipeline.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
@@ -21,6 +22,22 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     wrap((_event, since): noteTypes.NoteList | null => {
       const store = requireNotes();
       return since === store.revision ? null : store.list();
+    }),
+  );
+  // The pack in use and the built-in ones, so the page can name categories;
+  // a repository pack not yet confirmed is not in use (../courses.ts).
+  ipcMain.handle(
+    CHANNELS.notesCourses,
+    wrap(async (): Promise<noteTypes.NoteCourses> => {
+      const { pack } = await ctx.course();
+      return {
+        current: pack.id,
+        packs: courses.knownPacks(pack).map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          rubric: entry.rubric.map((item) => ({ id: item.id, label: item.label, dimension: item.dimension })),
+        })),
+      };
     }),
   );
   ipcMain.handle(

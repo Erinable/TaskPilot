@@ -6,6 +6,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import * as noteCourses from '../shared/note_courses.ts';
+import type { CoursePack } from '../shared/course_pack.ts';
 import type { NoteMeta } from '../shared/ipc/notes.ts';
 import type { Grade, GradeCategory, Review } from '../shared/ipc/packages.ts';
 
@@ -52,16 +54,42 @@ export const reviewForGrade = (review: Review | null): { passed: boolean; summar
 
 export const MAX_GRADE_NOTES = 10;
 
-// The developer's notes Tutor reads when grading: those about a file this
-// submission changed, then those with a grading category, newest first,
-// at most MAX_GRADE_NOTES. Notes come newest first from the store.
+// The developer's notes Tutor reads when grading, at most MAX_GRADE_NOTES:
+// those about a file this submission changed, then those with a category of
+// the pack in use (`course`), then those of other packs whose category maps
+// onto a dimension this pack's rubric also has. Notes come newest first from
+// the store; `packs` are the packs whose rubrics are known here.
 // Tutor reads each note's summary, never its body: a note without one
-// stands in with the start of its text.
-export const notesForGrade = (notes: NoteMeta[], changedPaths: string[]): { category: GradeCategory | null; title: string; summary: string }[] => {
+// stands in with the start of its text. Another pack's note is labelled
+// with its dimension, since its own category means nothing in this pack.
+// [人工决策-2026-10-26 15:38:21] 先同文件，再同课程包，最后其他包里同一通用维度的笔记。
+export const notesForGrade = (
+  notes: NoteMeta[],
+  changedPaths: string[],
+  course: Pick<CoursePack, 'id' | 'rubric'>,
+  packs: Pick<CoursePack, 'id' | 'rubric'>[],
+): { category: GradeCategory | null; title: string; summary: string }[] => {
   const changed = new Set(changedPaths);
-  const sameFile = notes.filter((note) => note.source?.file && changed.has(note.source.file));
-  const categorized = notes.filter((note) => note.category && !sameFile.includes(note));
-  return [...sameFile, ...categorized]
+  const dimensions = new Set(course.rubric.map((item) => item.dimension));
+  const label = new Map<NoteMeta, GradeCategory | null>();
+  const sameFile: NoteMeta[] = [];
+  const samePack: NoteMeta[] = [];
+  const sameDimension: NoteMeta[] = [];
+  for (const note of notes) {
+    if (note.source?.file && changed.has(note.source.file)) {
+      sameFile.push(note);
+      label.set(note, noteCourses.noteCourseId(note) === course.id ? note.category : (noteCourses.dimensionOf(note, packs) ?? note.category));
+    } else if (note.category && noteCourses.noteCourseId(note) === course.id) {
+      samePack.push(note);
+      label.set(note, note.category);
+    } else {
+      const dimension = note.category ? noteCourses.dimensionOf(note, packs) : null;
+      if (!dimension || !dimensions.has(dimension)) continue;
+      sameDimension.push(note);
+      label.set(note, dimension);
+    }
+  }
+  return [...sameFile, ...samePack, ...sameDimension]
     .slice(0, MAX_GRADE_NOTES)
-    .map((note) => ({ category: note.category, title: note.title, summary: note.summary ?? note.excerpt }));
+    .map((note) => ({ category: label.get(note) ?? null, title: note.title, summary: note.summary ?? note.excerpt }));
 };

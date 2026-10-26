@@ -54,6 +54,7 @@ const onMouseUp = (event: MouseEvent) => {
 
 onMounted(() => {
   run(notes.refresh());
+  run(notes.loadCourses());
   notes.startPolling();
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('mouseup', onMouseUp);

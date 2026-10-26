@@ -1,8 +1,9 @@
 // Learning notes as a folder of Markdown files, readable by Obsidian or any
 // editor: one note per top-level .md file, its title the file name, its body
-// Markdown. TaskPilot's fields (category, tags, source, summary, created)
-// live in the YAML frontmatter, beside any fields other programs put there,
-// which are kept as written. Notes follow the developer across repositories.
+// Markdown. TaskPilot's fields (category, course, tags, source, summary,
+// created) live in the YAML frontmatter, beside any fields other programs put
+// there, which are kept as written; a save only writes the fields it changes.
+// Notes follow the developer across repositories.
 //
 // The folder is userData/notes unless the developer chose another one (an
 // existing Obsidian vault, say). Other programs may change the files at any
@@ -12,6 +13,8 @@
 //
 // [人工决策-2026-10-24 14:25:15] 笔记全局一份，上限 5000 条，满了拒绝新增、不自动删除。
 // [人工决策-2026-10-24 16:12:00] 笔记改为 .md 文件目录（默认 userData/notes，可改），监听外部修改、冲突时让用户选覆盖或放弃；正文不限长度，判卷只读标题 + AI 总结（手动生成）。
+// [人工决策-2026-10-26 15:38:21] 笔记新增可选 course 字段，没有的视为 programming，旧文件不迁移；category 是课程包
+// rubric 项的 id，任意合法 id 都原样保留（不认识的包或维度也不读成 null）。
 import { createHash, randomUUID } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
@@ -19,6 +22,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 
 import * as markdown from '../shared/note_markdown.ts';
+import { PROGRAMMING_COURSE, isCourseId } from '../shared/course_pack.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
@@ -33,7 +37,6 @@ const EXCERPT_LENGTH = 300;
 const MAX_TAGS = 8;
 const MAX_TAG = 20;
 const WATCH_DEBOUNCE_MS = 200;
-const CATEGORIES: (GradeCategory | null)[] = ['thinking', 'writing', 'style', null];
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
 export class NoteError extends Error {
@@ -76,9 +79,15 @@ const body = (value: unknown): string => {
   return value;
 };
 
+// A rubric item id of any pack, known here or not.
 const category = (value: unknown): GradeCategory | null => {
-  if (!CATEGORIES.includes((value ?? null) as GradeCategory | null)) fail('Unknown category', 'category');
+  if (value !== null && value !== undefined && !isCourseId(value)) fail('category must be a rubric item id', 'category');
   return (value ?? null) as GradeCategory | null;
+};
+
+const course = (value: unknown): string | null => {
+  if (value !== null && value !== undefined && !isCourseId(value)) fail('course must be a course pack id', 'course');
+  return (value ?? null) as string | null;
 };
 
 const tags = (value: unknown): string[] => {
@@ -110,7 +119,14 @@ const summary = (value: unknown): string | null => (value === null ? null : text
 export const validateNote = (raw: unknown): noteTypes.NoteInput => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('A note must be an object', 'note');
   const input = raw as Record<string, unknown>;
-  return { title: title(input.title), body: body(input.body ?? ''), category: category(input.category), tags: tags(input.tags), source: source(input.source) };
+  return {
+    title: title(input.title),
+    body: body(input.body ?? ''),
+    category: category(input.category),
+    course: course(input.course),
+    tags: tags(input.tags),
+    source: source(input.source),
+  };
 };
 
 const digest = (content: string) => createHash('sha256').update(content).digest('hex').slice(0, 16);
@@ -168,7 +184,8 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
     meta: {
       id,
       title: id.slice(0, -'.md'.length),
-      category: CATEGORIES.includes(fields.category as GradeCategory) ? (fields.category as GradeCategory) : null,
+      category: isCourseId(fields.category) ? fields.category : null,
+      course: isCourseId(fields.course) ? fields.course : null,
       tags: loose.tags(fields.tags),
       inlineTags: scan.tags,
       source: loose.source(fields.source),
@@ -187,7 +204,16 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
   };
 };
 
-type Fields = { category: GradeCategory | null; tags: string[]; source?: noteTypes.NoteSource | null; summary?: string | null; created?: string };
+// A field left out (undefined) keeps what the file says, even a value
+// TaskPilot could not read.
+type Fields = {
+  category?: GradeCategory | null;
+  course?: string | null;
+  tags?: string[];
+  source?: noteTypes.NoteSource | null;
+  summary?: string | null;
+  created?: string;
+};
 
 // The file for a body and fields, keeping every other frontmatter field.
 const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): string => {
@@ -196,8 +222,9 @@ const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): st
     if (value === null || value === undefined || (Array.isArray(value) && !value.length)) next.delete(key);
     else next.set(key, value);
   };
-  put('category', fields.category);
-  put('tags', fields.tags);
+  if (fields.category !== undefined) put('category', fields.category);
+  if (fields.course !== undefined) put('course', fields.course);
+  if (fields.tags !== undefined) put('tags', fields.tags);
   if (fields.source !== undefined) put('source', fields.source && Object.fromEntries(Object.entries(fields.source).filter(([, value]) => value !== null)));
   if (fields.summary !== undefined) {
     put('summary', fields.summary);
@@ -208,12 +235,32 @@ const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): st
   return yaml ? `---\n${yaml}---\n${noteBody}` : noteBody;
 };
 
+// The fields an edit sets, checked.
+const editedFields = (input: Record<string, unknown>): Fields => {
+  const fields: Fields = { category: category(input.category), tags: tags(input.tags) };
+  if (input.course !== undefined) fields.course = course(input.course);
+  if (input.summary !== undefined) fields.summary = summary(input.summary);
+  return fields;
+};
+
+// Category and course are only written when they change, so a value as
+// another program wrote it stays. No course is programming, so writing one
+// over the other changes nothing.
+const changedFields = ({ category: nextCategory, course: nextCourse, ...rest }: Fields, meta: noteTypes.NoteMeta): Fields => {
+  const fields: Fields = rest;
+  const courseOf = (value: string | null) => value ?? PROGRAMMING_COURSE.id;
+  if (nextCategory !== meta.category) fields.category = nextCategory;
+  if (nextCourse !== undefined && courseOf(nextCourse) !== courseOf(meta.course)) fields.course = nextCourse;
+  return fields;
+};
+
 // ========== The store ==========
 
 export type NoteEditInput = {
   title: string;
   body: string;
   category: GradeCategory | null;
+  course?: string | null;
   tags: string[];
   summary?: string | null;
   baseVersion: string;
@@ -370,9 +417,9 @@ export class NoteStore {
       if (typeof input.baseVersion !== 'string') fail('baseVersion is required', 'baseVersion');
       const nextTitle = title(input.title);
       const nextBody = body(input.body);
-      const fields: Fields = { category: category(input.category), tags: tags(input.tags) };
-      if (input.summary !== undefined) fields.summary = summary(input.summary);
+      const edited = editedFields(input);
       const current = await this.#fresh(id);
+      const fields = changedFields(edited, current.meta);
       if (current.meta.frontmatterError)
         throw new NoteError('The frontmatter of this note is not valid YAML; fix it in another editor first', 'frontmatter_invalid');
       if (current.meta.version !== input.baseVersion && input.force !== true)
@@ -404,7 +451,7 @@ export class NoteStore {
       const current = await this.#fresh(id);
       if (current.meta.frontmatterError) throw new NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
       if (current.meta.version !== baseVersion) throw new NoteError('The note changed on disk since it was opened', 'note_conflict');
-      const content = render(current.doc, current.body, { category: current.meta.category, tags: current.meta.tags, summary: summary(value) });
+      const content = render(current.doc, current.body, { summary: summary(value) });
       await this.#writeFile(id, content);
       await this.#reread(id);
       return { revision: this.#revision, note: this.get(id), relinked: 0 };
