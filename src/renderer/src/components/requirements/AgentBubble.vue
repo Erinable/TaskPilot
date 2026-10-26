@@ -4,7 +4,7 @@ import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import type { IconName } from '@/lib/icons.ts';
 
-withDefaults(defineProps<{ text?: string | null; tone?: string; iconName?: IconName | null; agent?: 'pm' | 'arch' }>(), {
+withDefaults(defineProps<{ text?: string | null; tone?: string; iconName?: IconName | null; agent?: 'pm' | 'arch' | 'tutor' }>(), {
   text: null,
   tone: '',
   iconName: null,
@@ -18,6 +18,10 @@ withDefaults(defineProps<{ text?: string | null; tone?: string; iconName?: IconN
       <template v-if="agent === 'arch'">
         <span class="agent-avatar arch">AR</span>
         <strong>Architect</strong>
+      </template>
+      <template v-else-if="agent === 'tutor'">
+        <span class="agent-avatar tutor">TU</span>
+        <strong>Tutor</strong>
       </template>
       <template v-else>
         <span class="agent-avatar pm">PM</span>

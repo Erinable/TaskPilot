@@ -5,6 +5,8 @@
 // and a field it refuses is shown the same way. The rubric's dimension is
 // picked, never typed. Saving changes the content, so the pack is pending
 // until this machine confirms it again; the form says so before saving.
+// `save` replaces saving over the pack's file, for a drafted pack that has
+// none yet (the requirement center's course interview).
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
@@ -15,7 +17,7 @@ import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS } from '@shared/course_pack.
 import { COURSE_LIMITS, checkCourse } from '@shared/course_rules.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
-const props = defineProps<{ pack: CoursePack }>();
+const props = defineProps<{ pack: CoursePack; save?: (pack: CoursePack) => Promise<{ field: string; message: string } | null> }>();
 const emit = defineEmits<{ close: [] }>();
 
 const courses = useCoursesStore();
@@ -99,7 +101,7 @@ const save = async () => {
   tried.value = true;
   serverError.value = null;
   if (!checked.value.pack) return;
-  const refused = await courses.save(checked.value.pack);
+  const refused = await (props.save ?? courses.save)(checked.value.pack);
   if (refused) serverError.value = refused;
   else emit('close');
 };

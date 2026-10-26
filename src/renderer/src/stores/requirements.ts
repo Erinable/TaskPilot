@@ -1,17 +1,20 @@
 // Requirement center: write a requirement, answer Product Lead's questions,
-// review the proposed work packages, and publish them to the queue.
+// review the proposed work packages, and publish them to the queue. A course
+// requirement ("我想学…") runs Tutor's goal interview instead and ends with
+// a learning path, or a drafted course pack to edit and confirm first.
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { call } from '@/lib/ipc.ts';
+import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
 import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/components/requirements/requirement_model.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
-import type { IpcError } from '@/lib/ipc.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import type { CoursePack } from '@shared/course_pack.ts';
+import type { GoalForm, PathEntry } from '@shared/course_plan.ts';
 
 export type RequirementPane = 'new' | 'detail' | 'empty';
 
@@ -66,6 +69,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   // ========== Compose ==========
+  // What the form asks for: work on the repository, or something to learn.
+  const composeKind = ref<requirementTypes.RequirementKind>('project');
+  const composeForm = ref<GoalForm>({ level: 'basic', target: 'implement', environment: model.ENVIRONMENT_OPTIONS[0], weeklyHours: 4 });
   const composeTitle = ref('');
   const composeText = ref('');
   const composeStatus = ref<{ text: string; error: boolean }>({ text: '', error: false });
@@ -90,7 +96,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   };
 
-  const startCompose = () => {
+  const startCompose = (kind: requirementTypes.RequirementKind = 'project') => {
+    composeKind.value = kind;
     composing.value = true;
     selectedId.value = null;
     stopPolling();
@@ -120,7 +127,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
     submitting.value = true;
     try {
-      const item = await call(window.taskpilot.requirements.create({ title: composeTitle.value, text }));
+      const course = composeKind.value === 'course' ? { course: { ...composeForm.value } } : {};
+      const item = await call(window.taskpilot.requirements.create({ title: composeTitle.value, text, ...course }));
       composeTitle.value = '';
       composeText.value = '';
       composing.value = false;
@@ -144,12 +152,18 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // The step request in flight, until the requirement reports it is running.
   const acting = ref<'clarify' | 'plan' | 'edit' | null>(null);
 
-  const runStep = async (item: requirementTypes.Requirement, step: 'clarify' | 'plan', answers?: requirementTypes.RequirementAnswers) => {
+  const runStep = async (
+    item: requirementTypes.Requirement,
+    step: 'clarify' | 'plan',
+    answers?: requirementTypes.RequirementAnswers,
+    choice?: requirementTypes.CourseChoice,
+  ) => {
     if (acting.value) return;
     acting.value = step;
     try {
-      const next =
-        step === 'plan' ? await call(window.taskpilot.requirements.plan(item.id, answers)) : await call(window.taskpilot.requirements.clarify(item.id));
+      // A project's plan request carries no choice argument at all.
+      const planned = () => (choice ? window.taskpilot.requirements.plan(item.id, answers, choice) : window.taskpilot.requirements.plan(item.id, answers));
+      const next = await call(step === 'plan' ? planned() : window.taskpilot.requirements.clarify(item.id));
       upsert(next);
       renderDetail(next);
       startPolling();
@@ -229,6 +243,68 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   const showQueue = () => useAppStore().navigate('queue');
 
+  // ========== Course path and draft ==========
+  const courseBusy = ref(false);
+
+  const courseAction = async (action: () => Promise<requirementTypes.Requirement>, failure: string) => {
+    courseBusy.value = true;
+    try {
+      const next = await action();
+      upsert(next);
+      renderDetail(next);
+      return next;
+    } catch (error) {
+      console.error(error);
+      showToast(`${failure}：${describeError(error)}`);
+      return null;
+    } finally {
+      courseBusy.value = false;
+    }
+  };
+
+  // The learner reordered the path or marked a concept.
+  const savePath = (item: requirementTypes.Requirement, path: PathEntry[]) =>
+    courseAction(() => call(window.taskpilot.requirements.coursePath(item.id, path)), '保存路径失败');
+
+  const confirmPath = async (item: requirementTypes.Requirement) => {
+    const next = await courseAction(() => call(window.taskpilot.requirements.publish(item.id)), '确认路径失败');
+    if (next) showToast('学习路径已确认。');
+  };
+
+  // Saves the edited draft into the global folder. A refusal naming a field
+  // is returned for the editor to show there.
+  const saveDraft = async (item: requirementTypes.Requirement, pack: CoursePack) => {
+    courseBusy.value = true;
+    try {
+      const saved = await call(window.taskpilot.requirements.courseSaveDraft(item.id, pack));
+      upsert(saved.requirement);
+      renderDetail(saved.requirement);
+      draftSaved.value = { requirementId: item.id, ref: saved.ref, pack };
+      return null;
+    } catch (error) {
+      console.error(error);
+      if (error instanceof IpcError && error.field && error.code !== 'unknown') return { field: error.field, message: describeError(error) };
+      showToast(`保存课程包失败：${describeError(error)}`);
+      return null;
+    } finally {
+      courseBusy.value = false;
+    }
+  };
+
+  // The pack just saved from the draft, shown in full to confirm.
+  const draftSaved = ref<{ requirementId: string; ref: requirementTypes.CourseDraftSaved['ref']; pack: CoursePack } | null>(null);
+
+  // Confirms the saved pack at the content shown, then plans the path with it.
+  const confirmDraft = async (item: requirementTypes.Requirement) => {
+    const saved = draftSaved.value;
+    if (!saved || saved.requirementId !== item.id) return;
+    const next = await courseAction(() => call(window.taskpilot.requirements.courseConfirmDraft(item.id, saved.ref.contentHash)), '确认课程包失败');
+    if (!next) return;
+    draftSaved.value = null;
+    showToast(`已确认课程包「${saved.pack.title}」，开始规划学习路径。`);
+    await runStep(next, 'plan');
+  };
+
   // ========== Polling ==========
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -238,6 +314,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const announce = (item: requirementTypes.Requirement) => {
+    if (model.isCourse(item)) {
+      if (item.status === 'answering') announceAgent('Tutor 看完了你的目标，等你选课程包。', 'info');
+      else if (item.status === 'reviewing')
+        announceAgent(item.course?.draft ? 'Tutor 起草了一个课程包，等你预览和确认。' : '学习路径规划好了，请确认。', 'info');
+      else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Tutor 运行失败：${describeErrorInfo(item.error)}`);
+      return;
+    }
     if (item.status === 'answering') announceAgent('Product Lead 提出了澄清问题，等你回答。', 'info');
     else if (item.status === 'reviewing') announceAgent('工作包拆解完成，请确认。', 'info');
     else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);
@@ -270,12 +353,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const isPolling = () => pollTimer !== null;
 
   // ========== Navigation ==========
-  const open = async ({ compose = false, id = null }: { compose?: boolean; id?: string | null } = {}) => {
+  // `compose: 'course'` opens the "我想学…" form.
+  const open = async ({ compose = false, id = null }: { compose?: boolean | requirementTypes.RequirementKind; id?: string | null } = {}) => {
     const app = useAppStore();
     if (!(await app.navigate('requirements'))) return;
     await refreshList();
     const target = id ?? selectedId.value;
-    if (compose) startCompose();
+    if (compose) startCompose(compose === true ? 'project' : compose);
     else if (target) select(target);
     else if (items.value.length) select(items.value[0].id);
     else pane.value = 'empty';
@@ -301,6 +385,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     detailRevision,
     select,
     // Compose
+    composeKind,
+    composeForm,
     composeTitle,
     composeText,
     composeStatus,
@@ -319,6 +405,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
     cancelRun,
     removeRequirement,
     showQueue,
+    // Course path and draft
+    courseBusy,
+    savePath,
+    confirmPath,
+    saveDraft,
+    draftSaved,
+    confirmDraft,
     // Polling
     startPolling,
     stopPolling,

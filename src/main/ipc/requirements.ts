@@ -1,5 +1,7 @@
 // Requirement channels: Product Lead clarifies and plans, Architect
-// summarizes the code it touches, and the human publishes the plan.
+// summarizes the code it touches, and the human publishes the plan. Course
+// requirements go to Tutor's goal interview (../course_interview_service.ts)
+// on the same channels, plus the path and draft channels below.
 import { asAgentError, failWith, requireString } from '../coded_error.ts';
 import * as git from '../git.ts';
 import * as productLead from '../agents/product_lead.ts';
@@ -14,9 +16,20 @@ import type { RequirementStore } from '../requirement_store.ts';
 import type { IpcMainLike } from './handler.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
+import type { CourseInterviewService } from '../course_interview_service.ts';
+import { goalFormProblem } from '../../shared/course_plan.ts';
+import type { GoalForm } from '../../shared/course_plan.ts';
 
 type RequirementItem = Awaited<ReturnType<RequirementStore['get']>>;
-type PromptInput = Omit<RequirementItem, 'interfaces'> & { files: string[]; interfaces: string | null; profile: ProjectProfile | null; course: CoursePack };
+type PromptInput = Omit<RequirementItem, 'interfaces' | 'course'> & {
+  files: string[];
+  interfaces: string | null;
+  profile: ProjectProfile | null;
+  course: CoursePack;
+};
+
+// The form as stored: checked by goalFormProblem() first, then trimmed.
+const formOf = (form: GoalForm): GoalForm => ({ level: form.level, target: form.target, environment: form.environment.trim(), weeklyHours: form.weeklyHours });
 
 // Repository paths Product Lead sees: tracked files only (gitignored and
 // untracked files are left out), capped, and never their contents.
@@ -29,7 +42,7 @@ const repositoryFiles = async (root: string | null): Promise<string[]> => {
   }
 };
 
-export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
+export const register = (ipcMain: IpcMainLike, ctx: AppContext, { courseInterview }: { courseInterview: CourseInterviewService }) => {
   const { backgroundRuns, record } = ctx;
 
   const requireRequirements = () => {
@@ -126,7 +139,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return toWireRequirement(item);
   };
 
-  const clarify = (id: string) =>
+  const isCourse = (id: string) => requireRequirements().get(id).kind === 'course';
+
+  const clarify = (id: string) => (isCourse(id) ? courseInterview.clarify(id).then(toWireRequirement) : clarifyProject(id));
+
+  const clarifyProject = (id: string) =>
     startRun(id, 'clarifying', productLead.clarifyPrompt, productLead.CLARIFY_SCHEMA, productLead.validateClarify, (rid, output, cost) =>
       requireRequirements().finishClarify(rid, output, cost),
     );
@@ -145,8 +162,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   ipcMain.handle(
     CHANNELS.requirementsCreate,
     wrap(async (_event, rawInput): Promise<requirementTypes.Requirement> => {
-      const input = rawInput as { title?: unknown; text?: unknown } | null | undefined;
-      const item = await requireRequirements().create({ title: input?.title, text: input?.text });
+      const input = rawInput as { title?: unknown; text?: unknown; course?: unknown } | null | undefined;
+      const problem = input?.course === undefined ? null : goalFormProblem(input.course);
+      if (problem) failWith(problem.message, 'invalid_argument', problem.field);
+      const course = input?.course === undefined ? undefined : formOf(input.course as GoalForm);
+      const item = await requireRequirements().create({ title: input?.title, text: input?.text, course });
       record({ kind: 'requirement_created', requirementId: item.id, title: item.title || item.text.slice(0, 40) });
       // Clarification starts right away; the page shows it running.
       return clarify(item.id);
@@ -168,8 +188,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
   ipcMain.handle(
     CHANNELS.requirementsPlan,
-    wrap(async (_event, id, answers): Promise<requirementTypes.Requirement> => {
+    wrap(async (_event, id, answers, choice): Promise<requirementTypes.Requirement> => {
       const rid = requireString(id, 'id');
+      if (isCourse(rid)) return toWireRequirement(await courseInterview.plan(rid, answers, choice));
       // Answers submitted with the plan request are saved first, in one step.
       if (answers !== undefined) await requireRequirements().setAnswers(rid, answers);
       // Linked tests are checked against the submit-stage test run only.
@@ -202,6 +223,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     wrap(async (_event, id): Promise<requirementTypes.Requirement> => {
       const store = requireRequirements();
       const item = store.get(requireString(id, 'id'));
+      // A course path is confirmed, not published: its labs come later.
+      if (item.kind === 'course') return toWireRequirement(await courseInterview.confirmPath(item.id));
       if (item.status !== 'reviewing' || !item.plan) return failWith('There is no plan to publish', 'invalid_state');
       const definitions = productLead.toTaskDefinitions(item, item.plan.packages, item.plan.course);
       const published = await store.publish(item.id, definitions);
@@ -223,5 +246,26 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       await store.remove(item.id);
       return true;
     }),
+  );
+
+  // ========== Course interview ==========
+  ipcMain.handle(
+    CHANNELS.requirementsCoursePath,
+    wrap(async (_event, id, path): Promise<requirementTypes.Requirement> => toWireRequirement(await courseInterview.savePath(requireString(id, 'id'), path))),
+  );
+
+  ipcMain.handle(
+    CHANNELS.requirementsCourseSaveDraft,
+    wrap(async (_event, id, pack): Promise<requirementTypes.CourseDraftSaved> => {
+      const { requirement, ref } = await courseInterview.saveDraft(requireString(id, 'id'), pack);
+      return { requirement: toWireRequirement(requirement), ref };
+    }),
+  );
+
+  ipcMain.handle(
+    CHANNELS.requirementsCourseConfirmDraft,
+    wrap(async (_event, id, contentHash): Promise<requirementTypes.Requirement> =>
+      toWireRequirement(await courseInterview.confirmDraft(requireString(id, 'id'), requireString(contentHash, 'contentHash'))),
+    ),
   );
 };
