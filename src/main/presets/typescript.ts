@@ -7,9 +7,10 @@
 import * as git from '../git.ts';
 import { readTracked } from '../repo_reader.ts';
 import { semverOrNull } from '../semver.ts';
-import { SCRIPT_NAME, parseManifest } from './typescript_setup.ts';
+import { SCRIPT_NAME, parseManifest, typescriptSetup } from './typescript_setup.ts';
 import type { Manifest } from './typescript_setup.ts';
 import type { Preset } from './preset.ts';
+import type { SetupAdapter } from '../setup_adapter.ts';
 import type { StepId, StepKind } from '../../shared/check_steps.ts';
 import type { StepPatch } from '../step_config.ts';
 
@@ -98,4 +99,5 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
   sandboxEnv: () => ({}),
   sandboxRead: () => [],
   version: async (root, commit) => ({ file: 'package.json', value: packageVersion(await git.showFile(root, commit, 'package.json')) }),
+  setup: typescriptSetup as SetupAdapter,
 };

@@ -69,3 +69,21 @@ export const orderSteps = (ids: Iterable<string>): StepId[] => {
   const set = new Set(ids);
   return [...STEP_KINDS.filter((kind) => set.has(kind)), ...[...set].filter(isCustomStepId).sort()];
 };
+
+// What agent prompts call a fixed step; the renderer has its own Chinese labels.
+const STEP_NAMES: Record<StepKind, string> = {
+  setup: 'Setup',
+  build: 'Build',
+  format: 'Format',
+  lint: 'Lint',
+  typecheck: 'Type check',
+  test: 'Unit tests',
+  coverage: 'Coverage',
+};
+// Custom steps TaskPilot itself names: v2's smoke check became custom:smoke.
+const KNOWN_CUSTOM: Record<string, string> = { 'custom:smoke': 'Smoke tests' };
+
+// A step's label: its own (taskpilot.toml's, for a custom step), else the
+// fixed step's name, else the custom step's name.
+export const stepName = (id: string, label: string | null = null): string =>
+  label ?? KNOWN_CUSTOM[id] ?? (isStepKind(id) ? STEP_NAMES[id] : isCustomStepId(id) ? id.slice(CUSTOM_PREFIX.length) : id);

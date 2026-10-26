@@ -51,9 +51,8 @@ export type CodingOverrides = {
 export const run = promisify(execFile);
 
 // A one-commit repository with src/auth/application/login-user.ts.
-export const gitRepo = async () => {
+const createGitRepo = async () => {
   const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-repo-'));
-  onTestFinished(() => fs.rm(repo, { recursive: true, force: true }));
   const g = (args: string[]) => run('git', args, { cwd: repo });
   await g(['init', '-b', 'main', '-q']);
   await g(['config', 'user.email', 'test@example.com']);
@@ -62,6 +61,12 @@ export const gitRepo = async () => {
   await fs.writeFile(path.join(repo, 'src/auth/application/login-user.ts'), 'export {};\n');
   await g(['add', '.']);
   await g(['commit', '-qm', 'init']);
+  return repo;
+};
+
+export const gitRepo = async () => {
+  const repo = await createGitRepo();
+  onTestFinished(() => fs.rm(repo, { recursive: true, force: true }));
   return repo;
 };
 
@@ -80,12 +85,16 @@ export const harness = async ({
 } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
+  // onTestFinished hooks run last-registered-first, so the repository is
+  // removed here, after shutdown, not by a hook of its own.
   let ipc: IpcHandle | null = null;
+  let root: string | null = null;
   onTestFinished(async () => {
     await ipc?.shutdown();
-    await fs.rm(configDir, { recursive: true, force: true });
+    await fs.rm(configDir, { recursive: true, force: true, maxRetries: 5 });
+    if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
-  const root = withRepo ? await gitRepo() : null;
+  root = withRepo ? await createGitRepo() : null;
 
   // As at startup: the test repository is added and open, and its data lives
   // in its own directory under configDir.

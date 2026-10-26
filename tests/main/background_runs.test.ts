@@ -23,6 +23,21 @@ test('a registered run is listed, cancelled and waited for without any other wir
   assert.equal(settled, true, 'cancelAll returned before the run settled');
 });
 
+test('cancelAll also waits for a run that a settling run starts', async () => {
+  const runs = new BackgroundRuns();
+  let followUpSettled = false;
+  const followUp = () =>
+    new Promise<void>((resolve) =>
+      setTimeout(() => {
+        followUpSettled = true;
+        resolve();
+      }, 5),
+    );
+  runs.track(new Promise<void>((resolve) => setTimeout(resolve, 1)).then(() => runs.track(followUp())));
+  await runs.cancelAll();
+  assert.equal(followUpSettled, true, 'cancelAll returned before the follow-up run settled');
+});
+
 test('busy lists runs in a fixed order and folds once-listed kinds; work lists only agent runs', () => {
   const runs = new BackgroundRuns();
   let title = '';

@@ -20,6 +20,10 @@ export const presetsOf = (ids: readonly string[]) => PRESETS.filter((preset) => 
 export const versionReaderOf = (ids: readonly string[]): ((root: string, commit: string) => Promise<CommittedVersion>) =>
   (presetById(ids[0] ?? null) ?? typescriptPreset).version;
 
+// The Environment Steward's adapter for a repository: that of its first
+// language with one; null when none has.
+export const setupOf = (ids: readonly string[]) => presetsOf(ids).find((preset) => preset.setup)?.setup ?? null;
+
 // Manifests TaskPilot recognises, with the preset each points to; null
 // when no preset for that language exists yet.
 const LANGUAGES: { manifest: string; language: string; preset: string | null }[] = [

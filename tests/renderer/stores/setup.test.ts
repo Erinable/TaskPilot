@@ -198,3 +198,12 @@ test('the rebuild step names its packages before it runs', async () => {
   expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('electron、esbuild');
   expect(api.env.runStep).toHaveBeenCalledWith('rebuild');
 });
+
+test('a repository without setup support says so and offers nothing to apply', async () => {
+  api.env.get.mockReturnValue(ok(envState({ blockers: ['setup_unsupported'], facts: null, plan: null, steps: [], stepKinds: [], configured: {} })));
+  const setup = await onSetupPage();
+  expect(setup.notices.map((item) => item.text)).toEqual([expect.stringContaining('暂不支持自动环境规划')]);
+  expect(setup.facts).toEqual([]);
+  expect(setup.applyItems).toEqual([]);
+  expect(setup.selectedKinds).toEqual([]);
+});

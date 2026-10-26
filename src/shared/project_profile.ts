@@ -8,6 +8,12 @@
 // exit code.
 export type ProfileCheckReport = 'tests' | 'diagnostics' | 'exit';
 
+// What a parser format (check_steps.ts PARSER_FORMATS) reports.
+export const reportsOf = (format: string): ProfileCheckReport => {
+  if (format === 'tests' || format === 'junit') return 'tests';
+  return format === 'exitcode' ? 'exit' : 'diagnostics';
+};
+
 export type ProfileCheck = {
   id: string;
   label: string;

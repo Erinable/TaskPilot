@@ -42,6 +42,7 @@ test('env: plan, confirm steps one by one, then apply the scripts', async () => 
   const view = await settleEnv(call);
   assert.equal(view.status, 'ready', JSON.stringify(view.error));
   assert.deepEqual(view.blockers, []);
+  assert.deepEqual(view.stepKinds, ['test', 'lint', 'build']);
   assert.deepEqual(
     view.steps.map((s) => [s.id, s.line]),
     [
@@ -211,21 +212,44 @@ test('env: steps are refused without a plan, by unknown id, or after the root ch
   assert.equal((await call(CHANNELS.envRunStep, 'rm -rf /')).error.code, 'invalid_argument');
   assert.equal((await call(CHANNELS.envApply, ['build'])).error.code, 'invalid_argument');
   assert.equal((await call(CHANNELS.envApply, ['deploy'])).error.code, 'invalid_argument');
+  // A step kind the npm adapter does not plan.
+  assert.equal((await call(CHANNELS.envApply, ['typecheck'])).error.code, 'invalid_argument');
   setRoot(os.tmpdir());
   assert.equal((await call(CHANNELS.envGet)).data.stale, true);
   assert.equal((await call(CHANNELS.envRunStep, 'test')).error.code, 'env_stale');
 });
 
-test('env: a repository without package.json is blocked before the model runs', async () => {
+test('env: a repository without a supported language is not planned, and the model never runs', async () => {
   const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });
   await call(CHANNELS.envPlan);
   const view = await settleEnv(call);
   assert.equal(view.status, 'ready');
-  assert.ok(view.blockers.includes('no_manifest'));
+  assert.deepEqual(view.blockers, ['setup_unsupported']);
+  assert.equal(view.facts, null);
   assert.equal(view.plan, null);
   assert.deepEqual(view.steps, []);
+  assert.deepEqual(view.stepKinds, []);
   assert.equal(agentCalls.length, 0);
+  assert.equal((await call(CHANNELS.envRunStep, 'install')).error.code, 'env_no_plan');
+  assert.equal((await call(CHANNELS.envApply, ['test'])).error.code, 'env_no_plan');
 });
+
+for (const [language, files] of [
+  ['Rust', { 'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\n' }],
+  ['Python', { 'pyproject.toml': '[project]\nname = "demo"\nversion = "0.1.0"\n' }],
+] as const) {
+  test(`env: a ${language} repository gets setup_unsupported, not no_manifest`, async () => {
+    const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+    for (const [file, content] of Object.entries(files)) await fs.writeFile(path.join(h.root, file), content);
+    await fixtures.run('git', ['add', '-A'], { cwd: h.root });
+    await fixtures.run('git', ['commit', '-qm', 'manifest'], { cwd: h.root });
+    await h.call(CHANNELS.envPlan);
+    const view = await settleEnv(h.call);
+    assert.deepEqual(view.blockers, ['setup_unsupported']);
+    assert.equal(view.plan, null);
+    assert.equal(h.agentCalls.length, 0);
+  });
+}
 
 test('env: a second plan request while one runs is refused', async () => {
   let release;

@@ -79,7 +79,7 @@ test('buildProfile() without taskpilot.toml lists only the detected languages an
   assert.deepEqual(profile.manifests, ['Cargo.toml', 'requirements.txt']);
   assert.deepEqual(
     profile.checks.map((check) => [check.id, check.label, check.commandLine]),
-    [['test', 'test', 'cargo test']],
+    [['test', 'Unit tests', 'cargo test']],
   );
 });
 

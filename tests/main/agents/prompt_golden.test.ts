@@ -1,9 +1,11 @@
 // Golden prompts: every prompt Product Lead, Architect, QA, Tutor and Coding
 // Agent send, rendered from fixed inputs. Recorded before the project profile
 // existed (CARM-17); with no profile, or with the default TypeScript profile,
-// each must stay byte for byte the same. Re-record only for an intended
-// prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
+// each must stay byte for byte the same, except where a prompt now uses the
+// profile (Coding Agent's submit checks, CARM-21). Re-record only for an
+// intended prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
 import { describe, expect, test } from 'vitest';
+import assert from 'node:assert/strict';
 
 import * as productLead from '../../../src/main/agents/product_lead.ts';
 import * as architect from '../../../src/main/agents/architect.ts';
@@ -23,8 +25,8 @@ const TS_PROFILE: ProjectProfile = {
   testLayout: null,
   testNameFormat: null,
   checks: [
-    { id: 'test', label: 'test', stage: 'submit', blocking: true, commandLine: 'npm test', reports: 'tests' },
-    { id: 'lint', label: 'lint', stage: 'manual', blocking: false, commandLine: 'npm run lint', reports: 'exit' },
+    { id: 'test', label: 'Unit tests', stage: 'submit', blocking: true, commandLine: 'npm test', reports: 'tests' },
+    { id: 'lint', label: 'Lint', stage: 'manual', blocking: false, commandLine: 'npm run lint', reports: 'exit' },
   ],
   version: null,
 };
@@ -188,12 +190,32 @@ describe.each(PROFILES)('%s', (_name, profile) => {
     await expect(tutor.gradePrompt({ task, submission, reference: null, review: null, profile })).toMatchFileSnapshot(golden('tutor_grade_no_reference'));
   });
 
+  // With a profile the prompt lists the submit-stage checks, so it has its own golden.
   test('Coding Agent', async () => {
+    const suffix = profile ? '_profile' : '';
     const ctx = { getPreferences: () => ({}), configDir: '/config', interfacesFor: () => INTERFACES } as unknown as AppContext;
     const bare = { ...ctx, interfacesFor: () => null } as unknown as AppContext;
-    await expect(createCodingRuntime(ctx).codingPrompt(TASK, '先写测试。', null, profile)).toMatchFileSnapshot(golden('coding'));
+    await expect(createCodingRuntime(ctx).codingPrompt(TASK, '先写测试。', null, profile)).toMatchFileSnapshot(golden(`coding${suffix}`));
     await expect(createCodingRuntime(bare).codingPrompt(TASK, '修复失败的测试。', 'locks after five failures failed', profile)).toMatchFileSnapshot(
-      golden('coding_feedback'),
+      golden(`coding_feedback${suffix}`),
     );
   });
+});
+
+test('Coding Agent lists only the submit-stage checks, with their labels and commands', () => {
+  const ctx = { getPreferences: () => ({}), configDir: '/config', interfacesFor: () => null } as unknown as AppContext;
+  const profile: ProjectProfile = {
+    ...TS_PROFILE,
+    checks: [
+      ...TS_PROFILE.checks,
+      { id: 'custom:complexity', label: '复杂度', stage: 'submit', blocking: false, commandLine: 'npm run --silent check:complexity', reports: 'diagnostics' },
+    ],
+  };
+  const prompt = createCodingRuntime(ctx).codingPrompt(TASK, '先写测试。', null, profile);
+  assert.match(prompt, /- Unit tests \(blocking\): npm test\n- 复杂度 \(advisory\): npm run --silent check:complexity\nDeveloper instruction/);
+  assert.doesNotMatch(prompt, /npm run lint/);
+  assert.doesNotMatch(
+    createCodingRuntime(ctx).codingPrompt(TASK, '先写测试。', null, { ...TS_PROFILE, checks: [TS_PROFILE.checks[1]] }),
+    /TaskPilot runs these checks/,
+  );
 });
