@@ -14,6 +14,7 @@ export const COURSE_SCHEMA_VERSION = 1;
 // packs and for notes written before packs existed.
 export const COURSE_DIMENSIONS = ['thinking', 'writing', 'style'] as const;
 export type CourseDimension = (typeof COURSE_DIMENSIONS)[number];
+export const COURSE_DIMENSION_LABELS: Record<CourseDimension, string> = { thinking: '思路', writing: '写法', style: '风格' };
 
 // Pack, rubric and language ids.
 const COURSE_ID = /^[a-z][a-z0-9_-]{0,31}$/;

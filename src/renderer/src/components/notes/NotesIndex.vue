@@ -1,20 +1,21 @@
 <script setup lang="ts">
 // The notes index, laid out like a blog's archive: notes grouped by month,
-// newest first, each a title link with its date; one category or tag can
-// be picked from the side. Note text is shown with {{ }} only.
+// newest first, each a title link with its date; one category of the pack
+// in use, one dimension shared by every pack, or one tag can be picked from
+// the side. Note text is shown with {{ }} only.
 import { computed, onUnmounted, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import * as model from '@/lib/notes_model.ts';
 import { useNotesStore } from '@/stores/notes.ts';
-import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const notes = useNotesStore();
 
-const CATEGORIES = Object.keys(model.CATEGORY_LABELS) as packageTypes.GradeCategory[];
 const groups = computed(() => model.groupByMonth(notes.visible));
 const tagCounts = computed(() => model.tagCounts(notes.notes));
-const categoryCounts = computed(() => model.categoryCounts(notes.notes));
+const rubricCounts = computed(() => model.rubricCounts(notes.notes, notes.courses));
+const dimensionCounts = computed(() => (model.showDimensions(notes.notes, notes.courses) ? model.dimensionCounts(notes.notes, notes.courses) : []));
+const packTitle = computed(() => model.currentPack(notes.courses).title);
 const recent = computed(() => notes.notes.slice(0, 5));
 const filtered = computed(() => Boolean(notes.filter.category || notes.filter.tag || notes.filter.query.trim()));
 
@@ -44,7 +45,7 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
 
       <p v-if="notes.filter.category || notes.filter.tag" class="blog-filter-line">
         正在看
-        <strong v-if="notes.filter.category">{{ model.CATEGORY_LABELS[notes.filter.category] }}</strong>
+        <strong v-if="notes.filter.category">{{ model.filterLabel(notes.filter.category, notes.courses) }}</strong>
         <strong v-if="notes.filter.tag">#{{ notes.filter.tag }}</strong>
         ，共 {{ notes.visible.length }} 篇
         <button class="blog-link" type="button" @click="run(notes.goIndex())">看全部</button>
@@ -67,8 +68,8 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
             </div>
             <p v-if="note.summary || note.excerpt" class="post-excerpt">{{ note.summary ?? note.excerpt }}</p>
             <div v-if="note.category || model.allTags(note).length" class="post-meta">
-              <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: note.category }))">
-                {{ model.CATEGORY_LABELS[note.category] }}
+              <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))">
+                {{ notes.categoryLabel(note) }}
               </a>
               <a v-for="tag in model.allTags(note)" :key="tag" class="post-tag" role="link" tabindex="0" @click="run(notes.goIndex({ tag }))">#{{ tag }}</a>
             </div>
@@ -78,12 +79,21 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
     </main>
 
     <aside v-if="notes.notes.length && !filtered" class="blog-aside">
-      <section>
-        <h4>分类</h4>
+      <section data-notes-rubric>
+        <h4>分类 · {{ packTitle }}</h4>
         <ul>
-          <li v-for="category in CATEGORIES" :key="category">
-            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goIndex({ category }))">{{ model.CATEGORY_LABELS[category] }}</a>
-            <span class="count">{{ categoryCounts[category] ?? 0 }}</span>
+          <li v-for="entry in rubricCounts" :key="entry.filter.category">
+            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goIndex({ category: entry.filter }))">{{ entry.label }}</a>
+            <span class="count">{{ entry.count }}</span>
+          </li>
+        </ul>
+      </section>
+      <section v-if="dimensionCounts.length" data-notes-dimensions>
+        <h4>通用维度</h4>
+        <ul>
+          <li v-for="entry in dimensionCounts" :key="entry.filter.dimension">
+            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goIndex({ category: entry.filter }))">{{ entry.label }}</a>
+            <span class="count">{{ entry.count }}</span>
           </li>
         </ul>
       </section>

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { asAgentError, failWith } from './coded_error.ts';
 import * as codingExec from './coding_exec.ts';
 import * as practice from './practice.ts';
+import * as courses from './courses.ts';
 import * as tutorAgent from './agents/tutor.ts';
 import { billableCodingUsage, codingCancelled, codingFailure } from './coding_runtime.ts';
 import { reportIgnore } from './submit_checks.ts';
@@ -141,6 +142,8 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       ? practice.notesForGrade(
           ctx.notes.list().notes,
           submission.map((file) => file.path),
+          course,
+          courses.knownPacks(course),
         )
       : [];
     console.debug(`[grade] start package=${id} course=${courseRef.id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);

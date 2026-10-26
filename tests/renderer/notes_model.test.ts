@@ -8,6 +8,7 @@ const note = (id: string, overrides: Partial<noteTypes.NoteMeta> = {}): noteType
   id,
   title: id,
   category: null,
+  course: null,
   tags: [],
   inlineTags: [],
   source: null,
@@ -32,13 +33,14 @@ describe('notes model', () => {
   const all = { query: '', category: null, tag: null };
 
   test('filters by category, frontmatter or body tags, and a search over text, tags, source and body matches', () => {
-    expect(ids(model.filterNotes(notes, { ...all, category: 'style' }))).toEqual(['b']);
-    expect(ids(model.filterNotes(notes, { ...all, tag: 'tdd' }))).toEqual(['a']);
-    expect(ids(model.filterNotes(notes, { ...all, tag: '命名' }))).toEqual(['b']);
-    expect(ids(model.filterNotes(notes, { ...all, query: 'full' }))).toEqual(['b']);
-    expect(ids(model.filterNotes(notes, { ...all, query: ' login.ts ' }))).toEqual(['c']);
-    expect(ids(model.filterNotes(notes, { ...all, query: '只在正文里' }, new Set(['a'])))).toEqual(['a']);
-    expect(ids(model.filterNotes(notes, all))).toEqual(['a', 'b', 'c']);
+    const courses = model.DEFAULT_COURSES;
+    expect(ids(model.filterNotes(notes, { ...all, category: { course: 'programming', category: 'style' } }, courses))).toEqual(['b']);
+    expect(ids(model.filterNotes(notes, { ...all, tag: 'tdd' }, courses))).toEqual(['a']);
+    expect(ids(model.filterNotes(notes, { ...all, tag: '命名' }, courses))).toEqual(['b']);
+    expect(ids(model.filterNotes(notes, { ...all, query: 'full' }, courses))).toEqual(['b']);
+    expect(ids(model.filterNotes(notes, { ...all, query: ' login.ts ' }, courses))).toEqual(['c']);
+    expect(ids(model.filterNotes(notes, { ...all, query: '只在正文里' }, courses, new Set(['a'])))).toEqual(['a']);
+    expect(ids(model.filterNotes(notes, all, courses))).toEqual(['a', 'b', 'c']);
   });
 
   test('the source label leaves out what is unknown', () => {
@@ -79,8 +81,79 @@ test('the archive groups by the business-day month written, newest first, and co
     { tag: 'x', count: 2 },
     { tag: 'y', count: 1 },
   ]);
-  expect(model.categoryCounts(list)).toEqual({ style: 2 });
+  expect(model.rubricCounts(list, model.DEFAULT_COURSES).map((entry) => [entry.label, entry.count])).toEqual([
+    ['思路', 0],
+    ['写法', 0],
+    ['风格', 2],
+  ]);
   expect(model.formatDay('2026-09-30T17:00:00Z', 'Asia/Shanghai')).toBe('2026-10-01');
+});
+
+describe('categories across course packs', () => {
+  const OS: noteTypes.NoteCourse = {
+    id: 'os',
+    title: '操作系统',
+    rubric: [
+      { id: 'concurrency', label: '并发', dimension: 'thinking' },
+      { id: 'syscalls', label: '系统调用', dimension: 'writing' },
+    ],
+  };
+  const courses: noteTypes.NoteCourses = { current: 'os', packs: [...model.DEFAULT_COURSES.packs, OS] };
+  const notes = [
+    note('old', { category: 'thinking' }),
+    note('os', { category: 'concurrency', course: 'os' }),
+    note('os-2', { category: 'syscalls', course: 'os' }),
+    note('cooking', { category: 'knife', course: 'cooking' }),
+    note('cooking-style', { category: 'style', course: 'cooking' }),
+  ];
+  const ids = (list: noteTypes.NoteMeta[]) => list.map((entry) => entry.id);
+  const all = { query: '', tag: null };
+
+  test("labels come from the note's pack; an unknown category shows its id", () => {
+    expect(notes.map((entry) => model.categoryLabel(entry, courses))).toEqual(['思路', '并发', '系统调用', 'knife（未知维度）', '风格']);
+    expect(model.categoryLabel(note('x'), courses)).toBeNull();
+    // programming has no concurrency.
+    expect(model.categoryLabel(note('x', { category: 'concurrency' }), model.DEFAULT_COURSES)).toBe('concurrency（未知维度）');
+  });
+
+  test("filters by the pack in use's rubric or by a dimension across packs, and counts both", () => {
+    expect(ids(model.filterNotes(notes, { ...all, category: { course: 'os', category: 'concurrency' } }, courses))).toEqual(['os']);
+    expect(ids(model.filterNotes(notes, { ...all, category: { course: 'programming', category: 'thinking' } }, courses))).toEqual(['old']);
+    expect(ids(model.filterNotes(notes, { ...all, category: { dimension: 'thinking' } }, courses))).toEqual(['old', 'os']);
+    expect(ids(model.filterNotes(notes, { ...all, category: { dimension: 'style' } }, courses))).toEqual(['cooking-style']);
+    expect(model.rubricCounts(notes, courses).map((entry) => [entry.label, entry.count])).toEqual([
+      ['并发', 1],
+      ['系统调用', 1],
+    ]);
+    expect(model.dimensionCounts(notes, courses).map((entry) => [entry.label, entry.count])).toEqual([
+      ['思路', 2],
+      ['写法', 1],
+      ['风格', 1],
+    ]);
+    expect(model.filterLabel({ dimension: 'writing' }, courses)).toBe('写法（通用维度）');
+    expect(model.filterLabel({ course: 'os', category: 'syscalls' }, courses)).toBe('系统调用');
+  });
+
+  test('dimensions are only offered when they say more than the rubric', () => {
+    expect(model.showDimensions([note('a', { category: 'thinking' })], model.DEFAULT_COURSES)).toBe(false);
+    expect(model.showDimensions(notes, model.DEFAULT_COURSES)).toBe(true);
+    expect(model.showDimensions([], courses)).toBe(true);
+  });
+
+  test("the editor offers the note's own pack, the pack in use for a new note, and never drops an unknown category", () => {
+    expect(model.categoryOptions({ category: 'thinking', course: null }, courses)).toEqual({
+      course: 'programming',
+      options: [
+        { value: 'thinking', label: '思路' },
+        { value: 'writing', label: '写法' },
+        { value: 'style', label: '风格' },
+      ],
+    });
+    expect(model.categoryOptions({ category: null, course: null }, courses).course).toBe('os');
+    const unknown = model.categoryOptions({ category: 'knife', course: 'cooking' }, courses);
+    expect(unknown.course).toBe('os');
+    expect(unknown.options.at(-1)).toEqual({ value: 'knife', label: 'knife（未知维度）' });
+  });
 });
 
 describe('note markdown', () => {

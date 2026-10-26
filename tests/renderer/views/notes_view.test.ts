@@ -28,6 +28,7 @@ const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta =
   id: '用例要有断言.md',
   title: '用例要有断言',
   category: 'writing',
+  course: null,
   tags: ['测试'],
   inlineTags: [],
   source: { repositoryId: 'r1', repositoryName: 'app', packageId: 'p1', packageTitle: '登录', file: 'src/a.ts', line: 4 },
@@ -43,6 +44,24 @@ const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta =
 });
 const NOTE: noteTypes.Note = { ...meta(), body: '# 断言\n\n<b>没有 expect</b> 见 [[命名]] 和 [[不存在]]\n\n- [ ] 补上\n\n```ts\nconst a = 1\n```\n' };
 const LINKING = meta({ id: '命名.md', title: '命名', category: null, tags: [], links: ['用例要有断言'], excerpt: '链接到断言', source: null, version: 'v9' });
+
+const PROGRAMMING: noteTypes.NoteCourse = {
+  id: 'programming',
+  title: '编程',
+  rubric: [
+    { id: 'thinking', label: '思路', dimension: 'thinking' },
+    { id: 'writing', label: '写法', dimension: 'writing' },
+    { id: 'style', label: '风格', dimension: 'style' },
+  ],
+};
+const OS: noteTypes.NoteCourse = {
+  id: 'os',
+  title: '操作系统',
+  rubric: [
+    { id: 'concurrency', label: '并发', dimension: 'thinking' },
+    { id: 'syscalls', label: '系统调用', dimension: 'writing' },
+  ],
+};
 
 let api: { businessTimeZone: string; notes: Record<string, ReturnType<typeof vi.fn>>; workspace: { openFile: ReturnType<typeof vi.fn> } };
 const list = (notes: noteTypes.NoteMeta[]): noteTypes.NoteList => ({
@@ -86,6 +105,7 @@ beforeEach(() => {
       setDirectory: vi.fn(),
       reveal: vi.fn(() => ok(true)),
       openUrl: vi.fn(() => ok(true)),
+      courses: vi.fn(() => ok<noteTypes.NoteCourses>({ current: 'programming', packs: [PROGRAMMING] })),
     },
     workspace: { openFile: vi.fn(() => ok('vscode')) },
   };
@@ -115,6 +135,31 @@ describe('NotesView', () => {
     await flushPromises();
     expect(useNotesStore().filter.tag).toBe('测试');
     expect(wrapper.find('[data-note="命名.md"]').exists()).toBe(false);
+  });
+
+  test("with an OS repository the side lists OS's rubric and the shared dimensions; an unknown category shows its id", async () => {
+    api.notes.courses.mockImplementation(() => ok<noteTypes.NoteCourses>({ current: 'os', packs: [PROGRAMMING, OS] }));
+    const wrapper = await mountView([
+      meta({ id: 'os.md', title: 'os', category: 'concurrency', course: 'os' }),
+      meta({ id: 'old.md', title: 'old', category: 'thinking' }),
+      meta({ id: 'odd.md', title: 'odd', category: 'knife', course: 'cooking' }),
+    ]);
+    const rubric = wrapper.get('[data-notes-rubric]');
+    expect(rubric.get('h4').text()).toBe('分类 · 操作系统');
+    expect(rubric.findAll('li').map((item) => item.text())).toEqual(['并发1', '系统调用0']);
+    expect(
+      wrapper
+        .get('[data-notes-dimensions]')
+        .findAll('li')
+        .map((item) => item.text()),
+    ).toEqual(['思路2', '写法0', '风格0']);
+    expect(wrapper.get('[data-note="odd.md"] .post-category').text()).toBe('knife（未知维度）');
+    expect(wrapper.get('[data-note="os.md"] .post-category').text()).toBe('并发');
+
+    await wrapper.get('[data-notes-dimensions] li a').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('.blog-filter-line').text()).toContain('思路（通用维度）');
+    expect(wrapper.findAll('.post-item').map((item) => item.attributes('data-note'))).toEqual(['os.md', 'old.md']);
   });
 
   test('a note opens as its own page, rendering Markdown as nodes, never as markup, with its backlinks', async () => {

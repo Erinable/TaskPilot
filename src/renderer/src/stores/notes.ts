@@ -10,6 +10,7 @@ import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
+import { PROGRAMMING_COURSE } from '@shared/course_pack.ts';
 import * as markdown from '@shared/note_markdown.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
@@ -31,7 +32,10 @@ export const useNotesStore = defineStore('notes', () => {
   const filter = ref<model.NoteFilter>({ query: '', category: null, tag: null });
   // Ids whose body matched the current query, from the main process.
   const bodyMatches = ref(new Set<string>());
-  const visible = computed(() => model.filterNotes(notes.value, filter.value, bodyMatches.value));
+  // The packs that name categories; the one in use follows the open repository.
+  const courses = ref<noteTypes.NoteCourses>(model.DEFAULT_COURSES);
+  const visible = computed(() => model.filterNotes(notes.value, filter.value, courses.value, bodyMatches.value));
+  const categoryLabel = (note: Pick<noteTypes.NoteMeta, 'category' | 'course'>) => model.categoryLabel(note, courses.value);
   const tags = computed(() => [...new Set(notes.value.flatMap((note) => model.allTags(note)))].sort((a, b) => a.localeCompare(b)));
   const byTitle = computed(() => model.titleIndex(notes.value));
   const findByTitle = (title: string) => byTitle.value.get(markdown.titleKey(title)) ?? null;
@@ -54,6 +58,10 @@ export const useNotesStore = defineStore('notes', () => {
     return true;
   };
 
+  const loadCourses = async () => {
+    courses.value = await call(window.taskpilot.notes.courses());
+  };
+
   let searchGeneration = 0;
   const search = async (query: string) => {
     const generation = (searchGeneration += 1);
@@ -65,7 +73,7 @@ export const useNotesStore = defineStore('notes', () => {
   // The notes page works like a small blog: the index (optionally one
   // category or tag) and one page per note, with back and forward.
   // heading: a [[note#heading]] to scroll to once the note is shown.
-  type Route = { name: 'index'; category: packageTypes.GradeCategory | null; tag: string | null } | { name: 'note'; id: string; heading: string | null };
+  type Route = { name: 'index'; category: model.CategoryFilter | null; tag: string | null } | { name: 'note'; id: string; heading: string | null };
   const history = ref<Route[]>([{ name: 'index', category: null, tag: null }]);
   const position = ref(0);
   const route = computed(() => history.value[position.value]);
@@ -107,7 +115,7 @@ export const useNotesStore = defineStore('notes', () => {
     position.value += 1;
     await show(route.value).catch(() => show({ name: 'index', category: null, tag: null }));
   };
-  const goIndex = (options: { category?: packageTypes.GradeCategory | null; tag?: string | null } = {}) =>
+  const goIndex = (options: { category?: model.CategoryFilter | null; tag?: string | null } = {}) =>
     navigate({ name: 'index', category: options.category ?? null, tag: options.tag ?? null });
   const goNote = (id: string, heading: string | null = null) => navigate({ name: 'note', id, heading });
 
@@ -129,7 +137,7 @@ export const useNotesStore = defineStore('notes', () => {
 
   // ========== Open note ==========
   // The note being read or edited, and the edit in progress.
-  type Draft = { title: string; body: string; category: packageTypes.GradeCategory | null; tags: string[]; summary: string | null };
+  type Draft = { title: string; body: string; category: packageTypes.GradeCategory | null; course: string | null; tags: string[]; summary: string | null };
   const current = ref<noteTypes.Note | null>(null);
   const draft = ref<Draft | null>(null);
   // The file changed on disk while there were unsaved edits.
@@ -140,6 +148,7 @@ export const useNotesStore = defineStore('notes', () => {
     title: note.title,
     body: note.body,
     category: note.category,
+    course: note.course,
     tags: [...note.tags],
     summary: note.summary,
   });
@@ -335,13 +344,16 @@ export const useNotesStore = defineStore('notes', () => {
   // ========== From grading ==========
   // One click under a grade comment: the comment becomes a note that points
   // back at the package and the line it was about.
-  const saveComment = async (task: Pick<packageTypes.TaskView, 'id' | 'title'>, comment: packageTypes.GradeComment) => {
+  // The comment's category is a rubric item of the pack the grade was made
+  // with; grades from before packs have no snapshot and were programming.
+  const saveComment = async (task: Pick<packageTypes.TaskView, 'id' | 'title' | 'grade'>, comment: packageTypes.GradeComment) => {
     const repository = useRepositoriesStore().current;
     const note = await create(
       {
         title: markdown.toTitle(comment.observation.length > 60 ? `${comment.observation.slice(0, 59)}…` : comment.observation),
         body: `${comment.observation}\n\n## 下次可以\n\n${comment.betterWay}\n`,
         category: comment.category,
+        course: task.grade?.course?.id ?? PROGRAMMING_COURSE.id,
         tags: [],
         source: {
           repositoryId: repository?.id ?? null,
@@ -367,10 +379,13 @@ export const useNotesStore = defineStore('notes', () => {
     unavailable,
     truncated,
     filter,
+    courses,
     visible,
+    categoryLabel,
     tags,
     findByTitle,
     load,
+    loadCourses,
     refresh,
     search,
     // Pages
