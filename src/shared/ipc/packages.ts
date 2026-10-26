@@ -4,7 +4,7 @@
 import type { CodingRun } from '../coding_types.ts';
 import type { ErrorInfo } from './envelope.ts';
 import type * as workspaceTypes from './workspace.ts';
-import type { CourseRef } from '../course_pack.ts';
+import type { CourseRef, RubricItem } from '../course_pack.ts';
 
 export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
 
@@ -59,14 +59,15 @@ export type ReferenceRun = {
   revealedAt: string | null;
 };
 
-// Tutor's marking of a practised submission against the reference.
-//   thinking  how the problem was approached
-//   writing   how the code does it (constructs, APIs, error handling)
-//   style     naming, layout and the repository's conventions
-export type GradeCategory = 'thinking' | 'writing' | 'style';
+// Tutor's marking of a practised submission against the reference, along
+// the rubric of the course pack in use (for programming: thinking, writing,
+// style). A category is a rubric item's id.
+export type GradeCategory = string;
 // repeated: one of the developer's notes already describes this mistake.
 export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string; repeated: boolean };
 export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[] };
+// The course pack a grade was made with, and its rubric as it was then.
+export type GradeCourse = Pick<CourseRef, 'id' | 'version' | 'contentHash'> & { rubric: RubricItem[] };
 // waiting: QA has finished but the reference is still being written.
 export type Grade = {
   id: string;
@@ -79,6 +80,8 @@ export type Grade = {
   withReference: boolean;
   report: GradeReport | null;
   costUsd: number;
+  // [人工决策-2026-10-26 15:38:21] 判卷时快照课程包和 rubric；旧记录没有这个字段，显示时按内置 programming 包处理，不改写旧文件。
+  course?: GradeCourse;
 };
 // A work package definition: hand-written samples and published packages.
 export type TaskDefinition = {

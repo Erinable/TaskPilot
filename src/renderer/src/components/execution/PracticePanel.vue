@@ -12,6 +12,7 @@ import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import { useNotesStore } from '@/stores/notes.ts';
+import { PROGRAMMING_COURSE } from '@shared/course_pack.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const props = defineProps<{ task: packageTypes.TaskView }>();
@@ -26,8 +27,6 @@ const save = async (comment: packageTypes.GradeComment) => {
 };
 
 type PracticeView = { text: string; tone: '' | 'success' | 'danger' };
-
-const CATEGORY_LABELS: Record<packageTypes.GradeCategory, string> = { thinking: '思路', writing: '写法', style: '风格' };
 
 const run = computed(() => props.task.referenceRun);
 const grade = computed(() => props.task.grade);
@@ -55,10 +54,12 @@ const gradeText = computed((): string | null => {
   return current.withReference ? '导师对照参考答案判完了。' : '导师只根据你的代码判完了（没有参考答案）。';
 });
 
+// [人工决策-2026-10-26 15:38:21] 维度和标签来自判卷时快照的 rubric；旧记录没有快照，按内置 programming 包显示。
 const byCategory = computed(() => {
   const comments = grade.value?.report?.comments ?? [];
-  return (Object.keys(CATEGORY_LABELS) as packageTypes.GradeCategory[])
-    .map((category) => ({ category, label: CATEGORY_LABELS[category], comments: comments.filter((comment) => comment.category === category) }))
+  const rubric = grade.value?.course?.rubric ?? PROGRAMMING_COURSE.rubric;
+  return rubric
+    .map((item) => ({ category: item.id, label: item.label, comments: comments.filter((comment) => comment.category === item.id) }))
     .filter((group) => group.comments.length);
 });
 

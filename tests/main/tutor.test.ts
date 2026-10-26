@@ -6,6 +6,8 @@ import path from 'node:path';
 
 import { validateAnswer } from '../../src/main/agents/tutor.ts';
 import { TutorStore } from '../../src/main/tutor_store.ts';
+import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import type { CoursePack } from '../../src/shared/course_pack.ts';
 
 const answer = { explanation: '说明', hints: ['第一步'], snippet: null, terms: [] };
 
@@ -36,7 +38,7 @@ test('validateGrade keeps comments, drops locations outside the submission, and 
   const comment = { category: 'thinking', file: 'a.ts', line: 2, observation: '先写了实现再写测试。', betterWay: '先写一个会失败的测试。', repeated: false };
   const report = validateGrade(
     { summary: '不错', strengths: ['命名清楚'], comments: [comment, { ...comment, file: 'other.ts' }, { ...comment, line: 0 }] },
-    { changedPaths: ['a.ts'] },
+    { changedPaths: ['a.ts'], course: PROGRAMMING_COURSE },
   );
   assert.deepEqual(report.comments[0], comment);
   assert.deepEqual([report.comments[1].file, report.comments[1].line], [null, null]);
@@ -46,8 +48,48 @@ test('validateGrade keeps comments, drops locations outside the submission, and 
     { ...comment, betterWay: ' ' },
     { ...comment, observation: 'a‮b' },
   ])
-    assert.throws(() => validateGrade({ summary: 's', strengths: [], comments: [bad] }, { changedPaths: ['a.ts'] }), { code: 'agent_bad_output' });
-  assert.throws(() => validateGrade({ summary: 's', strengths: [], comments: Array(13).fill(comment) }, { changedPaths: ['a.ts'] }), {
-    code: 'agent_bad_output',
-  });
+    assert.throws(() => validateGrade({ summary: 's', strengths: [], comments: [bad] }, { changedPaths: ['a.ts'], course: PROGRAMMING_COURSE }), {
+      code: 'agent_bad_output',
+    });
+  assert.throws(
+    () => validateGrade({ summary: 's', strengths: [], comments: Array(13).fill(comment) }, { changedPaths: ['a.ts'], course: PROGRAMMING_COURSE }),
+    { code: 'agent_bad_output' },
+  );
+});
+
+const OS_COURSE: CoursePack = {
+  ...PROGRAMMING_COURSE,
+  id: 'os',
+  learner: 'a student learning operating systems',
+  rubric: [
+    {
+      id: 'concept',
+      label: '原理',
+      description: 'the model of the mechanism',
+      dimension: 'thinking',
+      examples: [{ observation: 'Took the lock after reading the list', betterWay: 'Take it before the first read' }],
+    },
+    { id: 'mechanism', label: '实现', description: 'locking and error paths', dimension: 'writing' },
+  ],
+};
+
+test('grading with another course pack marks, offers and accepts only its rubric ids', async () => {
+  const { gradeSchema, gradeSystemPrompt, validateGrade } = await import('../../src/main/agents/tutor.ts');
+  const system = gradeSystemPrompt(OS_COURSE);
+  assert.ok(system.includes('a desktop app where a student learning operating systems practises'));
+  assert.ok(system.includes('\n- Mark two things. concept: the model of the mechanism. mechanism: locking and error paths.\n'));
+  assert.ok(
+    system.includes('\n  - Example for concept: what was seen "Took the lock after reading the list"; the better way "Take it before the first read".\n'),
+  );
+  assert.doesNotMatch(system, /thinking:|new to programming/);
+  assert.deepEqual(gradeSchema(OS_COURSE).properties.comments.items.properties.category.enum, ['concept', 'mechanism']);
+
+  const comment = { category: 'concept', file: null, line: null, observation: '锁拿晚了。', betterWay: '先拿锁再读。', repeated: false };
+  const options = { changedPaths: [], course: OS_COURSE };
+  assert.equal(validateGrade({ summary: 's', strengths: [], comments: [comment] }, options).comments[0].category, 'concept');
+  for (const category of ['thinking', 'style', 42])
+    assert.throws(() => validateGrade({ summary: 's', strengths: [], comments: [{ ...comment, category }] }, options), {
+      code: 'agent_bad_output',
+      message: /comments\[0\]\.category.*concept, mechanism/,
+    });
 });
