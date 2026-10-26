@@ -146,6 +146,7 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
           relinked: 0,
           note: {
             ...input,
+            course: input.course ?? null,
             id: `${input.title}.md`,
             inlineTags: [],
             summary: null,

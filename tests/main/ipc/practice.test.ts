@@ -236,6 +236,23 @@ test('practice: grading uses the rubric of the course pack in use and snapshots 
   );
 });
 
+test('practice: grading an OS package reads OS notes first, then other packs on a dimension OS has', async () => {
+  const osComment = { category: 'concept', file: null, line: null, observation: '锁拿晚了。', betterWay: '先拿锁再读。', repeated: false };
+  const h = await practiceHarness({ agent: fixtures.fakeAgent({ grade: { summary: '能跑。', strengths: [], comments: [osComment] } }) });
+  await fixtures.useOsPack(h);
+  await h.notes.create({ title: '先拆问题', body: '先拆', category: 'thinking', tags: [], source: null });
+  await h.notes.create({ title: '命名要完整', body: '命名', category: 'style', tags: [], source: null });
+  await h.notes.create({ title: '锁的顺序', body: '先拿锁', category: 'concept', course: 'os', tags: [], source: null });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  const prompt = fixtures.callFor(h.agentCalls, 'grade').prompt;
+  // style is not a dimension the OS rubric has.
+  assert.match(prompt, /<developer_notes>\n- \[concept\] 锁的顺序: 先拿锁\n- \[thinking\] 先拆问题: 先拆\n<\/developer_notes>/);
+});
+
 test('practice: a grade whose category is not in the pack in use fails instead of being kept', async () => {
   // The default fake answers with programming categories (writing, style).
   const h = await practiceHarness();

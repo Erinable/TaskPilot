@@ -49,6 +49,36 @@ test('notes: the channels create, edit and delete notes, which stay with the dev
   assert.deepEqual((await h.call(CHANNELS.notesList, null)).data.notes, []);
 });
 
+test('notes: the packs that name categories are the built-in ones and the confirmed one in use', async () => {
+  const h = await fixtures.harness();
+  assert.deepEqual((await h.call(CHANNELS.notesCourses)).data, {
+    current: 'programming',
+    packs: [
+      {
+        id: 'programming',
+        title: '编程',
+        rubric: [
+          { id: 'thinking', label: '思路', dimension: 'thinking' },
+          { id: 'writing', label: '写法', dimension: 'writing' },
+          { id: 'style', label: '风格', dimension: 'style' },
+        ],
+      },
+    ],
+  });
+  await fixtures.useOsPack(h, { confirm: false });
+  assert.equal((await h.call(CHANNELS.notesCourses)).data.current, 'programming', 'an unconfirmed pack is not in use');
+  await fixtures.useOsPack(h);
+  const confirmed = (await h.call(CHANNELS.notesCourses)).data;
+  assert.equal(confirmed.current, 'os');
+  assert.deepEqual(
+    confirmed.packs.map((pack) => [pack.id, pack.rubric.map((item) => `${item.id}:${item.dimension}`)]),
+    [
+      ['programming', ['thinking:thinking', 'writing:writing', 'style:style']],
+      ['os', ['concept:thinking', 'mechanism:writing']],
+    ],
+  );
+});
+
 test('notes: another folder can only be one picked in the dialog', async () => {
   const vault = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-vault-'));
   onTestFinished(() => fs.rm(vault, { recursive: true, force: true }));

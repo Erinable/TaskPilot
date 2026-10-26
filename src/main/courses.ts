@@ -35,6 +35,13 @@ const BUILTIN: ReadonlyMap<string, { pack: CoursePack; ref: CourseRef }> = new M
   [PROGRAMMING_COURSE].map((pack) => [pack.id, { pack, ref: builtinRef(pack) }]),
 );
 
+// The packs whose rubrics name note categories here: every built-in pack
+// and the one in use.
+export const knownPacks = (inUse: CoursePack): CoursePack[] => [
+  ...[...BUILTIN.values()].map((entry) => entry.pack).filter((pack) => pack.id !== inUse.id),
+  inUse,
+];
+
 // The pack in use, and how the repository's choice resolved.
 export type CourseResolution = CourseView & { pack: CoursePack };
 

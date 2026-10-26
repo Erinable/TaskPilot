@@ -2,6 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as practice from '../../src/main/practice.ts';
+import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
 import type { Grade } from '../../src/shared/ipc/packages.ts';
 
 const grade = (overrides: Partial<Grade> = {}): Grade => ({
@@ -60,26 +61,75 @@ test('reference patches are kept per package, with the id made safe for a file n
   assert.equal(practice.referencePath('/data', '../x'), '/data/references/..%2Fx.patch');
 });
 
+// A pack whose rubric ids are not the dimension names, as a non-programming pack's are.
+const OS_PACK = {
+  id: 'os',
+  rubric: [
+    { id: 'concurrency', label: '并发', description: 'x', dimension: 'thinking' as const },
+    { id: 'syscalls', label: '系统调用', description: 'x', dimension: 'writing' as const },
+  ],
+};
+const PACKS = [PROGRAMMING_COURSE, OS_PACK];
+const note = (id: string, overrides: object = {}) =>
+  ({ id, title: id, category: null, course: null, tags: [], source: null, summary: null, excerpt: `${id} 正文`, ...overrides }) as never;
+
 test('grading reads notes on the changed files first, then categorized ones, at most ten', () => {
-  const note = (id: string, overrides: object = {}) =>
-    ({ id, title: id, category: null, tags: [], source: null, summary: null, excerpt: `${id} 正文`, ...overrides }) as never;
   const notes = [
     note('plain'),
     note('style', { category: 'style' }),
     note('file', { source: { file: 'a.ts' } }),
     ...Array.from({ length: 12 }, (_unused, index) => note(`thinking-${index}`, { category: 'thinking' })),
   ];
-  const picked = practice.notesForGrade(notes, ['a.ts']);
+  const picked = practice.notesForGrade(notes, ['a.ts'], PROGRAMMING_COURSE, PACKS);
   assert.equal(picked.length, practice.MAX_GRADE_NOTES);
   assert.deepEqual(
     picked.slice(0, 3).map((item) => item.title),
     ['file', 'style', 'thinking-0'],
   );
   assert.equal(picked[0].summary, 'file 正文', 'a note without a summary stands in with its excerpt');
-  assert.equal(practice.notesForGrade([note('s', { category: 'style', summary: '总结' })], [])[0].summary, '总结');
+  assert.equal(practice.notesForGrade([note('s', { category: 'style', summary: '总结' })], [], PROGRAMMING_COURSE, PACKS)[0].summary, '总结');
   assert.equal(
     picked.some((item) => item.title === 'plain'),
     false,
     'an uncategorized note elsewhere is not relevant',
   );
+});
+
+test('grading reads the same file, then the same pack, then other packs on a shared dimension', () => {
+  const notes = [
+    note('other-style', { category: 'style' }),
+    note('other-thinking', { category: 'thinking', summary: '先拆问题' }),
+    note('unknown', { category: 'mood', course: 'cooking' }),
+    note('os-file', { category: 'syscalls', course: 'os', source: { file: 'k.c' } }),
+    note('prog-file', { category: 'style', source: { file: 'k.c' } }),
+    note('os-concurrency', { category: 'concurrency', course: 'os' }),
+    note('os-uncategorized', { course: 'os' }),
+  ];
+  const picked = practice.notesForGrade(notes, ['k.c'], OS_PACK, PACKS);
+  assert.deepEqual(
+    picked.map((item) => [item.title, item.category]),
+    [
+      ['os-file', 'syscalls'],
+      // Another pack's category means nothing here; it is named by its dimension.
+      ['prog-file', 'style'],
+      ['os-concurrency', 'concurrency'],
+      // thinking is a dimension OS has; style is not, and an unknown pack's category maps onto none.
+      ['other-thinking', 'thinking'],
+    ],
+  );
+  assert.equal(picked[3].summary, '先拆问题');
+
+  const many = Array.from({ length: 12 }, (_unused, index) => note(`os-${index}`, { category: 'concurrency', course: 'os' }));
+  const capped = practice.notesForGrade([note('other', { category: 'thinking' }), ...many], [], OS_PACK, PACKS);
+  assert.equal(capped.length, practice.MAX_GRADE_NOTES);
+  assert.equal(
+    capped.some((item) => item.title === 'other'),
+    false,
+    'the same pack fills the cap before other packs',
+  );
+
+  // From programming, an OS note counts on its dimension even under an id programming does not have.
+  assert.deepEqual(practice.notesForGrade([note('os-concurrency', { category: 'concurrency', course: 'os' })], [], PROGRAMMING_COURSE, PACKS), [
+    { category: 'thinking', title: 'os-concurrency', summary: 'os-concurrency 正文' },
+  ]);
 });
