@@ -3,7 +3,7 @@
 // ready (its content stays locked until the first submission), Tutor's
 // grading of the submission, and the reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
@@ -11,14 +11,15 @@ import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import { useCoursesStore } from '@/stores/courses.ts';
 import { useNotesStore } from '@/stores/notes.ts';
-import { PROGRAMMING_COURSE } from '@shared/course_pack.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const props = defineProps<{ task: packageTypes.TaskView }>();
 
 const execution = useExecutionStore();
 const notes = useNotesStore();
+const courses = useCoursesStore();
 // Comments already saved while this page is open, so the button says so.
 const saved = ref(new Set<packageTypes.GradeComment>());
 
@@ -55,9 +56,10 @@ const gradeText = computed((): string | null => {
 });
 
 // [人工决策-2026-10-26 15:38:21] 维度和标签来自判卷时快照的 rubric；旧记录没有快照，按内置 programming 包显示。
+// The default pack comes from the main process; until it answers an old grade lists nothing.
 const byCategory = computed(() => {
   const comments = grade.value?.report?.comments ?? [];
-  const rubric = grade.value?.course?.rubric ?? PROGRAMMING_COURSE.rubric;
+  const rubric = grade.value?.course?.rubric ?? courses.defaultPack?.rubric ?? [];
   return rubric
     .map((item) => ({ category: item.id, label: item.label, comments: comments.filter((comment) => comment.category === item.id) }))
     .filter((group) => group.comments.length);
@@ -83,6 +85,9 @@ watch(
   },
   { immediate: true },
 );
+
+// Read once at startup (App.vue); asked again here in case that failed.
+onMounted(() => courses.loadDefault().catch((error) => console.error(error)));
 
 const regrade = (skipReference: boolean) => execution.regrade(skipReference).catch((error) => console.error(error));
 </script>

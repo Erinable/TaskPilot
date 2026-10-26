@@ -4,13 +4,13 @@
 //
 // [人工决策-2026-10-26 15:38:21] 没有 course 的笔记视为 programming；跨领域按 thinking / writing / style 三个通用维度统计。
 // 不认识的包或 rubric 项显示原 id，维度只有在 id 本身就是通用维度名时才算得出。
-import { COURSE_DIMENSIONS, PROGRAMMING_COURSE } from './course_pack.ts';
+import { COURSE_DIMENSIONS, DEFAULT_COURSE_ID } from './course_pack.ts';
 import type { CourseDimension, RubricItem } from './course_pack.ts';
 
 type Pack = { id: string; rubric: Pick<RubricItem, 'id' | 'label' | 'dimension'>[] };
 type Categorized = { category: string | null; course: string | null };
 
-export const noteCourseId = (note: Pick<Categorized, 'course'>) => note.course ?? PROGRAMMING_COURSE.id;
+export const noteCourseId = (note: Pick<Categorized, 'course'>) => note.course ?? DEFAULT_COURSE_ID;
 
 export const rubricItemOf = (note: Categorized, packs: Pack[]) =>
   note.category === null ? null : (packs.find((pack) => pack.id === noteCourseId(note))?.rubric.find((item) => item.id === note.category) ?? null);

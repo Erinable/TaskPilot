@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as productLead from '../../../src/main/agents/product_lead.ts';
-import { PROGRAMMING_COURSE } from '../../../src/shared/course_pack.ts';
+import { PROGRAMMING_COURSE } from '../../fixtures/builtin_courses.ts';
 import { ICONS } from '../../../src/renderer/src/lib/icons.ts';
 
 const validPackage = (overrides = {}) => ({

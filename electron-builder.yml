@@ -9,9 +9,15 @@ directories:
 files:
   - out/**
   - package.json
-# The coding user setup script and the wrapper it installs, for the user to
-# review and run by hand; the setup script finds the wrapper beside itself.
 extraResources:
+  # The built-in course packs, read at startup from Resources/courses
+  # (src/main/courses.ts loadBuiltinCourses).
+  - from: resources/courses
+    to: courses
+    filter:
+      - '*.toml'
+  # The coding user setup script and the wrapper it installs, for the user to
+  # review and run by hand; the setup script finds the wrapper beside itself.
   - from: scripts
     to: scripts
     filter:

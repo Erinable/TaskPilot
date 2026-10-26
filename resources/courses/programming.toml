@@ -1,0 +1,49 @@
+# The built-in programming pack (the default). Shipped with TaskPilot under
+# resources/courses/ and loaded at startup by src/main/courses.ts, which
+# validates it like any pack file (src/main/course_file.ts). Its text is what
+# Product Lead and Tutor are told, so the prompts change with it; check a
+# change with npm run eval:tutor-grade and npm run eval:product-lead.
+#
+# [人工决策-2026-10-27 00:55:52] 内置课程包随应用打包为 TOML，只读；用户想改就复制一份再改（导入或放进仓库 .taskpilot/courses/，换一个 id）。
+
+schemaVersion = 1
+id = "programming"
+version = "1.0.0"
+domain = "programming"
+title = "编程"
+summary = "在真实仓库里写代码，学习解决问题的思路、语言和库的用法，以及项目的约定。"
+learner = "a developer who may be new to programming"
+tutorGuide = [
+  "The developer may be new to programming.",
+]
+difficultyGuide = [
+  "- easy: follows a pattern already in the repository, in one or two files, with no new concepts.",
+  "- medium: touches several files, or uses one idea the developer may not know yet (async code, a new library call, a database query).",
+  "- hard: new structure, several unfamiliar ideas together, or tricky cases such as concurrency, security or data migration.",
+  "- reason names the concrete thing that makes it easy or hard, in one plain sentence without jargon.",
+]
+practiceGuide = [
+  "- practice: the core of the requirement, where writing it teaches how to think about the problem, a useful technique, or the conventions of this code.",
+  "- ai: boilerplate, configuration, wiring, renames or repetitive edits, where writing it by hand teaches little.",
+  "- Write steps, acceptance criteria and tests the same way for both; the mode only says who is best placed to write the code.",
+  "- reason says in one plain sentence what the developer would learn, or why it is not worth practising.",
+]
+referenceGuide = "Write the complete solution to this work package. It is a reference answer for a learner, so follow the repository conventions closely."
+
+[[rubric]]
+id = "thinking"
+label = "思路"
+dimension = "thinking"
+description = "how they approached the problem (decomposition, the cases they handled or missed, where logic lives)"
+
+[[rubric]]
+id = "writing"
+label = "写法"
+dimension = "writing"
+description = "how the code does it (language features, library calls, error handling, tests)"
+
+[[rubric]]
+id = "style"
+label = "风格"
+dimension = "style"
+description = "naming, layout and the conventions the surrounding code follows"

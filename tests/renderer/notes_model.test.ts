@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import * as model from '../../src/renderer/src/lib/notes_model.ts';
 import * as markdown from '../../src/shared/note_markdown.ts';
+import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 import type * as noteTypes from '../../src/shared/ipc/notes.ts';
 
 const note = (id: string, overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta => ({
@@ -23,6 +24,8 @@ const note = (id: string, overrides: Partial<noteTypes.NoteMeta> = {}): noteType
   ...overrides,
 });
 
+const DEFAULT_COURSES = model.defaultCourses(PROGRAMMING_COURSE);
+
 describe('notes model', () => {
   const notes = [
     note('a', { title: '先写测试', category: 'thinking', tags: ['tdd'] }),
@@ -33,7 +36,7 @@ describe('notes model', () => {
   const all = { query: '', category: null, tag: null };
 
   test('filters by category, frontmatter or body tags, and a search over text, tags, source and body matches', () => {
-    const courses = model.DEFAULT_COURSES;
+    const courses = DEFAULT_COURSES;
     expect(ids(model.filterNotes(notes, { ...all, category: { course: 'programming', category: 'style' } }, courses))).toEqual(['b']);
     expect(ids(model.filterNotes(notes, { ...all, tag: 'tdd' }, courses))).toEqual(['a']);
     expect(ids(model.filterNotes(notes, { ...all, tag: '命名' }, courses))).toEqual(['b']);
@@ -81,7 +84,7 @@ test('the archive groups by the business-day month written, newest first, and co
     { tag: 'x', count: 2 },
     { tag: 'y', count: 1 },
   ]);
-  expect(model.rubricCounts(list, model.DEFAULT_COURSES).map((entry) => [entry.label, entry.count])).toEqual([
+  expect(model.rubricCounts(list, DEFAULT_COURSES).map((entry) => [entry.label, entry.count])).toEqual([
     ['思路', 0],
     ['写法', 0],
     ['风格', 2],
@@ -98,7 +101,7 @@ describe('categories across course packs', () => {
       { id: 'syscalls', label: '系统调用', dimension: 'writing' },
     ],
   };
-  const courses: noteTypes.NoteCourses = { current: 'os', packs: [...model.DEFAULT_COURSES.packs, OS] };
+  const courses: noteTypes.NoteCourses = { current: 'os', packs: [...DEFAULT_COURSES.packs, OS] };
   const notes = [
     note('old', { category: 'thinking' }),
     note('os', { category: 'concurrency', course: 'os' }),
@@ -113,7 +116,7 @@ describe('categories across course packs', () => {
     expect(notes.map((entry) => model.categoryLabel(entry, courses))).toEqual(['思路', '并发', '系统调用', 'knife（未知维度）', '风格']);
     expect(model.categoryLabel(note('x'), courses)).toBeNull();
     // programming has no concurrency.
-    expect(model.categoryLabel(note('x', { category: 'concurrency' }), model.DEFAULT_COURSES)).toBe('concurrency（未知维度）');
+    expect(model.categoryLabel(note('x', { category: 'concurrency' }), DEFAULT_COURSES)).toBe('concurrency（未知维度）');
   });
 
   test("filters by the pack in use's rubric or by a dimension across packs, and counts both", () => {
@@ -135,8 +138,8 @@ describe('categories across course packs', () => {
   });
 
   test('dimensions are only offered when they say more than the rubric', () => {
-    expect(model.showDimensions([note('a', { category: 'thinking' })], model.DEFAULT_COURSES)).toBe(false);
-    expect(model.showDimensions(notes, model.DEFAULT_COURSES)).toBe(true);
+    expect(model.showDimensions([note('a', { category: 'thinking' })], DEFAULT_COURSES)).toBe(false);
+    expect(model.showDimensions(notes, DEFAULT_COURSES)).toBe(true);
     expect(model.showDimensions([], courses)).toBe(true);
   });
 

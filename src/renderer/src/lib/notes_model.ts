@@ -1,23 +1,26 @@
 // Pure logic of the notes page: filtering, link resolution, backlinks,
 // [[ completion and the labels it shows.
 import { businessDay, businessTimeZone } from '@/lib/time_zone.ts';
-import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS, PROGRAMMING_COURSE } from '@shared/course_pack.ts';
+import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS, DEFAULT_COURSE_ID } from '@shared/course_pack.ts';
 import * as markdown from '@shared/note_markdown.ts';
 import * as noteCourses from '@shared/note_courses.ts';
-import type { CourseDimension } from '@shared/course_pack.ts';
+import type { CourseDimension, CoursePack } from '@shared/course_pack.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
 
 // One rubric item of one pack, or a dimension across every pack.
 export type CategoryFilter = { course: string; category: string } | { dimension: CourseDimension };
 export type NoteFilter = { query: string; category: CategoryFilter | null; tag: string | null };
 
-// What the page knows before the main process answers: only the built-in programming pack.
-export const DEFAULT_COURSES: noteTypes.NoteCourses = {
-  current: PROGRAMMING_COURSE.id,
-  packs: [{ id: PROGRAMMING_COURSE.id, title: PROGRAMMING_COURSE.title, rubric: PROGRAMMING_COURSE.rubric }],
-};
+// What the page knows before the main process answers: only the built-in
+// default pack, once the main process has sent it (stores/courses.ts).
+export const defaultCourses = (pack: CoursePack | null): noteTypes.NoteCourses => ({
+  current: DEFAULT_COURSE_ID,
+  packs: pack ? [{ id: pack.id, title: pack.title, rubric: pack.rubric.map(({ id, label, dimension }) => ({ id, label, dimension })) }] : [],
+});
 
-export const currentPack = (courses: noteTypes.NoteCourses) => courses.packs.find((pack) => pack.id === courses.current)!;
+// The pack in use; with nothing known yet, an empty rubric under its id.
+export const currentPack = (courses: noteTypes.NoteCourses): noteTypes.NoteCourse =>
+  courses.packs.find((pack) => pack.id === courses.current) ?? { id: courses.current, title: courses.current, rubric: [] };
 
 // The rubric item's label in the note's pack; a category no known pack has
 // is shown as written.

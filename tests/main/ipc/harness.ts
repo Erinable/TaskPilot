@@ -30,6 +30,7 @@ import { createPathResolver } from '../../../src/main/shell_env.ts';
 import { RepositoryRegistry } from '../../../src/main/repositories.ts';
 import { TutorStore } from '../../../src/main/tutor_store.ts';
 import { NoteStore } from '../../../src/main/note_store.ts';
+import { BUILTIN } from '../../fixtures/builtin_courses.ts';
 
 // A stand-in agent; tests answer with plain objects or reject.
 export type FakeAgent = (options: RunStructuredOptions) => Promise<unknown>;
@@ -139,6 +140,7 @@ export const harness = async ({
     {
       store,
       configDir,
+      builtinCourses: BUILTIN,
       repositories,
       getConfig: () => config,
       setConfig: (next) => {

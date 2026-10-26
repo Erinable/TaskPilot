@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as courseFile from '../../src/main/course_file.ts';
-import { OS_COURSE, PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { OS_COURSE, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 // A valid pack as TOML; `extra` is appended, `drop` removes top-level lines.
 const OS_PACK = `

@@ -22,7 +22,7 @@ import type { AppContext } from '../../../src/main/app_context.ts';
 import type { CheckOutcome, EvidenceItem } from '../../../src/main/evidence.ts';
 import type { TaskDefinition } from '../../../src/main/tasks.ts';
 import type { ProjectProfile } from '../../../src/shared/project_profile.ts';
-import { PROGRAMMING_COURSE } from '../../../src/shared/course_pack.ts';
+import { PROGRAMMING_COURSE } from '../../fixtures/builtin_courses.ts';
 
 // What effective_steps gives a TypeScript repository with taskpilot.toml.
 const TS_PROFILE: ProjectProfile = {

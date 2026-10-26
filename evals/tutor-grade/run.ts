@@ -9,7 +9,9 @@
 //
 // Costs real money, so it is not part of `npm test`. Reports go to
 // evals/tutor-grade/reports/ (gitignored).
-import { BUILTIN_COURSES } from '../../src/shared/course_pack.ts';
+import path from 'node:path';
+
+import * as courses from '../../src/main/courses.ts';
 import { judgeWith, parseArgs, runAgent, runSuite } from '../shared/harness.ts';
 import { cases } from './cases.ts';
 import { check, structure } from './checks.ts';
@@ -36,9 +38,12 @@ const SYSTEM = [
   'Give a one-sentence reason naming the specific flaw or strength. Write reasons in English.',
 ].join('\n');
 
+// The built-in packs as the app ships them (resources/courses/).
+const BUILTIN = await courses.loadBuiltinCourses(path.join(import.meta.dirname, '..', '..', courses.BUILTIN_COURSES_DIR));
+
 const packById = (id: string): CoursePack => {
-  const pack = BUILTIN_COURSES.find((entry) => entry.id === id);
-  if (!pack) throw new Error(`--course: "${id}" is not a built-in course pack; use one of ${BUILTIN_COURSES.map((entry) => entry.id).join(', ')}`);
+  const pack = BUILTIN.get(id)?.pack;
+  if (!pack) throw new Error(`--course: "${id}" is not a built-in course pack; use one of ${[...BUILTIN.keys()].join(', ')}`);
   return pack;
 };
 

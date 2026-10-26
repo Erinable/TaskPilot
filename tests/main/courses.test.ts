@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import * as courses from '../../src/main/courses.ts';
 import * as courseFile from '../../src/main/course_file.ts';
-import { OS_COURSE, PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { BUILTIN, BUILTIN_COURSES_DIR, OS_COURSE, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 const tempDir = async (prefix: string) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -55,7 +55,7 @@ const none = { local: null, project: null };
 
 test('with nothing set, the built-in programming pack is used', async () => {
   const { root, dataDir } = await setup();
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, none);
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, none);
   assert.deepEqual(resolved.selected, { id: 'programming', from: 'default' });
   assert.deepEqual(resolved.state, { status: 'ok' });
   assert.equal(resolved.pack, PROGRAMMING_COURSE);
@@ -63,21 +63,21 @@ test('with nothing set, the built-in programming pack is used', async () => {
   assert.equal(resolved.ref.version, PROGRAMMING_COURSE.version);
   assert.match(resolved.ref.contentHash, /^[0-9a-f]{64}$/);
   // Also without an open repository.
-  assert.equal((await courses.resolveCourse({ root: null, dataDir, configDir: null }, none)).pack, PROGRAMMING_COURSE);
+  assert.equal((await courses.resolveCourse({ root: null, dataDir, configDir: null, builtin: BUILTIN }, none)).pack, PROGRAMMING_COURSE);
 });
 
 test("this machine's choice wins over taskpilot.toml's", async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
-  const fromProject = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: null, project: 'oslab' });
+  const fromProject = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: null, project: 'oslab' });
   assert.deepEqual(fromProject.selected, { id: 'oslab', from: 'project' });
-  const fromLocal = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: 'programming', project: 'oslab' });
+  const fromLocal = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'programming', project: 'oslab' });
   assert.deepEqual(fromLocal.selected, { id: 'programming', from: 'local' });
   assert.deepEqual(fromLocal.state, { status: 'ok' });
 });
 
 test('an unknown id is reported with the ids to choose from, and programming is used', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: null, project: 'database' });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: null, project: 'database' });
   assert.equal(resolved.state.status, 'invalid');
   assert.deepEqual(resolved.state.status === 'invalid' && resolved.state.error, {
     code: 'unknown_course',
@@ -95,7 +95,7 @@ test('an unknown id is reported with the ids to choose from, and programming is 
 test('a repository pack is not used until this machine confirms it', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
   const choice = { local: null, project: 'oslab' };
-  const pending = await courses.resolveCourse({ root, dataDir, configDir: null }, choice);
+  const pending = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, choice);
   assert.equal(pending.state.status, 'pending');
   assert.equal(pending.pack, PROGRAMMING_COURSE);
   assert.equal(pending.ref.id, 'programming');
@@ -103,8 +103,8 @@ test('a repository pack is not used until this machine confirms it', async () =>
   assert.equal(pending.state.pack.title, '操作系统实验');
   assert.equal(pending.state.ref.source, 'repository');
 
-  await courses.confirm({ root, dataDir, configDir: null }, pending.state.pack, pending.state.ref);
-  const confirmed = await courses.resolveCourse({ root, dataDir, configDir: null }, choice);
+  await courses.confirm({ root, dataDir, configDir: null, builtin: BUILTIN }, pending.state.pack, pending.state.ref);
+  const confirmed = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, choice);
   assert.deepEqual(confirmed.state, { status: 'ok' });
   assert.equal(confirmed.pack.id, 'oslab');
   assert.deepEqual(confirmed.ref, pending.state.ref);
@@ -116,15 +116,15 @@ test('a repository pack is not used until this machine confirms it', async () =>
 test('a changed pack needs confirming again', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
   const choice = { local: null, project: 'oslab' };
-  const first = await courses.resolveCourse({ root, dataDir, configDir: null }, choice);
+  const first = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, choice);
   if (first.state.status !== 'pending') throw new Error('expected pending');
-  await courses.confirm({ root, dataDir, configDir: null }, first.state.pack, first.state.ref);
+  await courses.confirm({ root, dataDir, configDir: null, builtin: BUILTIN }, first.state.pack, first.state.ref);
   // A comment is not content; the confirmation holds.
   await fs.appendFile(path.join(root, courses.COURSES_DIR, 'oslab.toml'), '\n# a note\n');
-  assert.equal((await courses.resolveCourse({ root, dataDir, configDir: null }, choice)).state.status, 'ok');
+  assert.equal((await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, choice)).state.status, 'ok');
 
   await fs.writeFile(path.join(root, courses.COURSES_DIR, 'oslab.toml'), packText('oslab', '操作系统（改）'));
-  const changed = await courses.resolveCourse({ root, dataDir, configDir: null }, choice);
+  const changed = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, choice);
   assert.equal(changed.state.status, 'pending');
   assert.equal(changed.pack, PROGRAMMING_COURSE);
   assert.notEqual(changed.state.status === 'pending' && changed.state.ref.contentHash, first.state.ref.contentHash);
@@ -133,12 +133,12 @@ test('a changed pack needs confirming again', async () => {
 test('a broken trust file confirms nothing', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
   await fs.writeFile(path.join(dataDir, courses.TRUST_FILENAME), '{ not json');
-  assert.equal((await courses.resolveCourse({ root, dataDir, configDir: null }, { local: 'oslab', project: null })).state.status, 'pending');
+  assert.equal((await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'oslab', project: null })).state.status, 'pending');
 });
 
 test('a broken repository pack is reported with its field, and programming is used', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab').replace('dimension = "writing"', 'dimension = "safety"') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: 'oslab', project: null });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'oslab', project: null });
   assert.equal(resolved.state.status, 'invalid');
   assert.equal(resolved.state.status === 'invalid' && resolved.state.error.field, 'rubric[1].dimension');
   assert.equal(resolved.pack, PROGRAMMING_COURSE);
@@ -146,7 +146,7 @@ test('a broken repository pack is reported with its field, and programming is us
 
 test("a pack's id must match its file name", async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('kernel') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: 'oslab', project: null });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'oslab', project: null });
   assert.equal(resolved.state.status === 'invalid' && resolved.state.error.field, 'id');
 });
 
@@ -161,7 +161,7 @@ test('only regular .toml files with valid ids are listed; symlinks are refused',
 
 test('a repository file cannot replace a built-in pack', async () => {
   const { root, dataDir } = await setup({ 'programming.toml': packText('programming', '假的') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, none);
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, none);
   assert.equal(resolved.pack, PROGRAMMING_COURSE);
   assert.deepEqual(resolved.available, [
     { id: 'programming', source: 'builtin' },
@@ -171,7 +171,7 @@ test('a repository file cannot replace a built-in pack', async () => {
 
 test('the built-in os pack is used without confirming, with its own rubric', async () => {
   const { root, dataDir } = await setup();
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: null, project: 'os' });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: null, project: 'os' });
   assert.deepEqual(resolved.state, { status: 'ok' });
   assert.equal(resolved.pack, OS_COURSE);
   assert.deepEqual(resolved.ref, { id: 'os', version: OS_COURSE.version, contentHash: courseFile.contentHash(OS_COURSE), source: 'builtin' });
@@ -193,7 +193,7 @@ test('the built-in os pack is used without confirming, with its own rubric', asy
 
 test('a repository os.toml cannot replace the built-in os pack', async () => {
   const { root, dataDir } = await setup({ 'os.toml': packText('os', '假的') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: 'os', project: null });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'os', project: null });
   assert.equal(resolved.pack, OS_COURSE);
   assert.equal(resolved.ref.source, 'builtin');
 });
@@ -209,7 +209,7 @@ const userFolder = async (files: Record<string, string> = {}) => {
 test('an imported pack is listed after the repository ones and needs confirming, recorded in userData', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
   const configDir = await userFolder({ 'net.toml': packText('net', '网络') });
-  const places = { root, dataDir, configDir };
+  const places = { root, dataDir, configDir, builtin: BUILTIN };
   const pending = await courses.resolveCourse(places, { local: 'net', project: null });
   assert.deepEqual(pending.available.at(-1), { id: 'net', source: 'user' });
   assert.equal(pending.state.status, 'pending');
@@ -225,25 +225,25 @@ test('an imported pack is listed after the repository ones and needs confirming,
   assert.ok(JSON.parse(await fs.readFile(path.join(configDir, courses.TRUST_FILENAME), 'utf8')).confirmed.net);
   // And holds in another repository.
   const other = await setup();
-  assert.equal((await courses.resolveCourse({ ...other, configDir }, { local: 'net', project: null })).state.status, 'ok');
+  assert.equal((await courses.resolveCourse({ ...other, configDir, builtin: BUILTIN }, { local: 'net', project: null })).state.status, 'ok');
 });
 
 test('a repository pack wins over an imported one of the same id, and an import cannot replace a built-in pack', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab', '仓库的') });
   const configDir = await userFolder({ 'oslab.toml': packText('oslab', '导入的'), 'os.toml': packText('os', '假的') });
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir }, { local: 'oslab', project: null });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir, builtin: BUILTIN }, { local: 'oslab', project: null });
   assert.deepEqual(resolved.available, [
     { id: 'programming', source: 'builtin' },
     { id: 'os', source: 'builtin' },
     { id: 'oslab', source: 'repository' },
   ]);
   assert.equal(resolved.state.status === 'pending' && resolved.state.pack.title, '仓库的');
-  assert.equal((await courses.resolveCourse({ root, dataDir, configDir }, { local: 'os', project: null })).pack, OS_COURSE);
+  assert.equal((await courses.resolveCourse({ root, dataDir, configDir, builtin: BUILTIN }, { local: 'os', project: null })).pack, OS_COURSE);
 });
 
 test('a confirmation keeps the content it was given; one from before (a bare hash) still confirms', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
-  const places = { root, dataDir, configDir: null };
+  const places = { root, dataDir, configDir: null, builtin: BUILTIN };
   const pending = await courses.resolveCourse(places, { local: 'oslab', project: null });
   if (pending.state.status !== 'pending') throw new Error('expected pending');
   assert.equal(await courses.confirmationFor(places, pending.state.ref), null);
@@ -263,9 +263,9 @@ test('a confirmation keeps the content it was given; one from before (a bare has
 
 test('built-in packs need no confirmation and cannot be given one', async () => {
   const { root, dataDir } = await setup();
-  const builtin = courses.builtinCourse('os')!;
-  assert.equal(await courses.trustOf({ root, dataDir, configDir: null }, builtin.ref), 'builtin');
-  await assert.rejects(() => courses.confirm({ root, dataDir, configDir: null }, builtin.pack, builtin.ref), { code: 'invalid_course' });
+  const builtin = BUILTIN.get('os')!;
+  assert.equal(await courses.trustOf({ root, dataDir, configDir: null, builtin: BUILTIN }, builtin.ref), 'builtin');
+  await assert.rejects(() => courses.confirm({ root, dataDir, configDir: null, builtin: BUILTIN }, builtin.pack, builtin.ref), { code: 'invalid_course' });
 });
 
 test('parseCourseText validates an import: size, fields, and the file name when given', () => {
@@ -275,4 +275,37 @@ test('parseCourseText validates an import: size, fields, and the file name when 
   assert.throws(() => courses.parseCourseText(packText('net').replace('dimension = "writing"', 'dimension = "safety"'), 'user', 'net.toml'), {
     field: 'rubric[1].dimension',
   });
+});
+
+// The hashes of the built-in packs when they were TypeScript constants. Grade
+// snapshots and confirmations recorded then name these, so the files must
+// keep hashing the same.
+const HASHES_BEFORE_TOML = {
+  programming: '22470ff4e07f076fc4e40ac5105b99c9cae2656e88f788569e8eba8fa7ea3518',
+  os: '88d0d0641295de8ffeb39a05df30f08849f92952faea72e732db5a1729b044bd',
+};
+
+test('the built-in TOML packs hash the same as the constants they replaced', () => {
+  assert.deepEqual([...BUILTIN.keys()], ['programming', 'os']);
+  for (const [id, hash] of Object.entries(HASHES_BEFORE_TOML)) {
+    const { pack, ref } = BUILTIN.get(id)!;
+    assert.equal(courseFile.contentHash(pack), hash, id);
+    assert.deepEqual(ref, { id, version: pack.version, contentHash: hash, source: 'builtin' });
+  }
+});
+
+test('a built-in pack that does not validate, or a missing default, fails loading', async () => {
+  const dir = await tempDir('taskpilot-builtin-');
+  await assert.rejects(() => courses.loadBuiltinCourses(dir), { code: 'invalid_course', message: /programming\.toml is missing/ });
+  await fs.writeFile(path.join(dir, 'programming.toml'), await fs.readFile(path.join(BUILTIN_COURSES_DIR, 'programming.toml'), 'utf8'));
+  await fs.writeFile(path.join(dir, 'net.toml'), packText('net').replace('dimension = "writing"', 'dimension = "safety"'));
+  await assert.rejects(() => courses.loadBuiltinCourses(dir), {
+    code: 'invalid_course',
+    field: 'rubric[1].dimension',
+    message: /^The built-in course pack net\.toml/,
+  });
+  await fs.writeFile(path.join(dir, 'net.toml'), packText('net'));
+  const loaded = await courses.loadBuiltinCourses(dir);
+  assert.deepEqual([...loaded.keys()], ['programming', 'net']);
+  assert.equal(loaded.get('net')!.ref.source, 'builtin');
 });

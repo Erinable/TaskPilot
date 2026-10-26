@@ -17,7 +17,7 @@ import { promisify } from 'node:util';
 import { summarizeForRequirement } from '../../src/main/agents/pipeline.ts';
 import * as cli from '../../src/main/agents/claude_cli.ts';
 import * as productLead from '../../src/main/agents/product_lead.ts';
-import { BUILTIN_COURSES } from '../../src/shared/course_pack.ts';
+import * as courses from '../../src/main/courses.ts';
 import { cases, answerFor } from './fixtures.ts';
 import { check } from './checks.ts';
 import { CRITERIA, judge } from './judge.ts';
@@ -77,9 +77,12 @@ const parseArgs = (argv: string[]): Args => {
 
 const git = promisify(execFile);
 
+// The built-in packs as the app ships them (resources/courses/).
+const BUILTIN = await courses.loadBuiltinCourses(path.join(import.meta.dirname, '..', '..', courses.BUILTIN_COURSES_DIR));
+
 const packById = (id: string): CoursePack => {
-  const pack = BUILTIN_COURSES.find((entry) => entry.id === id);
-  if (!pack) throw new Error(`--course: "${id}" is not a built-in course pack; use one of ${BUILTIN_COURSES.map((entry) => entry.id).join(', ')}`);
+  const pack = BUILTIN.get(id)?.pack;
+  if (!pack) throw new Error(`--course: "${id}" is not a built-in course pack; use one of ${[...BUILTIN.keys()].join(', ')}`);
   return pack;
 };
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { cases } from '../../evals/tutor-grade/cases.ts';
 import { check, structure } from '../../evals/tutor-grade/checks.ts';
 import { gradeCase } from '../../evals/tutor-grade/grade.ts';
-import { BUILTIN_COURSES, OS_COURSE, PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { BUILTIN_COURSES, OS_COURSE, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 import type { GradeReport } from '../../src/main/agents/tutor.ts';
 
 const comment = (category: string, file: string | null = null, repeated = false) => ({

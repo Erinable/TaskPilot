@@ -197,3 +197,14 @@ test('an imported pack is not told to Product Lead until it is confirmed', async
   assert.deepEqual(confirmed.plan.course, preview.ref);
   assert.match(h.agentCalls.at(-1)!.systemPrompt!, /a student learning networks/);
 });
+
+test('courses:default sends the built-in programming pack, whichever pack is in use', async () => {
+  const h = await fixtures.harness();
+  await fixtures.useOsPack(h, { confirm: true });
+  const { data } = await h.call(CHANNELS.coursesDefault);
+  assert.equal(data.id, 'programming');
+  assert.deepEqual(
+    data.rubric.map((item) => item.id),
+    ['thinking', 'writing', 'style'],
+  );
+});
