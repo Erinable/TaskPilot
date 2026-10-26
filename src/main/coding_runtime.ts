@@ -110,12 +110,14 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
     return { ...status, config: { ...status.config, timeoutMinutes: getPreferences().coding.timeoutMinutes }, setupScript };
   };
 
-  // QA checks linked tests by name, so the names go in exactly as planned.
+  // QA checks linked tests by name, so the names go in exactly as planned,
+  // with the form the repository's test results give them.
   // The submit-stage checks are listed with their commands so the agent can
   // run them itself before handing the change back.
   const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null, profile?: ProjectProfile | null) => {
     const interfaces = ctx.interfacesFor(task);
     const submitChecks = profile?.checks.filter((check) => check.stage === 'submit') ?? [];
+    const testNameFormat = task.acceptance.some((item) => item.test) ? (profile?.testNameFormat ?? null) : null;
     return [
       'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
       'Do not commit, push, change git remotes, or modify files outside the requested scope.',
@@ -125,6 +127,12 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
       ...task.steps.map((step, index) => `${index + 1}. ${step}`),
       'Acceptance:',
       ...task.acceptance.map((item) => (item.test ? `- ${item.text} (proved by a test named exactly "${item.test}")` : `- ${item.text}`)),
+      // [人工决策-2026-10-25 23:51:35] 测试名精确匹配，只在 prompt 里注入名字格式（CARM-16 决策 A）。
+      ...(testNameFormat
+        ? [
+            `TaskPilot matches these names exactly against the test results, where a test's name is ${testNameFormat}. Write each test so it is reported under exactly that name.`,
+          ]
+        : []),
       ...(interfaces ? ['', '<interface_summary author="Architect">', interfaces, '</interface_summary>'] : []),
       ...(submitChecks.length
         ? [

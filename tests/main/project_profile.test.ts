@@ -15,6 +15,8 @@ import * as tutor from '../../src/main/agents/tutor.ts';
 import * as effectiveSteps from '../../src/main/effective_steps.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { pythonPreset } from '../../src/main/presets/python.ts';
+import { typescriptPreset } from '../../src/main/presets/typescript.ts';
 import type { AppDeps } from '../../src/main/app_context.ts';
 import type { ProjectProfile } from '../../src/shared/project_profile.ts';
 
@@ -51,7 +53,7 @@ test('buildProfile() describes a TypeScript repository from its preset and steps
     ],
   );
   assert.match(profile.testLayout ?? '', /\*\.test\.ts/);
-  assert.equal(profile.testNameFormat, null);
+  assert.equal(profile.testNameFormat, typescriptPreset.testNameFormat);
   assert.equal(profile.version, null);
 });
 
@@ -64,6 +66,7 @@ test('buildProfile() reports junit and JSON steps of a Python repository', async
   assert.equal(reports.test, 'tests');
   assert.equal(reports.lint, 'diagnostics');
   assert.match(profile.testLayout ?? '', /test_\*\.py/);
+  assert.equal(profile.testNameFormat, pythonPreset.testNameFormat);
 });
 
 test('buildProfile() without taskpilot.toml lists only the detected languages and local steps', async () => {
@@ -84,6 +87,8 @@ test('buildProfile() without taskpilot.toml lists only the detected languages an
     profile.checks.map((check) => [check.id, check.label, check.commandLine]),
     [['test', 'Unit tests', 'cargo test']],
   );
+  // No preset names the runner, so there is no test name format.
+  assert.equal(profile.testNameFormat, null);
 });
 
 test('buildProfile() names a custom step by its label', () => {
@@ -110,7 +115,7 @@ const PROFILE: ProjectProfile = {
   languages: [{ id: 'python', label: 'Python' }],
   manifests: ['pyproject.toml'],
   testLayout: 'tests/ 下 test_*.py',
-  testNameFormat: 'pytest node id: path::func',
+  testNameFormat: "the test function's name alone",
   checks: [{ id: 'test', label: 'test', stage: 'submit', blocking: true, commandLine: 'uv run pytest', reports: 'tests' }],
   version: { file: 'pyproject.toml', value: null },
 };
@@ -124,7 +129,7 @@ test('profileBlock() renders only the named sections, and nothing without a prof
     '',
     '<project_profile>',
     'Languages: Python',
-    'Test names: pytest node id: path::func',
+    "Test names: the test function's name alone",
     'Checks:',
     '- test (runs before review, blocking, test results): uv run pytest',
     'Version: (none) (from pyproject.toml)',

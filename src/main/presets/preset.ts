@@ -28,6 +28,10 @@ export interface Preset<Facts = unknown> {
   // Common command lines per step, offered as choices in settings.
   suggestions: (facts: Facts) => Partial<Record<StepKind, string[]>>;
   tools: ToolRequirement[];
+  // [人工决策-2026-10-25 23:51:35] 测试名保持精确匹配（evidence.ts criteriaStatus），只在 prompt 里注入名字格式（CARM-16 决策 A）。
+  // How a test's name reads in the results this preset's test step parses
+  // (check_output.ts, test_report.ts), the form a linked test is written in.
+  testNameFormat: string;
   // Paths, relative to the repository, a Coding Agent patch only changes
   // after the developer confirms (manifests, lockfiles, build scripts), and
   // paths it never changes (credentials). Added to the fixed rules in

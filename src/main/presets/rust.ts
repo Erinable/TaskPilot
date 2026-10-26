@@ -111,6 +111,9 @@ export const rustPreset: Preset<RustFacts> = {
     { command: 'cargo-clippy', versionArgs: ['--version'], install: 'rustup component add clippy' },
     { command: 'rustfmt', versionArgs: ['--version'], install: 'rustup component add rustfmt' },
   ],
+  // libtest and nextest name a test by its module path inside the crate.
+  testNameFormat:
+    'the test function\'s module path inside its crate joined with "::", e.g. "auth::tests::locks_after_five_failures" for a #[test] fn in mod tests of src/auth.rs; a test in tests/login.rs is just its function name, e.g. "it_works"',
   // [人工决策-2026-10-25 23:51:35] Rust 仓库的清单、锁文件、构建脚本和 .cargo/ 改动要人工确认（CARM-16 #9）。
   // 这会让更多补丁停下等确认，与 work_package_status.ts 的全自动闭环决策不冲突：有确认项本来就停下等人。
   // Any crate's, not only the root's: a workspace has one per member.

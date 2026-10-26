@@ -93,6 +93,9 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
     { command: 'node', versionArgs: ['--version'], install: 'brew install node   # 或从 https://nodejs.org 安装' },
     { command: 'npm', versionArgs: ['--version'], install: 'npm 随 Node.js 一起安装' },
   ],
+  // vitest's JUnit report names a test by its describe() blocks and title.
+  testNameFormat:
+    'the enclosing describe() names and the test\'s own title joined with " > " (vitest), e.g. "auth > login > locks after five failures"; a test outside any describe() is just its title, e.g. "exports login"',
   // The npm files and cache are in the fixed rules and sandbox environment,
   // so every repository keeps them.
   protectedFiles: [],

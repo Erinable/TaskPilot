@@ -186,6 +186,10 @@ export const pythonPreset: Preset<PythonFacts> = {
     { command: PYTHON, versionArgs: ['--version'], install: 'brew install python   # 或从 https://www.python.org/downloads/ 安装' },
     { command: 'uv', versionArgs: ['--version'], install: 'curl -LsSf https://astral.sh/uv/install.sh | sh   # 可选；没有 uv 时用 venv + pip' },
   ],
+  // pytest's JUnit report names a test by its function alone; the module
+  // and class only go into `classname`.
+  testNameFormat:
+    'the test function\'s name alone, without file path or class, e.g. "test_locks_after_five_failures"; a parametrized test is reported once per case, e.g. "test_rate[1]"',
   // [人工决策-2026-10-25 23:51:35] Python 仓库的项目配置、依赖清单和 pytest 配置改动要人工确认（CARM-16 #9）。
   // 这会让更多补丁停下等确认，与 work_package_status.ts 的全自动闭环决策不冲突：有确认项本来就停下等人。
   protectedFiles: [

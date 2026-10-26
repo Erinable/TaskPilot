@@ -8,6 +8,7 @@ Steps:
 Acceptance:
 - 第 5 次失败后锁定 (proved by a test named exactly "locks after five failures")
 - 锁定提示不泄露账户是否存在
+TaskPilot matches these names exactly against the test results, where a test's name is the enclosing describe() names and the test's own title joined with " > " (vitest), e.g. "auth > login > locks after five failures"; a test outside any describe() is just its title, e.g. "exports login". Write each test so it is reported under exactly that name.
 
 <interface_summary author="Architect">
 ## src/auth/login.ts

@@ -212,6 +212,8 @@ export const criteriaStatus = (
     let found: TestResult | null = null;
     let foundIn: string | null = null;
     for (const { kind, results } of trusted) {
+      // [人工决策-2026-10-25 23:51:35] 保持精确匹配，不按后缀或模糊规则放宽：同名测试会被误判为已验证（CARM-16 决策 A）。
+      // 名字格式由 preset 的 testNameFormat 注入 Product Lead 和 Coding Agent 的 prompt。
       found = results.find((r) => r.name === criterion.test || keyOf(r) === criterion.test) ?? null;
       if (found) {
         foundIn = kind;
