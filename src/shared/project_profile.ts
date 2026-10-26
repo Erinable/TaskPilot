@@ -32,7 +32,7 @@ export interface ProjectProfile {
   testLayout: string | null;
   // [人工决策-2026-10-25 23:51:35] 测试名保持精确匹配，只在 prompt 里注入名字格式（CARM-16 决策 A）。
   // The exact form a linked test name takes in the runner's results, e.g.
-  // "pytest node id: path::func"; null when the preset does not say.
+  // pytest's bare function name; null without a preset.
   testNameFormat: string | null;
   checks: ProfileCheck[];
   // The committed version and the file it is read from; null until a preset

@@ -185,6 +185,10 @@ export const planPrompt = ({
     linkTests
       ? '- Acceptance criteria are checkable outcomes. Give every package at least one criterion with `test` set to the exact name of a test the developer should write; test names must be unique across the plan.'
       : '- Acceptance criteria are checkable outcomes. This repository has no test check that runs before review, so TaskPilot cannot run tests: leave `test` out of every criterion, and write criteria a reviewer can check by reading the change or using the app.',
+    // [人工决策-2026-10-25 23:51:35] 测试名精确匹配，只在 prompt 里注入名字格式（CARM-16 决策 A）。
+    linkTests && profile?.testNameFormat
+      ? `- TaskPilot matches \`test\` exactly against the names in this repository's test results, where a test's name is ${profile.testNameFormat}. Write \`test\` in that form.`
+      : null,
     '- Never include shell commands to run.',
     '',
     'Difficulty, for a developer who may be new to programming:',
