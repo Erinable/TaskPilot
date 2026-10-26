@@ -1,11 +1,13 @@
 // Environment Steward channels: a setup plan for the open repository, its
 // steps run one by one on the user's click, and its scripts copied into the
-// checks config.
+// checks config. The repository's languages pick the setup adapter; this
+// file only passes it on.
 import { failWith, requireString } from '../coded_error.ts';
 import * as workspace from '../workspace.ts';
 import { formatCommandLine } from '../command_line.ts';
 import * as verification from '../verification.ts';
-import * as envSetup from '../presets/typescript_setup.ts';
+import * as presets from '../presets/index.ts';
+import { buildProfile } from '../project_profile.ts';
 import { planEnvironment } from '../agents/pipeline.ts';
 import { toFailure, wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
@@ -13,13 +15,16 @@ import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
 import type * as envTypes from '../../shared/ipc/environment.ts';
 import type { EnvFailure } from '../agents/env_steward.ts';
 import type { AppContext } from '../app_context.ts';
+import type { SetupAdapter } from '../setup_adapter.ts';
 import type { IpcMainLike } from './handler.ts';
 
 type EnvSession = {
   root: string | null;
   status: envTypes.EnvStatus;
-  facts: Awaited<ReturnType<typeof envSetup.probe>> | null;
-  blockers: ReturnType<typeof envSetup.blockers>;
+  // The adapter the plan was made with; its facts are of its own shape.
+  setup: SetupAdapter | null;
+  facts: unknown;
+  blockers: envTypes.EnvBlocker[];
   plan: Awaited<ReturnType<typeof planEnvironment>>['plan'];
   error: envelopeTypes.IpcFailure | null;
   costUsd: number;
@@ -40,6 +45,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   let env: EnvSession = {
     root: null,
     status: 'idle',
+    setup: null,
     facts: null,
     blockers: [],
     plan: null,
@@ -52,21 +58,30 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   };
   // The steward's plan described the previous repository's toolchain.
   ctx.onRepositoryOpened(() => {
-    env = { ...env, root: null, status: 'idle', facts: null, blockers: [], plan: null, error: null, costUsd: 0, results: {}, running: null, live: null };
+    env = {
+      ...env,
+      root: null,
+      status: 'idle',
+      setup: null,
+      facts: null,
+      blockers: [],
+      plan: null,
+      error: null,
+      costUsd: 0,
+      results: {},
+      running: null,
+      live: null,
+    };
   });
 
   // A plan only exists alongside the facts it was made from.
-  const envSteps = () => (env.plan && env.facts ? envSetup.buildSteps(env.plan, env.facts, { allowScripts: env.allowScripts }) : []);
+  const envSteps = () => (env.plan && env.setup ? env.setup.buildSteps(env.plan, env.facts, { allowScripts: env.allowScripts }) : []);
 
   const envView = (): envTypes.EnvState => ({
     root: env.root,
     status: env.status,
     stale: Boolean(env.root && env.root !== getConfig().root),
-    facts: env.facts && {
-      ...env.facts,
-      workflows: env.facts.workflows.map((file) => file.path),
-      versionFiles: env.facts.versionFiles,
-    },
+    facts: env.setup && env.facts ? env.setup.view(env.facts) : null,
     blockers: env.blockers,
     plan: env.plan,
     error: env.error,
@@ -77,22 +92,24 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     steps: envSteps().map((step) => ({
       id: step.id,
       kind: step.kind,
-      script: 'script' in step ? step.script : null,
-      packages: 'packages' in step ? step.packages : [],
-      replacesInstall: step.kind === 'install' && step.args[0] === 'ci' && Boolean(env.facts?.nodeModules),
+      script: step.script,
+      packages: step.packages,
+      replacesInstall: step.replacesInstall,
       line: formatCommandLine(step),
       result: env.results[step.id] ?? null,
     })),
+    stepKinds: [...(env.setup?.stepKinds ?? [])],
     configured: Object.fromEntries(
-      envSetup.SCRIPT_KINDS.map((kind) => [kind, (getConfig().steps[kind]?.commands ?? []).map(formatCommandLine).join(' && ')]),
-    ) as envTypes.EnvState['configured'],
+      (env.setup?.stepKinds ?? []).map((kind) => [kind, (getConfig().steps[kind]?.commands ?? []).map(formatCommandLine).join(' && ')]),
+    ),
   });
 
+  // A plan only exists alongside the adapter that made it.
   const requireEnvPlan = () => {
-    if (env.status !== 'ready' || !env.plan) return failWith('No environment plan is ready', 'env_no_plan');
+    if (env.status !== 'ready' || !env.plan || !env.setup) return failWith('No environment plan is ready', 'env_no_plan');
     if (env.root !== getConfig().root) failWith('The workspace changed since this plan was made', 'env_stale');
     if (env.running) failWith('A setup step is already running', 'env_busy');
-    return env.plan;
+    return { plan: env.plan, setup: env.setup };
   };
 
   // Re-planning after a failure hands the steward that step's output.
@@ -117,9 +134,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const withFailure = (options as { withFailure?: unknown } | null | undefined)?.withFailure === true && env.root === root;
       const failure = withFailure ? failedStep() : null;
       const keepResults = failure !== null;
+      // Resolved fresh, not from the cached profile: a manifest committed since
+      // still counts.
+      const setup = presets.setupOf(buildProfile(await ctx.resolveSteps()).languages.map((language) => language.id));
       env = {
         root,
         status: 'planning',
+        setup,
         facts: null,
         blockers: [],
         plan: null,
@@ -136,7 +157,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       backgroundRuns.track(
         (async () => {
           try {
-            const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure });
+            const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
             Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
             // Results only carry over for steps the new plan still runs unchanged.
             const lines = new Map(envSteps().map((step) => [step.id, formatCommandLine(step)]));
@@ -170,10 +191,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     CHANNELS.envRunStep,
     wrap(async (_event, stepId): Promise<envTypes.EnvState> => {
       requireString(stepId, 'stepId');
-      requireEnvPlan();
+      const { setup } = requireEnvPlan();
       const step = envSteps().find((candidate) => candidate.id === stepId);
       if (!step) return failWith(`Unknown setup step: ${stepId}`, 'invalid_argument');
-      const blocking = env.blockers.filter((code) => code !== 'unsupported_manager' || step.kind === 'install');
+      const blocking = setup.blocking(env.blockers, step.kind);
       if (blocking.length) failWith(`Setup is blocked: ${blocking.join(', ')}`, 'env_blocked');
 
       const session = env;
@@ -223,9 +244,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   ipcMain.handle(
     CHANNELS.envApply,
     wrap(async (_event, kinds): Promise<envTypes.EnvApplyResult> => {
-      const plan = requireEnvPlan();
-      if (!Array.isArray(kinds) || kinds.some((kind) => !envSetup.SCRIPT_KINDS.includes(kind))) {
-        failWith('kinds must be a list of test, lint or build', 'invalid_argument');
+      const { plan, setup } = requireEnvPlan();
+      if (!Array.isArray(kinds) || kinds.some((kind) => !setup.stepKinds.includes(kind))) {
+        failWith(`kinds must be a list of ${setup.stepKinds.join(', ')}`, 'invalid_argument');
       }
       const config = getConfig();
       // workspace.save() normalizes the steps, filling in what is left unset.
@@ -236,7 +257,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         // A new command keeps the step's stage and blocking choice; its parser
         // resets, since the old one described a different command.
         const kept = config.steps[kind];
-        steps[kind] = { commands: [envSetup.scriptCommand(name)], stage: kept?.stage, blocking: kept?.blocking };
+        steps[kind] = { commands: [setup.commandFor(kind, name)], stage: kept?.stage, blocking: kept?.blocking };
       }
       ctx.setConfig(await ctx.repositories.saveConfig(workspace.normalize({ ...config, version: workspace.CONFIG_VERSION, steps })));
       return envView();

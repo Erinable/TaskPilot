@@ -3,3 +3,5 @@ node_modules/
 package-lock.json
 evals/*/reports/
 *.md
+# Golden files are written byte for byte by toMatchFileSnapshot.
+**/__golden__/
