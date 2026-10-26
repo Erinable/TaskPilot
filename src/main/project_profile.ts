@@ -4,22 +4,19 @@
 // only get the result.
 import { formatCommandLine } from './command_line.ts';
 import * as presets from './presets/index.ts';
-import type { ProfileCheck, ProfileCheckReport, ProjectProfile } from '../shared/project_profile.ts';
+import { stepName } from '../shared/check_steps.ts';
+import { reportsOf } from '../shared/project_profile.ts';
+import type { ProfileCheck, ProjectProfile } from '../shared/project_profile.ts';
 import type { Resolution } from './effective_steps.ts';
 import type { CheckStep } from './step_config.ts';
 
-const reportsOf = (step: CheckStep): ProfileCheckReport => {
-  if (step.parser.format === 'tests' || step.parser.format === 'junit') return 'tests';
-  return step.parser.format === 'exitcode' ? 'exit' : 'diagnostics';
-};
-
 const checkOf = (step: CheckStep): ProfileCheck => ({
   id: step.id,
-  label: step.label ?? step.id,
+  label: stepName(step.id, step.label),
   stage: step.stage === 'submit' ? 'submit' : 'manual',
   blocking: step.blocking,
   commandLine: step.commands.map(formatCommandLine).join(' && '),
-  reports: reportsOf(step),
+  reports: reportsOf(step.parser.format),
 });
 
 // The profile of a resolved repository. Without taskpilot.toml the languages

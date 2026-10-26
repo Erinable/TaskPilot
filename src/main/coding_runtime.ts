@@ -111,8 +111,11 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
   };
 
   // QA checks linked tests by name, so the names go in exactly as planned.
+  // The submit-stage checks are listed with their commands so the agent can
+  // run them itself before handing the change back.
   const codingPrompt = (task: TaskDefinition, instruction: string, feedback: string | null, profile?: ProjectProfile | null) => {
     const interfaces = ctx.interfacesFor(task);
+    const submitChecks = profile?.checks.filter((check) => check.stage === 'submit') ?? [];
     return [
       'You are TaskPilot Coding Agent. Work only in the current isolated repository.',
       'Do not commit, push, change git remotes, or modify files outside the requested scope.',
@@ -123,6 +126,12 @@ export const createCodingRuntime = (ctx: AppContext, deps: CodingDeps = {}) => {
       'Acceptance:',
       ...task.acceptance.map((item) => (item.test ? `- ${item.text} (proved by a test named exactly "${item.test}")` : `- ${item.text}`)),
       ...(interfaces ? ['', '<interface_summary author="Architect">', interfaces, '</interface_summary>'] : []),
+      ...(submitChecks.length
+        ? [
+            'Before review, TaskPilot runs these checks on your change; run them yourself first and fix what fails:',
+            ...submitChecks.map((check) => `- ${check.label} (${check.blocking ? 'blocking' : 'advisory'}): ${check.commandLine}`),
+          ]
+        : []),
       `Developer instruction: ${instruction}`,
       ...(feedback ? ['', 'The repository already contains your previous attempt.', feedback] : []),
       ...profileBlock(profile, CODING_PROFILE_SECTIONS),
