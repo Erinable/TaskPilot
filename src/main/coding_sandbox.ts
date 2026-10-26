@@ -105,6 +105,10 @@ export interface SandboxContext {
   pathEntries: string[];
   extraRead: string[];
   extraWrite: string[];
+  // The repository's languages: where their caches go under the run's home,
+  // and their toolchain folders under the real home (read-only).
+  languageEnv?: (agentHome: string) => Record<string, string>;
+  languageRead?: string[];
   spawnFn?: SandboxSpawnFn;
 }
 
@@ -193,7 +197,7 @@ export const profileFor = (context: SandboxContext, cli: CliId, runDir: string, 
   home: context.home,
   runDir,
   writable: [agentHomeOf(runDir), ...context.extraWrite],
-  readable: [...toolchainRoots(context.home, context.pathEntries, executable), ...context.extraRead],
+  readable: [...toolchainRoots(context.home, context.pathEntries, executable), ...(context.languageRead ?? []), ...context.extraRead],
 });
 
 // ========== Environment ==========
@@ -204,8 +208,10 @@ const PROVIDER_KEY =
   /^(?:ANTHROPIC|OPENAI|XAI|GROK|GEMINI|GOOGLE_GENERATIVE_AI|DEEPSEEK|MOONSHOT|OPENROUTER|MISTRAL|GROQ|ZAI|DASHSCOPE)_[A-Z0-9_]*(?:KEY|TOKEN|BASE_URL)$/;
 
 // `agentHome` is the run's own home; caches and XDG folders live under it.
+// The languages' variables come first, so they cannot replace these.
 export const sandboxEnv = (context: SandboxContext, source: NodeJS.ProcessEnv = processEnv(), agentHome = context.home): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = {
+    ...context.languageEnv?.(agentHome),
     HOME: agentHome,
     XDG_CONFIG_HOME: path.join(agentHome, '.config'),
     XDG_DATA_HOME: path.join(agentHome, '.local', 'share'),

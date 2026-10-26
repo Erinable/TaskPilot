@@ -22,4 +22,16 @@ export interface Preset<Facts = unknown> {
   // Common command lines per step, offered as choices in settings.
   suggestions: (facts: Facts) => Partial<Record<StepKind, string[]>>;
   tools: ToolRequirement[];
+  // Paths, relative to the repository, a Coding Agent patch only changes
+  // after the developer confirms (manifests, lockfiles, build scripts), and
+  // paths it never changes (credentials). Added to the fixed rules in
+  // ../coding_workspace.ts, which they only tighten.
+  protectedFiles: RegExp[];
+  secretFiles: RegExp[];
+  // Where the language's caches go in a sandbox run: under `agentHome`, the
+  // run's own home. `home` is the real home.
+  sandboxEnv: (agentHome: string, home: string) => Record<string, string>;
+  // Folders under the real home the sandbox may read for the toolchain,
+  // besides those on PATH.
+  sandboxRead: (home: string) => string[];
 }

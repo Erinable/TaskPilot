@@ -6,6 +6,7 @@
 // SECURITY: every command is a fixed argument array. `cargo fetch` only
 // downloads; build scripts and proc macros run in build, lint and test, as
 // they do for any `cargo build` the developer runs.
+import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
 import { readTracked } from '../repo_reader.ts';
@@ -93,4 +94,13 @@ export const rustPreset: Preset<RustFacts> = {
     { command: 'cargo-clippy', versionArgs: ['--version'], install: 'rustup component add clippy' },
     { command: 'rustfmt', versionArgs: ['--version'], install: 'rustup component add rustfmt' },
   ],
+  // [人工决策-2026-10-25 23:51:35] Rust 仓库的清单、锁文件、构建脚本和 .cargo/ 改动要人工确认（CARM-16 #9）。
+  // 这会让更多补丁停下等确认，与 work_package_status.ts 的全自动闭环决策不冲突：有确认项本来就停下等人。
+  // Any crate's, not only the root's: a workspace has one per member.
+  protectedFiles: [/(?:^|\/)(?:Cargo\.toml|Cargo\.lock|build\.rs)$/i, /(?:^|\/)\.cargo(?:\/|$)/i],
+  secretFiles: [/(?:^|\/)\.cargo\/credentials(?:\.toml)?$/i],
+  // Downloaded crates go in the run's home; the installed toolchain stays
+  // where rustup put it, read-only.
+  sandboxEnv: (agentHome, home) => ({ CARGO_HOME: path.join(agentHome, '.cargo'), RUSTUP_HOME: path.join(home, '.rustup') }),
+  sandboxRead: (home) => [path.join(home, '.rustup')],
 };

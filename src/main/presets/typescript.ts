@@ -79,4 +79,10 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
     { command: 'node', versionArgs: ['--version'], install: 'brew install node   # 或从 https://nodejs.org 安装' },
     { command: 'npm', versionArgs: ['--version'], install: 'npm 随 Node.js 一起安装' },
   ],
+  // The npm files and cache are in the fixed rules and sandbox environment,
+  // so every repository keeps them.
+  protectedFiles: [],
+  secretFiles: [],
+  sandboxEnv: () => ({}),
+  sandboxRead: () => [],
 };

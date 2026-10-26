@@ -193,6 +193,7 @@ const loopHarness = async ({
 } = {}) => {
   const prompts: string[] = [];
   const timeouts: number[] = [];
+  const reads: Parameters<NonNullable<CodingDeps['readPatch']>>[2][] = [];
   const file = highRisk ? 'tests/auth/login-user.test.ts' : 'src/auth/application/login-user.ts';
   const preview = () => fixtures.filePatch(file, `export const round = ${prompts.length};`, SAMPLE_TASKS[0].fileScope);
   let root = '';
@@ -219,7 +220,10 @@ const loopHarness = async ({
           sessionId: null,
         };
       },
-      codingReadPatch: async () => preview(),
+      codingReadPatch: async (_runName, _scope, options) => {
+        reads.push(options);
+        return preview();
+      },
       codingApplyPatch: async (_root, patch) => {
         await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
         await fs.writeFile(
@@ -238,7 +242,7 @@ const loopHarness = async ({
   root = h.root;
   const head = (await fixtures.run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   await h.store.transition('auth-email-login', 'claim', 'human', { baseline: head });
-  return { ...h, prompts, timeouts, preview, file };
+  return { ...h, prompts, timeouts, reads, preview, file };
 };
 test('coding: a practised package keeps Coding Agent out', async () => {
   const h = await loopHarness();
@@ -248,6 +252,19 @@ test('coding: a practised package keeps Coding Agent out', async () => {
   const refused = await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
   assert.equal(refused.error.code, 'practice_mode');
   assert.equal(h.prompts.length, 0);
+});
+
+test("coding: a Rust repository's patch is read with the Rust preset's protected files", async () => {
+  const h = await loopHarness();
+  await fs.writeFile(path.join(h.root, 'Cargo.toml'), '[package]\nname = "demo"\n');
+  await fixtures.run('git', ['add', 'Cargo.toml'], { cwd: h.root });
+  await fixtures.run('git', ['-c', 'user.email=e@x', '-c', 'user.name=t', 'commit', '-qm', 'cargo'], { cwd: h.root });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  await fixtures.settleCoding(h.call, 'auth-email-login');
+  const rules = h.reads[0]?.rules;
+  assert.ok(rules);
+  assert.equal(parsePatchPreview(fixtures.filePatch('Cargo.lock', 'x').patch, undefined, rules).files[0]?.highRisk, true);
+  assert.equal(parsePatchPreview(fixtures.filePatch('pyproject.toml', 'x').patch, undefined, rules).files[0]?.highRisk, false);
 });
 
 test('coding: the prompt lists steps and the exact names of linked tests', async () => {
