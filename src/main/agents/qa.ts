@@ -20,6 +20,7 @@ import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../evidence.ts
 import type { CheckRun } from '../verification.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
+import { rolePreamble } from './role_preamble.ts';
 import { stepName } from '../../shared/check_steps.ts';
 import { reportsOf } from '../../shared/project_profile.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
@@ -103,7 +104,7 @@ export type CompactRun =
     };
 
 export const SYSTEM_PROMPT = [
-  'You are QA Partner on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
+  rolePreamble('QA Partner'),
   'A developer has finished a work package and submitted it for review. Your job is to decide whether the change does what the package asked, and if not, tell the developer exactly what to fix.',
   '',
   'Principles:',

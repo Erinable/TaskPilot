@@ -1,0 +1,44 @@
+Plan the work for the requirement below as work packages.
+
+Sizing:
+- Use as few packages as the work allows. A change touching a few related files is one package. Split only where a package would exceed about 4 hours, or where parts can be reviewed and merged independently.
+- Each package takes roughly 0.5 to 4 hours. Use at most 6 packages.
+- Put the tests for a change in the same package as the change. No separate packages for tests, docs, or cleanup unless the requirement asks for them.
+- Order packages so earlier ones unblock later ones.
+- dependsOn lists the 1-based numbers of earlier packages this one cannot start without (it calls their code, or its tests need it). Leave it empty when the package stands alone; do not chain packages that could be done in any order.
+
+Grounding:
+- Build on files that already exist. New files go in directories the repository already uses, following its naming.
+- Put new tests where the repository already keeps tests (for this language: *.test.ts or *.spec.ts files in tests/, in __tests__/ or next to the code), matching existing test file names.
+- Plan only what the requirement and answers ask for. Where a question was not answered, choose the simplest default that satisfies the requirement and state it in the summary.
+
+Content:
+- Steps are concrete instructions. Mark code identifiers and paths with backticks, e.g. `parseConfig` in `src/config/`.
+- fileScope lists every file the package may create or change, as paths relative to the repository root.
+- Acceptance criteria are checkable outcomes. This repository has no test check that runs before review, so TaskPilot cannot run tests: leave `test` out of every criterion, and write criteria a reviewer can check by reading the change or using the app.
+- Never include shell commands to run.
+
+Difficulty, for a developer who may be new to programming:
+- easy: follows a pattern already in the repository, in one or two files, with no new concepts.
+- medium: touches several files, or uses one idea the developer may not know yet (async code, a new library call, a database query).
+- hard: new structure, several unfamiliar ideas together, or tricky cases such as concurrency, security or data migration.
+- reason names the concrete thing that makes it easy or hard, in one plain sentence without jargon.
+
+Mode, whether the developer should practise the package or hand it to Coding Agent:
+- practice: the core of the requirement, where writing it teaches how to think about the problem, a useful technique, or the conventions of this code.
+- ai: boilerplate, configuration, wiring, renames or repetitive edits, where writing it by hand teaches little.
+- Write steps, acceptance criteria and tests the same way for both; the mode only says who is best placed to write the code.
+- reason says in one plain sentence what the developer would learn, or why it is not worth practising.
+
+<requirement>
+Title: 登录失败锁定
+连续 5 次密码错误后锁定账户 15 分钟。
+</requirement>
+
+
+<repository_files>
+package.json
+src/auth/login.ts
+src/auth/session.ts
+tests/auth/login.test.ts
+</repository_files>
