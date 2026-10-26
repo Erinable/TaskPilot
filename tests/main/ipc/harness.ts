@@ -224,6 +224,8 @@ export const harness = async ({
     requirements,
     notes,
     agentCalls,
+    // The lab service main-process callers use (src/main/lab_service.ts).
+    labs: ipc.labs,
     shellReads: () => shellReads,
     shutdown: () => ipc?.shutdown(),
   };

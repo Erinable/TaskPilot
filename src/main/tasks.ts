@@ -2,7 +2,7 @@
 // generated and the user published from the requirement center; there are no
 // built-in samples. Inline code in `steps` is marked with backticks and
 // rendered as <code>.
-import type { ModeRecommendation, PackageDifficulty } from '../shared/ipc/packages.ts';
+import type { LabRef, ModeRecommendation, PackageDifficulty } from '../shared/ipc/packages.ts';
 import type { WorkPackageStatus } from './work_package_status.ts';
 import type { CourseRef } from '../shared/course_pack.ts';
 import { isInside } from './workspace.ts';
@@ -49,6 +49,10 @@ export interface TaskDefinition {
   // The course pack it was planned with. Absent on packages planned before
   // packs were read, which count as programming.
   course?: CourseRef;
+  // Concept ids of the course pack the package practises.
+  concepts?: string[];
+  // Set on a course lab (./lab_service.ts); absent on project packages.
+  lab?: LabRef;
 }
 
 // The part of a definition Architect can replan.

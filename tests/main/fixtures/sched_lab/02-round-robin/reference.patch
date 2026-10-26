@@ -1,0 +1,38 @@
+diff --git a/src/rr.c b/src/rr.c
+index 6247fff..86be2a8 100644
+--- a/src/rr.c
++++ b/src/rr.c
+@@ -16,12 +16,28 @@ static int read_jobs(struct job *jobs) {
+   return count;
+ }
+ 
+-// TODO: give each job in the ready queue at most `slice` ticks in turn. Jobs
+-// that arrive while one runs join the queue before it goes back to the end.
++// Gives each job in the ready queue at most `slice` ticks in turn; arrivals
++// join before the job that ran goes back. reference-marker-rr
+ static void rr(struct job *jobs, int count, int slice) {
+-  (void)jobs;
+-  (void)count;
+-  (void)slice;
++  int queue[MAX_JOBS * 64];
++  int head = 0, tail = 0, next = 0, time = 0, done = 0;
++  while (done < count) {
++    while (next < count && jobs[next].arrival <= time) queue[tail++] = next++;
++    if (head == tail) {
++      time = jobs[next].arrival;
++      continue;
++    }
++    int current = queue[head++];
++    int run = jobs[current].left < slice ? jobs[current].left : slice;
++    time += run;
++    jobs[current].left -= run;
++    while (next < count && jobs[next].arrival <= time) queue[tail++] = next++;
++    if (jobs[current].left > 0) queue[tail++] = current;
++    else {
++      printf("%s %d\n", jobs[current].name, time);
++      done++;
++    }
++  }
+ }
+ 
+ int main(void) {

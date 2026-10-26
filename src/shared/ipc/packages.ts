@@ -43,11 +43,17 @@ export type ExecutionMode = 'practice' | 'ai' | 'self';
 export type PlannedMode = Exclude<ExecutionMode, 'self'>;
 export type ModeRecommendation = { mode: PlannedMode; reason: string };
 
+// A course lab: its id in taskpilot.toml's `labs`, its stage (1-based; each
+// stage's public tests also run every earlier stage's) and its difficulty.
+export type LabRef = { id: string; stage: number; difficulty: Difficulty };
+
 // ========== practice ==========
 
 // Coding Agent's reference solution for a practised package, generated in
 // the background from the claimed commit and never applied. Its patch stays
 // in the main process until the developer first submits (revealedAt).
+// A course lab's reference ships with the lab instead (source 'lab'): it is
+// ready at the claim and no run is started. Absent source: a run.
 export type ReferenceRun = {
   id: string;
   status: 'running' | 'ready' | 'failed' | 'cancelled';
@@ -57,6 +63,7 @@ export type ReferenceRun = {
   files: { path: string; added: number; removed: number }[];
   costUsd: number | null;
   revealedAt: string | null;
+  source?: 'run' | 'lab';
 };
 
 // Tutor's marking of a practised submission against the reference, along
@@ -110,6 +117,10 @@ export type TaskDefinition = {
   estimateHours?: number;
   // The course pack it was planned with; absent on older packages (programming).
   course?: CourseRef;
+  // Concept ids of the course pack the package practises.
+  concepts?: string[];
+  // Set on a course lab; absent on project packages.
+  lab?: LabRef;
 };
 
 // The parts of a definition Architect's replan replaces.

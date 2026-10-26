@@ -1,0 +1,33 @@
+diff --git a/src/fcfs.c b/src/fcfs.c
+index 4c9717b..e9e0660 100644
+--- a/src/fcfs.c
++++ b/src/fcfs.c
+@@ -16,11 +16,24 @@ static int read_jobs(struct job *jobs) {
+   return count;
+ }
+ 
+-// TODO: run the jobs in arrival order (input order on a tie). The CPU idles
+-// until the next job arrives. Print "name finish" as each job finishes.
++// Runs the jobs in arrival order (input order on a tie); the CPU idles until
++// the next job arrives. reference-marker-fcfs
+ static void fcfs(struct job *jobs, int count) {
+-  (void)jobs;
+-  (void)count;
++  for (int i = 1; i < count; i++) {
++    struct job current = jobs[i];
++    int at = i;
++    while (at > 0 && jobs[at - 1].arrival > current.arrival) {
++      jobs[at] = jobs[at - 1];
++      at--;
++    }
++    jobs[at] = current;
++  }
++  int time = 0;
++  for (int i = 0; i < count; i++) {
++    if (time < jobs[i].arrival) time = jobs[i].arrival;
++    time += jobs[i].burst;
++    printf("%s %d\n", jobs[i].name, time);
++  }
+ }
+ 
+ int main(void) {

@@ -20,6 +20,12 @@
 //   label = "复杂度"
 //   commands = ["node scripts/analyze_complexity.ts --check"]
 //
+//   [[labs]]                         # a course lab repository's labs,
+//   id = "round-robin"               # written by TaskPilot (./lab_service.ts)
+//   stage = 1
+//   dir = "labs/01-round-robin"
+//   concepts = ["round-robin"]
+//
 // SECURITY: the file is the repository's, like its package.json scripts,
 // and is read from the working tree whenever steps are needed. A Coding
 // Agent patch that touches it is high-risk and stops for the developer
@@ -41,13 +47,25 @@ export const PROJECT_FILENAME = 'taskpilot.toml';
 export const PROJECT_VERSION = 1;
 const MAX_PROJECT_BYTES = 64 * 1024;
 const MAX_CUSTOM = 16;
+const MAX_LABS = 32;
+const MAX_LAB_CONCEPTS = 8;
+
+// One lab of a course lab repository. Stages count from 1 and are unique;
+// `dir` holds the lab's README.
+export type LabEntry = { id: string; stage: number; dir: string; concepts: string[] };
 
 // The file's validated content. `preset` is null when the file names none
-// ("none" or left out), `course` when it names no course pack.
-export type ProjectFile = { preset: string | null; course: string | null; steps: Partial<Record<StepId, StepPatch>> };
+// ("none" or left out), `course` when it names no course pack. `labs` is
+// empty outside a lab repository, and in files from before labs existed.
+export type ProjectFile = { preset: string | null; course: string | null; labs: LabEntry[]; steps: Partial<Record<StepId, StepPatch>> };
 
 // [人工决策-2026-10-26 15:38:21] 课程包按仓库选：顶层 course 随仓库提交，本机 workspace.json 可覆盖。
-const TOP_KEYS = new Set(['version', 'preset', 'course', 'steps', 'custom']);
+const TOP_KEYS = new Set(['version', 'preset', 'course', 'labs', 'steps', 'custom']);
+const LAB_KEYS = new Set(['id', 'stage', 'dir', 'concepts']);
+// Lab ids; concepts are a pack's ids, or `ai:` nodes of the course plan.
+const LAB_ID = /^[a-z][a-z0-9-]{0,39}$/;
+export const isLabId = (value: unknown): value is string => typeof value === 'string' && LAB_ID.test(value);
+export const isLabConcept = (value: unknown): value is string => typeof value === 'string' && isCourseId(value.replace(/^ai:/, ''));
 const STEP_KEYS = new Set(['enabled', 'commands', 'cwd', 'timeout', 'required', 'stage', 'parser', 'env']);
 const CUSTOM_KEYS = new Set([...STEP_KEYS, 'label']);
 const PARSER_KEYS = new Set(['format', 'path', 'dialect', 'pattern', 'severity']);
@@ -115,6 +133,37 @@ const toPatch = (table: unknown, field: string, custom: boolean): StepPatch => {
   return patch as StepPatch;
 };
 
+const labEntry = (value: unknown, field: string): LabEntry => {
+  if (!isTable(value)) return stepConfig.stepError(field, 'must be a table', 'invalid_project');
+  onlyKeys(value, LAB_KEYS, field);
+  if (!isLabId(value.id)) stepConfig.stepError(`${field}.id`, 'must be lowercase letters, digits or -, starting with a letter', 'invalid_project');
+  if (!Number.isInteger(value.stage) || value.stage < 1 || value.stage > MAX_LABS)
+    stepConfig.stepError(`${field}.stage`, `must be a whole number from 1 to ${MAX_LABS}`, 'invalid_project');
+  let dir = '';
+  try {
+    dir = stepConfig.normalizeRelativePath(value.dir, `${field}.dir`);
+  } catch (error) {
+    asProjectError(error);
+  }
+  const concepts = value.concepts ?? [];
+  if (!Array.isArray(concepts) || concepts.length > MAX_LAB_CONCEPTS || !concepts.every(isLabConcept))
+    stepConfig.stepError(`${field}.concepts`, `must be at most ${MAX_LAB_CONCEPTS} concept ids`, 'invalid_project');
+  return { id: value.id, stage: value.stage, dir, concepts: [...new Set(concepts as string[])] };
+};
+
+const labEntries = (value: unknown): LabEntry[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return stepConfig.stepError('labs', 'must be a list of [[labs]] tables', 'invalid_project');
+  if (value.length > MAX_LABS) stepConfig.stepError('labs', `allows at most ${MAX_LABS} labs`, 'invalid_project');
+  const labs = value.map((entry, index) => labEntry(entry, `labs[${index}]`));
+  labs.forEach((lab, index) => {
+    if (labs.findIndex((other) => other.id === lab.id) !== index) stepConfig.stepError(`labs[${index}].id`, `repeats "${lab.id}"`, 'invalid_project');
+    if (labs.findIndex((other) => other.stage === lab.stage) !== index)
+      stepConfig.stepError(`labs[${index}].stage`, `repeats stage ${lab.stage}`, 'invalid_project');
+  });
+  return labs;
+};
+
 // Validates a parsed file. Every error names its field, e.g.
 // `steps.lint.parser.format`, and `presets` lists the names `preset` may take.
 export const normalizeProject = (value: unknown, presets: readonly string[]): ProjectFile => {
@@ -144,7 +193,7 @@ export const normalizeProject = (value: unknown, presets: readonly string[]): Pr
       steps[`${CUSTOM_PREFIX}${name}`] = toPatch((value.custom as LooseJson)[name], `custom.${name}`, true);
     }
   }
-  return { preset: preset === 'none' ? null : preset, course: value.course ?? null, steps };
+  return { preset: preset === 'none' ? null : preset, course: value.course ?? null, labs: labEntries(value.labs), steps };
 };
 
 // Parses the file's text; a syntax error names its line and column.
@@ -199,6 +248,13 @@ export const projectTemplate = (preset: string, examples: TemplateExamples) =>
     '',
     '# The course pack TaskPilot teaches with: built in, or .taskpilot/courses/<id>.toml.',
     '# course = "programming"',
+    '',
+    '# A course lab repository lists its labs; TaskPilot writes them.',
+    '# [[labs]]',
+    '# id = "round-robin"',
+    '# stage = 1',
+    '# dir = "labs/01-round-robin"',
+    '# concepts = ["round-robin"]',
     '',
   ].join('\n');
 
