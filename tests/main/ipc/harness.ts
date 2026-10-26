@@ -468,7 +468,7 @@ export const publishChain = async (h: Awaited<ReturnType<typeof harness>>) => {
 // A repository course pack (src/main/courses.ts), for the tests that switch packs.
 export const OS_PACK = `
 schemaVersion = 1
-id = "os"
+id = "oslab"
 version = "0.1.0"
 domain = "operating-systems"
 title = "操作系统实验"
@@ -494,11 +494,11 @@ description = "locking and error paths"
 
 // Selects OS_PACK in taskpilot.toml and, unless `confirm` is false, confirms it on this machine.
 export const useOsPack = async ({ call, root }: Pick<Awaited<ReturnType<typeof harness>>, 'call' | 'root'>, { confirm = true } = {}) => {
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "os"\n');
+  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "oslab"\n');
   await fs.mkdir(path.join(root, '.taskpilot/courses'), { recursive: true });
-  await fs.writeFile(path.join(root, '.taskpilot/courses/os.toml'), OS_PACK);
+  await fs.writeFile(path.join(root, '.taskpilot/courses/oslab.toml'), OS_PACK);
   const { data } = await call(CHANNELS.workspaceGet);
   const shown = data.course.state.ref;
-  if (confirm) await call(CHANNELS.workspaceConfirmCourse, 'os', shown.contentHash);
+  if (confirm) await call(CHANNELS.workspaceConfirmCourse, 'oslab', shown.contentHash);
   return shown;
 };

@@ -1,7 +1,6 @@
 // A course pack: who the learner is and how their work is planned, explained
-// and graded, for one learning domain. Product Lead, Tutor's step explanation
-// and the reference run read it instead of programming assumptions; grading
-// still has its own text.
+// and graded, for one learning domain. Product Lead, Tutor (explaining and
+// grading) and the reference run read it instead of programming assumptions.
 //
 // [人工决策-2026-10-25 23:51:35] 课程包本期只做结构，不切换读取（CARM-16 决策 B）：prompt 仍用原文，
 // PROGRAMMING_COURSE 由测试保证与原文一致，切换在 T7。
@@ -99,3 +98,60 @@ export const PROGRAMMING_COURSE: CoursePack = {
     { id: 'style', label: '风格', description: 'naming, layout and the conventions the surrounding code follows', dimension: 'style' },
   ],
 };
+
+// [人工决策-2026-10-26 15:38:21] 内置 OS 包：维度为原理 / 实现 / 并发与安全，分别挂到 thinking / writing / style；
+// 练习形态仍是"仓库 + 检查步骤"（xv6 的 make grade 或纯 C 小程序配成 custom:grade）。内容按 CARM-26 已确认的草稿。
+export const OS_COURSE: CoursePack = {
+  schemaVersion: COURSE_SCHEMA_VERSION,
+  id: 'os',
+  version: '0.1.0',
+  domain: 'operating-systems',
+  title: '操作系统实验',
+  summary: '在教学内核或系统调用小程序里动手，理解进程、内存、文件系统和并发。',
+  learner: 'a student learning operating systems who can already write basic C',
+  tutorGuide: [
+    'The student knows basic C but may not know how the kernel works underneath.',
+    'Connect every step to the mechanism behind it: which trap, which data structure, which invariant.',
+    'Draw on the kernel code you were given; name the real functions (e.g. the trap handler, the page table walker).',
+  ],
+  difficultyGuide: [
+    '- easy: uses an existing kernel facility the same way the code already does (add a syscall that reads an existing field).',
+    '- medium: changes one mechanism the student may not know yet (a new page table mapping, a scheduler tweak, a file system call path).',
+    '- hard: touches concurrency or crash consistency: locks across CPUs, interrupts, copy-on-write, logging.',
+    '- reason names the concrete mechanism that makes it easy or hard, in one plain sentence.',
+  ],
+  practiceGuide: [
+    '- practice: the core mechanism of the lab (the trap path, the page table change, the lock), where writing it builds the mental model.',
+    '- ai: Makefile and build wiring, user-space test programs, syscall table boilerplate.',
+    '- Write steps, acceptance criteria and tests the same way for both; the mode only says who is best placed to write the code.',
+    '- reason says in one plain sentence which mechanism the student would understand by writing it.',
+  ],
+  referenceGuide:
+    "Write the complete solution to this lab step. It is a reference answer for a student, so keep it close to the kernel's existing style and explain non-obvious invariants in short comments.",
+  rubric: [
+    {
+      id: 'concept',
+      label: '原理',
+      description:
+        'whether the change shows the right model of the mechanism (what runs in user vs kernel mode, which state must be saved, which invariant holds)',
+      dimension: 'thinking',
+      examples: [
+        {
+          observation: '在 trap 处理中直接读用户指针',
+          betterWay: '用 copyin 拷贝到内核再读：用户地址在内核页表里不一定有效，直接解引用会崩或越权',
+        },
+      ],
+    },
+    {
+      id: 'mechanism',
+      label: '实现',
+      description: 'how the kernel code does it: locking, error paths, freeing what was allocated, edge cases such as a full table or a failed allocation',
+      dimension: 'writing',
+    },
+    { id: 'safety', label: '并发与安全', description: 'races, lock ordering, interrupts while holding a lock, and trusting user input', dimension: 'style' },
+  ],
+  appliesTo: { languages: ['c', 'rust'] },
+};
+
+// The packs that ship with TaskPilot, default first.
+export const BUILTIN_COURSES: readonly CoursePack[] = [PROGRAMMING_COURSE, OS_COURSE];

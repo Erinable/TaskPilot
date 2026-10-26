@@ -5,6 +5,7 @@
 //   npm run eval:product-lead -- --case vague one case
 //   npm run eval:product-lead -- --label v2   names the report
 //   npm run eval:product-lead -- --no-judge   skips the rubric judge
+//   npm run eval:product-lead -- --course os  plans every case with one course pack
 //
 // Costs real money (roughly $0.3–0.5 per case with the judge), so it is not
 // part of `npm test`. Reports are written to evals/product-lead/reports/.
@@ -16,7 +17,7 @@ import { promisify } from 'node:util';
 import { summarizeForRequirement } from '../../src/main/agents/pipeline.ts';
 import * as cli from '../../src/main/agents/claude_cli.ts';
 import * as productLead from '../../src/main/agents/product_lead.ts';
-import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { BUILTIN_COURSES } from '../../src/shared/course_pack.ts';
 import { cases, answerFor } from './fixtures.ts';
 import { check } from './checks.ts';
 import { CRITERIA, judge } from './judge.ts';
@@ -25,6 +26,7 @@ import type { CheckResult, EvalRun } from './checks.ts';
 import type { Criterion, Scores } from './judge.ts';
 import type { SummaryResult } from '../../src/main/agents/pipeline.ts';
 import type { JsonSchema } from '../../src/main/agents/claude_cli.ts';
+import type { CoursePack } from '../../src/shared/course_pack.ts';
 
 interface Args {
   case: string | null;
@@ -32,9 +34,12 @@ interface Args {
   judge: boolean;
   concurrency: number;
   architect: boolean;
+  // Overrides each case's own course pack.
+  course: string | null;
 }
 
 interface CaseRun extends EvalRun {
+  course: string;
   architect: (Pick<SummaryResult, 'text' | 'skipped' | 'error'> & { read: string[] }) | null;
 }
 
@@ -58,18 +63,25 @@ interface CaseError {
 const isCaseError = (r: CaseResult | CaseError): r is CaseError => Boolean(r.error);
 
 const parseArgs = (argv: string[]): Args => {
-  const args: Args = { case: null, label: 'run', judge: true, concurrency: 3, architect: false };
+  const args: Args = { case: null, label: 'run', judge: true, concurrency: 3, architect: false, course: null };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--case') args.case = argv[++i];
     else if (argv[i] === '--label') args.label = argv[++i];
     else if (argv[i] === '--no-judge') args.judge = false;
     else if (argv[i] === '--architect') args.architect = true;
     else if (argv[i] === '--concurrency') args.concurrency = Number(argv[++i]);
+    else if (argv[i] === '--course') args.course = argv[++i];
   }
   return args;
 };
 
 const git = promisify(execFile);
+
+const packById = (id: string): CoursePack => {
+  const pack = BUILTIN_COURSES.find((entry) => entry.id === id);
+  if (!pack) throw new Error(`--course: "${id}" is not a built-in course pack; use one of ${BUILTIN_COURSES.map((entry) => entry.id).join(', ')}`);
+  return pack;
+};
 
 // Materializes a fixture as a committed git repository, so Architect reads
 // through the same repo_reader path the app uses. Files without contents
@@ -87,7 +99,10 @@ const fixtureRepo = async (testCase: EvalCase): Promise<string> => {
   return root;
 };
 
-const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJudge: boolean; withArchitect: boolean }): Promise<CaseResult> => {
+const runCase = async (
+  testCase: EvalCase,
+  { withJudge, withArchitect, course }: { withJudge: boolean; withArchitect: boolean; course: CoursePack },
+): Promise<CaseResult> => {
   const started = Date.now();
   const base: { title: string; text: string; files: string[]; interfaces?: string | null } = {
     title: testCase.requirement.title,
@@ -105,17 +120,18 @@ const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJ
     }
     base.interfaces = architect.text;
   }
-  const call = (prompt: string, schema: JsonSchema) => cli.runStructured({ prompt, systemPrompt: productLead.systemPrompt(PROGRAMMING_COURSE), schema });
+  const call = (prompt: string, schema: JsonSchema) => cli.runStructured({ prompt, systemPrompt: productLead.systemPrompt(course), schema });
 
   const c = await call(productLead.clarifyPrompt(base), productLead.CLARIFY_SCHEMA);
   const clarify = productLead.validateClarify(c.output);
   const answers = clarify.questions.map((question) => answerFor(testCase, question));
 
   const questions = clarify.questions.map((text, i) => ({ text, answer: answers[i] }));
-  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true, course: PROGRAMMING_COURSE }), productLead.PLAN_SCHEMA);
+  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true, course }), productLead.PLAN_SCHEMA);
   const plan = productLead.validatePlan(p.output, { linkTests: true });
 
   const run: CaseRun = {
+    course: course.id,
     clarify,
     answers,
     plan,
@@ -212,13 +228,16 @@ const printTable = (results: (CaseResult | CaseError)[], summary: ReturnType<typ
 
 const main = async () => {
   const args = parseArgs(process.argv.slice(2));
-  const selected = args.case ? cases.filter((c) => c.id === args.case) : cases;
+  // --case takes one id or a comma-separated list.
+  const wanted = args.case?.split(',') ?? null;
+  const selected = wanted ? cases.filter((c) => wanted.includes(c.id)) : cases;
   if (selected.length === 0) throw new Error(`No case named ${args.case}`);
+  const forced = args.course ? packById(args.course) : null;
 
   const results = await pool(selected, args.concurrency, async (testCase): Promise<CaseResult | CaseError> => {
     process.stderr.write(`· ${testCase.id}\n`);
     try {
-      return await runCase(testCase, { withJudge: args.judge, withArchitect: args.architect });
+      return await runCase(testCase, { withJudge: args.judge, withArchitect: args.architect, course: forced ?? packById(testCase.course ?? 'programming') });
     } catch (error) {
       const coded = error as Error & { code?: string };
       return { id: testCase.id, error: `${coded.code ?? ''} ${coded.message}`.trim() };

@@ -6,6 +6,7 @@
 // rather than this repository.
 
 import * as sources from './sources.ts';
+import { OS_LAB } from '../shared/os_lab.ts';
 
 export interface EvalExpect {
   questions: [number, number];
@@ -15,11 +16,15 @@ export interface EvalExpect {
   mustNotInvent?: string[];
   testPattern?: RegExp;
   grounding?: string[];
+  // Files whose package the course pack's mode guide says to practise.
+  practiceFiles?: string[];
 }
 
 export interface EvalCase {
   id: string;
   note: string;
+  // The course pack the case is written for; programming when absent.
+  course?: string;
   requirement: { title: string; text: string };
   files: string[];
   answers: Record<string, string>;
@@ -79,10 +84,13 @@ const PY_SERVICE = [
   'tests/conftest.py',
 ];
 
+const OS_LAB_FILES = Object.keys(OS_LAB);
+
 const SOURCES_BY_FILES = new Map<string[], Record<string, string>>([
   [TS_API, sources.TS_API],
   [REACT_APP, sources.REACT_APP],
   [PY_SERVICE, sources.PY_SERVICE],
+  [OS_LAB_FILES, OS_LAB],
 ]);
 
 export const cases: EvalCase[] = [
@@ -186,6 +194,45 @@ export const cases: EvalCase[] = [
     files: [],
     answers: { default: '保留第一次出现的行。列名通过参数传入。' },
     expect: { questions: [0, 3], packages: [1, 2], hours: [1, 4] },
+  },
+  // OS lab cases: planned with the os pack, on the C lab in ../shared/os_lab/.
+  {
+    id: 'os-bbuf',
+    course: 'os',
+    note: 'One lab program. The bounded buffer is the mechanism to practise.',
+    requirement: {
+      title: 'Lab 4 有界缓冲区',
+      text: '完成 src/bbuf.c：一个生产者、多个消费者，8 格缓冲区，用互斥锁和条件变量。make grade 里的 bbuf 测试要通过。',
+    },
+    files: OS_LAB_FILES,
+    answers: { default: '只用 pthread，不用信号量。' },
+    expect: {
+      questions: [0, 1],
+      packages: [1, 2],
+      hours: [1, 4],
+      mustTouch: ['src/bbuf.c'],
+      grounding: ['not_full', 'not_empty', 'SLOTS'],
+      practiceFiles: ['src/bbuf.c'],
+    },
+  },
+  {
+    id: 'os-new-lab',
+    course: 'os',
+    note: 'A new lab program plus its build and grade wiring: the wiring is for Coding Agent.',
+    requirement: {
+      title: 'Lab 5 primes',
+      text: '新增 Lab 5：src/primes.c 用管道和 fork 实现埃拉托斯特尼筛法（每个素数一个进程），打印 2 到 35 的素数。把它接进 Makefile 和 tests/grade.sh。',
+    },
+    files: OS_LAB_FILES,
+    answers: { default: '输出每行 "prime N"。进程数不设上限，35 以内够用。' },
+    expect: {
+      questions: [0, 2],
+      packages: [1, 3],
+      hours: [1, 5],
+      mustTouch: ['Makefile', 'tests/grade.sh'],
+      grounding: ['PROGRAMS', 'report', 'limit'],
+      practiceFiles: ['src/primes.c'],
+    },
   },
 ];
 

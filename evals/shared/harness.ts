@@ -1,4 +1,4 @@
-// Plumbing shared by the QA and Architect evals: argument parsing, a
+// Plumbing shared by the QA, Architect and Tutor grading evals: argument parsing, a
 // concurrency pool, fixture repositories and report files. Each suite keeps
 // its own cases, checks and judge rubric.
 import fs from 'node:fs/promises';
@@ -29,16 +29,19 @@ export interface SuiteArgs {
   judge: boolean;
   concurrency: number;
   timeoutMinutes: number;
+  // A course pack id the suite runs every case with, when it reads one.
+  course: string | null;
 }
 
 export const parseArgs = (argv: string[]): SuiteArgs => {
-  const args: SuiteArgs = { case: null, label: 'run', judge: true, concurrency: 3, timeoutMinutes: 10 };
+  const args: SuiteArgs = { case: null, label: 'run', judge: true, concurrency: 3, timeoutMinutes: 10, course: null };
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--case') args.case = argv[++index];
     else if (argv[index] === '--label') args.label = argv[++index];
     else if (argv[index] === '--no-judge') args.judge = false;
     else if (argv[index] === '--concurrency') args.concurrency = Number(argv[++index]);
     else if (argv[index] === '--timeout-minutes') args.timeoutMinutes = Number(argv[++index]);
+    else if (argv[index] === '--course') args.course = argv[++index];
   }
   return args;
 };
@@ -156,11 +159,14 @@ export const summarize = <Run, Criterion extends string>(results: (CaseOutcome<R
 
 // Prints failures and low scores per case, then the summary, and writes
 // reports/<stamp>-<label>.json beside the suite.
+// `suite` adds checks across cases (e.g. a rubric's coverage), printed and
+// written beside the summary.
 export const report = async <Run, Criterion extends string>(
   suiteDir: string,
   label: string,
   results: (CaseOutcome<Run, Criterion> | CaseFailure)[],
   criteria: Criterion[],
+  suite: Record<string, unknown> | null = null,
 ) => {
   const summary = summarize(results, criteria);
   for (const result of results) {
@@ -178,11 +184,12 @@ export const report = async <Run, Criterion extends string>(
   console.log(`\nchecks ${summary.checkPassRate}%  ${JSON.stringify(summary.checkRates)}`);
   console.log(`judge  mean ${summary.meanScore}  ${JSON.stringify(summary.scoreMeans)}`);
   console.log(`cost   agent $${summary.agentCostUsd}  judge $${summary.judgeCostUsd}`);
+  if (suite) console.log(`suite  ${JSON.stringify(suite)}`);
   const dir = path.join(suiteDir, 'reports');
   await fs.mkdir(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const file = path.join(dir, `${stamp}-${label}.json`);
-  await fs.writeFile(file, `${JSON.stringify({ label, summary, results }, null, 2)}\n`);
+  await fs.writeFile(file, `${JSON.stringify({ label, summary, ...(suite ? { suite } : {}), results }, null, 2)}\n`);
   console.log(`report ${path.relative(process.cwd(), file)}`);
 };
 
@@ -192,11 +199,13 @@ export const runSuite = async <Case extends { id: string }, Run, Criterion exten
   cases,
   criteria,
   runCase,
+  suite,
 }: {
   suiteDir: string;
   cases: Case[];
   criteria: Criterion[];
   runCase: (testCase: Case, args: SuiteArgs) => Promise<CaseOutcome<Run, Criterion>>;
+  suite?: (results: CaseOutcome<Run, Criterion>[]) => Record<string, unknown>;
 }) => {
   const args = parseArgs(process.argv.slice(2));
   timeoutMs = args.timeoutMinutes * 60 * 1000;
@@ -213,7 +222,8 @@ export const runSuite = async <Case extends { id: string }, Run, Criterion exten
       return { id: testCase.id, error: `${coded.code ?? ''} ${coded.message}`.trim() };
     }
   });
-  await report(suiteDir, args.label, results, criteria);
+  const finished = results.filter((result): result is CaseOutcome<Run, Criterion> => !isFailure(result));
+  await report(suiteDir, args.label, results, criteria, suite ? suite(finished) : null);
   // A run where every case errored produced no result; say so in the exit code.
   if (results.every((result) => 'error' in result)) process.exitCode = 1;
 };

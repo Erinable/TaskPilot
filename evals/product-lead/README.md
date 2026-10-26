@@ -11,6 +11,7 @@ npm run eval:product-lead -- --architect       # with Architect, ~$2.7
 npm run eval:product-lead -- --case vague      # one case
 npm run eval:product-lead -- --label my-change # names the report
 npm run eval:product-lead -- --no-judge        # checks only, ~$1
+npm run eval:product-lead -- --course os       # every case planned with one course pack
 ```
 
 Reports go to `reports/` (gitignored). Results vary between runs: the same prompt scored a judge mean of 4.26 on one run and 4.2 on the next. Treat a difference under about 0.2 as noise, and run twice before concluding a change helped.
@@ -40,3 +41,18 @@ The `codeGrounding` check looks for identifiers that are visible only inside the
 | with Architect | 96.8% | 4/5 | 4.23 | 4.17 | ~$2.2 |
 
 Across two runs with Architect, the judge mean was 4.30 and 4.23.
+
+## Course packs
+
+Each case is planned with its own course pack (`course` in `fixtures.ts`, programming when absent); `--course <id>` plans every case with one built-in pack instead. Two cases, `os-bbuf` and `os-new-lab`, use the os pack on the C lab in `evals/shared/os_lab/`. Their `practiceMode` check asks that the package touching the lab's core program is recommended for practice, which is what the os pack's mode guide says.
+
+2026-10-26, all cases with Architect off:
+
+| run | cases | checks | judge mean | actionability |
+|---|---|---|---|---|
+| before course packs (commit 7c436ac) | 6 programming | 59/63 | 3.53 | 2.33 |
+| with course packs | 6 programming | 57/63 | 3.57 | 2.50 |
+| with course packs | 2 os, os pack | 23/24 | 3.50 | 2.50 |
+| with course packs | 2 os, programming pack | 23/24 | 3.30 | 2.00 |
+
+The programming prompts are byte for byte unchanged, so the first two rows differ only by noise. Both OS cases recommend practising the core program under either pack; the judge's main complaint on them, as on the programming cases without Architect, is steps that do not match the code (the stubs are TODOs, the file already names its fields), which `--architect` addresses.

@@ -232,21 +232,21 @@ test('workspace:get reports the course pack, and workspace:confirm-course confir
   assert.deepEqual(data.course.selected, { id: 'programming', from: 'default' });
   assert.deepEqual(data.course.state, { status: 'ok' });
 
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "os"\n');
+  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "oslab"\n');
   await fs.mkdir(path.join(root, '.taskpilot/courses'), { recursive: true });
-  await fs.writeFile(path.join(root, '.taskpilot/courses/os.toml'), fixtures.OS_PACK);
+  await fs.writeFile(path.join(root, '.taskpilot/courses/oslab.toml'), fixtures.OS_PACK);
   ({ data } = await call(CHANNELS.workspaceGet));
-  assert.deepEqual(data.course.selected, { id: 'os', from: 'project' });
+  assert.deepEqual(data.course.selected, { id: 'oslab', from: 'project' });
   assert.equal(data.course.state.status, 'pending');
   assert.equal(data.course.ref.id, 'programming');
   const shown = data.course.state.ref;
 
-  const stale = await call(CHANNELS.workspaceConfirmCourse, 'os', 'f'.repeat(64));
+  const stale = await call(CHANNELS.workspaceConfirmCourse, 'oslab', 'f'.repeat(64));
   assert.equal(stale.error.code, 'course_changed');
   const other = await call(CHANNELS.workspaceConfirmCourse, 'programming', shown.contentHash);
   assert.equal(other.error.code, 'course_not_pending');
 
-  const confirmed = await call(CHANNELS.workspaceConfirmCourse, 'os', shown.contentHash);
+  const confirmed = await call(CHANNELS.workspaceConfirmCourse, 'oslab', shown.contentHash);
   assert.equal(confirmed.ok, true);
   assert.deepEqual(confirmed.data.course.state, { status: 'ok' });
   assert.deepEqual(confirmed.data.course.ref, shown);
