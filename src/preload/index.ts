@@ -21,6 +21,7 @@ import type * as settingsTypes from '../shared/ipc/settings.ts';
 import type * as tutorTypes from '../shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../shared/ipc/workspace.ts';
 import type { CoursePack } from '../shared/course_pack.ts';
+import type { PathEntry } from '../shared/course_plan.ts';
 
 const invoke = <T>(channel: Channel, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<envelopeTypes.IpcResult<T>>;
 
@@ -100,10 +101,14 @@ const api = {
     create: (input: requirementTypes.RequirementInput) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCreate, input),
     clarify: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsClarify, id),
     answer: (id: string, answers: requirementTypes.RequirementAnswers) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsAnswer, id, answers),
-    plan: (id: string, answers?: requirementTypes.RequirementAnswers) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsPlan, id, answers),
+    plan: (id: string, answers?: requirementTypes.RequirementAnswers, choice?: requirementTypes.CourseChoice) =>
+      invoke<requirementTypes.Requirement>(CHANNELS.requirementsPlan, id, answers, choice),
     publish: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsPublish, id),
     remove: (id: string) => invoke<true>(CHANNELS.requirementsRemove, id),
     cancel: (id: string) => invoke<boolean>(CHANNELS.requirementsCancel, id),
+    coursePath: (id: string, path: PathEntry[]) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCoursePath, id, path),
+    courseSaveDraft: (id: string, pack: CoursePack) => invoke<requirementTypes.CourseDraftSaved>(CHANNELS.requirementsCourseSaveDraft, id, pack),
+    courseConfirmDraft: (id: string, contentHash: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCourseConfirmDraft, id, contentHash),
   },
 
   agent: {

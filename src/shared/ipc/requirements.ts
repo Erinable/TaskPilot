@@ -3,7 +3,8 @@
 import type { ErrorInfo } from './envelope.ts';
 import type * as packageTypes from './packages.ts';
 import type { AcceptanceCriterion } from './workspace.ts';
-import type { CourseRef } from '../course_pack.ts';
+import type { Concept, CoursePack, CourseRef } from '../course_pack.ts';
+import type { CoursePlan, GoalForm } from '../course_plan.ts';
 
 export type RequirementStatus = 'draft' | 'clarifying' | 'answering' | 'planning' | 'reviewing' | 'published' | 'failed';
 
@@ -11,9 +12,32 @@ export type RequirementStatus = 'draft' | 'clarifying' | 'answering' | 'planning
 export type RequirementStep = 'clarifying' | 'planning';
 
 // Which agent is working during a run.
-export type RequirementPhase = 'architect' | 'product-lead';
+export type RequirementPhase = 'architect' | 'product-lead' | 'tutor';
 
-export type RequirementInput = { title?: string; text: string };
+// A project asks for work on the repository; a course for a learning path.
+export type RequirementKind = 'project' | 'course';
+
+// `course` makes a course requirement: `text` is what the learner wants to learn.
+export type RequirementInput = { title?: string; text: string; course?: GoalForm };
+
+// The pack a course path is planned from: one offered, or a new draft.
+export type CourseChoice = { course: string } | { draft: true };
+
+export type CourseInterview = {
+  form: GoalForm;
+  // The packs offered and Tutor's pick (null when none fits).
+  pick: { course: string | null; reason: string; options: { id: string; title: string }[] } | null;
+  choice: CourseChoice | null;
+  plan: CoursePlan | null;
+  // The skeleton's concepts on the path, for their labels and prerequisites.
+  pathConcepts: Concept[];
+  // A drafted pack, validated, until the learner saves and confirms it.
+  draft: { pack: CoursePack; contentHash: string } | null;
+};
+
+// requirements:course-save-draft: the requirement, now choosing the saved
+// pack, and the saved pack's ref, to confirm it at the content shown.
+export type CourseDraftSaved = { requirement: Requirement; ref: CourseRef };
 
 // One answer per question, in order.
 export type RequirementAnswers = string[];
@@ -57,6 +81,8 @@ export type RequirementInterfaces =
 
 export type Requirement = {
   id: string;
+  // Absent on requirements from before course mode: a project.
+  kind?: RequirementKind;
   status: RequirementStatus;
   title: string;
   text: string;
@@ -72,4 +98,5 @@ export type Requirement = {
   costUsd: number;
   createdAt: string;
   updatedAt: string;
+  course?: CourseInterview;
 };

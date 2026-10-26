@@ -199,3 +199,78 @@ test('catalog reads share frozen definitions that callers cannot change', async 
   saved.packages[0].title = 'edited copy';
   assert.equal(store.getTask('a-wp1')?.title, 't');
 });
+
+// ========== Course requirements ==========
+const FORM = { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4 } as const;
+const pick = { course: 'os', reason: 'fits', options: [{ id: 'os', title: '操作系统实验' }] };
+const coursePlan: any = {
+  course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' },
+  goal: { kind: 'course', goal: '调度', ...FORM, knownConcepts: [] },
+  summary: 's',
+  path: [
+    { conceptId: 'fcfs', status: 'planned' },
+    { conceptId: 'round-robin', status: 'planned' },
+  ],
+  extraConcepts: [],
+};
+
+test('a course requirement runs the interview, the path and its confirmation; projects keep no course fields', async () => {
+  const { store, configDir } = await newStore();
+  const project = await store.create({ text: '登录' });
+  assert.equal('kind' in project, false);
+  assert.equal('course' in project, false);
+
+  const { id } = await store.create({ text: '想学调度', course: FORM });
+  assert.equal(store.get(id).kind, 'course');
+  await store.begin(id, 'clarifying');
+  let item = await store.finishCourseClarify(id, { title: '调度', summary: 's', questions: ['多核？'], pick }, 0.01);
+  assert.equal(item.status, 'answering');
+  assert.deepEqual(item.course!.pick, pick);
+  await assert.rejects(() => store.finishCourseClarify(project.id, { title: 't', summary: 's', questions: [], pick }), { code: 'invalid_state' });
+
+  await store.setAnswers(id, ['先不用']);
+  await store.setCourseChoice(id, { course: 'os' });
+  await store.begin(id, 'planning');
+  item = await store.finishCoursePlan(id, coursePlan, [], 0.02);
+  assert.equal(item.status, 'reviewing');
+  item = await store.setCoursePath(id, [
+    { conceptId: 'fcfs', status: 'known' },
+    { conceptId: 'round-robin', status: 'planned' },
+  ]);
+  assert.deepEqual(item.course!.plan!.goal.knownConcepts, ['fcfs']);
+  item = await store.confirmCoursePath(id);
+  assert.equal(item.status, 'published');
+  assert.deepEqual(store.listTasks(), [], 'a confirmed path adds nothing to the queue');
+
+  const reloaded = (await newStore(configDir)).store;
+  assert.equal(reloaded.get(id).course!.plan!.path[0].status, 'known');
+});
+
+test('editing answers drops a course path or draft, and a saved draft becomes the choice', async () => {
+  const { store } = await newStore();
+  const { id } = await store.create({ text: '想学词法分析', course: FORM });
+  await store.begin(id, 'clarifying');
+  await store.finishCourseClarify(id, { title: '词法', summary: 's', questions: [], pick: { ...pick, course: null } });
+  await store.setCourseChoice(id, { draft: true });
+  await store.begin(id, 'planning');
+  let item = await store.finishCourseDraft(id, { pack: { id: 'lexing' } as any, contentHash: 'h' });
+  assert.equal(item.course!.draft!.contentHash, 'h');
+  item = await store.useCourseDraft(id, { id: 'lexing', title: '词法分析' });
+  assert.deepEqual(item.course!.choice, { course: 'lexing' });
+  assert.equal(item.course!.draft, null);
+  assert.deepEqual(item.course!.pick!.options.at(-1), { id: 'lexing', title: '词法分析' });
+
+  await store.begin(id, 'planning');
+  await store.finishCoursePlan(id, coursePlan, []);
+  item = await store.setAnswers(id, []);
+  assert.equal(item.status, 'answering');
+  assert.equal(item.course!.plan, null);
+});
+
+test('a course run interrupted by quitting names Tutor', async () => {
+  const { store, configDir } = await newStore();
+  const { id } = await store.create({ text: '想学', course: FORM });
+  await store.begin(id, 'clarifying');
+  const reloaded = (await newStore(configDir)).store;
+  assert.match(reloaded.get(id).error!.message, /Tutor/);
+});
