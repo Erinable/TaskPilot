@@ -32,10 +32,6 @@ const create = (preset: string) => {
 };
 
 const course = computed(() => view.value?.course ?? null);
-const COURSE_FROM = { local: '本机设置', project: 'taskpilot.toml', default: '默认' } as const;
-const confirmCourse = () => {
-  settings.confirmCourse().catch((error) => console.error(error));
-};
 </script>
 
 <template>
@@ -89,25 +85,21 @@ const confirmCourse = () => {
     </button>
   </div>
 
-  <div v-if="course" id="courseState" class="settings-card glass project-file" :class="course.state.status">
+  <div v-if="course" id="commandsCourse" class="settings-card glass project-file" :class="course.state.status">
     <AppIcon :name="course.state.status === 'ok' ? 'check-circle' : 'alert'" class="project-icon" />
     <div class="project-body">
       <strong>
         课程包：
         <span class="scope-badge">{{ course.ref.id }}</span>
-        <small>（来自{{ COURSE_FROM[course.selected.from] }}）</small>
       </strong>
-      <template v-if="course.state.status === 'pending'">
-        <p class="warn-text" role="status">课程包待确认：仓库里的「{{ course.state.pack.title }}」还没在本机确认，确认前先用内置的「编程」课程包。</p>
-      </template>
+      <p v-if="course.state.status === 'pending'" class="warn-text" role="status">课程包待确认，确认前先用内置的「编程」课程包。</p>
       <p v-else-if="course.state.status === 'invalid'" role="alert">
         <code>{{ course.state.error.message }}</code>
-        先用内置的「编程」课程包。
       </p>
     </div>
-    <button v-if="course.state.status === 'pending'" id="confirmCourse" class="primary-button small" type="button" @click="confirmCourse">
-      <AppIcon name="check-circle" />
-      查看并确认
+    <button id="openCourses" class="secondary-button small" type="button" @click="settings.openPage('courses')">
+      <AppIcon name="blocks" />
+      {{ course.state.status === 'pending' ? '去确认' : '查看课程包' }}
     </button>
   </div>
 

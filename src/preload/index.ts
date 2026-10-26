@@ -9,6 +9,7 @@ import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
 import type * as codingTypes from '../shared/coding_types.ts';
 import type * as commitTypes from '../shared/ipc/commit.ts';
+import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
@@ -212,6 +213,17 @@ const api = {
     openUrl: (url: string) => invoke<boolean>(CHANNELS.notesOpenUrl, url),
     // The packs whose categories the notes page names, and the one in use.
     courses: () => invoke<noteTypes.NoteCourses>(CHANNELS.notesCourses),
+  },
+
+  courses: {
+    list: () => invoke<courseTypes.CourseList>(CHANNELS.coursesList),
+    preview: (id: string) => invoke<courseTypes.CoursePreview>(CHANNELS.coursesPreview, id),
+    // Writes this machine's choice; null leaves it to taskpilot.toml.
+    select: (id: string | null) => invoke<courseTypes.CourseList>(CHANNELS.coursesSelect, id),
+    // Opens the file picker and validates the file; nothing is copied yet.
+    pickImport: () => invoke<courseTypes.CourseImport | null>(CHANNELS.coursesPickImport),
+    // Copies the picked file, the content with the hash shown, into the global folder.
+    import: (contentHash: string) => invoke<courseTypes.CourseList>(CHANNELS.coursesImport, contentHash),
   },
 };
 

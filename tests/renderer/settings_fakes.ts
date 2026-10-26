@@ -5,6 +5,8 @@ import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import type * as courseTypes from '@shared/ipc/courses.ts';
+import { BUILTIN_COURSES, OS_COURSE } from '@shared/course_pack.ts';
 import { STEP_KINDS } from '@shared/check_steps.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
@@ -51,6 +53,31 @@ export const defaultCourse = (): workspaceTypes.CourseView => ({
   state: { status: 'ok' },
   ref: { id: 'programming', version: '1.0.0', contentHash: 'a'.repeat(64), source: 'builtin' },
 });
+
+// courses:list with only the built-in packs, programming in use.
+export const courseList = (overrides: Partial<courseTypes.CourseList> = {}): courseTypes.CourseList => ({
+  current: defaultCourse(),
+  entries: [
+    { id: 'programming', source: 'builtin', title: '编程', version: '1.0.0', languages: null, trust: 'builtin', error: null },
+    { id: 'os', source: 'builtin', title: '操作系统实验', version: '0.1.0', languages: ['c', 'rust'], trust: 'builtin', error: null },
+  ],
+  languages: ['typescript'],
+  userDir: '/config/courses',
+  ...overrides,
+});
+
+export const coursePreview = (id: string, overrides: Partial<courseTypes.CoursePreview> = {}): courseTypes.CoursePreview => {
+  const pack = BUILTIN_COURSES.find((entry) => entry.id === id) ?? { ...OS_COURSE, id, title: `${id} 课程` };
+  const source = BUILTIN_COURSES.includes(pack) ? 'builtin' : 'repository';
+  return {
+    pack,
+    ref: { id, version: pack.version, contentHash: 'b'.repeat(64), source },
+    trust: source === 'builtin' ? 'builtin' : 'pending',
+    previous: 'none',
+    changes: [],
+    ...overrides,
+  };
+};
 
 export const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): workspaceTypes.WorkspaceView => ({
   root: '/repo',
@@ -130,6 +157,13 @@ export const installApi = () => {
       confirmCourse: vi.fn(() => ok(workspaceView())),
       pickRoot: vi.fn(() => ok(null)),
       info: vi.fn(() => ok({ configured: false })),
+    },
+    courses: {
+      list: vi.fn(() => ok(courseList())),
+      preview: vi.fn((id: string) => ok(coursePreview(id))),
+      select: vi.fn(() => ok(courseList())),
+      pickImport: vi.fn(() => ok<courseTypes.CourseImport | null>(null)),
+      import: vi.fn(() => ok(courseList())),
     },
     preferences: {
       get: vi.fn(() => ok(savedPreferences)),

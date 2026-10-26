@@ -29,7 +29,7 @@ test('the OS lab picks the built-in os pack without confirming it', async () => 
   const project = projectConfig.parseProject((await projectConfig.readProjectText(root))!, PRESET_IDS);
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-os-lab-data-'));
   onTestFinished(() => fs.rm(dataDir, { recursive: true, force: true }));
-  const resolved = await courses.resolveCourse(root, dataDir, { local: null, project: project.course });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: null, project: project.course });
   assert.deepEqual(resolved.selected, { id: 'os', from: 'project' });
   assert.deepEqual(resolved.state, { status: 'ok' });
   assert.equal(resolved.pack, OS_COURSE);

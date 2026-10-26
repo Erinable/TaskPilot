@@ -169,6 +169,12 @@ app.whenReady().then(async () => {
           const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
           return result.canceled ? null : (result.filePaths[0] ?? null);
         },
+        pickFile: async (defaultPath, filters) => {
+          const options: OpenDialogOptions = { properties: ['openFile'], filters, defaultPath: defaultPath ?? app.getPath('home') };
+          const parent = BrowserWindow.getFocusedWindow();
+          const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+          return result.canceled ? null : (result.filePaths[0] ?? null);
+        },
       },
       coding: {
         // electron-builder copies scripts/ into the bundle (extraResources).

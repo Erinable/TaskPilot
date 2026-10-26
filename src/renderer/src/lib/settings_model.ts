@@ -13,6 +13,7 @@ export const PAGE_STORES = {
   agents: 'preferences',
   repository: 'workspace',
   commands: 'workspace',
+  courses: null, // picks, confirms and imports through its own IPC
   setup: null, // runs steps and writes commands through its own IPC
   data: null, // actions only, nothing to save
 } as const satisfies Record<string, SettingsStore | null>;
@@ -124,6 +125,7 @@ export const dirtyPages = (saved: DraftPair, draft: DraftPair): Partial<Record<S
     agents: !sameValue(savedPrefs.agents, draftPrefs.agents) || !sameValue(savedPrefs.coding, draftPrefs.coding),
     repository: savedWorkspace.root !== draftWorkspace.root,
     commands: !sameValue(savedWorkspace.steps, draftWorkspace.steps),
+    courses: false,
     data: false,
   };
 };

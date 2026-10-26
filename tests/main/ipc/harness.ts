@@ -44,6 +44,7 @@ export type CodingOverrides = {
   codingSnapshot?: CodingDeps['snapshot'];
   codingPreviewMerge?: CodingDeps['previewMerge'];
   pickDirectory?: ShellDeps['pickDirectory'];
+  pickFile?: ShellDeps['pickFile'];
   probeAgent?: AgentDeps['probeAgent'];
   checkSignIn?: AgentDeps['checkSignIn'];
 };
@@ -162,6 +163,7 @@ export const harness = async ({
         revealFile: (file) => void revealed.push(file),
         launchEditor: async (file, args) => void launched.push({ file, args }),
         pickDirectory: coding.pickDirectory,
+        pickFile: coding.pickFile,
       },
       agents: {
         runAgent: async (options) => {

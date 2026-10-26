@@ -6,6 +6,7 @@ import ProfilePage from '@/components/settings/ProfilePage.vue';
 import PreferencesPage from '@/components/settings/PreferencesPage.vue';
 import RepositoryPage from '@/components/settings/RepositoryPage.vue';
 import CommandsPage from '@/components/settings/CommandsPage.vue';
+import CoursesPage from '@/components/settings/CoursesPage.vue';
 import SetupPage from '@/components/settings/SetupPage.vue';
 import EnvironmentPage from '@/components/settings/EnvironmentPage.vue';
 import DataPage from '@/components/settings/DataPage.vue';
@@ -110,6 +111,7 @@ const onSearch = (event: Event) => settings.search((event.target as HTMLInputEle
       <form v-show="settings.activePage === 'commands'" id="commandsForm" class="settings-page" data-page="commands" novalidate @submit.prevent="onSubmit">
         <CommandsPage />
       </form>
+      <section v-show="settings.activePage === 'courses'" id="coursesPage" class="settings-page" data-page="courses"><CoursesPage /></section>
       <section v-show="settings.activePage === 'setup'" id="setupPage" class="settings-page" data-page="setup"><SetupPage /></section>
       <form
         v-show="settings.activePage === 'environment'"

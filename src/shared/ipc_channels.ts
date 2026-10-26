@@ -94,6 +94,11 @@ export const CHANNELS = {
   notesReveal: 'notes:reveal',
   notesOpenUrl: 'notes:open-url',
   notesCourses: 'notes:courses',
+  coursesList: 'courses:list',
+  coursesPreview: 'courses:preview',
+  coursesSelect: 'courses:select',
+  coursesPickImport: 'courses:pick-import',
+  coursesImport: 'courses:import',
   // Resolves once the main process has loaded its stores; true retries a failed start.
   startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.
