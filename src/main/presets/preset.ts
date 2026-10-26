@@ -3,6 +3,7 @@
 // it needs. A preset only applies when taskpilot.toml names it.
 import type { StepId, StepKind } from '../../shared/check_steps.ts';
 import type { StepPatch } from '../step_config.ts';
+import type { SetupAdapter } from '../setup_adapter.ts';
 
 // A tool a preset needs. TaskPilot only checks for it and shows `install`;
 // it never installs anything.
@@ -34,4 +35,7 @@ export interface Preset<Facts = unknown> {
   // Folders under the real home the sandbox may read for the toolchain,
   // besides those on PATH.
   sandboxRead: (home: string) => string[];
+  // How the Environment Steward plans setup for this language; without one
+  // the setup page says automatic planning is not supported yet.
+  setup?: SetupAdapter;
 }

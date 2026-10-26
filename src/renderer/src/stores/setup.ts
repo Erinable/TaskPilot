@@ -8,6 +8,7 @@ import { call } from '@/lib/ipc.ts';
 import type { IpcError } from '@/lib/ipc.ts';
 import { ERROR_HINTS, describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
+import { STEP_LABELS } from '@/lib/check_steps.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useAppStore } from './app.ts';
 import { useSettingsStore } from './settings.ts';
@@ -16,7 +17,10 @@ import type * as envTypes from '@shared/ipc/environment.ts';
 
 const POLL_MS = 800;
 
+// [人工决策-2026-10-25 23:51:35] 非 TS 仓库本期只显示「暂不支持自动环境规划」，不调用模型。
 const BLOCKER_TEXT: Record<string, string> = {
+  setup_unsupported:
+    '这个仓库暂不支持自动环境规划，目前只支持根目录有 package.json 的 Node/npm 项目。依赖请按项目说明手动安装，检查步骤可以在「检查步骤」里设置。',
   no_manifest: '仓库里没有已提交的 package.json，目前只支持 Node/npm 项目。',
   invalid_manifest: 'package.json 不是合法的 JSON。',
   unsupported_manager: '仓库使用了 npm 以外的包管理器（yarn/pnpm/bun），安装步骤已禁用，脚本仍可运行。',
@@ -29,7 +33,7 @@ const adjustmentText = (adjustment: envTypes.EnvAdjustment) => {
   if (adjustment.code === 'unknown_script') return `package.json 里没有脚本「${adjustment.script}」，已取消 ${adjustment.kind} 步骤。`;
   return (adjustment as { code: string }).code;
 };
-export const KIND_LABEL: Record<string, string> = { install: '安装依赖', rebuild: '运行必需的安装脚本', test: '测试', lint: '代码检查', build: '构建' };
+export const KIND_LABEL: Record<string, string> = { install: '安装依赖', rebuild: '运行必需的安装脚本', ...STEP_LABELS };
 // Packages listed by name before the rest are counted.
 const NAMED_PACKAGES = 4;
 const packageList = (packages: string[]) =>
@@ -138,11 +142,11 @@ export const useSetupStore = defineStore('setup', () => {
   const applyItems = computed(() => {
     const current = view.value;
     if (!current) return [];
-    return (['test', 'lint', 'build'] as const)
+    return current.stepKinds
       .filter((kind) => current.plan?.scripts[kind])
       .map((kind): ApplyItem => {
         const proposed = current.steps.find((candidate) => candidate.id === kind)?.line ?? '';
-        const configured = current.configured[kind];
+        const configured = current.configured[kind] ?? '';
         return {
           kind,
           proposed,
@@ -157,7 +161,7 @@ export const useSetupStore = defineStore('setup', () => {
   // Every new view resets the apply ticks to their defaults, as a repaint did.
   const setView = (next: envTypes.EnvState) => {
     view.value = next;
-    selectedKinds.value = (['test', 'lint', 'build'] as const).filter((kind) => {
+    selectedKinds.value = next.stepKinds.filter((kind) => {
       const step = next.steps.find((candidate) => candidate.id === kind);
       return Boolean(next.plan?.scripts[kind]) && !next.configured[kind] && step?.result?.ok === true;
     });

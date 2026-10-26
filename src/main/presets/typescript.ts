@@ -5,9 +5,10 @@
 // A repository without taskpilot.toml gets no preset steps, so it behaves
 // exactly as before: only the steps set in settings run.
 import { readTracked } from '../repo_reader.ts';
-import { SCRIPT_NAME, parseManifest } from './typescript_setup.ts';
+import { SCRIPT_NAME, parseManifest, typescriptSetup } from './typescript_setup.ts';
 import type { Manifest } from './typescript_setup.ts';
 import type { Preset } from './preset.ts';
+import type { SetupAdapter } from '../setup_adapter.ts';
 import type { StepId, StepKind } from '../../shared/check_steps.ts';
 import type { StepPatch } from '../step_config.ts';
 
@@ -85,4 +86,5 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
   secretFiles: [],
   sandboxEnv: () => ({}),
   sandboxRead: () => [],
+  setup: typescriptSetup as SetupAdapter,
 };

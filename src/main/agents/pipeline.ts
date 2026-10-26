@@ -11,7 +11,6 @@ import * as envSteward from './env_steward.ts';
 import * as releaseManager from './release_manager.ts';
 import * as git from '../git.ts';
 import { looksSecret } from '../repo_reader.ts';
-import * as envSetup from '../presets/typescript_setup.ts';
 import { readTracked } from '../repo_reader.ts';
 import { collectChanges } from '../review_diff.ts';
 import * as evidence from '../evidence.ts';
@@ -21,7 +20,8 @@ import type { AdjudicationResult, AdjudicationTask, DeviationRecord, InterfaceSu
 import type { CompactRun, RejectReason, ReviewReport, ReviewTask } from './qa.ts';
 import type { EnvFailure, EnvPlan } from './env_steward.ts';
 import type { ReleaseInput, ReleasePlan } from './release_manager.ts';
-import type { Blocker, EnvFacts } from '../presets/typescript_setup.ts';
+import type { SetupAdapter } from '../setup_adapter.ts';
+import type { EnvBlocker } from '../../shared/ipc/environment.ts';
 import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../evidence.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
@@ -68,14 +68,13 @@ export interface ReviewResult {
   costUsd: number;
 }
 
-export interface EnvPlanResult {
-  facts: EnvFacts;
-  blockers: Blocker[];
+// `facts` is null when the repository has no setup adapter.
+export interface EnvPlanResult<Facts = unknown> {
+  facts: Facts | null;
+  blockers: EnvBlocker[];
   plan: EnvPlan | null;
   costUsd: number;
 }
-
-export type EnvProbe = (root: string, options: { envPath?: string | null }) => Promise<EnvFacts>;
 
 export type AdjudicationOutcome = AdjudicationResult & {
   read: string[];
@@ -263,40 +262,42 @@ export const reviewWorkPackage = async (
   return result(report, costUsd ?? 0);
 };
 
-// Environment Steward's turn: probe the workspace, then ask the model to pick
-// an install mode and verification scripts. Without a usable package.json
-// there is nothing to choose, so the model is not called.
+// Environment Steward's turn: probe the workspace through its setup adapter,
+// then ask the model to pick an install mode and verification scripts.
+// Without an adapter, or when the facts leave nothing to choose, the model
+// is not called.
 //
+// deps.setup:   the repository's setup adapter, or null when its language has none
 // deps.failure: optional failed step
-export const planEnvironment = async ({
+// [人工决策-2026-10-25 23:51:35] 非 TS 仓库的 Environment Steward 本期只做解耦：没有 setup 适配器时返回 setup_unsupported，界面显示「暂不支持自动环境规划」，不调用模型；cargo、uv/pip 适配器另开任务。
+export const planEnvironment = async <Facts>({
   root,
   runAgent,
   envPath,
   signal,
   failure = null,
-  probe = envSetup.probe,
+  setup,
 }: {
   root: string;
   runAgent: RunAgent;
   envPath?: string | null;
   signal?: AbortSignal;
   failure?: EnvFailure | null;
-  probe?: EnvProbe;
-}): Promise<EnvPlanResult> => {
-  const facts = await probe(root, { envPath });
-  const found = envSetup.blockers(facts);
-  if (found.includes('no_manifest') || found.includes('invalid_manifest')) {
-    return { facts, blockers: found, plan: null, costUsd: 0 };
-  }
+  setup: SetupAdapter<Facts> | null;
+}): Promise<EnvPlanResult<Facts>> => {
+  if (!setup) return { facts: null, blockers: ['setup_unsupported'], plan: null, costUsd: 0 };
+  const facts = await setup.probe(root, { envPath });
+  const found = setup.blockers(facts);
+  if (setup.stopsPlanning(found)) return { facts, blockers: found, plan: null, costUsd: 0 };
   throwIfCancelled(signal);
   const { output, costUsd } = await runAgent({
-    prompt: envSteward.planPrompt(facts, { failure }),
+    prompt: envSteward.planPrompt(setup, facts, { failure }),
     systemPrompt: envSteward.SYSTEM_PROMPT,
-    schema: envSteward.PLAN_SCHEMA,
+    schema: envSteward.planSchema(setup),
     envPath,
     signal,
   });
-  return { facts, blockers: found, plan: envSteward.validatePlan(output, facts), costUsd: costUsd ?? 0 };
+  return { facts, blockers: found, plan: envSteward.validatePlan(output, facts, setup), costUsd: costUsd ?? 0 };
 };
 
 // Architect's ruling on the package's latest deviation. Reads the files the
