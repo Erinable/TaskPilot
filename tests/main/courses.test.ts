@@ -130,6 +130,31 @@ test('a changed pack needs confirming again', async () => {
   assert.notEqual(changed.state.status === 'pending' && changed.state.ref.contentHash, first.state.ref.contentHash);
 });
 
+// CARM-37: a pack with a concept skeleton loads like any other, and adding or
+// changing concepts is a change that is confirmed again.
+test('a pack with concepts loads, and a change to its concepts needs confirming again', async () => {
+  const withConcepts = (summary: string) =>
+    `${packText('oslab')}\n[[concepts]]\nid = "fcfs"\nlabel = "先来先服务"\nsummary = "${summary}"\nprerequisites = []\n`;
+  const { root, dataDir } = await setup({ 'oslab.toml': withConcepts('按到达顺序运行。') });
+  const places = { root, dataDir, configDir: null, builtin: BUILTIN };
+  const choice = { local: null, project: 'oslab' };
+  const first = await courses.resolveCourse(places, choice);
+  if (first.state.status !== 'pending') throw new Error('expected pending');
+  assert.deepEqual(
+    first.state.pack.concepts?.map((item) => item.id),
+    ['fcfs'],
+  );
+  await courses.confirm(places, first.state.pack, first.state.ref);
+  const confirmed = await courses.resolveCourse(places, choice);
+  assert.deepEqual(confirmed.state, { status: 'ok' });
+  assert.equal(confirmed.pack.concepts?.[0].summary, '按到达顺序运行。');
+
+  await fs.writeFile(path.join(root, courses.COURSES_DIR, 'oslab.toml'), withConcepts('按到达顺序运行，不抢占。'));
+  const changed = await courses.resolveCourse(places, choice);
+  assert.equal(changed.state.status, 'pending');
+  assert.equal(changed.pack, PROGRAMMING_COURSE);
+});
+
 test('a broken trust file confirms nothing', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
   await fs.writeFile(path.join(dataDir, courses.TRUST_FILENAME), '{ not json');
@@ -277,17 +302,19 @@ test('parseCourseText validates an import: size, fields, and the file name when 
   });
 });
 
-// The hashes of the built-in packs when they were TypeScript constants. Grade
-// snapshots and confirmations recorded then name these, so the files must
-// keep hashing the same.
-const HASHES_BEFORE_TOML = {
+// The hashes of the built-in packs. programming's is the one it had as a
+// TypeScript constant: grade snapshots recorded then name it, so it must not
+// move. os changed on purpose in CARM-37 (version 0.2.0, labGuide and the
+// concept skeleton; it was 88d0d064… before). A built-in pack needs no
+// confirmation, so a new hash only marks new grades with the new content.
+const BUILTIN_HASHES = {
   programming: '22470ff4e07f076fc4e40ac5105b99c9cae2656e88f788569e8eba8fa7ea3518',
-  os: '88d0d0641295de8ffeb39a05df30f08849f92952faea72e732db5a1729b044bd',
+  os: 'b05058dcc6b38e2ed108d9d0c68ea251ea2e468b55b6a037a493d21b041dea9f',
 };
 
-test('the built-in TOML packs hash the same as the constants they replaced', () => {
+test('the built-in TOML packs hash as recorded; programming as the constant it replaced', () => {
   assert.deepEqual([...BUILTIN.keys()], ['programming', 'os']);
-  for (const [id, hash] of Object.entries(HASHES_BEFORE_TOML)) {
+  for (const [id, hash] of Object.entries(BUILTIN_HASHES)) {
     const { pack, ref } = BUILTIN.get(id)!;
     assert.equal(courseFile.contentHash(pack), hash, id);
     assert.deepEqual(ref, { id, version: pack.version, contentHash: hash, source: 'builtin' });

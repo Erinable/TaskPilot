@@ -32,6 +32,48 @@ export type RubricItem = {
   examples?: RubricExample[];
 };
 
+// A node of the pack's concept skeleton: the stable ids lab plans and
+// mastery are kept under. Prerequisites name other concepts of the same pack
+// and never form a cycle.
+export type Concept = {
+  id: string;
+  label: string;
+  summary: string;
+  prerequisites: string[];
+  dimension?: CourseDimension;
+};
+
+// The first cycle among prerequisites, as the ids along it with the first
+// repeated at the end, or null. Unknown prerequisites are skipped; the pack's
+// loader (../main/course_file.ts) refuses them first, and an editor can call
+// this on a half-written list. Iterative, so a 200-node chain cannot
+// overflow the stack.
+export const conceptCycle = (items: Pick<Concept, 'id' | 'prerequisites'>[]): string[] | null => {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const state = new Map<string, 'open' | 'done'>();
+  for (const root of items) {
+    if (state.has(root.id)) continue;
+    const path: { id: string; next: number }[] = [{ id: root.id, next: 0 }];
+    state.set(root.id, 'open');
+    while (path.length) {
+      const top = path[path.length - 1];
+      const prerequisite = byId.get(top.id)!.prerequisites[top.next++];
+      if (prerequisite !== undefined && !byId.has(prerequisite)) continue;
+      if (prerequisite === undefined) {
+        state.set(top.id, 'done');
+        path.pop();
+      } else if (state.get(prerequisite) === 'open') {
+        const ids = path.map((entry) => entry.id);
+        return [...ids.slice(ids.indexOf(prerequisite)), prerequisite];
+      } else if (!state.has(prerequisite)) {
+        state.set(prerequisite, 'open');
+        path.push({ id: prerequisite, next: 0 });
+      }
+    }
+  }
+  return null;
+};
+
 export interface CoursePack {
   schemaVersion: typeof COURSE_SCHEMA_VERSION;
   id: string;
@@ -56,6 +98,10 @@ export interface CoursePack {
   // Project languages the pack is written for; only used to warn about a
   // mismatch, never enforced.
   appliesTo?: { languages?: string[] };
+  // What the lab generator is told about labs in this domain, one line each.
+  labGuide?: string[];
+  // The concept skeleton; at most 200 nodes.
+  concepts?: Concept[];
 }
 
 // Where a pack was loaded from.

@@ -7,7 +7,7 @@
 import { computed, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { FIELD_LABELS, SOURCE_LABELS, changeText, changedFields, dimensionLabel, sourcePath } from '@/lib/course_model.ts';
+import { FIELD_LABELS, SOURCE_LABELS, changeText, changedFields, dimensionLabel, itemChanged, sourcePath } from '@/lib/course_model.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
 
 const courses = useCoursesStore();
@@ -17,6 +17,7 @@ const pack = computed(() => preview.value?.pack ?? null);
 const changes = computed(() => preview.value?.changes ?? []);
 const marked = computed(() => changedFields(changes.value));
 const isMarked = (field: string) => marked.value.has(field);
+const conceptLabels = computed(() => new Map((pack.value?.concepts ?? []).map((item) => [item.id, item.label])));
 const location = computed(() => (preview.value ? sourcePath(preview.value.ref.id, preview.value.ref.source, courses.list?.userDir ?? 'courses') : null));
 const imported = computed(() => (courses.previewMode === 'import' ? (preview.value as { replaces: boolean; shadowed: boolean }) : null));
 const asking = computed(() => courses.previewMode !== 'view');
@@ -29,7 +30,9 @@ watch(preview, () => {
 const needsTick = computed(() => courses.previewMode === 'confirm' && changes.value.length > 0);
 const canAccept = computed(() => !courses.busy && (!needsTick.value || changesRead.value));
 
-const GUIDES = ['tutorGuide', 'difficultyGuide', 'practiceGuide'] as const;
+const GUIDES = ['tutorGuide', 'difficultyGuide', 'practiceGuide', 'labGuide'] as const;
+// labGuide is optional: shown when the pack has it, or when it was removed.
+const guides = computed(() => GUIDES.filter((name) => pack.value?.[name] || isMarked(name)));
 
 const accept = () => {
   const action = courses.previewMode === 'import' ? courses.importPicked() : courses.confirm();
@@ -101,11 +104,11 @@ const accept = () => {
           <dt>{{ FIELD_LABELS.appliesTo }}</dt>
           <dd>{{ pack.appliesTo?.languages?.join(', ') ?? '不限' }}</dd>
         </div>
-        <div v-for="guide in GUIDES" :key="guide" :class="{ changed: isMarked(guide) }">
+        <div v-for="guide in guides" :key="guide" :class="{ changed: isMarked(guide) }">
           <dt>{{ FIELD_LABELS[guide] }}</dt>
           <dd>
             <ul class="course-lines">
-              <li v-for="(line, index) in pack[guide]" :key="index">{{ line }}</li>
+              <li v-for="(line, index) in pack[guide] ?? ['（无）']" :key="index">{{ line }}</li>
             </ul>
           </dd>
         </div>
@@ -117,18 +120,32 @@ const accept = () => {
           <dt>判卷维度</dt>
           <dd>
             <ul class="course-rubric">
-              <li
-                v-for="item in pack.rubric"
-                :key="item.id"
-                :data-rubric="item.id"
-                :class="{ changed: [...marked].some((field) => field === `rubric.${item.id}` || field.startsWith(`rubric.${item.id}.`)) }"
-              >
+              <li v-for="item in pack.rubric" :key="item.id" :data-rubric="item.id" :class="{ changed: itemChanged(marked, 'rubric', item.id) }">
                 <strong>{{ item.label }}</strong>
                 <small>（{{ item.id }}，通用维度：{{ dimensionLabel(item.dimension) }}）</small>
                 <p>{{ item.description }}</p>
                 <ul v-if="item.examples" class="course-lines">
                   <li v-for="(example, index) in item.examples" :key="index">{{ example.observation }} → {{ example.betterWay }}</li>
                 </ul>
+              </li>
+            </ul>
+          </dd>
+        </div>
+        <div v-if="pack.concepts || isMarked('concepts')" :class="{ changed: isMarked('concepts') }">
+          <dt>知识点（{{ pack.concepts?.length ?? 0 }} 个）</dt>
+          <dd>
+            <ul class="course-rubric">
+              <li v-for="item in pack.concepts" :key="item.id" :data-concept="item.id" :class="{ changed: itemChanged(marked, 'concepts', item.id) }">
+                <strong>{{ item.label }}</strong>
+                <small>
+                  （{{ item.id }}
+                  <template v-if="item.dimension">，通用维度：{{ dimensionLabel(item.dimension) }}</template>
+                  ）
+                </small>
+                <p>{{ item.summary }}</p>
+                <p v-if="item.prerequisites.length" class="course-prerequisites">
+                  前置：{{ item.prerequisites.map((id) => conceptLabels.get(id) ?? id).join('、') }}
+                </p>
               </li>
             </ul>
           </dd>
@@ -239,6 +256,9 @@ const accept = () => {
 }
 .course-rubric p {
   margin: 2px 0 0;
+}
+.course-prerequisites {
+  color: var(--text-muted);
 }
 .course-tick {
   display: flex;

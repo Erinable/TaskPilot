@@ -4,10 +4,11 @@
 # [人工决策-2026-10-26 15:38:21] 内置 OS 包：维度为原理 / 实现 / 并发与安全，分别挂到 thinking / writing / style；
 # 练习形态仍是"仓库 + 检查步骤"（xv6 的 make grade 或纯 C 小程序配成 custom:grade）。内容按 CARM-26 已确认的草稿。
 # [人工决策-2026-10-27 00:55:52] 内置课程包随应用打包为 TOML，只读；用户想改就复制一份再改。
+# [人工决策-2026-10-27 00:36:21] lab 只做"仓库 + 测试"，labGuide 按此写；没有 xv6 工具链时改用用户态 C 模拟器。
 
 schemaVersion = 1
 id = "os"
-version = "0.1.0"
+version = "0.2.0"
 domain = "operating-systems"
 title = "操作系统实验"
 summary = "在教学内核或系统调用小程序里动手，理解进程、内存、文件系统和并发。"
@@ -31,6 +32,13 @@ practiceGuide = [
 ]
 referenceGuide = "Write the complete solution to this lab step. It is a reference answer for a student, so keep it close to the kernel's existing style and explain non-obvious invariants in short comments."
 appliesTo = { languages = ["c", "rust"] }
+labGuide = [
+  "A lab is a repository plus tests: a README with the task, starter code with TODOs, public tests under tests/public/ and a make grade target.",
+  "With the xv6 toolchain (a riscv64 gcc and qemu) installed, a lab may change xv6 itself and be graded by xv6's own make grade.",
+  "Without the xv6 toolchain, write the lab as a user-space C simulator of the mechanism, built with the system cc and make: a scheduler reading jobs from stdin, a page table walk over an array, a file system on a disk image file.",
+  "Cover one to three concepts of the skeleton per lab. Tests check behaviour the student can observe (a timeline, a translated address, the blocks written), never internal names.",
+  "Keep a lab to one sitting of two to four hours; split a larger mechanism into stages whose tests also run the earlier stages' tests.",
+]
 
 [[rubric]]
 id = "concept"
@@ -52,3 +60,335 @@ id = "safety"
 label = "并发与安全"
 dimension = "style"
 description = "races, lock ordering, interrupts while holding a lock, and trusting user input"
+
+# The concept skeleton: process scheduling, memory, file system. Lab plans and
+# mastery records name these ids, so an id is never renamed; a node that is
+# wrong is fixed in place or retired in a new version.
+
+# ---- 进程与调度 ----
+
+[[concepts]]
+id = "process-state"
+label = "进程与进程状态"
+summary = "进程是正在运行的程序加上它的内核状态（PCB）。状态在 运行 / 就绪 / 阻塞 / 僵尸 之间转换，每次转换都有明确的触发：被调度、时间片用完、等 I/O、退出。"
+prerequisites = []
+dimension = "thinking"
+
+[[concepts]]
+id = "trap-syscall"
+label = "陷入与系统调用"
+summary = "用户态通过 ecall/int 等指令陷入内核：硬件切到内核模式、保存 pc，内核保存寄存器、按编号分派系统调用，返回值写回用户寄存器，再回到用户态。"
+prerequisites = []
+dimension = "thinking"
+
+[[concepts]]
+id = "process-lifecycle"
+label = "fork / exec / exit / wait"
+summary = "fork 复制出一个子进程，exec 用新程序替换地址空间，exit 释放资源后变成僵尸，父进程 wait 回收它。孤儿进程交给 init 收养。"
+prerequisites = ["process-state", "trap-syscall"]
+dimension = "writing"
+
+[[concepts]]
+id = "context-switch"
+label = "上下文切换"
+summary = "调度器保存当前进程的被调用者保存寄存器和栈指针，再恢复下一个进程的，切换后从对方上次让出的位置继续执行。切换本身有开销，也是调度时间片不能太小的原因。"
+prerequisites = ["process-state", "trap-syscall"]
+dimension = "writing"
+
+[[concepts]]
+id = "timer-interrupt"
+label = "时钟中断与抢占"
+summary = "时钟中断定期把 CPU 交还给内核，内核在中断返回前决定是否让出 CPU（yield）。没有时钟中断就只能等进程主动让出，做不到抢占式调度。"
+prerequisites = ["trap-syscall"]
+dimension = "thinking"
+
+[[concepts]]
+id = "sched-metrics"
+label = "调度指标"
+summary = "周转时间 = 完成 − 到达，等待时间 = 周转 − 运行，响应时间 = 首次运行 − 到达。不同算法在这几个指标和公平性之间取舍，比较算法先算清这些数。"
+prerequisites = ["process-state"]
+dimension = "thinking"
+
+[[concepts]]
+id = "fcfs"
+label = "先来先服务（FCFS）"
+summary = "按到达顺序运行到结束，不抢占。实现最简单，但长作业排在前面时短作业要等很久（护航效应），平均等待时间可能很差。"
+prerequisites = ["sched-metrics"]
+dimension = "thinking"
+
+[[concepts]]
+id = "sjf"
+label = "最短作业优先（SJF / SRTF）"
+summary = "总挑剩余运行时间最短的作业，平均等待时间最优；SRTF 是它的抢占版本。前提是事先知道运行时长，现实中只能估计，而且长作业可能饿死。"
+prerequisites = ["fcfs"]
+dimension = "thinking"
+
+[[concepts]]
+id = "round-robin"
+label = "时间片轮转（RR）"
+summary = "就绪队列按先进先出轮流运行，每个作业最多运行一个时间片就被抢占放回队尾。响应时间好，周转时间通常变差；要说清新到作业和被抢占作业同时入队时谁在前。"
+prerequisites = ["fcfs", "timer-interrupt"]
+dimension = "writing"
+
+[[concepts]]
+id = "priority-sched"
+label = "优先级调度"
+summary = "每次选优先级最高的就绪进程，同优先级之间再用 RR。可以抢占也可以不抢占；低优先级进程可能一直得不到运行，需要配合老化。"
+prerequisites = ["round-robin"]
+dimension = "thinking"
+
+[[concepts]]
+id = "aging"
+label = "老化与饥饿"
+summary = "等待越久优先级越高，防止低优先级进程饿死。要选好提升的速度和上限，太快会退化成 RR，太慢又挡不住饥饿。"
+prerequisites = ["priority-sched"]
+dimension = "thinking"
+
+[[concepts]]
+id = "mlfq"
+label = "多级反馈队列（MLFQ）"
+summary = "多个优先级队列，新作业进最高级；用完时间片就降级，主动让出则保级；定期把所有作业提回最高级（priority boost）防止饥饿和被刷优先级。"
+prerequisites = ["priority-sched", "aging"]
+dimension = "writing"
+
+[[concepts]]
+id = "lottery-stride"
+label = "彩票与步长调度"
+summary = "按比例分配 CPU：彩票调度按票数随机抽签，期望上成比例；步长调度给每个进程一个 pass 值，每次选最小的再加上步长，结果是确定的。"
+prerequisites = ["round-robin"]
+dimension = "thinking"
+
+[[concepts]]
+id = "spinlock"
+label = "自旋锁与关中断"
+summary = "多核上用原子指令（test-and-set / amoswap）实现互斥，持锁期间关本核中断，避免中断处理程序再抢同一把锁造成死锁。持锁时间要短，不能在持锁时睡眠。"
+prerequisites = ["timer-interrupt"]
+dimension = "style"
+
+[[concepts]]
+id = "sleep-wakeup"
+label = "睡眠与唤醒"
+summary = "进程等待条件时进入阻塞并让出 CPU，条件满足时被唤醒回到就绪。检查条件和进入睡眠必须在同一把锁下完成，否则会丢失唤醒。"
+prerequisites = ["spinlock", "context-switch"]
+dimension = "style"
+
+[[concepts]]
+id = "multicore-sched"
+label = "多核调度与负载均衡"
+summary = "每个 CPU 一个运行队列可以减少锁竞争，但要在核之间迁移任务来均衡负载；迁移会丢失缓存亲和性，什么时候迁移是取舍。"
+prerequisites = ["round-robin", "spinlock"]
+dimension = "style"
+
+# ---- 内存 ----
+
+[[concepts]]
+id = "address-space"
+label = "地址空间"
+summary = "每个进程看到自己独立的一段虚拟地址：代码、数据、堆、栈和内核映射。隔离靠的是每个进程有自己的映射，而不是物理内存分开放。"
+prerequisites = ["process-state"]
+dimension = "thinking"
+
+[[concepts]]
+id = "segmentation"
+label = "基址界限与分段"
+summary = "最早的地址翻译：物理地址 = 基址 + 虚拟地址，超出界限就报错。分段给代码、堆、栈各一对基址界限，但会产生外部碎片，这是引出分页的原因。"
+prerequisites = ["address-space"]
+dimension = "thinking"
+
+[[concepts]]
+id = "paging"
+label = "分页与地址翻译"
+summary = "虚拟地址拆成页号和页内偏移，页号查页表得到物理页框号，再拼上偏移。页表项里还有有效位、读写执行权限位和用户位，查不到或权限不对就触发缺页异常。"
+prerequisites = ["segmentation"]
+dimension = "writing"
+
+[[concepts]]
+id = "multilevel-page-table"
+label = "多级页表"
+summary = "把页表本身也分页，只为用到的区域分配下一级表，省下大片空洞的空间。翻译时逐级用虚拟地址的各段索引（如 Sv39 的三级），任意一级无效就是缺页。"
+prerequisites = ["paging"]
+dimension = "writing"
+
+[[concepts]]
+id = "tlb"
+label = "TLB 与快表"
+summary = "TLB 缓存最近的页号到页框号的翻译，命中就不用走页表。改了页表要刷新对应的 TLB 项（sfence.vma / invlpg），切换地址空间时要整体刷新或用 ASID 区分。"
+prerequisites = ["multilevel-page-table"]
+dimension = "thinking"
+
+[[concepts]]
+id = "frame-allocator"
+label = "物理页分配"
+summary = "内核用空闲链表或位图管理物理页框：分配时取一页，释放时放回。要处理分配失败、重复释放，多核下空闲链表要加锁或按 CPU 分开。"
+prerequisites = ["paging"]
+dimension = "writing"
+
+[[concepts]]
+id = "kernel-user-copy"
+label = "内核与用户内存拷贝"
+summary = "内核不能直接解引用用户指针：用户地址在内核页表里不一定有效，也可能越权。用 copyin / copyout 按用户页表逐页翻译、检查权限后再拷贝。"
+prerequisites = ["paging", "trap-syscall"]
+dimension = "style"
+
+[[concepts]]
+id = "page-fault"
+label = "缺页异常处理"
+summary = "访问无效页或权限不符时陷入内核，内核根据出错地址（stval / cr2）和原因判断：合法就分配或调入页面再重新执行那条指令，不合法就杀掉进程。"
+prerequisites = ["multilevel-page-table", "trap-syscall"]
+dimension = "writing"
+
+[[concepts]]
+id = "lazy-allocation"
+label = "懒分配"
+summary = "sbrk 只增加进程的大小，不立刻分配物理页；第一次访问触发缺页时再分配并映射。要处理访问超出大小、栈下方的保护页，以及释放时跳过从未映射的页。"
+prerequisites = ["page-fault", "frame-allocator"]
+dimension = "writing"
+
+[[concepts]]
+id = "copy-on-write"
+label = "写时复制"
+summary = "fork 时父子共享物理页并都去掉写权限，任一方写入时触发缺页，再复制一页给它。要给物理页计引用数，最后一个引用释放时才真正回收，copyout 也要处理 COW 页。"
+prerequisites = ["page-fault", "frame-allocator", "process-lifecycle"]
+dimension = "style"
+
+[[concepts]]
+id = "page-replacement"
+label = "页面置换"
+summary = "物理内存不够时选一页换出到磁盘。OPT 是理论最优，LRU 近似它但代价高，时钟算法用访问位近似 LRU；FIFO 可能出现页框越多缺页反而越多（Belady 异常）。"
+prerequisites = ["page-fault"]
+dimension = "thinking"
+
+[[concepts]]
+id = "working-set"
+label = "工作集与抖动"
+summary = "进程在一段时间内频繁访问的页集合叫工作集。所有进程的工作集之和超过物理内存时，系统大部分时间都在换页（抖动），办法是减少同时运行的进程。"
+prerequisites = ["page-replacement"]
+dimension = "thinking"
+
+[[concepts]]
+id = "mmap"
+label = "内存映射文件（mmap）"
+summary = "把文件的一段映射进地址空间，访问时按缺页把文件内容读进来；共享映射的修改在 munmap 或换出时写回文件，私有映射用写时复制。"
+prerequisites = ["page-fault"]
+dimension = "writing"
+
+[[concepts]]
+id = "heap-allocator"
+label = "用户态堆分配器"
+summary = "malloc 在 sbrk / mmap 拿到的内存上管理空闲块：首次适应、最佳适应、分离空闲链表，释放时合并相邻空闲块以减少外部碎片，块头记录大小和是否空闲。"
+prerequisites = ["address-space"]
+dimension = "writing"
+
+[[concepts]]
+id = "kernel-isolation"
+label = "内核地址空间与隔离"
+summary = "内核映射对用户态不可见（页表项不带用户位），陷入时切换到内核页表或内核映射；保护页放在内核栈之间，越界立刻缺页而不是悄悄写坏别的栈。"
+prerequisites = ["multilevel-page-table", "trap-syscall"]
+dimension = "style"
+
+# ---- 文件系统 ----
+
+[[concepts]]
+id = "block-device"
+label = "块设备与磁盘布局"
+summary = "磁盘按固定大小的块读写。一个文件系统镜像通常依次是：引导块、超级块、日志区、inode 区、空闲位图、数据块；超级块记录各区的起点和大小。"
+prerequisites = []
+dimension = "thinking"
+
+[[concepts]]
+id = "buffer-cache"
+label = "块缓存"
+summary = "内存里缓存最近用过的磁盘块，同一块只有一份缓存，用锁保证同一时刻只有一个进程在改它。缓存满时按 LRU 回收没人在用的块，被改过的块写回磁盘后才能复用。"
+prerequisites = ["block-device", "sleep-wakeup"]
+dimension = "writing"
+
+[[concepts]]
+id = "inode"
+label = "inode"
+summary = "inode 记录文件的类型、大小、链接数和数据块地址，不含文件名。磁盘 inode 和内存 inode 要分清：内存 inode 有引用计数和锁，最后一次 iput 且链接数为 0 时才释放磁盘上的 inode 和数据块。"
+prerequisites = ["block-device"]
+dimension = "thinking"
+
+[[concepts]]
+id = "block-map"
+label = "直接块与间接块"
+summary = "inode 里放若干直接块地址和一个或多个间接块，间接块里再放块地址，二级间接能支持更大的文件。bmap 按文件内偏移找到或分配对应的数据块。"
+prerequisites = ["inode"]
+dimension = "writing"
+
+[[concepts]]
+id = "free-space"
+label = "空闲空间管理"
+summary = "用位图或空闲链表记录哪些块和 inode 空闲。分配要在锁下或日志事务里完成；位图和实际使用不一致时，fsck 一类工具负责修复。"
+prerequisites = ["block-device"]
+dimension = "writing"
+
+[[concepts]]
+id = "directory"
+label = "目录"
+summary = "目录是一种特殊文件，内容是（文件名，inode 号）的列表，. 和 .. 也是普通目录项。查找、添加、删除目录项都要在目录 inode 的锁下进行。"
+prerequisites = ["inode"]
+dimension = "writing"
+
+[[concepts]]
+id = "path-resolution"
+label = "路径解析"
+summary = "从根目录或当前目录开始，逐段在目录里查名字、拿到下一级 inode。逐级加锁时要先拿到下一级的引用再放开上一级的锁，否则遇到 .. 会和另一个方向的查找死锁。"
+prerequisites = ["directory"]
+dimension = "style"
+
+[[concepts]]
+id = "fd-table"
+label = "文件描述符与打开文件表"
+summary = "进程的 fd 表指向全局的打开文件表项，表项记录偏移、读写模式和对 inode 的引用。fork 和 dup 共享同一表项，所以共享偏移；close 只减引用计数。"
+prerequisites = ["inode", "process-lifecycle"]
+dimension = "thinking"
+
+[[concepts]]
+id = "file-rw"
+label = "read / write 的实现路径"
+summary = "系统调用经 fd 找到 inode，按偏移用 bmap 找到块，经块缓存读出或写入，再用 copyout / copyin 和用户缓冲区交换数据；写入超过文件大小时更新 inode 大小。"
+prerequisites = ["fd-table", "block-map", "buffer-cache", "kernel-user-copy"]
+dimension = "writing"
+
+[[concepts]]
+id = "links"
+label = "硬链接与符号链接"
+summary = "硬链接是多个目录项指向同一个 inode，链接数归零才删除；符号链接是一个内容为路径的特殊文件，打开时再解析一次，要限制跟随深度防止成环。"
+prerequisites = ["directory", "path-resolution"]
+dimension = "thinking"
+
+[[concepts]]
+id = "pipe"
+label = "管道"
+summary = "管道是内核里的一个环形缓冲区，读端和写端各是一个文件描述符。缓冲区空时读者睡眠、满时写者睡眠；写端全部关闭后读者读到 EOF，读端全部关闭后写者收到错误。"
+prerequisites = ["fd-table", "sleep-wakeup"]
+dimension = "writing"
+
+[[concepts]]
+id = "crash-consistency"
+label = "崩溃一致性"
+summary = "一次文件操作要改多个块（位图、inode、目录、数据），写到一半断电会让文件系统不一致，比如块被标为已用却没人引用。要先想清楚哪种写入顺序下崩溃后还能恢复。"
+prerequisites = ["inode", "free-space", "directory"]
+dimension = "thinking"
+
+[[concepts]]
+id = "journaling"
+label = "日志（预写式日志）"
+summary = "把一次操作要改的块先写进日志区，写完再写一条提交记录，然后才写回原位置；崩溃后重放已提交的日志、丢掉未提交的。一个事务的块数不能超过日志区大小。"
+prerequisites = ["crash-consistency", "buffer-cache"]
+dimension = "style"
+
+[[concepts]]
+id = "group-commit"
+label = "组提交与写回"
+summary = "把多个系统调用的修改合进一次日志提交，减少磁盘写次数；同一块在一个事务里改多次只记一次（吸收）。代价是提交前崩溃会丢掉最近的几次修改。"
+prerequisites = ["journaling"]
+dimension = "style"
+
+[[concepts]]
+id = "large-files"
+label = "大文件与扩展块"
+summary = "文件超过直接块和一级间接块的容量时，用二级间接块或连续区段（extent）记录数据块。要算清每级能寻址的最大文件大小，释放文件时逐级回收所有块。"
+prerequisites = ["block-map"]
+dimension = "writing"
