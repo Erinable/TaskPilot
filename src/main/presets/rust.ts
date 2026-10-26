@@ -75,6 +75,7 @@ export const rustPreset: Preset<RustFacts> = {
   id: 'rust',
   label: 'Rust',
   manifests: ['Cargo.toml'],
+  testLayout: 'unit tests in a #[cfg(test)] mod tests inside the source file; integration tests in tests/*.rs',
   detect: (tracked) => tracked.has('Cargo.toml'),
   facts: async (root, { envPath } = {}) => {
     const { files } = await readTracked(root, ['Cargo.toml'], { maxFiles: 1, maxFileBytes: 64 * 1024, maxTotalBytes: 64 * 1024 });

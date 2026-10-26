@@ -51,6 +51,7 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
   id: 'typescript',
   label: 'TypeScript / JavaScript',
   manifests: ['package.json'],
+  testLayout: '*.test.ts or *.spec.ts files in tests/, in __tests__/ or next to the code',
   detect: (tracked) => tracked.has('package.json'),
   facts: async (root) => {
     const { files } = await readTracked(root, ['package.json'], { maxFiles: 1, maxFileBytes: 64 * 1024, maxTotalBytes: 64 * 1024 });

@@ -11,6 +11,7 @@ import { AgentOutputError, isObject } from './product_lead.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
+import { rolePreamble } from './role_preamble.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 
@@ -48,7 +49,7 @@ export interface TutorAnswer {
 }
 
 export const SYSTEM_PROMPT = [
-  'You are Tutor on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
+  rolePreamble('Tutor'),
   'The developer may be new to programming. Your job is to help them do one step of a work package themselves.',
   '',
   'Principles:',

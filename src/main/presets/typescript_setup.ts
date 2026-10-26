@@ -10,11 +10,11 @@
 // machine; the user has to opt in per run.
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
 
-import { processEnv } from '../env.ts';
+import { toolVersion } from '../tool_version.ts';
 import { readTracked, indexEntries } from '../repo_reader.ts';
 import type { CommandEntry } from '../command_line.ts';
+import type { ToolVersion } from '../tool_version.ts';
 import type { LooseJson } from '../loose_json.ts';
 import type { EnvAdjustment, FactSection, SetupAdapter, SetupChoice, SetupStep } from '../setup_adapter.ts';
 import type { StepKind } from '../../shared/check_steps.ts';
@@ -68,9 +68,6 @@ export interface EnvFacts {
 
 export type Blocker = 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
 
-// Reads a tool's version; injectable for tests.
-export type ToolVersion = (command: string, args: string[], envPath?: string | null) => Promise<string | null>;
-
 export type EnvSetupErrorCode = 'invalid_script' | 'invalid_mode' | 'invalid_package' | 'invalid_kind';
 // npm's own script-name rules are loose; this is what TaskPilot will pass on.
 export const SCRIPT_NAME = /^[A-Za-z0-9][\w:.-]{0,63}$/;
@@ -90,20 +87,6 @@ export class EnvSetupError extends Error {
     this.code = code;
   }
 }
-
-// The first line a tool prints for its version flag; null when it is missing.
-export const toolVersion: ToolVersion = (command, args, envPath) =>
-  new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      {
-        timeout: 5000,
-        env: { ...processEnv(), ...(envPath ? { PATH: envPath } : {}), NO_UPDATE_NOTIFIER: '1' },
-      },
-      (error, stdout) => resolve(error ? null : stdout.trim().split('\n')[0] || null),
-    );
-  });
 
 export const parseManifest = (content: string): Manifest => {
   let raw: LooseJson | null;

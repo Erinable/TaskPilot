@@ -101,13 +101,29 @@ test('the file is read only as a regular file in the root, and created only when
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-project-'));
   onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
   assert.equal(await projectConfig.readProjectText(root), null);
-  await projectConfig.createProjectFile(root, 'typescript');
+  await projectConfig.createProjectFile(root, 'typescript', { lint: 'npm run lint', custom: null });
   const text = await projectConfig.readProjectText(root);
   assert.equal(parse(text as string).preset, 'typescript');
-  await assert.rejects(() => projectConfig.createProjectFile(root, 'none'), { code: 'invalid_project' });
+  await assert.rejects(() => projectConfig.createProjectFile(root, 'none', { lint: null, custom: null }), { code: 'invalid_project' });
 
   const linked = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-project-link-'));
   onTestFinished(() => fs.rm(linked, { recursive: true, force: true }));
   await fs.symlink(path.join(root, projectConfig.PROJECT_FILENAME), path.join(linked, projectConfig.PROJECT_FILENAME));
   await assert.rejects(() => projectConfig.readProjectText(linked), { code: 'invalid_project', field: 'toml' });
+});
+
+test("the template shows the preset's own example commands, quoted for TOML", () => {
+  const rust = projectConfig.projectTemplate('rust', { lint: 'cargo clippy --workspace', custom: 'cargo check --workspace' });
+  assert.match(rust, /^# commands = \["cargo clippy --workspace"\]$/m);
+  assert.match(rust, /^# commands = \["cargo check --workspace"\]$/m);
+  assert.doesNotMatch(rust, /npm|node /);
+  const none = projectConfig.projectTemplate('none', { lint: null, custom: null });
+  assert.equal(none.match(/# commands = \["<command>"\]/g)?.length, 2);
+  // Uncommented, the lint example parses as a step.
+  const lint = rust
+    .split('\n')
+    .slice(3, 6)
+    .map((line) => line.replace(/^# /, ''))
+    .join('\n');
+  assert.deepEqual(parse(lint).steps.lint?.commands, [{ command: 'cargo', args: ['clippy', '--workspace'] }]);
 });

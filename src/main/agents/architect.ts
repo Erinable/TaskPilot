@@ -21,6 +21,7 @@ import type { RawObject } from './product_lead.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
+import { rolePreamble } from './role_preamble.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 
@@ -110,7 +111,7 @@ export interface DeviationRecord {
 }
 
 export const SYSTEM_PROMPT = [
-  'You are Architect on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
+  rolePreamble('Architect'),
   'Your job is to read the parts of a repository that a requirement touches and describe them at the interface level, so Product Lead can plan without reading code.',
   '',
   'Principles:',
@@ -125,10 +126,14 @@ export const SYSTEM_PROMPT = [
 
 // Step 1: choose files to read
 
+// The repository's own manifests when the profile names them.
+const manifestHint = (profile: ProjectProfile | null | undefined) =>
+  profile?.manifests.length ? `its manifest (${profile.manifests.join(' or ')})` : 'a manifest such as package.json, Cargo.toml or pyproject.toml';
+
 export const selectPrompt = ({ title, text, files, profile }: ArchitectRequirement): string => {
   return [
     'Pick the files whose code you need to read to describe the parts of the repository this requirement touches.',
-    `Choose at most ${MAX_SELECTED}, most important first. Include the modules the change will likely build on or modify, one existing test file per area the change touches (to learn the test conventions), and a manifest such as package.json or pyproject.toml if dependencies matter.`,
+    `Choose at most ${MAX_SELECTED}, most important first. Include the modules the change will likely build on or modify, one existing test file per area the change touches (to learn the test conventions), and ${manifestHint(profile)} if dependencies matter.`,
     'Only choose paths from the file list. Skip files that are unrelated to the requirement.',
     '',
     '<requirement>',
@@ -355,7 +360,7 @@ const MAX_CRITERIA = 8;
 const DECISIONS: AdjudicationDecision[] = ['dismiss', 'replan'];
 
 export const ADJUDICATE_SYSTEM_PROMPT = [
-  'You are Architect on an AI team inside TaskPilot, a desktop app where AI agents plan software work and a human developer writes the code.',
+  rolePreamble('Architect'),
   'The developer stopped working on a work package and reported a deviation: the plan does not match the code, or cannot be carried out as written.',
   'Your job is to decide whether the plan stands or this one package must be replanned, and your decision takes effect immediately.',
   '',

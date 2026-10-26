@@ -52,7 +52,7 @@ test('buildProfile() describes a TypeScript repository from its preset and steps
       { id: 'test', stage: 'submit', blocking: true, reports: 'tests', commandLine: 'npm test' },
     ],
   );
-  assert.equal(profile.testLayout, null);
+  assert.match(profile.testLayout ?? '', /\*\.test\.ts/);
   assert.equal(profile.testNameFormat, typescriptPreset.testNameFormat);
   assert.equal(profile.version, null);
 });
@@ -65,6 +65,7 @@ test('buildProfile() reports junit and JSON steps of a Python repository', async
   const reports = Object.fromEntries(profile.checks.map((check) => [check.id, check.reports]));
   assert.equal(reports.test, 'tests');
   assert.equal(reports.lint, 'diagnostics');
+  assert.match(profile.testLayout ?? '', /test_\*\.py/);
   assert.equal(profile.testNameFormat, pythonPreset.testNameFormat);
 });
 
@@ -80,6 +81,8 @@ test('buildProfile() without taskpilot.toml lists only the detected languages an
     ['rust', 'python'],
   );
   assert.deepEqual(profile.manifests, ['Cargo.toml', 'requirements.txt']);
+  // Two languages, so no single test layout to name.
+  assert.equal(profile.testLayout, null);
   assert.deepEqual(
     profile.checks.map((check) => [check.id, check.label, check.commandLine]),
     [['test', 'Unit tests', 'cargo test']],

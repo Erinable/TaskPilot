@@ -16,6 +16,9 @@ export interface Preset<Facts = unknown> {
   label: string;
   // Tracked files that mark the language, for recommending this preset.
   manifests: string[];
+  // Where the language keeps its tests, in one phrase Product Lead plans
+  // new test files by.
+  testLayout: string;
   detect: (tracked: ReadonlySet<string>) => boolean;
   // What the defaults depend on, read from the repository's tracked files
   // and, for optional tools, the PATH commands run with.

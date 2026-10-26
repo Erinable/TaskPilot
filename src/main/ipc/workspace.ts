@@ -12,7 +12,7 @@ import * as projectConfig from '../project_config.ts';
 import * as presets from '../presets/index.ts';
 import { checkLine } from '../submit_checks.ts';
 import { openWorkspaceFile } from '../open_file.ts';
-import { toolVersion } from '../presets/typescript_setup.ts';
+import { toolVersion } from '../tool_version.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import { STEP_KINDS, isStepId } from '../../shared/check_steps.ts';
@@ -112,7 +112,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     wrap(async (_event, rawPreset): Promise<workspaceTypes.WorkspaceView> => {
       const preset = requireString(rawPreset, 'preset');
       if (preset !== 'none' && !presets.PRESET_IDS.includes(preset)) failWith(`Unknown preset: ${preset}`, 'invalid_argument', 'preset');
-      await projectConfig.createProjectFile(requireRoot(), preset);
+      const root = requireRoot();
+      // The commented examples are the preset's own suggestions, so a Rust or
+      // Python repository is not shown npm commands.
+      const source = presets.presetById(preset);
+      const suggestions = source ? source.suggestions(await source.facts(root, { envPath: (await ctx.commandPath()).path })) : {};
+      await projectConfig.createProjectFile(root, preset, { lint: suggestions.lint?.[0] ?? null, custom: suggestions.typecheck?.[0] ?? null });
       return viewOf(getConfig());
     }),
   );

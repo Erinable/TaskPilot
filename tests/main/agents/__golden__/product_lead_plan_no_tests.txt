@@ -9,11 +9,11 @@ Sizing:
 
 Grounding:
 - Build on files that already exist. New files go in directories the repository already uses, following its naming.
-- Put new tests where the repository already keeps tests (for example tests/… mirroring src/…, or __tests__ next to the code), matching existing test file names.
+- Put new tests where the repository already keeps tests (for example a tests/ directory, or test files next to the code), matching existing test file names.
 - Plan only what the requirement and answers ask for. Where a question was not answered, choose the simplest default that satisfies the requirement and state it in the summary.
 
 Content:
-- Steps are concrete instructions. Mark code identifiers and paths with backticks, e.g. `src/auth/login.ts`.
+- Steps are concrete instructions. Mark code identifiers and paths with backticks, e.g. `parseConfig` in `src/config/`.
 - fileScope lists every file the package may create or change, as paths relative to the repository root.
 - Acceptance criteria are checkable outcomes. This repository has no test check that runs before review, so TaskPilot cannot run tests: leave `test` out of every criterion, and write criteria a reviewer can check by reading the change or using the app.
 - Never include shell commands to run.
