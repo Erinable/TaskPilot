@@ -208,3 +208,55 @@ test('practice: the reference run is told the referenceGuide of the course pack 
   assert.match(h.prompts[0], /Write the complete solution to this lab step\./);
   assert.doesNotMatch(h.prompts[0], /reference answer for a learner/);
 });
+
+test('practice: grading uses the rubric of the course pack in use and snapshots it on the grade', async () => {
+  const osComment = { category: 'concept', file: null, line: null, observation: '锁拿晚了。', betterWay: '先拿锁再读。', repeated: false };
+  const h = await practiceHarness({ agent: fixtures.fakeAgent({ grade: { summary: '能跑。', strengths: [], comments: [osComment] } }) });
+  const shown = await fixtures.useOsPack(h);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  const call = fixtures.callFor(h.agentCalls, 'grade');
+  assert.match(call.systemPrompt, /- Mark two things\. concept: the model of the mechanism\. mechanism: locking and error paths\./);
+  assert.deepEqual(call.schema.properties.comments.items.properties.category.enum, ['concept', 'mechanism']);
+  assert.equal(graded.grade!.report!.comments[0].category, 'concept');
+  assert.deepEqual(
+    { ...graded.grade!.course!, rubric: graded.grade!.course!.rubric.map((item) => [item.id, item.label]) },
+    {
+      id: 'os',
+      version: '0.1.0',
+      contentHash: shown.contentHash,
+      rubric: [
+        ['concept', '原理'],
+        ['mechanism', '实现'],
+      ],
+    },
+  );
+});
+
+test('practice: a grade whose category is not in the pack in use fails instead of being kept', async () => {
+  // The default fake answers with programming categories (writing, style).
+  const h = await practiceHarness();
+  await fixtures.useOsPack(h);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const failed = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'failed');
+  assert.equal(failed.grade!.error!.code, 'agent_bad_output');
+  assert.match(failed.grade!.error!.message, /comments\[0\]\.category must be one of concept, mechanism/);
+});
+
+test('practice: an unconfirmed repository pack is graded with programming', async () => {
+  const h = await practiceHarness();
+  await fixtures.useOsPack(h, { confirm: false });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(graded.grade!.course!.id, 'programming');
+  assert.deepEqual(fixtures.callFor(h.agentCalls, 'grade').schema.properties.comments.items.properties.category.enum, ['thinking', 'writing', 'style']);
+});

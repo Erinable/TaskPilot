@@ -6,7 +6,7 @@
 // CARM-23; Product Lead's test layout, CARM-23; the test name format in
 // Product Lead's plan and Coding Agent, CARM-22). Product Lead and Tutor
 // render the built-in programming course pack here, which must give the same
-// bytes (CARM-28). Re-record only for an
+// bytes (CARM-28), and so does the grading prompt and its schema (CARM-29). Re-record only for an
 // intended prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
 import { describe, expect, test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -105,7 +105,8 @@ test('system prompts', async () => {
   await expect(architect.ADJUDICATE_SYSTEM_PROMPT).toMatchFileSnapshot(golden('architect_adjudicate_system'));
   await expect(qa.SYSTEM_PROMPT).toMatchFileSnapshot(golden('qa_system'));
   await expect(tutor.systemPrompt(PROGRAMMING_COURSE)).toMatchFileSnapshot(golden('tutor_system'));
-  await expect(tutor.GRADE_SYSTEM_PROMPT).toMatchFileSnapshot(golden('tutor_grade_system'));
+  await expect(tutor.gradeSystemPrompt(PROGRAMMING_COURSE)).toMatchFileSnapshot(golden('tutor_grade_system'));
+  await expect(`${JSON.stringify(tutor.gradeSchema(PROGRAMMING_COURSE), null, 2)}\n`).toMatchFileSnapshot(golden('tutor_grade_schema'));
   await expect(releaseManager.SYSTEM_PROMPT).toMatchFileSnapshot(golden('release_system'));
 });
 

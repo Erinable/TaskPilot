@@ -109,6 +109,29 @@ test('state survives a reload from disk', async () => {
   assert.deepEqual(reloaded.get('a').completedSteps, [0]);
 });
 
+// A grade saved before course packs has no `course`; it loads as it was and is never rewritten.
+test('a grade saved without a course snapshot loads unchanged', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
+  onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
+  const grade = {
+    id: 'g1',
+    status: 'done',
+    startedAt: '2026-10-01T00:00:00.000Z',
+    finishedAt: '2026-10-01T00:01:00.000Z',
+    error: null,
+    diffDigest: 'd',
+    withReference: false,
+    report: { summary: 's', strengths: [], comments: [{ category: 'style', file: null, line: null, observation: 'o', betterWay: 'b', repeated: false }] },
+    costUsd: 0.01,
+  };
+  const file = path.join(configDir, STATE_FILENAME);
+  await fs.writeFile(file, JSON.stringify({ a: { status: 'in_progress', baseline: 'abc', grade } }));
+  const before = await fs.readFile(file, 'utf8');
+  const { store } = await newStore(configDir);
+  assert.deepEqual(store.get('a').grade, grade);
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+});
+
 test('a corrupt state file falls back to seeded defaults', async () => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
   onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));

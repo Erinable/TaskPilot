@@ -112,6 +112,8 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     if (!force && practice.alreadyGraded(state.grade, diffDigest)) return ctx.viewOf(task, state);
     const reference = state.referenceRun;
     const gradeId = codingExec.codingRunId();
+    // The pack in use now; a repository pack not yet confirmed is never it (./courses.ts).
+    const { pack: course, ref: courseRef } = await ctx.course(config);
     const base: packageTypes.Grade = {
       id: gradeId,
       status: 'running',
@@ -122,6 +124,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       withReference: false,
       report: null,
       costUsd: 0,
+      course: { id: courseRef.id, version: courseRef.version, contentHash: courseRef.contentHash, rubric: structuredClone(course.rubric) },
     };
     if (reference?.status === 'running' && !skipReference) {
       await store.setGrade(id, { ...base, status: 'waiting' });
@@ -140,7 +143,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
           submission.map((file) => file.path),
         )
       : [];
-    console.debug(`[grade] start package=${id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);
+    console.debug(`[grade] start package=${id} course=${courseRef.id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);
     const settled = (async () => {
       let finished: Partial<packageTypes.Grade>;
       try {
@@ -153,15 +156,15 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
             notes: history,
             profile,
           }),
-          systemPrompt: tutorAgent.GRADE_SYSTEM_PROMPT,
-          schema: tutorAgent.GRADE_SCHEMA,
+          systemPrompt: tutorAgent.gradeSystemPrompt(course),
+          schema: tutorAgent.gradeSchema(course),
           envPath,
           signal: controller.signal,
         });
         throwIfCancelled(controller.signal);
         finished = {
           status: 'done',
-          report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path), hasNotes: history.length > 0 }),
+          report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path), hasNotes: history.length > 0, course }),
           costUsd: costUsd ?? 0,
         };
       } catch (error) {

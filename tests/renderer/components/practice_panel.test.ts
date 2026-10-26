@@ -80,6 +80,33 @@ describe('PracticePanel', () => {
     expect(wrapper.get('[data-reference]').text()).toContain('+export const login = () => true;');
   });
 
+  test('a grade made with another course pack shows that rubric, in its order, with its labels', async () => {
+    const course = {
+      id: 'os',
+      version: '0.1.0',
+      contentHash: 'h',
+      rubric: [
+        { id: 'mechanism', label: '实现', description: 'd', dimension: 'writing' as const },
+        { id: 'concept', label: '原理', description: 'd', dimension: 'thinking' as const },
+      ],
+    };
+    const comments = [
+      { ...GRADE.report!.comments[0], category: 'concept', observation: '锁拿晚了。' },
+      { ...GRADE.report!.comments[1], category: 'mechanism', observation: '漏了错误路径。' },
+    ];
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: { ...GRADE, course, report: { ...GRADE.report!, comments } } });
+    const groups = wrapper.findAll('[data-category]');
+    expect(groups.map((group) => group.attributes('data-category'))).toEqual(['mechanism', 'concept']);
+    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现', '原理']);
+    expect(wrapper.get('[data-category="concept"]').text()).toContain('锁拿晚了。');
+  });
+
+  test('a grade saved before course packs shows the programming rubric', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE });
+    expect(wrapper.get('[data-category="thinking"] h3').text()).toBe('思路');
+    expect(wrapper.get('[data-category="style"] h3').text()).toBe('风格');
+  });
+
   test('a grade waiting on the reference can go ahead without it; a failed one can be retried', async () => {
     const waiting = await mountPanel({ referenceRun: { ...READY, status: 'running' }, review: REVIEWED, grade: { ...GRADE, status: 'waiting', report: null } });
     await waiting.get('[data-action="grade-now"]').trigger('click');

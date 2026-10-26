@@ -144,8 +144,7 @@ test('profileBlock() renders only the named sections, and nothing without a prof
 });
 
 // [人工决策-2026-10-25 23:51:35] 课程包本期只做结构不切换读取：内置包必须与 prompt 原文一致，T7 切换时才能零变化。
-// [人工决策-2026-10-26 15:38:21] T7b 起 Product Lead 和 Tutor 讲解从课程包渲染，直接比对渲染结果与原文（golden）；
-// 判卷 prompt 仍是原文，T7c 切换。
+// [人工决策-2026-10-26 15:38:21] T7b 起 Product Lead 和 Tutor 讲解从课程包渲染，T7c 起判卷也是，直接比对渲染结果与原文（golden）。
 test('the built-in programming course pack renders the text Product Lead and Tutor used before packs', async () => {
   const golden = (name: string) => fs.readFile(path.join(import.meta.dirname, 'agents/__golden__', `${name}.txt`), 'utf8');
   const requirement = {
@@ -159,14 +158,8 @@ test('the built-in programming course pack renders the text Product Lead and Tut
     productLead.planPrompt({ ...requirement, questions: [], interfaces: null, linkTests: false, course: PROGRAMMING_COURSE }),
     await golden('product_lead_plan_no_tests'),
   );
-  assert.ok(tutor.GRADE_SYSTEM_PROMPT.includes(`a desktop app where ${PROGRAMMING_COURSE.learner} practises`));
-  assert.ok(
-    tutor.GRADE_SYSTEM_PROMPT.includes(`- Mark three things. ${PROGRAMMING_COURSE.rubric.map((item) => `${item.id}: ${item.description}.`).join(' ')}`),
-  );
-  assert.deepEqual(
-    PROGRAMMING_COURSE.rubric.map((item) => item.id),
-    [...tutor.GRADE_CATEGORIES],
-  );
+  assert.equal(tutor.gradeSystemPrompt(PROGRAMMING_COURSE), await golden('tutor_grade_system'));
+  assert.equal(`${JSON.stringify(tutor.gradeSchema(PROGRAMMING_COURSE), null, 2)}\n`, await golden('tutor_grade_schema'));
 });
 
 test('AppContext.profile() is cached until taskpilot.toml changes', async () => {
