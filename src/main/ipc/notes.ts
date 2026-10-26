@@ -32,7 +32,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const { pack } = await ctx.course();
       return {
         current: pack.id,
-        packs: courses.knownPacks(pack).map((entry) => ({
+        packs: courses.knownPacks(ctx.builtinCourses, pack).map((entry) => ({
           id: entry.id,
           title: entry.title,
           rubric: entry.rubric.map((item) => ({ id: item.id, label: item.label, dimension: item.dimension })),

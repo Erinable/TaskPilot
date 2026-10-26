@@ -13,6 +13,7 @@ import type * as requirementTypes from '../shared/ipc/requirements.ts';
 import type * as settingsTypes from '../shared/ipc/settings.ts';
 import type * as tutorTypes from '../shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../shared/ipc/workspace.ts';
+import type { CoursePack } from '../shared/course_pack.ts';
 declare const api: {
   businessTimeZone: string;
   onFullScreen: (listener: (fullScreen: boolean) => void) => void;
@@ -163,6 +164,7 @@ declare const api: {
     select: (id: string | null) => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
     pickImport: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseImport | null>>;
     import: (contentHash: string) => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
+    default: () => Promise<envelopeTypes.IpcResult<CoursePack>>;
   };
 };
 

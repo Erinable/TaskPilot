@@ -16,6 +16,7 @@ import { ActivityLog } from './activity_log.ts';
 import { RepositoryRegistry } from './repositories.ts';
 import { TutorStore } from './tutor_store.ts';
 import { NoteStore } from './note_store.ts';
+import * as courses from './courses.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 
 // Matches --canvas in tokens.css, so the first paint and any area the page
@@ -106,6 +107,11 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = prefs.appearance.theme;
 
   const initialize = async () => {
+    // The packs that ship with the app; a broken one fails startup, on the splash.
+    // electron-builder copies resources/courses/ into the bundle (extraResources).
+    const builtinCourses = await courses.loadBuiltinCourses(
+      app.isPackaged ? path.join(process.resourcesPath, 'courses') : path.join(app.getAppPath(), courses.BUILTIN_COURSES_DIR),
+    );
     // Moves pre-repository files into place on the first start of this version.
     const repositories = await new RepositoryRegistry(configDir).load();
     // Everything below belongs to the open repository (or the unassigned data).
@@ -128,6 +134,7 @@ app.whenReady().then(async () => {
     ipcHandle = registerIpcHandlers(ipcMain, {
       store,
       configDir,
+      builtinCourses,
       repositories,
       getConfig: () => config,
       setConfig: (next) => {

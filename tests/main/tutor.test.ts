@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { validateAnswer } from '../../src/main/agents/tutor.ts';
 import { TutorStore } from '../../src/main/tutor_store.ts';
-import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 import type { CoursePack } from '../../src/shared/course_pack.ts';
 
 const answer = { explanation: '说明', hints: ['第一步'], snippet: null, terms: [] };

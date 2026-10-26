@@ -22,7 +22,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 
 import * as markdown from '../shared/note_markdown.ts';
-import { PROGRAMMING_COURSE, isCourseId } from '../shared/course_pack.ts';
+import { DEFAULT_COURSE_ID, isCourseId } from '../shared/course_pack.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
@@ -248,7 +248,7 @@ const editedFields = (input: Record<string, unknown>): Fields => {
 // over the other changes nothing.
 const changedFields = ({ category: nextCategory, course: nextCourse, ...rest }: Fields, meta: noteTypes.NoteMeta): Fields => {
   const fields: Fields = rest;
-  const courseOf = (value: string | null) => value ?? PROGRAMMING_COURSE.id;
+  const courseOf = (value: string | null) => value ?? DEFAULT_COURSE_ID;
   if (nextCategory !== meta.category) fields.category = nextCategory;
   if (nextCourse !== undefined && courseOf(nextCourse) !== courseOf(meta.course)) fields.course = nextCourse;
   return fields;

@@ -4,11 +4,14 @@
 // repository, `.taskpilot/courses/<id>.toml`, or one the user imported into
 // the global folder, `userData/courses/<id>.toml` (./course_file.ts). A
 // repository file wins over an imported one of the same id; neither can
-// replace a built-in pack.
+// replace a built-in pack. Built-in packs ship with TaskPilot as files too
+// (resources/courses/<id>.toml) and are loaded once at startup.
 //
 // [人工决策-2026-10-26 15:38:21] 一期只支持内置包和仓库内 .taskpilot/courses/*.toml；仓库内的包第一次加载、
 // 或 contentHash 变化后，未经本机确认不注入（退回 programming，UI 提示"课程包待确认"），确认记录存在本机。
 // 二期（T7f）加全局目录 userData/courses/：导入是校验后复制进去，同样未经确认不注入。
+// [人工决策-2026-10-27 00:55:52] 内置课程包改为随应用打包的 TOML，与用户课程包走同一个加载器；仍然只读、不需要确认、
+// 不能被同 id 的仓库包或导入包覆盖。用户想改就复制一份再改。
 //
 // SECURITY: a repository's pack is instructions to the agents, written by
 // whoever wrote the repository. Until this machine confirms its content hash
@@ -22,7 +25,7 @@ import { jsonText, writeFileAtomic } from './atomic_json_file.ts';
 import { codedError } from './coded_error.ts';
 import { WorkspaceError } from './command_line.ts';
 import * as courseFile from './course_file.ts';
-import { BUILTIN_COURSES, PROGRAMMING_COURSE, isCourseId } from '../shared/course_pack.ts';
+import { DEFAULT_COURSE_ID, isCourseId } from '../shared/course_pack.ts';
 import type { CoursePack, CourseRef, CourseSource } from '../shared/course_pack.ts';
 import type { CourseState, CourseView } from '../shared/ipc/workspace.ts';
 import type { LooseJson } from './loose_json.ts';
@@ -32,30 +35,33 @@ export const COURSES_DIR = '.taskpilot/courses';
 const USER_COURSES_DIRNAME = 'courses';
 export const TRUST_FILENAME = 'course_trust.json';
 const TRUST_VERSION = 2;
-const DEFAULT_COURSE = PROGRAMMING_COURSE.id;
+// The built-in packs, relative to the project root in development; a
+// packaged app has them in its Resources/courses (electron-builder.yml).
+export const BUILTIN_COURSES_DIR = 'resources/courses';
 export const MAX_COURSE_BYTES = 64 * 1024;
 // More files than this in a folder are not listed.
 const MAX_COURSE_FILES = 32;
 
-const builtinRef = (pack: CoursePack): CourseRef => ({ id: pack.id, version: pack.version, contentHash: courseFile.contentHash(pack), source: 'builtin' });
-
-// [人工决策-2026-10-26 15:38:21] 内置包：programming（默认）和 os（T7e 加入，用来验证结构）；仓库里的同名文件不能替换内置包。
-const BUILTIN: ReadonlyMap<string, { pack: CoursePack; ref: CourseRef }> = new Map(BUILTIN_COURSES.map((pack) => [pack.id, { pack, ref: builtinRef(pack) }]));
-
-export const isBuiltinCourse = (id: string) => BUILTIN.has(id);
-export const builtinCourse = (id: string) => BUILTIN.get(id) ?? null;
+// The packs that ship with TaskPilot, by id, the default first.
+export type BuiltinCourses = ReadonlyMap<string, { pack: CoursePack; ref: CourseRef }>;
 
 // The packs whose rubrics name note categories here: every built-in pack,
 // in registry order, then the one in use when it is not built in.
-export const knownPacks = (inUse: CoursePack): CoursePack[] => (BUILTIN.has(inUse.id) ? [...BUILTIN_COURSES] : [...BUILTIN_COURSES, inUse]);
+export const knownPacks = (builtin: BuiltinCourses, inUse: CoursePack): CoursePack[] => {
+  const packs = [...builtin.values()].map((entry) => entry.pack);
+  return builtin.has(inUse.id) ? packs : [...packs, inUse];
+};
+
+export const defaultCourse = (builtin: BuiltinCourses) => builtin.get(DEFAULT_COURSE_ID)!;
 
 // The pack in use, and how the repository's choice resolved.
 export type CourseResolution = CourseView & { pack: CoursePack };
 
 // Where packs and their confirmations are found. `root` is null without an
 // open repository; `configDir` (userData) is null where there is no global
-// folder (tests that only look at repository packs).
-export type CoursePlaces = { root: string | null; dataDir: string; configDir: string | null };
+// folder (tests that only look at repository packs); `builtin` is what
+// loadBuiltinCourses() read at startup.
+export type CoursePlaces = { root: string | null; dataDir: string; configDir: string | null; builtin: BuiltinCourses };
 
 export const userCoursesDir = (configDir: string) => path.join(configDir, USER_COURSES_DIRNAME);
 
@@ -174,6 +180,29 @@ export const importCourse = async (configDir: string, text: string, ref: CourseR
   console.debug(`[courses] imported id=${ref.id} hash=${ref.contentHash.slice(0, 12)}`);
 };
 
+// [人工决策-2026-10-26 15:38:21] 内置包：programming（默认）和 os（T7e 加入，用来验证结构）；仓库里的同名文件不能替换内置包。
+// Reads every pack file in `dir` (resources/courses/, in the app bundle
+// Resources/courses/) as built in. A file that does not validate, or a
+// missing default pack, is TaskPilot's own bug, so startup fails with it.
+export const loadBuiltinCourses = async (dir: string): Promise<BuiltinCourses> => {
+  const ids = await listCourseFiles(dir);
+  if (!ids.includes(DEFAULT_COURSE_ID))
+    throw new WorkspaceError(`The built-in course pack ${DEFAULT_COURSE_ID}.toml is missing from ${dir}`, 'invalid_course', 'course');
+  const ordered = [DEFAULT_COURSE_ID, ...ids.filter((id) => id !== DEFAULT_COURSE_ID)];
+  const loaded = await Promise.all(
+    ordered.map(async (id) => {
+      try {
+        return await readCourseFile(dir, id, 'builtin', `${id}.toml`);
+      } catch (error) {
+        if (!(error instanceof WorkspaceError)) throw error;
+        throw new WorkspaceError(`The built-in course pack ${id}.toml does not validate: ${error.message}`, error.code, error.field);
+      }
+    }),
+  );
+  console.debug(`[courses] built-in loaded dir=${dir} ids=${ordered.join(',')}`);
+  return new Map(loaded.map((entry) => [entry.pack.id, entry]));
+};
+
 const errorInfo = (error: unknown) => {
   if (!(error instanceof WorkspaceError)) throw error;
   return { code: error.code, message: error.message, field: error.field ?? null };
@@ -186,24 +215,24 @@ type Choice = { local: string | null; project: string | null };
 const selection = ({ local, project }: Choice): CourseView['selected'] => {
   if (local) return { id: local, from: 'local' };
   if (project) return { id: project, from: 'project' };
-  return { id: DEFAULT_COURSE, from: 'default' };
+  return { id: DEFAULT_COURSE_ID, from: 'default' };
 };
 
 // Every pack that can be picked here: built-in, then the repository's, then
 // imported ones the repository does not have.
-export const availableCourses = async ({ root, configDir }: CoursePlaces): Promise<CourseView['available']> => {
-  const repositoryIds = root ? (await listRepositoryCourses(root)).filter((id) => !BUILTIN.has(id)) : [];
-  const userIds = configDir ? (await listUserCourses(configDir)).filter((id) => !BUILTIN.has(id) && !repositoryIds.includes(id)) : [];
+export const availableCourses = async ({ root, configDir, builtin }: CoursePlaces): Promise<CourseView['available']> => {
+  const repositoryIds = root ? (await listRepositoryCourses(root)).filter((id) => !builtin.has(id)) : [];
+  const userIds = configDir ? (await listUserCourses(configDir)).filter((id) => !builtin.has(id) && !repositoryIds.includes(id)) : [];
   return [
-    ...[...BUILTIN.keys()].map((id) => ({ id, source: 'builtin' as const })),
+    ...[...builtin.keys()].map((id) => ({ id, source: 'builtin' as const })),
     ...repositoryIds.map((id) => ({ id, source: 'repository' as const })),
     ...userIds.map((id) => ({ id, source: 'user' as const })),
   ];
 };
 
-// Reads the pack `entry` names; a built-in one is returned as is.
+// Reads the pack `entry` names; a built-in one is returned as loaded at startup.
 export const loadCourse = async (places: CoursePlaces, entry: CourseView['available'][number]): Promise<{ pack: CoursePack; ref: CourseRef }> => {
-  const builtin = BUILTIN.get(entry.id);
+  const builtin = places.builtin.get(entry.id);
   if (builtin) return builtin;
   if (entry.source === 'repository' && places.root) return readRepositoryCourse(places.root, entry.id);
   if (entry.source === 'user' && places.configDir) return readUserCourse(places.configDir, entry.id);
@@ -222,7 +251,7 @@ export const trustOf = async (places: CoursePlaces, ref: CourseRef) => {
 export const resolveCourse = async (places: CoursePlaces, choice: Choice): Promise<CourseResolution> => {
   const selected = selection(choice);
   const available = await availableCourses(places);
-  const fallback = BUILTIN.get(DEFAULT_COURSE)!;
+  const fallback = defaultCourse(places.builtin);
   const result = (state: CourseState, used = fallback): CourseResolution => ({ selected, available, state, ref: used.ref, pack: used.pack });
 
   const entry = available.find((candidate) => candidate.id === selected.id);

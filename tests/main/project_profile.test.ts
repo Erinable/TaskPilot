@@ -14,7 +14,7 @@ import * as productLead from '../../src/main/agents/product_lead.ts';
 import * as tutor from '../../src/main/agents/tutor.ts';
 import * as effectiveSteps from '../../src/main/effective_steps.ts';
 import * as workspace from '../../src/main/workspace.ts';
-import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { BUILTIN, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 import { pythonPreset } from '../../src/main/presets/python.ts';
 import { VITEST_REPORT, typescriptPreset } from '../../src/main/presets/typescript.ts';
 import type { AppDeps } from '../../src/main/app_context.ts';
@@ -171,6 +171,7 @@ test('AppContext.profile() is cached until taskpilot.toml changes', async () => 
   const ctx = createAppContext({
     store: null,
     configDir: root,
+    builtinCourses: BUILTIN,
     repositories: null,
     getConfig: () => config,
     setConfig: (next) => {

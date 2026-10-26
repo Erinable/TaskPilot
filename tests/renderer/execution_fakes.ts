@@ -9,6 +9,7 @@ import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
+import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
   id: 't1',
@@ -167,6 +168,7 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
       reference: vi.fn(() => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n')),
       grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),
     },
+    courses: { default: vi.fn(() => ok(PROGRAMMING_COURSE)) },
     tutor: {
       get: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),
       ask: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'running', answer: null, error: null, costUsd: 0 })),

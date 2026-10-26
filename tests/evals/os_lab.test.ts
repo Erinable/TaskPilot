@@ -14,7 +14,7 @@ import * as verification from '../../src/main/verification.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import { env } from '../../src/main/env.ts';
 import { PRESET_IDS } from '../../src/main/presets/index.ts';
-import { OS_COURSE } from '../../src/shared/course_pack.ts';
+import { BUILTIN, OS_COURSE } from '../fixtures/builtin_courses.ts';
 import { fixtureRepo } from '../../evals/shared/harness.ts';
 import { OS_LAB, osReference } from '../../evals/shared/os_lab.ts';
 
@@ -29,7 +29,7 @@ test('the OS lab picks the built-in os pack without confirming it', async () => 
   const project = projectConfig.parseProject((await projectConfig.readProjectText(root))!, PRESET_IDS);
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-os-lab-data-'));
   onTestFinished(() => fs.rm(dataDir, { recursive: true, force: true }));
-  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null }, { local: null, project: project.course });
+  const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: null, project: project.course });
   assert.deepEqual(resolved.selected, { id: 'os', from: 'project' });
   assert.deepEqual(resolved.state, { status: 'ok' });
   assert.equal(resolved.pack, OS_COURSE);

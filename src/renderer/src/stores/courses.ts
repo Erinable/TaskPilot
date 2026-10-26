@@ -1,6 +1,7 @@
 // The course pack page: the packs the open repository can pick from, the
 // one in use, picking one on this machine, the full preview shown before a
-// pack is confirmed, and importing a pack file into the global folder.
+// pack is confirmed, and importing a pack file into the global folder. Also
+// the built-in default pack, for records from before packs.
 //
 // [人工决策-2026-10-26 15:38:21] 确认前把整包内容展示给用户；contentHash 变化时列出改动的字段。
 // 选包只写本机 workspace.json，只影响之后的规划和判卷。
@@ -11,6 +12,7 @@ import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
+import type { CoursePack } from '@shared/course_pack.ts';
 
 // `view` only shows a pack; `confirm` asks to use the pending pack in use;
 // `import` asks to copy a picked file into the global folder.
@@ -37,6 +39,16 @@ export const useCoursesStore = defineStore('courses', () => {
   const reset = () => {
     list.value = null;
     closePreview();
+  };
+
+  // ========== Default pack ==========
+  // Grades and notes from before packs were programming. The pack ships with
+  // the app and never changes while it runs, so it is read once and kept
+  // across repository switches.
+  const defaultPack = ref<CoursePack | null>(null);
+
+  const loadDefault = async () => {
+    if (!defaultPack.value) defaultPack.value = await call(window.taskpilot.courses.default());
   };
 
   // ========== Preview ==========
@@ -145,6 +157,9 @@ export const useCoursesStore = defineStore('courses', () => {
     current,
     load,
     reset,
+    // Default pack
+    defaultPack,
+    loadDefault,
     // Preview
     preview,
     previewMode,

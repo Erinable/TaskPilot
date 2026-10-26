@@ -60,6 +60,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     wrap(() => list()),
   );
 
+  // The built-in default pack: what the renderer shows for packages, grades
+  // and notes from before packs.
+  ipcMain.handle(
+    CHANNELS.coursesDefault,
+    wrap((): CoursePack => courses.defaultCourse(ctx.builtinCourses).pack),
+  );
+
   ipcMain.handle(
     CHANNELS.coursesPreview,
     wrap(async (_event, rawId): Promise<courseTypes.CoursePreview> => {
@@ -98,7 +105,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if (stat.size > courses.MAX_COURSE_BYTES) return failWith('The course pack is larger than 64 KB', 'invalid_course', 'toml');
       const text = await fs.readFile(file, 'utf8');
       const { pack, ref } = courses.parseCourseText(text, 'user', 'The course pack');
-      if (courses.isBuiltinCourse(pack.id)) return failWith(`id: "${pack.id}" is a built-in course pack`, 'invalid_course', 'id');
+      if (ctx.builtinCourses.has(pack.id)) return failWith(`id: "${pack.id}" is a built-in course pack`, 'invalid_course', 'id');
       const replaces = (await courses.listUserCourses(configDir)).includes(pack.id);
       const root = ctx.getConfig().root;
       const shadowed = root ? (await courses.listRepositoryCourses(root)).includes(pack.id) : false;

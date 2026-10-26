@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { courseChanges } from '../../src/shared/course_changes.ts';
-import { OS_COURSE, PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { OS_COURSE, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 test('the same content has no changes', () => {
   assert.deepEqual(courseChanges(OS_COURSE, structuredClone(OS_COURSE)), []);

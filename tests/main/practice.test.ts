@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import * as practice from '../../src/main/practice.ts';
-import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
+import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 import type { Grade } from '../../src/shared/ipc/packages.ts';
 
 const grade = (overrides: Partial<Grade> = {}): Grade => ({

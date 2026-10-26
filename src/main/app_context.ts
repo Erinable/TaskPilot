@@ -70,6 +70,8 @@ export type AppDeps = {
   store: WorkPackageStore;
   // userData: preferences and the repository registry live here.
   configDir: string;
+  // The course packs that ship with TaskPilot, read at startup.
+  builtinCourses: courses.BuiltinCourses;
   // Known repositories; each keeps its own data directory.
   repositories: RepositoryRegistry;
   // In-memory accessors for the loaded config.
@@ -150,6 +152,7 @@ export const createAppContext = (deps: AppDeps) => {
   const {
     store,
     configDir,
+    builtinCourses,
     repositories,
     getConfig,
     setConfig,
@@ -211,6 +214,7 @@ export const createAppContext = (deps: AppDeps) => {
     root: config.root,
     dataDir: repositories.dataDir(),
     configDir,
+    builtin: builtinCourses,
   });
 
   // The course pack the open repository teaches with (./courses.ts). Read
@@ -389,6 +393,7 @@ export const createAppContext = (deps: AppDeps) => {
   return {
     store,
     configDir,
+    builtinCourses,
     repositories,
     getConfig,
     setConfig,

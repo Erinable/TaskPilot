@@ -143,7 +143,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
           ctx.notes.list().notes,
           submission.map((file) => file.path),
           course,
-          courses.knownPacks(course),
+          courses.knownPacks(ctx.builtinCourses, course),
         )
       : [];
     console.debug(`[grade] start package=${id} course=${courseRef.id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);

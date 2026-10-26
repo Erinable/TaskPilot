@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import * as feedback from '@/lib/feedback.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
 import { courseList, coursePreview, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
-import { OS_COURSE } from '@shared/course_pack.ts';
+import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
@@ -85,4 +85,13 @@ test('import: a picked file is previewed, then copied with its hash; cancelling 
   await courses.importPicked();
   expect(api.courses.import).toHaveBeenCalledWith('b'.repeat(64));
   expect(courses.previewOpen).toBe(false);
+});
+
+test('the default pack is asked for once and kept across a reset', async () => {
+  const courses = useCoursesStore();
+  await courses.loadDefault();
+  await courses.loadDefault();
+  courses.reset();
+  expect(api.courses.default).toHaveBeenCalledTimes(1);
+  expect(courses.defaultPack?.id).toBe('programming');
 });

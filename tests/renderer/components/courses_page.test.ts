@@ -9,7 +9,7 @@ vi.setConfig({ testTimeout: 20_000 });
 import SettingsView from '@/views/SettingsView.vue';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { courseList, coursePreview, defaultCourse, installApi, ok } from '../settings_fakes.ts';
-import { OS_COURSE } from '@shared/course_pack.ts';
+import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));

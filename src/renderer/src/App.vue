@@ -22,6 +22,7 @@ import { useExecutionStore } from './stores/execution.ts';
 import { useNotificationsStore } from './stores/notifications.ts';
 import { useRepositoriesStore } from './stores/repositories.ts';
 import { useCodingActivityStore } from './stores/coding_activity.ts';
+import { useCoursesStore } from './stores/courses.ts';
 import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
 import { hideSplash } from './lib/splash.ts';
@@ -73,6 +74,9 @@ onMounted(async () => {
       showToast(`工作包加载失败：${describeError(error)}`);
     }),
     app.refreshWorkspaceStatus(),
+    useCoursesStore()
+      .loadDefault()
+      .catch((error) => console.error('Failed to load the default course pack', error)),
   ]);
   hideSplash();
   if (info && !info.configured) showToast('还没有添加仓库，点顶栏的仓库菜单添加一个。', 'info');
