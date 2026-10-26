@@ -60,7 +60,11 @@ test.skipIf(!hasTools)(
     assert.equal(unfinished['pingpong prints ping then pong'], false);
 
     for (const program of ['pingpong', 'copy', 'counter', 'bbuf']) await fs.writeFile(path.join(root, `src/${program}.c`), osReference(`src/${program}.c`));
-    assert.ok(Object.values(await outcome()).every(Boolean));
+    const finished = await outcome();
+    assert.deepEqual(
+      Object.keys(finished).filter((name) => !finished[name]),
+      [],
+    );
   },
   120_000,
 );

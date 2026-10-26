@@ -9,7 +9,11 @@ build/%: src/%.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
-grade: all
+# Always from a clean build: make compares file times to the second on some
+# systems, so a source saved just after the last build could be graded stale.
+grade:
+	@$(MAKE) -s clean
+	@$(MAKE) -s all
 	@sh tests/grade.sh
 
 clean:
