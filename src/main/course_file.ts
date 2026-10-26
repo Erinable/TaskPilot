@@ -14,6 +14,7 @@
 //   practiceGuide = ["..."]
 //   referenceGuide = "..."
 //   appliesTo = { languages = ["c", "rust"] }
+//   labGuide = ["..."]             # optional, like the other guides
 //
 //   [[rubric]]                     # 2 to 6 items
 //   id = "concept"
@@ -21,6 +22,13 @@
 //   dimension = "thinking"         # thinking, writing or style
 //   description = "..."
 //   examples = [{ observation = "...", betterWay = "..." }]   # at most 2
+//
+//   [[concepts]]                   # optional, at most 200
+//   id = "round-robin"
+//   label = "时间片轮转"
+//   summary = "..."                # at most 300 characters
+//   prerequisites = ["fcfs"]       # ids of this pack's concepts, no cycles
+//   dimension = "thinking"         # optional
 //
 // SECURITY: a pack's text is told to Product Lead and Tutor as instructions,
 // so it cannot be treated as plain data. Its reach is limited instead: fixed

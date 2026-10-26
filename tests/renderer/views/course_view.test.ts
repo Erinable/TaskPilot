@@ -176,6 +176,29 @@ test('every field can be edited and saving sends the whole pack; the saved pack 
   expect(feedback.showToast).toHaveBeenCalledWith(expect.stringContaining('重新确认'), 'info');
 });
 
+test('labGuide and concepts are part of the form; concepts open on demand and are saved with the pack', async () => {
+  // Three concepts: the editor renders a select of the others for each, which happy-dom is slow at.
+  const few = { ...MINE, concepts: MINE.concepts!.slice(0, 3).map((item) => ({ ...item, prerequisites: [] })) };
+  api.courses.list.mockReturnValue(ok(withMine()));
+  api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ pack: few }) : coursePreview(id)));
+  const wrapper = await mountView();
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  await wrapper.get('[data-action="edit"]').trigger('click');
+  await fieldOf(wrapper, 'labGuide[0]').get('textarea').setValue('新的 lab 指引');
+  expect(wrapper.find('.concept-editor').exists()).toBe(false);
+  await wrapper.get('[data-action="open-concepts"]').trigger('click');
+  expect(wrapper.findAll('[data-concept-row]')).toHaveLength(3);
+  await wrapper.get('[data-concept-row="0"] textarea').setValue('新的说明');
+
+  api.courses.save.mockReturnValueOnce(ok({ ...courseSaved('mine', MINE), preview: minePreview({ trust: 'pending' }) }));
+  await save(wrapper);
+  const [, pack] = api.courses.save.mock.calls[0] as unknown as [string, CoursePack];
+  expect(pack.labGuide![0]).toBe('新的 lab 指引');
+  expect(pack.concepts![0].summary).toBe('新的说明');
+  expect(pack.concepts!.map((item) => item.id)).toEqual(few.concepts.map((item) => item.id));
+});
+
 test('errors are checked with the main process rules and shown on their field, without saving', async () => {
   const wrapper = await openMine();
   await fieldOf(wrapper, 'title').get('input').setValue('   ');

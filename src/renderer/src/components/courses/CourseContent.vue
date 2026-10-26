@@ -5,7 +5,7 @@
 // else's content.
 import { computed } from 'vue';
 
-import { FIELD_LABELS, GUIDE_FIELDS, changedFields, dimensionLabel } from '@/lib/course_model.ts';
+import { FIELD_LABELS, GUIDE_FIELDS, changedFields, dimensionLabel, itemChanged } from '@/lib/course_model.ts';
 import type { CourseChange } from '@shared/course_changes.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -13,7 +13,9 @@ const props = defineProps<{ pack: CoursePack; changes: CourseChange[] }>();
 
 const marked = computed(() => changedFields(props.changes));
 const isMarked = (field: string) => marked.value.has(field);
-const itemMarked = (id: string) => [...marked.value].some((field) => field === `rubric.${id}` || field.startsWith(`rubric.${id}.`));
+const conceptLabels = computed(() => new Map((props.pack.concepts ?? []).map((item) => [item.id, item.label])));
+// labGuide is optional: shown when the pack has it, or when it was removed.
+const guides = computed(() => GUIDE_FIELDS.filter((name) => props.pack[name] || isMarked(name)));
 </script>
 
 <template>
@@ -34,11 +36,11 @@ const itemMarked = (id: string) => [...marked.value].some((field) => field === `
       <dt>{{ FIELD_LABELS.appliesTo }}</dt>
       <dd>{{ pack.appliesTo?.languages?.join(', ') ?? '不限' }}</dd>
     </div>
-    <div v-for="guide in GUIDE_FIELDS" :key="guide" :class="{ changed: isMarked(guide) }">
+    <div v-for="guide in guides" :key="guide" :class="{ changed: isMarked(guide) }">
       <dt>{{ FIELD_LABELS[guide] }}</dt>
       <dd>
         <ul class="course-lines">
-          <li v-for="(line, index) in pack[guide]" :key="index">{{ line }}</li>
+          <li v-for="(line, index) in pack[guide] ?? ['（无）']" :key="index">{{ line }}</li>
         </ul>
       </dd>
     </div>
@@ -50,13 +52,32 @@ const itemMarked = (id: string) => [...marked.value].some((field) => field === `
       <dt>判卷维度</dt>
       <dd>
         <ul class="course-rubric">
-          <li v-for="item in pack.rubric" :key="item.id" :data-rubric="item.id" :class="{ changed: itemMarked(item.id) }">
+          <li v-for="item in pack.rubric" :key="item.id" :data-rubric="item.id" :class="{ changed: itemChanged(marked, 'rubric', item.id) }">
             <strong>{{ item.label }}</strong>
             <small>（{{ item.id }}，通用维度：{{ dimensionLabel(item.dimension) }}）</small>
             <p>{{ item.description }}</p>
             <ul v-if="item.examples" class="course-lines">
               <li v-for="(example, index) in item.examples" :key="index">{{ example.observation }} → {{ example.betterWay }}</li>
             </ul>
+          </li>
+        </ul>
+      </dd>
+    </div>
+    <div v-if="pack.concepts || isMarked('concepts')" :class="{ changed: isMarked('concepts') }">
+      <dt>知识点（{{ pack.concepts?.length ?? 0 }} 个）</dt>
+      <dd>
+        <ul class="course-rubric">
+          <li v-for="item in pack.concepts" :key="item.id" :data-concept="item.id" :class="{ changed: itemChanged(marked, 'concepts', item.id) }">
+            <strong>{{ item.label }}</strong>
+            <small>
+              （{{ item.id }}
+              <template v-if="item.dimension">，通用维度：{{ dimensionLabel(item.dimension) }}</template>
+              ）
+            </small>
+            <p>{{ item.summary }}</p>
+            <p v-if="item.prerequisites.length" class="course-prerequisites">
+              前置：{{ item.prerequisites.map((id) => conceptLabels.get(id) ?? id).join('、') }}
+            </p>
           </li>
         </ul>
       </dd>
@@ -110,5 +131,8 @@ const itemMarked = (id: string) => [...marked.value].some((field) => field === `
 }
 .course-rubric p {
   margin: 2px 0 0;
+}
+.course-prerequisites {
+  color: var(--text-muted);
 }
 </style>

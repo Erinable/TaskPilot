@@ -98,6 +98,10 @@ test('a pending pack is confirmed from a preview of its whole content', async ()
     expect(text).toContain(line);
   for (const item of OS_COURSE.rubric) expect(text).toContain(item.description);
   expect(text).toContain(OS_COURSE.rubric[0].examples![0].betterWay);
+  // labGuide and every concept are part of what is confirmed (CARM-37).
+  for (const line of OS_COURSE.labGuide!) expect(text).toContain(line);
+  for (const item of OS_COURSE.concepts!) expect(text).toContain(item.summary);
+  expect(document.querySelector('[data-concept="round-robin"]')!.textContent).toContain('前置：先来先服务（FCFS）、时钟中断与抢占');
   expect(text).toContain('.taskpilot/courses/oslab.toml');
   acceptButton()!.click();
   await flushPromises();
@@ -109,13 +113,16 @@ test('a changed pack lists and marks what changed, and needs the changes ticked 
   const changes = [
     { field: 'tutorGuide', kind: 'changed' as const },
     { field: 'rubric.concept.description', kind: 'changed' as const },
+    { field: 'concepts.mlfq.prerequisites', kind: 'changed' as const },
   ];
   api.courses.preview.mockReturnValue(ok(coursePreview('oslab', { pack: { ...OS_COURSE, id: 'oslab' }, previous: 'known', changes })));
   const wrapper = await mountPage();
   await wrapper.get('#confirmCourse').trigger('click');
   await flushPromises();
   const listed = [...document.querySelectorAll('#courseChanges li')].map((item) => item.textContent);
-  expect(listed).toEqual(['修改 讲解指引', '修改 判卷维度 concept 的说明']);
+  expect(listed).toEqual(['修改 讲解指引', '修改 判卷维度 concept 的说明', '修改 知识点 mlfq 的前置知识点']);
+  expect(document.querySelector('[data-concept="mlfq"]')!.classList.contains('changed')).toBe(true);
+  expect(document.querySelector('[data-concept="fcfs"]')!.classList.contains('changed')).toBe(false);
   expect(document.querySelector('[data-rubric="concept"]')!.classList.contains('changed')).toBe(true);
   expect(document.querySelector('[data-rubric="mechanism"]')!.classList.contains('changed')).toBe(false);
   expect(acceptButton()!.disabled).toBe(true);

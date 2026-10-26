@@ -46,3 +46,11 @@ test('field errors are worded for the editor', () => {
   expect(courseModel.fieldErrorText({ field: 'rubric', kind: 'list', message: '', min: 2, max: 6 })).toBe('要有 2 到 6 项。');
   expect(courseModel.fieldErrorText({ field: 'title', kind: 'too_long', message: '', max: 500 })).toBe('最多 500 个字。');
 });
+
+test('concept and labGuide changes read in words', () => {
+  expect(courseModel.changeText({ field: 'labGuide', kind: 'changed' })).toBe('修改 lab 生成指引');
+  expect(courseModel.changeText({ field: 'concepts.round-robin', kind: 'added' })).toBe('新增 知识点 round-robin');
+  expect(courseModel.changeText({ field: 'concepts.round-robin.prerequisites', kind: 'changed' })).toBe('修改 知识点 round-robin 的前置知识点');
+  expect(courseModel.changeText({ field: 'concepts.fcfs.label', kind: 'changed' })).toBe('修改 知识点 fcfs 的名称');
+  expect(courseModel.changeText({ field: 'concepts', kind: 'changed' })).toBe('修改 知识点的顺序');
+});

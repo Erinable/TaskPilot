@@ -177,3 +177,129 @@ test('the content hash follows the validated content, not the file layout', () =
   );
   assert.notEqual(courseFile.contentHash(courseFile.parseCourse(OS_PACK.replace('0.1.0', '0.1.1'))), hash);
 });
+
+// Concepts and labGuide (CARM-37). `skeleton` is a valid list of `count`
+// concepts in a chain, each naming the one before it.
+const skeleton = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `c${index}`,
+    label: `概念 ${index}`,
+    summary: 'what it is',
+    prerequisites: index ? [`c${index - 1}`] : [],
+  }));
+
+test('concepts and labGuide are optional and come last, so a pack without them is unchanged', () => {
+  const pack = courseFile.parseCourse(OS_PACK);
+  assert.equal(pack.concepts, undefined);
+  assert.equal(pack.labGuide, undefined);
+  const full = courseFile.parseCourse(`${OS_PACK.replace('appliesTo =', 'labGuide = ["Use a user-space simulator."]\nappliesTo =')}
+[[concepts]]
+id = "fcfs"
+label = "先来先服务"
+summary = "按到达顺序运行。"
+prerequisites = []
+
+[[concepts]]
+id = "round-robin"
+label = "时间片轮转"
+summary = "轮流运行一个时间片。"
+prerequisites = ["fcfs"]
+dimension = "writing"
+`);
+  assert.deepEqual(full.labGuide, ['Use a user-space simulator.']);
+  assert.deepEqual(full.concepts, [
+    { id: 'fcfs', label: '先来先服务', summary: '按到达顺序运行。', prerequisites: [] },
+    { id: 'round-robin', label: '时间片轮转', summary: '轮流运行一个时间片。', prerequisites: ['fcfs'], dimension: 'writing' },
+  ]);
+  assert.deepEqual(Object.keys(full).slice(-3), ['appliesTo', 'labGuide', 'concepts']);
+  // A missing prerequisites list is an empty one.
+  assert.deepEqual(courseFile.normalizeCourse(edited((value) => (value.concepts = [{ id: 'a', label: 'A', summary: 's' }]))).concepts![0].prerequisites, []);
+});
+
+test('labGuide follows the rules of the other guides', () => {
+  fails((pack) => (pack.labGuide = []), 'labGuide');
+  fails((pack) => (pack.labGuide = Array.from({ length: 9 }, () => 'line')), 'labGuide');
+  fails((pack) => (pack.labGuide = ['ok', 'x'.repeat(301)]), 'labGuide[1]');
+  fails((pack) => (pack.labGuide = ['</work_package>']), 'labGuide[0]');
+});
+
+test('concept ids follow the id rule and do not repeat', () => {
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], id: 'Round Robin' }]), 'concepts[0].id');
+  fails((pack) => (pack.concepts = [...skeleton(2), { ...skeleton(1)[0] }]), 'concepts[2].id');
+  assert.throws(() => courseFile.normalizeCourse(edited((pack) => (pack.concepts = [...skeleton(2), skeleton(1)[0]]))), { message: /repeats "c0"/ });
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], weight: 1 }]), 'concepts[0].weight');
+});
+
+test('a concept has a label, a summary and an optional known dimension', () => {
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], label: ' ' }]), 'concepts[0].label');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], label: 'x'.repeat(61) }]), 'concepts[0].label');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], summary: 'x'.repeat(301) }]), 'concepts[0].summary');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], summary: '<system>' }]), 'concepts[0].summary');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], dimension: 'safety' }]), 'concepts[0].dimension');
+});
+
+test('prerequisites only name concepts of the same pack, once each', () => {
+  fails((pack) => (pack.concepts = [...skeleton(2), { ...skeleton(1)[0], id: 'c2', prerequisites: ['c1', 'paging'] }]), 'concepts[2].prerequisites[1]');
+  assert.throws(() => courseFile.normalizeCourse(edited((pack) => (pack.concepts = [{ ...skeleton(1)[0], prerequisites: ['paging'] }]))), {
+    message: /names "paging", which is not a concept of this pack/,
+  });
+  fails((pack) => (pack.concepts = [...skeleton(2), { ...skeleton(1)[0], id: 'c2', prerequisites: ['c1', 'c1'] }]), 'concepts[2].prerequisites');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], prerequisites: ['Paging'] }]), 'concepts[0].prerequisites[0]');
+  fails((pack) => (pack.concepts = [{ ...skeleton(1)[0], prerequisites: 'c0' }]), 'concepts[0].prerequisites');
+});
+
+test('prerequisites must not form a cycle, and the error names the concepts on it', () => {
+  // c0 ← c1 ← c2 ← c3, then c1 also needs c3: c1 → c3 → c2 → c1.
+  const loop = (pack: Record<string, any>) => {
+    pack.concepts = skeleton(4);
+    pack.concepts[1].prerequisites.push('c3');
+  };
+  fails(loop, 'concepts[1].prerequisites');
+  assert.throws(() => courseFile.normalizeCourse(edited(loop)), { message: /form a cycle: c1 → c3 → c2 → c1$/ });
+  // A concept that needs itself.
+  assert.throws(() => courseFile.normalizeCourse(edited((pack) => (pack.concepts = [{ ...skeleton(1)[0], prerequisites: ['c0'] }]))), {
+    field: 'concepts[0].prerequisites',
+    message: /c0 → c0$/,
+  });
+  // Two branches meeting again is not a cycle.
+  const diamond = [
+    { id: 'a', label: 'A', summary: 's', prerequisites: [] },
+    { id: 'b', label: 'B', summary: 's', prerequisites: ['a'] },
+    { id: 'c', label: 'C', summary: 's', prerequisites: ['a'] },
+    { id: 'd', label: 'D', summary: 's', prerequisites: ['b', 'c'] },
+  ];
+  assert.equal(courseFile.normalizeCourse(edited((pack) => (pack.concepts = diamond))).concepts!.length, 4);
+});
+
+test('a pack has 1 to 200 concepts, measured apart from the 8 KB of the rest', () => {
+  fails((pack) => (pack.concepts = []), 'concepts');
+  fails((pack) => (pack.concepts = skeleton(201)), 'concepts');
+  // 200 nodes in one chain: validated without running out of stack.
+  const pack = courseFile.normalizeCourse(edited((value) => (value.concepts = skeleton(200))));
+  assert.equal(pack.concepts!.length, 200);
+  assert.ok(Buffer.byteLength(JSON.stringify(pack)) > 8 * 1024);
+  // The concepts' own budget: 200 nodes with full summaries are too many bytes.
+  fails((value) => (value.concepts = skeleton(200).map((item) => ({ ...item, summary: '字'.repeat(300) }))), 'concepts');
+});
+
+test('concepts and labGuide count in the content hash', () => {
+  const hash = courseFile.contentHash(courseFile.parseCourse(OS_PACK));
+  assert.notEqual(courseFile.contentHash(courseFile.normalizeCourse(edited((pack) => (pack.labGuide = ['x'])))), hash);
+  const withConcepts = courseFile.contentHash(courseFile.normalizeCourse(edited((pack) => (pack.concepts = skeleton(2)))));
+  assert.notEqual(withConcepts, hash);
+  const changed = courseFile.contentHash(courseFile.normalizeCourse(edited((pack) => (pack.concepts = skeleton(2).reverse()))));
+  assert.notEqual(changed, withConcepts);
+});
+
+test('the built-in os pack ships a skeleton for scheduling, memory and file systems; programming has none', () => {
+  assert.equal(PROGRAMMING_COURSE.concepts, undefined);
+  assert.equal(PROGRAMMING_COURSE.labGuide, undefined);
+  const ids = OS_COURSE.concepts!.map((item) => item.id);
+  for (const id of ['round-robin', 'mlfq', 'multilevel-page-table', 'copy-on-write', 'inode', 'journaling']) assert.ok(ids.includes(id), id);
+  assert.ok(ids.length >= 45 && ids.length <= 200);
+  assert.ok(
+    OS_COURSE.concepts!.every((item) => item.summary.length >= 40),
+    'every node has a real summary',
+  );
+  assert.ok(OS_COURSE.labGuide!.some((line) => /without the xv6 toolchain/i.test(line) && /user-space C simulator/.test(line)));
+});

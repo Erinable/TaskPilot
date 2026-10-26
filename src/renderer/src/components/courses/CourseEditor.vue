@@ -10,6 +10,7 @@ import { computed, ref } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { FIELD_LABELS, GUIDE_FIELDS, draftOf, fieldErrorText, packOf } from '@/lib/course_model.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
+import ConceptEditor from './ConceptEditor.vue';
 import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS } from '@shared/course_pack.ts';
 import { COURSE_LIMITS, checkCourse } from '@shared/course_rules.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
@@ -22,6 +23,9 @@ const courses = useCoursesStore();
 const draft = ref(draftOf(props.pack));
 // Errors show once saving was tried, then follow the edits.
 const tried = ref(false);
+// The concept list is mounted only when opened: os has dozens of concepts,
+// each with a select of the others, and rendering them all slows every edit.
+const conceptsOpen = ref(false);
 // A field the main process refused, until the next edit of the form.
 const serverError = ref<{ field: string; message: string } | null>(null);
 
@@ -33,6 +37,8 @@ const errors = computed(() => {
   if (serverError.value && !found.has(serverError.value.field)) found.set(serverError.value.field, serverError.value.message);
   return found;
 });
+// The concept editor shows its own checks; these are the ones it cannot make.
+const conceptFieldErrors = computed(() => Object.fromEntries([...errors.value].filter(([field]) => field.startsWith('concepts'))));
 const errorOf = (field: string) => errors.value.get(field) ?? null;
 const invalid = (field: string) => errors.value.has(field);
 const errorId = (field: string) => `course-error-${field.replace(/[^a-zA-Z0-9]/g, '-')}`;
@@ -277,6 +283,16 @@ const save = async () => {
         加一项判卷维度
       </button>
       <small v-if="errorOf('rubric')" class="course-field-error" role="alert">{{ errorOf('rubric') }}</small>
+    </fieldset>
+
+    <fieldset class="course-editor-group" data-field="concepts">
+      <legend>知识点（可选，最多 {{ COURSE_LIMITS.concepts }} 个）</legend>
+      <ConceptEditor v-if="conceptsOpen" v-model="draft.concepts" :errors="conceptFieldErrors" @update:model-value="edited" />
+      <button v-else class="link-button" type="button" data-action="open-concepts" @click="conceptsOpen = true">
+        <AppIcon name="sliders" />
+        编辑知识点（{{ draft.concepts.length }} 个）
+      </button>
+      <small v-if="!conceptsOpen && conceptFieldErrors.concepts" class="course-field-error" role="alert">{{ conceptFieldErrors.concepts }}</small>
     </fieldset>
 
     <p v-for="[field, message] in otherErrors" :key="field" class="course-field-error" role="alert">{{ message }}</p>

@@ -8,7 +8,7 @@
 import { semverOrNull } from './semver.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
 import * as coursePack from './course_pack.ts';
-import type { CoursePack, RubricExample, RubricItem } from './course_pack.ts';
+import type { Concept, CoursePack, RubricExample, RubricItem } from './course_pack.ts';
 
 export const COURSE_LIMITS = {
   field: 500,
@@ -18,8 +18,15 @@ export const COURSE_LIMITS = {
   maxRubric: 6,
   examples: 2,
   languages: 8,
+  concepts: 200,
+  conceptLabel: 60,
+  conceptSummary: 300,
+  prerequisites: 8,
   // The pack's JSON, which is a little larger than its text in a prompt.
+  // Concepts are measured on their own: a skeleton of a few dozen nodes is
+  // larger than the rest of the pack, and no prompt renders all of it at once.
   packBytes: 8 * 1024,
+  conceptsBytes: 48 * 1024,
 } as const;
 
 // The tags prompts wrap their data in.
@@ -39,13 +46,31 @@ const TOP_KEYS = new Set([
   'referenceGuide',
   'rubric',
   'appliesTo',
+  'labGuide',
+  'concepts',
 ]);
+const CONCEPT_KEYS = new Set(['id', 'label', 'summary', 'prerequisites', 'dimension']);
 const RUBRIC_KEYS = new Set(['id', 'label', 'description', 'dimension', 'examples']);
 const EXAMPLE_KEYS = new Set(['observation', 'betterWay']);
 const APPLIES_KEYS = new Set(['languages']);
 const ID_RULE = 'must be lowercase letters, digits, - or _, start with a letter and be at most 32 long';
 
-type CourseErrorKind = 'table' | 'unknown' | 'list' | 'empty' | 'too_long' | 'control' | 'tag' | 'id' | 'repeat' | 'dimension' | 'version' | 'schema' | 'size';
+type CourseErrorKind =
+  | 'table'
+  | 'unknown'
+  | 'list'
+  | 'empty'
+  | 'too_long'
+  | 'control'
+  | 'tag'
+  | 'id'
+  | 'repeat'
+  | 'dimension'
+  | 'version'
+  | 'schema'
+  | 'size'
+  | 'prerequisite'
+  | 'cycle';
 
 // `message` is the main process's English text; `min` / `max` are the
 // bounds a `list` or `too_long` error broke.
@@ -100,13 +125,24 @@ const example = (value: unknown, field: string, errors: Errors): RubricExample |
   return observation !== null && betterWay !== null ? { observation, betterWay } : null;
 };
 
+const DIMENSION_RULE = `must be one of ${coursePack.COURSE_DIMENSIONS.join(', ')}`;
+
+// Each item's id once; a repeat names the item that repeats it.
+const uniqueIds = (items: { id: string }[], field: string, errors: Errors) => {
+  const seen = new Set<string>();
+  items.forEach((item, index) => {
+    if (seen.has(item.id)) report(errors, `${field}[${index}].id`, 'repeat', `repeats "${item.id}"`);
+    seen.add(item.id);
+  });
+};
+
 const rubricItem = (value: unknown, field: string, errors: Errors): RubricItem | null => {
   const raw = table(value, RUBRIC_KEYS, field, errors);
   if (!raw) return null;
   const id = coursePack.isCourseId(raw.id) ? raw.id : report(errors, `${field}.id`, 'id', ID_RULE);
   const dimension = coursePack.COURSE_DIMENSIONS.includes(raw.dimension as coursePack.CourseDimension)
     ? (raw.dimension as coursePack.CourseDimension)
-    : report(errors, `${field}.dimension`, 'dimension', `must be one of ${coursePack.COURSE_DIMENSIONS.join(', ')}`);
+    : report(errors, `${field}.dimension`, 'dimension', DIMENSION_RULE);
   const label = text(raw.label, `${field}.label`, errors);
   const description = text(raw.description, `${field}.description`, errors);
   const examples =
@@ -126,13 +162,55 @@ const rubric = (value: unknown, errors: Errors) => {
     rubricItem(entry, `rubric[${index}]`, errors),
   );
   if (!items) return null;
-  const seen = new Set<string>();
-  items.forEach((item, index) => {
-    if (seen.has(item.id)) report(errors, `rubric[${index}].id`, 'repeat', `repeats "${item.id}"`);
-    seen.add(item.id);
-  });
+  uniqueIds(items, 'rubric', errors);
   return items;
 };
+
+const concept = (value: unknown, field: string, errors: Errors): Concept | null => {
+  const raw = table(value, CONCEPT_KEYS, field, errors);
+  if (!raw) return null;
+  const id = coursePack.isCourseId(raw.id) ? raw.id : report(errors, `${field}.id`, 'id', ID_RULE);
+  const label = text(raw.label, `${field}.label`, errors, COURSE_LIMITS.conceptLabel);
+  const summary = text(raw.summary, `${field}.summary`, errors, COURSE_LIMITS.conceptSummary);
+  let prerequisites =
+    raw.prerequisites === undefined
+      ? []
+      : each(list(raw.prerequisites, `${field}.prerequisites`, 0, COURSE_LIMITS.prerequisites, errors), (prerequisite, index) =>
+          coursePack.isCourseId(prerequisite) ? prerequisite : report(errors, `${field}.prerequisites[${index}]`, 'id', ID_RULE),
+        );
+  if (prerequisites && new Set(prerequisites).size < prerequisites.length)
+    prerequisites = report(errors, `${field}.prerequisites`, 'repeat', 'must not repeat an id');
+  const dimension =
+    raw.dimension === undefined || coursePack.COURSE_DIMENSIONS.includes(raw.dimension as coursePack.CourseDimension)
+      ? (raw.dimension as coursePack.CourseDimension | undefined)
+      : report(errors, `${field}.dimension`, 'dimension', DIMENSION_RULE);
+  if (id === null || label === null || summary === null || prerequisites === null || dimension === null) return null;
+  const item: Concept = { id, label, summary, prerequisites };
+  if (dimension !== undefined) item.dimension = dimension;
+  return item;
+};
+
+const concepts = (value: unknown, errors: Errors) => {
+  const items = each(list(value, 'concepts', 1, COURSE_LIMITS.concepts, errors), (entry, index) => concept(entry, `concepts[${index}]`, errors));
+  if (!items) return null;
+  const before = errors.length;
+  uniqueIds(items, 'concepts', errors);
+  const ids = new Set(items.map((item) => item.id));
+  items.forEach((item, index) =>
+    item.prerequisites.forEach(
+      (id, at) =>
+        ids.has(id) || report(errors, `concepts[${index}].prerequisites[${at}]`, 'prerequisite', `names "${id}", which is not a concept of this pack`),
+    ),
+  );
+  if (errors.length > before) return null;
+  const cycle = coursePack.conceptCycle(items);
+  if (cycle) return report(errors, `concepts[${items.findIndex((item) => item.id === cycle[0])}].prerequisites`, 'cycle', `form a cycle: ${cycle.join(' → ')}`);
+  if (byteLength(items) > COURSE_LIMITS.conceptsBytes)
+    return report(errors, 'concepts', 'size', 'must be at most 48 KB together', { max: COURSE_LIMITS.conceptsBytes });
+  return items;
+};
+
+const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
 const appliesTo = (value: unknown, errors: Errors): CoursePack['appliesTo'] | null => {
   const raw = table(value, APPLIES_KEYS, 'appliesTo', errors);
@@ -169,8 +247,13 @@ export const checkCourse = (value: unknown): { pack: CoursePack | null; errors: 
     rubric: rubric(raw.rubric, errors),
   } as CoursePack;
   if (raw.appliesTo !== undefined) pack.appliesTo = appliesTo(raw.appliesTo, errors) ?? undefined;
+  if (raw.labGuide !== undefined) pack.labGuide = guide(raw.labGuide, 'labGuide', errors) ?? undefined;
+  const skeleton = raw.concepts === undefined ? undefined : concepts(raw.concepts, errors);
   if (errors.length) return { pack: null, errors };
-  if (new TextEncoder().encode(JSON.stringify(pack)).length > COURSE_LIMITS.packBytes)
+  if (byteLength(pack) > COURSE_LIMITS.packBytes)
     return { pack: null, errors: [{ field: 'pack', kind: 'size', message: 'The course pack is larger than 8 KB', max: COURSE_LIMITS.packBytes }] };
+  // Last, so the size above is the rest of the pack's and every field before
+  // it keeps its place in the hash.
+  if (skeleton) pack.concepts = skeleton;
   return { pack, errors };
 };
