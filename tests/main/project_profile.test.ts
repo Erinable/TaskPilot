@@ -16,7 +16,7 @@ import * as effectiveSteps from '../../src/main/effective_steps.ts';
 import * as workspace from '../../src/main/workspace.ts';
 import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
 import { pythonPreset } from '../../src/main/presets/python.ts';
-import { typescriptPreset } from '../../src/main/presets/typescript.ts';
+import { VITEST_REPORT, typescriptPreset } from '../../src/main/presets/typescript.ts';
 import type { AppDeps } from '../../src/main/app_context.ts';
 import type { ProjectProfile } from '../../src/shared/project_profile.ts';
 
@@ -49,7 +49,13 @@ test('buildProfile() describes a TypeScript repository from its preset and steps
       { id: 'setup', stage: 'manual', blocking: false, reports: 'exit', commandLine: profile.checks[0].commandLine },
       { id: 'lint', stage: 'submit', blocking: false, reports: 'exit', commandLine: 'npm run --silent lint' },
       { id: 'typecheck', stage: 'manual', blocking: false, reports: 'diagnostics', commandLine: 'npm run --silent typecheck' },
-      { id: 'test', stage: 'submit', blocking: true, reports: 'tests', commandLine: 'npm test' },
+      {
+        id: 'test',
+        stage: 'submit',
+        blocking: true,
+        reports: 'tests',
+        commandLine: `npm test -- --reporter=default --reporter=junit --outputFile=${VITEST_REPORT}`,
+      },
     ],
   );
   assert.match(profile.testLayout ?? '', /\*\.test\.ts/);
