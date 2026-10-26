@@ -30,3 +30,11 @@ test('a pack file is named where it lives', () => {
   expect(sourcePath('net', 'user', '/u/courses')).toBe('/u/courses/net.toml');
   expect(sourcePath('os', 'builtin', '/u/courses')).toBeNull();
 });
+
+test('concept and labGuide changes read in words', () => {
+  expect(changeText({ field: 'labGuide', kind: 'changed' })).toBe('修改 lab 生成指引');
+  expect(changeText({ field: 'concepts.round-robin', kind: 'added' })).toBe('新增 知识点 round-robin');
+  expect(changeText({ field: 'concepts.round-robin.prerequisites', kind: 'changed' })).toBe('修改 知识点 round-robin 的前置知识点');
+  expect(changeText({ field: 'concepts.fcfs.label', kind: 'changed' })).toBe('修改 知识点 fcfs 的名称');
+  expect(changeText({ field: 'concepts', kind: 'changed' })).toBe('修改 知识点的顺序');
+});
