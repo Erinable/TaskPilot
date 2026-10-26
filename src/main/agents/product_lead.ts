@@ -12,7 +12,7 @@
 
 import type { ModeRecommendation, PackageDifficulty } from '../../shared/ipc/packages.ts';
 import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
-import { CONTROL_CHARS } from '../text_rules.ts';
+import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';

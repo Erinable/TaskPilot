@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 
 // A pack file outside every repository, as the user would import it.
 const packFile = async (text = fixtures.OS_PACK.replace('id = "oslab"', 'id = "net"').replace('操作系统实验', '网络实验')) => {
@@ -207,4 +208,82 @@ test('courses:default sends the built-in programming pack, whichever pack is in 
     data.rubric.map((item) => item.id),
     ['thinking', 'writing', 'style'],
   );
+});
+
+test('courses:copy writes a built-in pack under a new id into the global folder, unconfirmed', async () => {
+  const h = await fixtures.harness();
+  const { data } = await h.call(CHANNELS.coursesCopy, 'os', 'myos');
+  const file = path.join(h.configDir, 'courses', 'myos.toml');
+  assert.match(await fs.readFile(file, 'utf8'), /^schemaVersion = 1\nid = "myos"\n/);
+  assert.equal(data.preview.ref.source, 'user');
+  assert.equal(data.preview.trust, 'pending');
+  assert.equal(data.preview.pack.id, 'myos');
+  assert.deepEqual({ ...data.preview.pack, id: 'os' }, OS_COURSE);
+  assert.deepEqual(data.list.entries.at(-1), {
+    id: 'myos',
+    source: 'user',
+    title: OS_COURSE.title,
+    version: OS_COURSE.version,
+    languages: ['c', 'rust'],
+    trust: 'pending',
+    error: null,
+  });
+
+  // The file reads back as the content written, so its hash matches.
+  const { data: preview } = await h.call(CHANNELS.coursesPreview, 'myos');
+  assert.deepEqual(preview.ref, data.preview.ref);
+});
+
+test('courses:copy refuses an id that is taken or malformed, and an unknown source', async () => {
+  const h = await fixtures.harness();
+  await fixtures.useOsPack(h);
+  await h.call(CHANNELS.coursesCopy, 'programming', 'mine');
+  for (const id of ['programming', 'oslab', 'mine'])
+    assert.deepEqual(
+      [(await h.call(CHANNELS.coursesCopy, 'os', id)).error.code, (await h.call(CHANNELS.coursesCopy, 'os', id)).error.field],
+      ['course_exists', 'id'],
+      id,
+    );
+  assert.deepEqual((await h.call(CHANNELS.coursesCopy, 'os', 'My OS')).error.field, 'id');
+  assert.equal((await h.call(CHANNELS.coursesCopy, 'cooking', 'cook')).error.code, 'unknown_course');
+});
+
+test('a repository pack can be copied, so it can be edited without touching the repository', async () => {
+  const h = await fixtures.harness();
+  await fixtures.useOsPack(h);
+  const { data } = await h.call(CHANNELS.coursesCopy, 'oslab', 'oslab2');
+  assert.equal(data.preview.pack.referenceGuide, 'Write the complete solution to this lab step.');
+  assert.equal((await h.call(CHANNELS.coursesSave, 'oslab', { ...data.preview.pack, id: 'oslab' })).error.code, 'course_read_only');
+});
+
+test('courses:save validates on the main process, writes the file and needs confirming again', async () => {
+  const h = await fixtures.harness();
+  await h.call(CHANNELS.coursesCopy, 'os', 'myos');
+  const { data: copied } = await h.call(CHANNELS.coursesSelect, 'myos');
+  const first = copied.current.state.ref;
+  await h.call(CHANNELS.workspaceConfirmCourse, 'myos', first.contentHash);
+  assert.equal((await h.call(CHANNELS.workspaceGet)).data.course.ref.id, 'myos');
+
+  const pack = (await h.call(CHANNELS.coursesPreview, 'myos')).data.pack;
+  const invalid = await h.call(CHANNELS.coursesSave, 'myos', { ...pack, rubric: [{ ...pack.rubric[0], dimension: 'safety' }, pack.rubric[1]] });
+  assert.deepEqual([invalid.error.code, invalid.error.field], ['invalid_course', 'rubric[0].dimension']);
+  assert.equal((await h.call(CHANNELS.coursesSave, 'myos', { ...pack, id: 'other' })).error.field, 'id');
+
+  const { data: saved } = await h.call(CHANNELS.coursesSave, 'myos', { ...pack, title: '我的操作系统课' });
+  assert.equal(saved.preview.trust, 'pending');
+  assert.equal(saved.preview.previous, 'known');
+  assert.deepEqual(saved.preview.changes, [{ field: 'title', kind: 'changed' }]);
+  // The saved pack is not used until it is confirmed again.
+  const view = (await h.call(CHANNELS.workspaceGet)).data;
+  assert.equal(view.course.state.status, 'pending');
+  assert.equal(view.course.ref.id, 'programming');
+  await h.call(CHANNELS.workspaceConfirmCourse, 'myos', saved.preview.ref.contentHash);
+  const confirmed = (await h.call(CHANNELS.workspaceGet)).data.course;
+  assert.deepEqual([confirmed.state.status, confirmed.ref.contentHash], ['ok', saved.preview.ref.contentHash]);
+});
+
+test('courses:save refuses built-in packs', async () => {
+  const h = await fixtures.harness();
+  const saved = await h.call(CHANNELS.coursesSave, 'os', OS_COURSE);
+  assert.equal(saved.error.code, 'course_read_only');
 });

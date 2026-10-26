@@ -9,8 +9,8 @@
 // Checklist evidence must name a path or commit from the input, and anything
 // else is dropped.
 import { AgentOutputError, isObject } from './product_lead.ts';
-import { CONTROL_CHARS_NO_CR } from '../text_rules.ts';
-import { parseVersion } from '../semver.ts';
+import { CONTROL_CHARS_NO_CR } from '../../shared/text_rules.ts';
+import { parseVersion } from '../../shared/semver.ts';
 
 export const BUMPS = ['major', 'minor', 'patch'] as const;
 export const NOTE_GROUPS = ['added', 'fixed', 'changed', 'notes'] as const;

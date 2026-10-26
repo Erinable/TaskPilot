@@ -29,137 +29,20 @@
 // repository's pack is only used after this machine confirmed its content
 // hash (./courses.ts).
 import { createHash } from 'node:crypto';
-import { parse as parseToml, TomlError } from 'smol-toml';
+import { parse as parseToml, stringify as stringifyToml, TomlError } from 'smol-toml';
 
 import { WorkspaceError } from './command_line.ts';
-import { semverOrNull } from './semver.ts';
-import { CONTROL_CHARS } from './text_rules.ts';
-import * as coursePack from '../shared/course_pack.ts';
-import type { CoursePack, RubricExample, RubricItem } from '../shared/course_pack.ts';
-import type { LooseJson } from './loose_json.ts';
+import { checkCourse } from '../shared/course_rules.ts';
+import type { CoursePack } from '../shared/course_pack.ts';
 
-const MAX_FIELD = 500;
-const MAX_GUIDE_LINE = 300;
-const MAX_GUIDE_LINES = 8;
-const MIN_RUBRIC = 2;
-const MAX_RUBRIC = 6;
-const MAX_EXAMPLES = 2;
-const MAX_LANGUAGES = 8;
-// The pack's JSON, which is a little larger than its text in a prompt.
-const MAX_PACK_BYTES = 8 * 1024;
-// The tags prompts wrap their data in.
-const PROMPT_TAG = /<\/?[a-z_]+>/;
-
-const TOP_KEYS = new Set([
-  'schemaVersion',
-  'id',
-  'version',
-  'domain',
-  'title',
-  'summary',
-  'learner',
-  'tutorGuide',
-  'difficultyGuide',
-  'practiceGuide',
-  'referenceGuide',
-  'rubric',
-  'appliesTo',
-]);
-const RUBRIC_KEYS = new Set(['id', 'label', 'description', 'dimension', 'examples']);
-const EXAMPLE_KEYS = new Set(['observation', 'betterWay']);
-const APPLIES_KEYS = new Set(['languages']);
-const ID_RULE = 'must be lowercase letters, digits, - or _, start with a letter and be at most 32 long';
-
-const fail = (field: string, message: string): never => {
-  throw new WorkspaceError(`${field}: ${message}`, 'invalid_course', field);
-};
-
-const isTable = (value: unknown): value is LooseJson => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-const table = (value: unknown, allowed: Set<string>, field: string): LooseJson => {
-  if (!isTable(value)) return fail(field, 'must be a table');
-  for (const key of Object.keys(value)) if (!allowed.has(key)) fail(field ? `${field}.${key}` : key, 'is not a known field');
-  return value;
-};
-
-const list = (value: unknown, field: string, min: number, max: number): unknown[] => {
-  if (!Array.isArray(value) || value.length < min || value.length > max) return fail(field, `must be a list of ${min} to ${max} items`);
-  return value;
-};
-
-// One piece of text, trimmed.
-const text = (value: unknown, field: string, max = MAX_FIELD): string => {
-  if (typeof value !== 'string' || !value.trim()) return fail(field, 'must be a non-empty string');
-  const trimmed = value.trim();
-  if ([...trimmed].length > max) fail(field, `must be at most ${max} characters`);
-  if (CONTROL_CHARS.test(trimmed)) fail(field, 'must not contain control characters');
-  if (PROMPT_TAG.test(trimmed)) fail(field, 'must not contain tags such as <work_package>');
-  return trimmed;
-};
-
-const guide = (value: unknown, field: string) => list(value, field, 1, MAX_GUIDE_LINES).map((line, index) => text(line, `${field}[${index}]`, MAX_GUIDE_LINE));
-
-const example = (value: unknown, field: string): RubricExample => {
-  const raw = table(value, EXAMPLE_KEYS, field);
-  return { observation: text(raw.observation, `${field}.observation`), betterWay: text(raw.betterWay, `${field}.betterWay`) };
-};
-
-const rubricItem = (value: unknown, field: string): RubricItem => {
-  const raw = table(value, RUBRIC_KEYS, field);
-  if (!coursePack.isCourseId(raw.id)) fail(`${field}.id`, ID_RULE);
-  if (!coursePack.COURSE_DIMENSIONS.includes(raw.dimension)) fail(`${field}.dimension`, `must be one of ${coursePack.COURSE_DIMENSIONS.join(', ')}`);
-  const item: RubricItem = {
-    id: raw.id,
-    label: text(raw.label, `${field}.label`),
-    description: text(raw.description, `${field}.description`),
-    dimension: raw.dimension,
-  };
-  if (raw.examples !== undefined)
-    item.examples = list(raw.examples, `${field}.examples`, 1, MAX_EXAMPLES).map((entry, index) => example(entry, `${field}.examples[${index}]`));
-  return item;
-};
-
-const rubric = (value: unknown): RubricItem[] => {
-  const items = list(value, 'rubric', MIN_RUBRIC, MAX_RUBRIC).map((entry, index) => rubricItem(entry, `rubric[${index}]`));
-  const seen = new Set<string>();
-  items.forEach((item, index) => {
-    if (seen.has(item.id)) fail(`rubric[${index}].id`, `repeats "${item.id}"`);
-    seen.add(item.id);
-  });
-  return items;
-};
-
-const appliesTo = (value: unknown): CoursePack['appliesTo'] => {
-  const raw = table(value, APPLIES_KEYS, 'appliesTo');
-  if (raw.languages === undefined) return {};
-  const languages = list(raw.languages, 'appliesTo.languages', 1, MAX_LANGUAGES);
-  languages.forEach((language, index) => coursePack.isCourseId(language) || fail(`appliesTo.languages[${index}]`, ID_RULE));
-  return { languages: languages as string[] };
-};
-
-// Validates a parsed pack. The result has its fields in a fixed order, so
-// equal content always hashes the same.
+// Validates a parsed pack with the rules the pack editor shows
+// (../shared/course_rules.ts), failing on the first error. The result has
+// its fields in a fixed order, so equal content always hashes the same.
 export const normalizeCourse = (value: unknown): CoursePack => {
-  const raw = table(value, TOP_KEYS, '');
-  if (raw.schemaVersion !== coursePack.COURSE_SCHEMA_VERSION) fail('schemaVersion', `must be ${coursePack.COURSE_SCHEMA_VERSION}`);
-  if (!coursePack.isCourseId(raw.id)) fail('id', ID_RULE);
-  const pack: CoursePack = {
-    schemaVersion: coursePack.COURSE_SCHEMA_VERSION,
-    id: raw.id,
-    version: semverOrNull(raw.version) ?? fail('version', 'must be a version such as 1.0.0'),
-    domain: text(raw.domain, 'domain'),
-    title: text(raw.title, 'title'),
-    summary: text(raw.summary, 'summary'),
-    learner: text(raw.learner, 'learner'),
-    tutorGuide: guide(raw.tutorGuide, 'tutorGuide'),
-    difficultyGuide: guide(raw.difficultyGuide, 'difficultyGuide'),
-    practiceGuide: guide(raw.practiceGuide, 'practiceGuide'),
-    referenceGuide: text(raw.referenceGuide, 'referenceGuide'),
-    rubric: rubric(raw.rubric),
-  };
-  if (raw.appliesTo !== undefined) pack.appliesTo = appliesTo(raw.appliesTo);
-  if (Buffer.byteLength(JSON.stringify(pack)) > MAX_PACK_BYTES) throw new WorkspaceError('The course pack is larger than 8 KB', 'invalid_course', 'pack');
-  return pack;
+  const { pack, errors } = checkCourse(value);
+  if (pack) return pack;
+  const [first] = errors;
+  throw new WorkspaceError(first.message, 'invalid_course', first.field);
 };
 
 // Parses a file's text; a syntax error names its line and column.
@@ -178,3 +61,7 @@ export const parseCourse = (text: string): CoursePack => {
 // What a confirmation is given for: the validated content, so only a change
 // the agents would see asks again.
 export const contentHash = (pack: CoursePack) => createHash('sha256').update(JSON.stringify(pack)).digest('hex');
+
+// A validated pack as the text of its file. It parses back to the same
+// content, so the same hash.
+export const courseText = (pack: CoursePack) => `${stringifyToml(pack)}\n`;

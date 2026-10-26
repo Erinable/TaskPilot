@@ -1,6 +1,6 @@
 // Course pack channels: the packs a repository can teach with, their full
-// content, picking one on this machine and importing a pack file into the
-// global folder (courses:*). Confirming the pack in use is workspace:confirm-course.
+// content, picking one on this machine, importing a pack file into the
+// global folder, and copying a pack there to edit it (courses:*). Confirming the pack in use is workspace:confirm-course.
 
 import type { CourseChange } from '../course_changes.ts';
 import type { CoursePack, CourseRef, CourseSource } from '../course_pack.ts';
@@ -49,3 +49,8 @@ export type CoursePreview = {
 // `replaces` when one is already imported; `shadowed` when the open
 // repository has its own pack of that id, which wins there.
 export type CourseImport = CoursePreview & { replaces: boolean; shadowed: boolean };
+
+// courses:copy and courses:save: the list after the write, and the pack
+// written, previewed as it now stands (a saved pack is pending until this
+// machine confirms it again).
+export type CourseSaved = { list: CourseList; preview: CoursePreview };

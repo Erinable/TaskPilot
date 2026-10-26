@@ -6,6 +6,7 @@ import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
+import type { CoursePack } from '@shared/course_pack.ts';
 import { BUILTIN_COURSES, OS_COURSE } from '../fixtures/builtin_courses.ts';
 import { STEP_KINDS } from '@shared/check_steps.ts';
 
@@ -76,6 +77,16 @@ export const coursePreview = (id: string, overrides: Partial<courseTypes.CourseP
     previous: 'none',
     changes: [],
     ...overrides,
+  };
+};
+
+// courses:copy / courses:save: `id` written into the global folder, pending.
+export const courseSaved = (id: string, pack: CoursePack = { ...OS_COURSE, id }): courseTypes.CourseSaved => {
+  const ref = { id, version: pack.version, contentHash: 'c'.repeat(64), source: 'user' as const };
+  const entry: courseTypes.CourseEntry = { id, source: 'user', title: pack.title, version: pack.version, languages: null, trust: 'pending', error: null };
+  return {
+    list: courseList({ entries: [...courseList().entries, entry] }),
+    preview: { pack, ref, trust: 'pending', previous: 'none', changes: [] },
   };
 };
 
@@ -165,6 +176,8 @@ export const installApi = () => {
       pickImport: vi.fn(() => ok<courseTypes.CourseImport | null>(null)),
       import: vi.fn(() => ok(courseList())),
       default: vi.fn(() => ok(BUILTIN_COURSES[0])),
+      copy: vi.fn((_sourceId: string, id: string) => ok(courseSaved(id))),
+      save: vi.fn((id: string) => ok(courseSaved(id))),
     },
     preferences: {
       get: vi.fn(() => ok(savedPreferences)),

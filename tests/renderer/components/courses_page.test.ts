@@ -7,6 +7,7 @@ import ElementPlus from 'element-plus';
 vi.setConfig({ testTimeout: 20_000 });
 
 import SettingsView from '@/views/SettingsView.vue';
+import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { courseList, coursePreview, defaultCourse, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
@@ -52,15 +53,18 @@ const pending = () => {
   });
 };
 
-test('the page shows the pack in use, its source and every pack to pick', async () => {
+test('the page shows the pack in use and where the choice came from, and links to the course view', async () => {
   const wrapper = await mountPage();
   expect(api.courses.list).toHaveBeenCalled();
   expect(wrapper.get('#courseState').text()).toContain('正在使用：编程');
   expect(wrapper.get('#courseState').text()).toContain('选择来自默认');
-  expect(wrapper.findAll('[data-course]').map((row) => row.attributes('data-course'))).toEqual(['programming', 'os']);
-  // The os pack is written for C and Rust; this repository is TypeScript.
-  expect(wrapper.get('[data-course="os"]').text()).toContain('和仓库语言不匹配');
+  // Built-in packs need no confirmation, and browsing them is the course view.
+  expect(wrapper.findAll('#pendingCourses [data-course]')).toHaveLength(0);
+  expect(wrapper.find('[data-empty="pending"]').exists()).toBe(true);
   expect(wrapper.find('#courseLanguageWarning').exists()).toBe(false);
+  await wrapper.get('#openCourseView').trigger('click');
+  await flushPromises();
+  expect(useAppStore().view).toBe('courses');
 });
 
 test('picking a pack for another language warns about the mismatch', async () => {
@@ -72,11 +76,14 @@ test('picking a pack for another language warns about the mismatch', async () =>
   expect(wrapper.find('#clearCourse').exists()).toBe(true);
 });
 
-test('选用 writes the choice through courses:select', async () => {
+test('a pack waiting for confirmation is listed; 选用并确认 writes the choice through courses:select', async () => {
+  const imported = { ...oslab(), id: 'net', source: 'user' as const, title: '网络实验' };
+  api.courses.list.mockReturnValue(ok(courseList({ entries: [...courseList().entries, imported] })));
   const wrapper = await mountPage();
-  await wrapper.get('[data-course="os"] [data-action="select"]').trigger('click');
+  expect(wrapper.findAll('#pendingCourses [data-course]').map((row) => row.attributes('data-course'))).toEqual(['net']);
+  await wrapper.get('[data-course="net"] [data-action="select"]').trigger('click');
   await flushPromises();
-  expect(api.courses.select).toHaveBeenCalledWith('os');
+  expect(api.courses.select).toHaveBeenCalledWith('net');
 });
 
 test('a pending pack is confirmed from a preview of its whole content', async () => {
@@ -119,9 +126,12 @@ test('a changed pack lists and marks what changed, and needs the changes ticked 
   expect(acceptButton()!.disabled).toBe(false);
 });
 
-test('a preview of a built-in pack only shows it', async () => {
+test('a preview of a pending pack that is not picked only shows it', async () => {
+  const imported = { ...oslab(), id: 'net', source: 'user' as const, title: '网络实验' };
+  api.courses.list.mockReturnValue(ok(courseList({ entries: [...courseList().entries, imported] })));
+  api.courses.preview.mockReturnValue(ok(coursePreview('net')));
   const wrapper = await mountPage();
-  await wrapper.get('[data-course="os"] [data-action="preview"]').trigger('click');
+  await wrapper.get('[data-course="net"] [data-action="preview"]').trigger('click');
   await flushPromises();
   expect(dialog()!.textContent).toContain(OS_COURSE.summary);
   expect(acceptButton()).toBeNull();

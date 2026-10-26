@@ -1,16 +1,20 @@
 <script setup lang="ts">
-// The course pack the open repository teaches with: which one is in use and
-// where the choice came from, picking another on this machine, previewing
-// any pack, and importing a pack file into the global folder.
+// The course pack settings: which pack the open repository uses and where
+// the choice came from, the packs waiting for this machine's confirmation,
+// and importing a pack file into the global folder. Browsing, copying and
+// editing packs is the 课程 view.
+//
+// [人工决策-2026-10-27 00:55:52] 设置页只保留当前生效包的状态、信任确认和导入，浏览和编辑去「课程」视图。
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { FROM_LABELS, SOURCE_LABELS, TRUST_LABELS, languageMismatch } from '@/lib/course_model.ts';
+import CoursePreviewDialog from '@/components/courses/CoursePreviewDialog.vue';
+import { FROM_LABELS, SOURCE_LABELS, languageMismatch } from '@/lib/course_model.ts';
+import { useAppStore } from '@/stores/app.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
-import CoursePreviewDialog from './CoursePreviewDialog.vue';
-import type * as courseTypes from '@shared/ipc/courses.ts';
 
 const courses = useCoursesStore();
+const app = useAppStore();
 
 const current = computed(() => courses.current);
 const entries = computed(() => courses.list?.entries ?? []);
@@ -19,7 +23,11 @@ const inUse = computed(() => entries.value.find((entry) => entry.id === current.
 const selectedEntry = computed(() => entries.value.find((entry) => entry.id === current.value?.selected.id) ?? null);
 const mismatch = computed(() => languageMismatch(selectedEntry.value?.languages, languages.value));
 
-const isSelected = (entry: courseTypes.CourseEntry) => current.value?.selected.id === entry.id;
+// Repository and imported packs not confirmed at their current content.
+const pendingEntries = computed(() => entries.value.filter((entry) => entry.trust === 'pending'));
+const isSelected = (id: string) => current.value?.selected.id === id;
+
+const openCourses = () => run(app.navigate('courses'));
 
 const run = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
@@ -72,45 +80,8 @@ const run = (promise: Promise<unknown>) => {
       </button>
     </div>
 
-    <h3 class="settings-section-title">
-      可选的课程包
-      <small>选中后写入本机设置；仓库和导入的包要先确认</small>
-    </h3>
-    <div id="courseList" class="settings-card glass">
-      <div v-for="entry in entries" :key="entry.id" class="setting-row course-row" :data-course="entry.id">
-        <div class="setting-label">
-          <strong>
-            {{ entry.title ?? entry.id }}
-            <span class="scope-badge">{{ SOURCE_LABELS[entry.source] }}</span>
-            <span class="scope-badge" :class="`trust-${entry.trust}`">{{ TRUST_LABELS[entry.trust] }}</span>
-            <span v-if="isSelected(entry)" class="scope-badge selected">已选</span>
-          </strong>
-          <small v-if="entry.error" class="warn-text">{{ entry.error }}</small>
-          <small v-else>
-            {{ entry.id }} · {{ entry.version }}
-            <template v-if="entry.languages">· 适用 {{ entry.languages.join(', ') }}</template>
-            <template v-if="languageMismatch(entry.languages, languages)">（和仓库语言不匹配）</template>
-          </small>
-        </div>
-        <div class="setting-control end">
-          <button v-if="!entry.error" class="secondary-button small" type="button" data-action="preview" @click="run(courses.openPreview(entry.id))">
-            <AppIcon name="file" />
-            预览
-          </button>
-          <button
-            v-if="!entry.error && !isSelected(entry)"
-            class="secondary-button small"
-            type="button"
-            data-action="select"
-            :disabled="courses.busy"
-            @click="run(courses.select(entry.id))"
-          >
-            <AppIcon name="check" />
-            选用
-          </button>
-        </div>
-      </div>
-      <div v-if="current.selected.from === 'local'" class="setting-row">
+    <div v-if="current.selected.from === 'local'" class="settings-card glass">
+      <div class="setting-row">
         <div class="setting-label">
           <strong>本机设置覆盖了仓库的选择</strong>
           <small>清除后按 taskpilot.toml 的 course 选，没设时用「编程」</small>
@@ -119,6 +90,58 @@ const run = (promise: Promise<unknown>) => {
           <button id="clearCourse" class="secondary-button small" type="button" :disabled="courses.busy" @click="run(courses.select(null))">
             <AppIcon name="undo" />
             清除本机选择
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="settings-section-title">
+      待确认的课程包
+      <small>仓库和导入的包，内容第一次出现或变了以后，要在本机看过并确认</small>
+    </h3>
+    <div id="pendingCourses" class="settings-card glass">
+      <div v-for="entry in pendingEntries" :key="entry.id" class="setting-row course-row" :data-course="entry.id">
+        <div class="setting-label">
+          <strong>
+            {{ entry.title ?? entry.id }}
+            <span class="scope-badge">{{ SOURCE_LABELS[entry.source] }}</span>
+            <span v-if="isSelected(entry.id)" class="scope-badge selected">已选</span>
+          </strong>
+          <small>
+            {{ entry.id }} · {{ entry.version }}
+            <template v-if="languageMismatch(entry.languages, languages)">（和仓库语言不匹配）</template>
+          </small>
+        </div>
+        <div class="setting-control end">
+          <button class="secondary-button small" type="button" data-action="preview" @click="run(courses.openPreview(entry.id))">
+            <AppIcon name="file" />
+            预览
+          </button>
+          <button
+            class="primary-button small"
+            type="button"
+            data-action="select"
+            :disabled="courses.busy"
+            @click="run(isSelected(entry.id) ? courses.openPreview(entry.id) : courses.select(entry.id))"
+          >
+            <AppIcon name="check-circle" />
+            {{ isSelected(entry.id) ? '查看并确认' : '选用并确认' }}
+          </button>
+        </div>
+      </div>
+      <p v-if="pendingEntries.length === 0" class="setting-row settings-note" data-empty="pending">没有待确认的课程包。</p>
+    </div>
+
+    <div class="settings-card glass">
+      <div class="setting-row">
+        <div class="setting-label">
+          <strong>浏览、复制和编辑课程包</strong>
+          <small>所有课程包的完整内容在侧栏的「课程」里；内置包只读，可以复制一份再改</small>
+        </div>
+        <div class="setting-control end">
+          <button id="openCourseView" class="secondary-button small" type="button" @click="openCourses">
+            <AppIcon name="arrow-right" />
+            去课程视图
           </button>
         </div>
       </div>
@@ -192,10 +215,6 @@ const run = (promise: Promise<unknown>) => {
 .course-row .setting-label strong {
   flex-wrap: wrap;
   gap: var(--space-1);
-}
-.scope-badge.trust-pending,
-.scope-badge.trust-invalid {
-  color: var(--warning);
 }
 .scope-badge.selected {
   font-weight: 600;

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 
 import SideBar from '../../../src/renderer/src/components/SideBar.vue';
 import { SIDEBAR_STORAGE_KEY, useAppStore } from '../../../src/renderer/src/stores/app.ts';
@@ -68,6 +68,16 @@ describe('SideBar', () => {
     expect(useAppStore().sidebarCollapsed).toBe(false);
     vi.restoreAllMocks();
   });
+  test('课程 is a top-level view beside the notes', async () => {
+    const wrapper = mount(SideBar);
+    const labels = wrapper.findAll('nav.main-nav .nav-label').map((node) => node.text());
+    expect(labels.slice(labels.indexOf('学习笔记'), labels.indexOf('学习笔记') + 2)).toEqual(['学习笔记', '课程']);
+    await wrapper.get('[data-nav="courses"]').trigger('click');
+    await flushPromises();
+    expect(useAppStore().view).toBe('courses');
+    expect(wrapper.get('[data-nav="courses"]').classes()).toContain('active');
+  });
+
   test('members, activity and cost share one entry, which stays active on each tab', async () => {
     const wrapper = mount(SideBar);
     const labels = wrapper.findAll('.nav-item .nav-label').map((node) => node.text());

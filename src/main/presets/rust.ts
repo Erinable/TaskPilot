@@ -11,7 +11,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import * as git from '../git.ts';
 import { readTracked } from '../repo_reader.ts';
-import { semverOrNull } from '../semver.ts';
+import { semverOrNull } from '../../shared/semver.ts';
 import { resolveExecutable } from '../workspace.ts';
 import type { Preset } from './preset.ts';
 import type { StepId, StepKind } from '../../shared/check_steps.ts';

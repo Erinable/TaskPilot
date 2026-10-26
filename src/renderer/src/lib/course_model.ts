@@ -1,9 +1,11 @@
-// Pure helpers for the course pack page: how a pack's fields, sources and
-// changes read, and whether a pack is written for the repository's
-// languages. No DOM access, so tests import it directly.
-import { COURSE_DIMENSION_LABELS } from '@shared/course_pack.ts';
+// Pure helpers for the course pages: how a pack's fields, sources and
+// changes read, whether a pack is written for the repository's languages,
+// and the pack editor's form (a draft of a pack and its field errors). No
+// DOM access, so tests import it directly.
+import { COURSE_DIMENSION_LABELS, COURSE_SCHEMA_VERSION } from '@shared/course_pack.ts';
 import type { CourseChange } from '@shared/course_changes.ts';
-import type { CourseSource } from '@shared/course_pack.ts';
+import type { CourseDimension, CoursePack, CourseSource } from '@shared/course_pack.ts';
+import type { CourseFieldError } from '@shared/course_rules.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 
 export const SOURCE_LABELS: Record<CourseSource, string> = { builtin: '内置', repository: '仓库', user: '已导入' };
@@ -56,4 +58,91 @@ export const languageMismatch = (packLanguages: string[] | null | undefined, rep
 export const sourcePath = (id: string, source: CourseSource, userDir: string) => {
   if (source === 'repository') return `.taskpilot/courses/${id}.toml`;
   return source === 'user' ? `${userDir}/${id}.toml` : null;
+};
+
+// ========== Pack editor ==========
+// The editor's form: every field of a pack, lists always present (an
+// empty languages or examples list means the pack has none).
+type RubricDraft = {
+  id: string;
+  label: string;
+  description: string;
+  dimension: CourseDimension;
+  examples: { observation: string; betterWay: string }[];
+};
+export type CourseDraft = Omit<CoursePack, 'schemaVersion' | 'rubric' | 'appliesTo'> & { languages: string[]; rubric: RubricDraft[] };
+
+export const GUIDE_FIELDS = ['tutorGuide', 'difficultyGuide', 'practiceGuide'] as const;
+
+export const draftOf = (pack: CoursePack): CourseDraft => ({
+  id: pack.id,
+  version: pack.version,
+  domain: pack.domain,
+  title: pack.title,
+  summary: pack.summary,
+  learner: pack.learner,
+  tutorGuide: [...pack.tutorGuide],
+  difficultyGuide: [...pack.difficultyGuide],
+  practiceGuide: [...pack.practiceGuide],
+  referenceGuide: pack.referenceGuide,
+  languages: [...(pack.appliesTo?.languages ?? [])],
+  rubric: pack.rubric.map((item) => ({ ...item, examples: (item.examples ?? []).map((entry) => ({ ...entry })) })),
+});
+
+// The pack a draft describes, in the shape the main process validates.
+export const packOf = (draft: CourseDraft): CoursePack => {
+  const pack: CoursePack = {
+    schemaVersion: COURSE_SCHEMA_VERSION,
+    id: draft.id,
+    version: draft.version,
+    domain: draft.domain,
+    title: draft.title,
+    summary: draft.summary,
+    learner: draft.learner,
+    tutorGuide: [...draft.tutorGuide],
+    difficultyGuide: [...draft.difficultyGuide],
+    practiceGuide: [...draft.practiceGuide],
+    referenceGuide: draft.referenceGuide,
+    rubric: draft.rubric.map(({ examples, ...item }) => (examples.length ? { ...item, examples: examples.map((entry) => ({ ...entry })) } : item)),
+  };
+  if (draft.languages.length) pack.appliesTo = { languages: [...draft.languages] };
+  return pack;
+};
+
+// A field error as the editor words it under the field.
+export const fieldErrorText = (error: CourseFieldError) => {
+  switch (error.kind) {
+    case 'empty':
+      return '请填写这一项。';
+    case 'too_long':
+      return `最多 ${error.max} 个字。`;
+    case 'control':
+      return '不能包含控制字符。';
+    case 'tag':
+      return '不能包含 <work_package> 这样的标签。';
+    case 'id':
+      return '只能用小写字母、数字、- 和 _，以字母开头，最长 32 个字符。';
+    case 'repeat':
+      return '和前面的 id 重复了。';
+    case 'dimension':
+      return '请选一个通用维度。';
+    case 'version':
+      return '要写成 1.0.0 这样的版本号。';
+    case 'list':
+      return `要有 ${error.min} 到 ${error.max} 项。`;
+    case 'size':
+      return '整个课程包超过了 8 KB，请删减一些内容。';
+    default:
+      return error.message;
+  }
+};
+
+// The id a copy of `sourceId` gets by default: `<id>-copy`, numbered when
+// taken, and cut to fit the id rule (a folder lists at most 32 packs, so
+// three digits are always enough).
+export const copyIdFor = (sourceId: string, taken: string[]) => {
+  const base = `${sourceId.slice(0, 24)}-copy`;
+  let candidate = base;
+  for (let index = 2; taken.includes(candidate); index += 1) candidate = `${base}${index}`;
+  return candidate;
 };

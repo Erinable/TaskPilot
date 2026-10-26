@@ -165,6 +165,8 @@ declare const api: {
     pickImport: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseImport | null>>;
     import: (contentHash: string) => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
     default: () => Promise<envelopeTypes.IpcResult<CoursePack>>;
+    copy: (sourceId: string, id: string) => Promise<envelopeTypes.IpcResult<courseTypes.CourseSaved>>;
+    save: (id: string, pack: CoursePack) => Promise<envelopeTypes.IpcResult<courseTypes.CourseSaved>>;
   };
 };
 

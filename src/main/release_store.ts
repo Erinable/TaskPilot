@@ -14,7 +14,7 @@ import { formatNotes } from './agents/release_manager.ts';
 import type { ReleasePlan } from './agents/release_manager.ts';
 import type { Milestone, ReleaseInputSummary } from '../shared/ipc/release.ts';
 import { MAX_MILESTONES, MilestoneError, assignRequirement, parseMilestoneInput } from './milestones.ts';
-import { CONTROL_CHARS } from './text_rules.ts';
+import { CONTROL_CHARS } from '../shared/text_rules.ts';
 import { JsonWriteQueue } from './atomic_json_file.ts';
 
 export const RELEASES_FILENAME = 'releases.json';

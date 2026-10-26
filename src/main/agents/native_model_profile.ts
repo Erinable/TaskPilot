@@ -5,7 +5,7 @@ import { stringify as stringifyToml } from 'smol-toml';
 import type { CliId, ThinkingLevel } from '../../shared/agent_runtime.ts';
 import { processEnv } from '../env.ts';
 import { loadNativeConfig } from '../cli_native_config.ts';
-import { CONTROL_CHARS } from '../text_rules.ts';
+import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 
 export type NativeModelProfile = {
   cli: CliId;

@@ -19,7 +19,7 @@
 import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
 import type { RawObject } from './product_lead.ts';
 import type { AcceptanceCriterion } from '../tasks.ts';
-import { CONTROL_CHARS } from '../text_rules.ts';
+import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
 import { rolePreamble } from './role_preamble.ts';
 import type { ProfileSection } from './prompt_blocks.ts';

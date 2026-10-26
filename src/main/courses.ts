@@ -180,6 +180,22 @@ export const importCourse = async (configDir: string, text: string, ref: CourseR
   console.debug(`[courses] imported id=${ref.id} hash=${ref.contentHash.slice(0, 12)}`);
 };
 
+// [人工决策-2026-10-27 00:55:52] 用户想改课程包就复制一份再改：复制品和编辑后的包都写进全局目录，来源是 user，
+// 照常要本机确认后才会用（沿用 [人工决策-2026-10-26 15:38:21] 的信任模型）。
+// Validates a pack from the pack editor and writes it into the global
+// folder as `<id>.toml`. The text is generated from the validated content,
+// so reading the file back gives the same pack and hash. Never confirms.
+export const writeUserCourse = async (configDir: string, value: unknown): Promise<{ pack: CoursePack; ref: CourseRef }> => {
+  const pack = courseFile.normalizeCourse(value);
+  const text = courseFile.courseText(pack);
+  const written = parseCourseText(text, 'user', `${USER_COURSES_DIRNAME}/${pack.id}.toml`, pack.id);
+  const dir = userCoursesDir(configDir);
+  await fs.mkdir(dir, { recursive: true });
+  await writeFileAtomic(path.join(dir, `${pack.id}.toml`), text);
+  console.debug(`[courses] saved id=${pack.id} hash=${written.ref.contentHash.slice(0, 12)}`);
+  return written;
+};
+
 // [人工决策-2026-10-26 15:38:21] 内置包：programming（默认）和 os（T7e 加入，用来验证结构）；仓库里的同名文件不能替换内置包。
 // Reads every pack file in `dir` (resources/courses/, in the app bundle
 // Resources/courses/) as built in. A file that does not validate, or a
