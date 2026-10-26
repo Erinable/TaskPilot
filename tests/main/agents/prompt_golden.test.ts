@@ -106,6 +106,7 @@ test('system prompts', async () => {
 test('Release Manager', async () => {
   const input = {
     currentVersion: '1.4.2',
+    versionFile: 'package.json',
     startCommit: '0'.repeat(40),
     startLabel: 'v1.4.2',
     endCommit: 'f'.repeat(40),

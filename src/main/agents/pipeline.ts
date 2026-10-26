@@ -361,18 +361,10 @@ export interface ReleasePlanResult {
   costUsd: number;
 }
 
-// The package.json version committed at `commit`; null when the file is
-// missing, unparsable or not semver. The working tree is never read.
-export const committedVersion = async (root: string, commit: string): Promise<string | null> => {
-  const raw = await git.showFile(root, commit, 'package.json');
-  if (raw === null) return null;
-  try {
-    const version = (JSON.parse(raw) as { version?: unknown } | null)?.version;
-    return releaseManager.parseVersion(version) && typeof version === 'string' ? version.trim() : null;
-  } catch {
-    return null;
-  }
-};
+// Reads the version committed at `commit` and names the file it came from.
+// The caller picks the reader for the repository's language; agents never
+// read manifests themselves.
+export type ReadVersion = (root: string, commit: string) => Promise<{ file: string; value: string | null }>;
 
 // Everything Release Manager sees, from committed history only: subjects,
 // changed paths with line counts (secret-looking paths dropped), and the
@@ -384,21 +376,24 @@ export const collectReleaseInput = async (
     startLabel,
     endCommit,
     packages,
+    readVersion,
   }: {
     startCommit: string;
     startLabel: string;
     endCommit: string;
     packages: ReleasePackage[];
+    readVersion: ReadVersion;
   },
 ): Promise<ReleaseInput> => {
-  const [range, changes, currentVersion] = await Promise.all([
+  const [range, changes, version] = await Promise.all([
     git.commitRange(root, startCommit, endCommit, { limit: RELEASE_MAX_COMMITS }),
     git.rangeStat(root, startCommit, endCommit),
-    committedVersion(root, endCommit),
+    readVersion(root, endCommit),
   ]);
   const files = changes.filter((change) => !looksSecret(change.path));
   return {
-    currentVersion,
+    currentVersion: version.value,
+    versionFile: version.file,
     startCommit,
     startLabel,
     endCommit,
@@ -418,6 +413,7 @@ export const planRelease = async ({
   startLabel,
   endCommit,
   packages,
+  readVersion,
   runAgent,
   envPath,
   signal,
@@ -427,12 +423,13 @@ export const planRelease = async ({
   startLabel: string;
   endCommit: string;
   packages: ReleasePackage[];
+  readVersion: ReadVersion;
   runAgent: RunAgent;
   envPath?: string | null;
   signal?: AbortSignal;
 }): Promise<ReleasePlanResult> => {
   throwIfCancelled(signal);
-  const input = await collectReleaseInput(root, { startCommit, startLabel, endCommit, packages });
+  const input = await collectReleaseInput(root, { startCommit, startLabel, endCommit, packages, readVersion });
   if (input.commits.length === 0) throw Object.assign(new Error('There are no commits since the start point'), { code: 'release_no_changes' });
   throwIfCancelled(signal);
   const { output, costUsd } = await runAgent({

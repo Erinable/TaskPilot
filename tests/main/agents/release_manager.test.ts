@@ -7,7 +7,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import * as release from '../../../src/main/agents/release_manager.ts';
-import { planRelease, committedVersion } from '../../../src/main/agents/pipeline.ts';
+import { planRelease } from '../../../src/main/agents/pipeline.ts';
+import { parseVersion } from '../../../src/main/semver.ts';
+import { typescriptPreset } from '../../../src/main/presets/typescript.ts';
 import type { RunStructuredOptions } from '../../../src/main/agents/claude_cli.ts';
 
 const run = promisify(execFile);
@@ -16,6 +18,7 @@ const SHA_B = 'a1b2c3d9999999999999999999999999999999ff';
 
 const INPUT: release.ReleaseInput = {
   currentVersion: '1.4.2',
+  versionFile: 'package.json',
   startCommit: '0'.repeat(40),
   startLabel: 'v1.4.2',
   endCommit: 'f'.repeat(40),
@@ -51,8 +54,8 @@ test('nextVersion() follows semver.inc, including prereleases and no version', (
   assert.equal(release.nextVersion('1.3.1-rc.1', 'minor'), '1.4.0');
   assert.equal(release.nextVersion(null, 'minor'), '0.1.0');
   assert.equal(release.nextVersion('not a version', 'patch'), '0.0.1');
-  assert.equal(release.parseVersion('01.2.3'), null);
-  assert.equal(release.parseVersion(`${Number.MAX_SAFE_INTEGER}.0.0`), null);
+  assert.equal(parseVersion('01.2.3'), null);
+  assert.equal(parseVersion(`${Number.MAX_SAFE_INTEGER}.0.0`), null);
 });
 
 test('planPrompt fences repository text and escapes tags inside it', () => {
@@ -65,7 +68,7 @@ test('planPrompt fences repository text and escapes tags inside it', () => {
   assert.match(prompt, /src\/export\.ts \+40 -2/);
   assert.match(prompt, /assets\/logo\.png \(binary\)/);
   assert.match(prompt, /only the newest 2 commits are listed/);
-  assert.match(prompt, /current package\.json version: 1\.4\.2/);
+  assert.match(prompt, /current version \(from package\.json\): 1\.4\.2/);
   assert.match(prompt, /<package id="wp1">[\s\S]*导出文件可被 Excel 打开[\s\S]*<\/package>/);
 });
 
@@ -142,6 +145,7 @@ test('planRelease sends names and counts, never file contents or secret paths', 
     startLabel: 'init',
     endCommit: end,
     packages: [],
+    readVersion: typescriptPreset.version,
     runAgent: async (options) => {
       calls.push(options);
       return { output: { ...PLAN, checklist: [{ text: '检查', evidence: ['feature.ts', '.env'] }] }, costUsd: 0.01 };
@@ -169,6 +173,7 @@ test('planRelease refuses an empty range before calling the model', async () => 
       startLabel: 'x',
       endCommit: end,
       packages: [],
+      readVersion: typescriptPreset.version,
       runAgent: async () => {
         called = true;
         return { output: PLAN, costUsd: 0 };
@@ -177,15 +182,4 @@ test('planRelease refuses an empty range before calling the model', async () => 
     { code: 'release_no_changes' },
   );
   assert.equal(called, false);
-});
-
-test('committedVersion() is null for a missing or non-semver package.json', async () => {
-  const { dir, g, end } = await makeRepo();
-  assert.equal(await committedVersion(dir, end), '1.0.0');
-  await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: 'latest' }));
-  await g(['commit', '-qam', 'bad version']);
-  assert.equal(await committedVersion(dir, await g(['rev-parse', 'HEAD'])), null);
-  await g(['rm', '-q', 'package.json']);
-  await g(['commit', '-qm', 'remove']);
-  assert.equal(await committedVersion(dir, await g(['rev-parse', 'HEAD'])), null);
 });

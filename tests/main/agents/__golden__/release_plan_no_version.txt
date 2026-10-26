@@ -1,7 +1,7 @@
 Prepare the release for the changes below.
 
 <version>
-current package.json version: (none)
+current version (from package.json): (none)
 previous release point: v1.4.2 (0000000)
 release commit: fffffff
 </version>

@@ -9,7 +9,9 @@
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
+import * as git from '../git.ts';
 import { readTracked } from '../repo_reader.ts';
+import { semverOrNull } from '../semver.ts';
 import { resolveExecutable } from '../workspace.ts';
 import type { Preset } from './preset.ts';
 import type { StepId, StepKind } from '../../shared/check_steps.ts';
@@ -31,6 +33,20 @@ export const parseCargoManifest = (content: string): CargoManifest => {
   }
   const name = raw.package?.name;
   return { valid: true, package: typeof name === 'string' ? name.slice(0, 120) : null, workspace: Boolean(raw.workspace) };
+};
+
+// The root Cargo.toml's `[package].version`, else the workspace's
+// `[workspace.package].version` (which members inherit with
+// `version.workspace = true`); null when neither is semver.
+const cargoVersion = (content: string | null) => {
+  if (content === null) return null;
+  let raw: LooseJson;
+  try {
+    raw = parseToml(content);
+  } catch {
+    return null;
+  }
+  return semverOrNull(raw.package?.version) ?? semverOrNull(raw.workspace?.package?.version);
 };
 
 // Rust builds are slow the first time; the default 10 minutes is not enough.
@@ -103,4 +119,5 @@ export const rustPreset: Preset<RustFacts> = {
   // where rustup put it, read-only.
   sandboxEnv: (agentHome, home) => ({ CARGO_HOME: path.join(agentHome, '.cargo'), RUSTUP_HOME: path.join(home, '.rustup') }),
   sandboxRead: (home) => [path.join(home, '.rustup')],
+  version: async (root, commit) => ({ file: 'Cargo.toml', value: cargoVersion(await git.showFile(root, commit, 'Cargo.toml')) }),
 };

@@ -10,6 +10,7 @@ import * as workspace from '../workspace.ts';
 import { businessDay } from '../activity_log.ts';
 import { looksSecret } from '../repo_reader.ts';
 import { env as appEnv } from '../env.ts';
+import * as presets from '../presets/index.ts';
 import { planRelease, throwIfCancelled, RELEASE_MAX_COMMITS } from '../agents/pipeline.ts';
 import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
@@ -211,6 +212,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       // A draft has no title of its own; the renderer names it by kind.
       const controller = backgroundRuns.start({ kind: 'release', key: '', busy: 'release', agent: () => 'release-manager', label: () => null });
       const { path: envPath } = await ctx.commandPath();
+      // [人工决策-2026-10-25 23:51:35] 版本号按仓库语言的 preset 读取；没有 preset 时退回 package.json，保持原行为（CARM-16 #7、#8）。
+      const readVersion = presets.versionReaderOf((await ctx.profile())?.languages.map((language) => language.id) ?? []);
       backgroundRuns.track(
         (async () => {
           let outcome: { result: Awaited<ReturnType<typeof planRelease>> } | { error: unknown };
@@ -221,6 +224,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
               startLabel,
               endCommit,
               packages,
+              readVersion,
               runAgent: releaseRunner,
               envPath,
               signal: controller.signal,

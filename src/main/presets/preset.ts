@@ -6,6 +6,8 @@ import type { StepPatch } from '../step_config.ts';
 
 // A tool a preset needs. TaskPilot only checks for it and shows `install`;
 // it never installs anything.
+export type CommittedVersion = { file: string; value: string | null };
+
 export type ToolRequirement = { command: string; versionArgs: string[]; install: string };
 
 export interface Preset<Facts = unknown> {
@@ -34,4 +36,8 @@ export interface Preset<Facts = unknown> {
   // Folders under the real home the sandbox may read for the toolchain,
   // besides those on PATH.
   sandboxRead: (home: string) => string[];
+  // The version committed at `commit` and the file it is read from; value
+  // is null when the file is missing, unparsable or not semver. The working
+  // tree is never read.
+  version: (root: string, commit: string) => Promise<CommittedVersion>;
 }
