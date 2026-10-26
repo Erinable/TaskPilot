@@ -93,10 +93,14 @@ export class BackgroundRuns {
     return this.#list().flatMap((entry): activityTypes.AgentWork[] => (entry.agent ? [{ agent: entry.agent(), kind: entry.busy, label: entry.label() }] : []));
   }
 
-  // Aborts every run and waits for every tracked promise to settle.
+  // Aborts every run and waits for every tracked promise to settle. A run
+  // that settles can start the next (QA after a submission, the next coding
+  // round), so this drains until nothing new was tracked meanwhile.
   async cancelAll(): Promise<void> {
-    for (const entry of this.#entries.values()) entry.controller.abort();
-    await Promise.allSettled([...this.#pending]);
+    do {
+      for (const entry of this.#entries.values()) entry.controller.abort();
+      await Promise.allSettled([...this.#pending]);
+    } while (this.#pending.size);
   }
 
   #list(): Entry[] {

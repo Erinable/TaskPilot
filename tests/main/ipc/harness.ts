@@ -78,6 +78,9 @@ export const harness = async ({
   coding?: CodingOverrides;
   modelCatalog?: AgentDeps['modelCatalog'];
 } = {}) => {
+  // Made first: onTestFinished runs in reverse, so the shutdown below runs
+  // before the repository is removed.
+  const root = withRepo ? await gitRepo() : null;
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
   let ipc: IpcHandle | null = null;
@@ -85,7 +88,6 @@ export const harness = async ({
     await ipc?.shutdown();
     await fs.rm(configDir, { recursive: true, force: true });
   });
-  const root = withRepo ? await gitRepo() : null;
 
   // As at startup: the test repository is added and open, and its data lives
   // in its own directory under configDir.
