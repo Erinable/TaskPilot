@@ -146,7 +146,11 @@ test('workspace:create-project writes taskpilot.toml once, and its steps then ru
   const created = await call(CHANNELS.workspaceCreateProject, 'typescript');
   assert.equal(created.ok, true, JSON.stringify(created.error));
   assert.deepEqual(created.data.project, { status: 'ok', preset: 'typescript' });
-  assert.match(await fs.readFile(path.join(root, 'taskpilot.toml'), 'utf8'), /^preset = "typescript"$/m);
+  const text = await fs.readFile(path.join(root, 'taskpilot.toml'), 'utf8');
+  assert.match(text, /^preset = "typescript"$/m);
+  // The commented examples are the preset's suggestions, not fixed npm lines.
+  assert.match(text, /^# commands = \["npx eslint \."\]$/m);
+  assert.match(text, /^# commands = \["npx tsc --noEmit"\]$/m);
   assert.equal((await call(CHANNELS.workspaceCreateProject, 'none')).error.code, 'invalid_project');
   assert.equal((await call(CHANNELS.workspaceCreateProject, 'cobol')).error.code, 'invalid_argument');
 });

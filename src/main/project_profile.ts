@@ -20,8 +20,8 @@ const checkOf = (step: CheckStep): ProfileCheck => ({
 });
 
 // The profile of a resolved repository. Without taskpilot.toml the languages
-// are the detected ones; testLayout, testNameFormat and version stay null
-// until presets provide them.
+// are the detected ones; testLayout comes from one language only, and
+// testNameFormat and version stay null until presets provide them.
 export const buildProfile = (resolution: Resolution): ProjectProfile => {
   const preset = resolution.project.status === 'ok' ? presets.presetById(resolution.project.preset) : null;
   const detected = resolution.detected.flatMap((entry) => (entry.preset ? [presets.presetById(entry.preset)] : [])).filter((entry) => entry !== null);
@@ -29,7 +29,7 @@ export const buildProfile = (resolution: Resolution): ProjectProfile => {
   return {
     languages: languages.map((entry) => ({ id: entry.id, label: entry.label })),
     manifests: preset ? preset.manifests : [...new Set(resolution.detected.map((entry) => entry.manifest))],
-    testLayout: null,
+    testLayout: languages.length === 1 ? languages[0].testLayout : null,
     testNameFormat: null,
     checks: resolution.steps.flatMap((entry) => (entry.step ? [checkOf(entry.step)] : [])),
     version: null,

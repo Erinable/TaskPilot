@@ -170,30 +170,34 @@ export const readProjectText = async (root: string): Promise<string | null> => {
   return fs.readFile(file, 'utf8');
 };
 
+// Example command lines for the commented steps, from the preset's
+// suggestions; null where the preset has none.
+export type TemplateExamples = { lint: string | null; custom: string | null };
+
 // What a new file says: the preset, and the shape of a step as comments.
-export const projectTemplate = (preset: string) =>
+export const projectTemplate = (preset: string, examples: TemplateExamples) =>
   [
     '# TaskPilot checks for this repository. Steps: setup, build, format, lint,',
     '# typecheck, test, coverage. The preset fills in every step not set here.',
     `preset = "${preset}"`,
     '',
     '# [steps.lint]',
-    '# commands = ["npm run lint"]',
+    `# commands = [${JSON.stringify(examples.lint ?? '<command>')}]`,
     '# required = true',
     '# stage = "submit"   # or "manual"',
     '# parser = { format = "exitcode" }',
     '',
     '# [custom.name]',
     '# label = "My check"',
-    '# commands = ["node scripts/check.js"]',
+    `# commands = [${JSON.stringify(examples.custom ?? '<command>')}]`,
     '',
   ].join('\n');
 
 // Writes a new file; an existing one is never overwritten.
-export const createProjectFile = async (root: string, preset: string) => {
+export const createProjectFile = async (root: string, preset: string, examples: TemplateExamples) => {
   const file = path.join(root, PROJECT_FILENAME);
   try {
-    await fs.writeFile(file, projectTemplate(preset), { flag: 'wx' });
+    await fs.writeFile(file, projectTemplate(preset, examples), { flag: 'wx' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new WorkspaceError(`${PROJECT_FILENAME} already exists`, 'invalid_project', 'toml');
     throw error;

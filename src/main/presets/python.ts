@@ -148,6 +148,7 @@ export const pythonPreset: Preset<PythonFacts> = {
   id: 'python',
   label: 'Python',
   manifests: ['pyproject.toml', 'requirements.txt', 'setup.py'],
+  testLayout: 'test_*.py or *_test.py files under tests/, as pytest collects them',
   detect: (tracked) => ['pyproject.toml', 'requirements.txt', 'setup.py'].some((manifest) => tracked.has(manifest)),
   facts: async (root, { envPath } = {}) => {
     const tracked = await indexEntries(root);
