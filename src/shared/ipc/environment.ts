@@ -2,10 +2,13 @@
 
 import type { IpcFailure } from './envelope.ts';
 import type { RunSummary } from './workspace.ts';
+import type { StepKind } from '../check_steps.ts';
 
-export type InstallMode = 'ci' | 'install' | 'skip';
-export type ScriptKind = 'test' | 'lint' | 'build';
-export type EnvBlocker = 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
+// A step kind the plan names a script for; which ones depends on the
+// repository's setup adapter.
+export type ScriptKind = StepKind;
+// setup_unsupported: no setup adapter for the repository's languages yet.
+export type EnvBlocker = 'setup_unsupported' | 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
 
 export type EnvManifest = {
   valid: boolean;
@@ -15,7 +18,8 @@ export type EnvManifest = {
   packageManager: string | null;
 };
 
-// presets/typescript_setup.probe() facts, with workflow files reduced to their paths.
+// The npm adapter's facts (presets/typescript_setup.ts), with workflow files
+// reduced to their paths; the only adapter there is so far.
 export type EnvFacts = {
   manifest: EnvManifest | null;
   lockfiles: string[];
@@ -33,9 +37,10 @@ export type EnvAdjustment = { code: 'install_without_manifest' | 'ci_without_loc
 
 export type EnvPlan = {
   summary: string;
-  install: InstallMode;
+  // One of the adapter's install modes, such as 'ci', 'install' or 'skip'.
+  install: string;
   installReason: string;
-  scripts: Record<ScriptKind, string | null>;
+  scripts: Partial<Record<ScriptKind, string | null>>;
   // Suggested fixes are shown, never run.
   issues: { text: string; fix: string }[];
   adjustments: EnvAdjustment[];
@@ -86,8 +91,10 @@ export type EnvState = {
   // The running step's latest output and its start time; null when idle.
   live: { output: string; startedAt: string } | null;
   steps: EnvStep[];
+  // The kinds the plan can name a script for; empty without an adapter.
+  stepKinds: ScriptKind[];
   // This machine's current command line per kind ('' when not set here).
-  configured: Record<ScriptKind, string>;
+  configured: Partial<Record<ScriptKind, string>>;
 };
 
 // Re-planning after a failed step hands the steward that step's output.

@@ -138,3 +138,24 @@ test('a scripts-off install is followed by a rebuild of only those packages', ()
   assert.throws(() => envSetup.rebuildCommand(['--global']), { code: 'invalid_package' });
   assert.throws(() => envSetup.rebuildCommand([]), { code: 'invalid_package' });
 });
+
+test('the adapter only builds commands for its kinds and valid script names', () => {
+  const setup = envSetup.typescriptSetup;
+  assert.deepEqual(setup.commandFor('lint', 'lint:js'), { command: 'npm', args: ['run', 'lint:js'] });
+  assert.throws(() => setup.commandFor('typecheck', 'tsc'), { code: 'invalid_kind' });
+  assert.throws(() => setup.commandFor('test', '--global'), { code: 'invalid_script' });
+  assert.throws(() => setup.commandFor('test', 'a b'), { code: 'invalid_script' });
+  const facts: any = { manifest: { scripts: { test: 'x' } }, installScripts: [] };
+  assert.throws(() => setup.buildSteps({ install: 'skip', scripts: { test: 'nope' } }, facts, { allowScripts: false }), { code: 'invalid_script' });
+  assert.throws(() => setup.buildSteps({ install: 'exec', scripts: {} }, facts, { allowScripts: false }), { code: 'invalid_mode' });
+  // Kinds outside the adapter's are never turned into steps.
+  assert.deepEqual(setup.buildSteps({ install: 'skip', scripts: { typecheck: 'test' } }, facts, { allowScripts: false }), []);
+});
+
+test('only the npm preset has a setup adapter', async () => {
+  const presets = await import('../../../src/main/presets/index.ts');
+  assert.equal(presets.setupOf(['typescript']), envSetup.typescriptSetup);
+  assert.equal(presets.setupOf(['rust']), null);
+  assert.equal(presets.setupOf(['python']), null);
+  assert.equal(presets.setupOf([]), null);
+});

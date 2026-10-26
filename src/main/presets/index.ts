@@ -15,6 +15,10 @@ export const presetById = (id: string | null) => PRESETS.find((preset) => preset
 // The presets of a repository's languages, as its project profile lists them.
 export const presetsOf = (ids: readonly string[]) => PRESETS.filter((preset) => ids.includes(preset.id));
 
+// The Environment Steward's adapter for a repository: that of its first
+// language with one; null when none has.
+export const setupOf = (ids: readonly string[]) => presetsOf(ids).find((preset) => preset.setup)?.setup ?? null;
+
 // Manifests TaskPilot recognises, with the preset each points to; null
 // when no preset for that language exists yet.
 const LANGUAGES: { manifest: string; language: string; preset: string | null }[] = [

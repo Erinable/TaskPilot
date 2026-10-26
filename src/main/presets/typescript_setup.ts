@@ -16,6 +16,8 @@ import { processEnv } from '../env.ts';
 import { readTracked, indexEntries } from '../repo_reader.ts';
 import type { CommandEntry } from '../command_line.ts';
 import type { LooseJson } from '../loose_json.ts';
+import type { EnvAdjustment, FactSection, SetupAdapter, SetupChoice, SetupStep } from '../setup_adapter.ts';
+import type { StepKind } from '../../shared/check_steps.ts';
 
 export const LOCKFILES: Record<string, string> = {
   'package-lock.json': 'npm',
@@ -29,11 +31,11 @@ const VERSION_FILES = ['.nvmrc', '.node-version', '.tool-versions'];
 const WORKFLOW = /^\.github\/workflows\/[^/]+\.ya?ml$/;
 const MAX_WORKFLOWS = 3;
 const MAX_WORKFLOW_CHARS = 4000;
-export const INSTALL_MODES = ['ci', 'install', 'skip'] as const;
-export const SCRIPT_KINDS = ['test', 'lint', 'build'] as const;
+const INSTALL_MODES = ['ci', 'install', 'skip'] as const;
+// The step kinds a plan names a package.json script for.
+const SCRIPT_KINDS = ['test', 'lint', 'build'] as const satisfies readonly StepKind[];
 
-export type InstallMode = (typeof INSTALL_MODES)[number];
-export type ScriptKind = (typeof SCRIPT_KINDS)[number];
+type ScriptKind = (typeof SCRIPT_KINDS)[number];
 
 // The parts of package.json setup reads.
 export interface Manifest {
@@ -66,21 +68,10 @@ export interface EnvFacts {
 
 export type Blocker = 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
 
-// The validated part of the Environment Steward's plan buildSteps() reads.
-export interface SetupPlan {
-  install: InstallMode;
-  scripts: Partial<Record<ScriptKind, string | null>>;
-}
-
-// One runnable setup step. `rebuild` runs the install scripts of only the
-// packages that need them, after an install that skipped scripts.
-export type SetupStep = CommandEntry &
-  ({ id: 'install'; kind: 'install' } | { id: 'rebuild'; kind: 'rebuild'; packages: string[] } | { id: ScriptKind; kind: ScriptKind; script: string });
-
 // Reads a tool's version; injectable for tests.
 export type ToolVersion = (command: string, args: string[], envPath?: string | null) => Promise<string | null>;
 
-export type EnvSetupErrorCode = 'invalid_script' | 'invalid_mode' | 'invalid_package';
+export type EnvSetupErrorCode = 'invalid_script' | 'invalid_mode' | 'invalid_package' | 'invalid_kind';
 // npm's own script-name rules are loose; this is what TaskPilot will pass on.
 export const SCRIPT_NAME = /^[A-Za-z0-9][\w:.-]{0,63}$/;
 // npm package names, optionally scoped: lowercase, no leading dot, dash or
@@ -211,7 +202,7 @@ export const blockers = (facts: EnvFacts): Blocker[] => {
   return found;
 };
 
-export const scriptCommand = (name: string): CommandEntry => {
+const scriptCommand = (name: string): CommandEntry => {
   if (!SCRIPT_NAME.test(name)) throw new EnvSetupError(`Invalid script name: ${name}`, 'invalid_script');
   return name === 'test' ? { command: 'npm', args: ['test'] } : { command: 'npm', args: ['run', name] };
 };
@@ -234,21 +225,123 @@ export const installCommand = (mode: string, { allowScripts = false } = {}): Com
 // probed package.json, so a plan can only name commands the repository
 // already defines.
 // The rebuild step names only packages the lockfile marks, and exists only
-// when install skips scripts.
+// when install skips scripts. npm ci over an existing node_modules deletes it
+// first, so that step asks before running.
 // [人工决策-2026-10-15 16:05:04] 默认仍带 --ignore-scripts；锁文件标了 hasInstallScript 的非可选包，由用户点击「运行必需的安装脚本」单独 npm rebuild，其余依赖的脚本不跑（默认拒绝、按包放行）。npm ci 覆盖已有 node_modules 时先确认。
-export const buildSteps = (plan: SetupPlan, facts: Pick<EnvFacts, 'manifest' | 'installScripts'>, { allowScripts = false } = {}): SetupStep[] => {
+export const buildSteps = (
+  plan: SetupChoice,
+  facts: Pick<EnvFacts, 'manifest' | 'installScripts'> & { nodeModules?: boolean },
+  { allowScripts = false } = {},
+): SetupStep[] => {
   const scripts = facts.manifest?.scripts ?? {};
   const steps: SetupStep[] = [];
   if (plan.install !== 'skip') {
-    steps.push({ id: 'install', kind: 'install', ...installCommand(plan.install, { allowScripts }) });
+    const install = installCommand(plan.install, { allowScripts });
+    steps.push({
+      id: 'install',
+      kind: 'install',
+      script: null,
+      packages: [],
+      replacesInstall: plan.install === 'ci' && Boolean(facts.nodeModules),
+      ...install,
+    });
     const packages = facts.installScripts ?? [];
-    if (!allowScripts && packages.length) steps.push({ id: 'rebuild', kind: 'rebuild', packages, ...rebuildCommand(packages) });
+    if (!allowScripts && packages.length)
+      steps.push({ id: 'rebuild', kind: 'rebuild', script: null, packages, replacesInstall: false, ...rebuildCommand(packages) });
   }
   for (const kind of SCRIPT_KINDS) {
     const name = plan.scripts[kind];
     if (!name) continue;
     if (!Object.hasOwn(scripts, name)) throw new EnvSetupError(`Script not in package.json: ${name}`, 'invalid_script');
-    steps.push({ id: kind, kind, script: name, ...scriptCommand(name) });
+    steps.push({ id: kind, kind, script: name, packages: [], replacesInstall: false, ...scriptCommand(name) });
   }
   return steps;
+};
+
+// What the Environment Steward is told about an npm repository: lines of the user prompt's <setup_rules>.
+const RULES = [
+  '- The facts are package.json scripts and engines, lockfiles, Node version pins, CI workflow files, and the',
+  '  node/npm versions installed on this machine.',
+  '- install: "ci" when a package-lock.json or npm-shrinkwrap.json is tracked, "install" when there is a',
+  '  package.json without a lockfile, "skip" when nothing needs installing.',
+  '- scripts: a package.json script name per step kind.',
+  '- A Node version that does not satisfy the pin or engines range is an issue.',
+];
+
+const factSections = (facts: EnvFacts): FactSection[] => {
+  const manifest = facts.manifest;
+  const scripts =
+    manifest && Object.keys(manifest.scripts).length
+      ? Object.entries(manifest.scripts)
+          .map(([name, body]) => `${name}: ${body}`)
+          .join('\n')
+      : '(none)';
+  return [
+    {
+      tag: 'package_json',
+      body: manifest
+        ? [
+            `name: ${manifest.name ?? '(none)'}`,
+            `engines: ${JSON.stringify(manifest.engines)}`,
+            `packageManager: ${manifest.packageManager ?? '(none)'}`,
+            'scripts:',
+            scripts,
+          ].join('\n')
+        : '(no package.json)',
+    },
+    { tag: 'lockfiles', body: facts.lockfiles.length ? facts.lockfiles.join('\n') : '(none)' },
+    { tag: 'node_modules', body: facts.nodeModules ? 'present' : 'absent' },
+    { tag: 'version_pins', body: facts.versionFiles.length ? facts.versionFiles.map((file) => `${file.path}: ${file.content}`).join('\n') : '(none)' },
+    { tag: 'installed_tools', body: `node: ${facts.tools.node ?? 'not found'}\nnpm: ${facts.tools.npm ?? 'not found'}` },
+    {
+      tag: 'ci_workflows',
+      body: facts.workflows.length ? facts.workflows.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n') : '(none)',
+    },
+  ];
+};
+
+// Corrects the steward's choices against the probed facts: no install
+// without a package.json, no npm ci without an npm lockfile, and only
+// script names package.json defines.
+const validateChoice: SetupAdapter<EnvFacts>['validate'] = (raw, facts) => {
+  const adjustments: EnvAdjustment[] = [];
+  let install = raw.install;
+  const npmLock = facts.lockfiles.some((file) => file === 'package-lock.json' || file === 'npm-shrinkwrap.json');
+  if (!facts.manifest && install !== 'skip') {
+    install = 'skip';
+    adjustments.push({ code: 'install_without_manifest' });
+  } else if (install === 'ci' && !npmLock) {
+    install = 'install';
+    adjustments.push({ code: 'ci_without_lockfile' });
+  }
+  const known = facts.manifest?.scripts ?? {};
+  const scripts: SetupChoice['scripts'] = {};
+  for (const kind of SCRIPT_KINDS) {
+    const name = raw.scripts[kind] ?? '';
+    scripts[kind] = name && SCRIPT_NAME.test(name) && Object.hasOwn(known, name) ? name : null;
+    if (name && !scripts[kind]) adjustments.push({ code: 'unknown_script', kind, script: name.slice(0, 64) });
+  }
+  return { install, scripts, adjustments };
+};
+
+const isScriptKind = (kind: string): kind is ScriptKind => (SCRIPT_KINDS as readonly string[]).includes(kind);
+
+// The Environment Steward's npm adapter.
+export const typescriptSetup: SetupAdapter<EnvFacts> = {
+  probe: (root, { envPath }) => probe(root, { envPath }),
+  blockers,
+  // Without a usable package.json there is nothing to choose.
+  stopsPlanning: (found) => found.includes('no_manifest') || found.includes('invalid_manifest'),
+  // Another manager's lockfile only stops npm install; scripts still run.
+  blocking: (found, kind) => found.filter((code) => code !== 'unsupported_manager' || kind === 'install'),
+  prompt: (facts) => ({ rules: RULES, sections: factSections(facts) }),
+  installModes: INSTALL_MODES,
+  stepKinds: SCRIPT_KINDS,
+  validate: validateChoice,
+  commandFor: (kind, choice) => {
+    if (!isScriptKind(kind)) throw new EnvSetupError(`No package.json script runs ${kind}`, 'invalid_kind');
+    return scriptCommand(choice);
+  },
+  buildSteps: (choice, facts, { allowScripts }) => buildSteps(choice, facts, { allowScripts }),
+  view: (facts) => ({ ...facts, workflows: facts.workflows.map((file) => file.path) }),
 };

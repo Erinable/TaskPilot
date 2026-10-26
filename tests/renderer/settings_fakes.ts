@@ -94,7 +94,8 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
     { id: 'install', kind: 'install', script: null, packages: [], replacesInstall: false, line: 'npm ci --ignore-scripts', result: null },
     { id: 'test', kind: 'test', script: 'test', packages: [], replacesInstall: false, line: 'npm run test', result: null },
   ],
-  configured: { test: '', lint: '', build: '', smoke: '' },
+  stepKinds: ['test', 'lint', 'build'],
+  configured: { test: '', lint: '', build: '' },
   ...overrides,
 });
 

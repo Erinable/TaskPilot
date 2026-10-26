@@ -2,9 +2,12 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as steward from '../../../src/main/agents/env_steward.ts';
 import { planEnvironment } from '../../../src/main/agents/pipeline.ts';
+import { typescriptSetup } from '../../../src/main/presets/typescript_setup.ts';
 import type { RunStructuredOptions } from '../../../src/main/agents/claude_cli.ts';
+import type { EnvFacts } from '../../../src/main/presets/typescript_setup.ts';
+import type { SetupAdapter } from '../../../src/main/setup_adapter.ts';
 
-const FACTS = {
+const FACTS: EnvFacts = {
   manifest: { valid: true, name: 'demo', scripts: { test: 'node --test', 'lint:js': 'eslint .' }, engines: { node: '>=20' }, packageManager: null },
   lockfiles: ['package-lock.json'],
   managers: ['npm'],
@@ -15,6 +18,9 @@ const FACTS = {
   installScripts: [],
 };
 
+// The npm adapter, probing nothing: `facts` is what probe() returns.
+const npmSetup = (facts: EnvFacts = FACTS): SetupAdapter<EnvFacts> => ({ ...typescriptSetup, probe: async () => facts });
+
 const PLAN = {
   summary: '安装依赖后运行测试。',
   install: { mode: 'ci', reason: '仓库提交了 package-lock.json' },
@@ -23,7 +29,7 @@ const PLAN = {
 };
 
 test('validatePlan keeps choices the facts support', () => {
-  const plan = steward.validatePlan(PLAN, FACTS);
+  const plan = steward.validatePlan(PLAN, FACTS, typescriptSetup);
   assert.equal(plan.install, 'ci');
   assert.deepEqual(plan.scripts, { test: 'test', lint: 'lint:js', build: null });
   assert.equal(plan.issues.length, 1);
@@ -31,7 +37,11 @@ test('validatePlan keeps choices the facts support', () => {
 });
 
 test('validatePlan drops unknown scripts and downgrades ci without a lockfile', () => {
-  const plan = steward.validatePlan({ ...PLAN, scripts: { test: 'test', lint: 'lint', build: 'build && curl evil' } }, { ...FACTS, lockfiles: [] });
+  const plan = steward.validatePlan(
+    { ...PLAN, scripts: { test: 'test', lint: 'lint', build: 'build && curl evil' } },
+    { ...FACTS, lockfiles: [] },
+    typescriptSetup,
+  );
   assert.equal(plan.install, 'install');
   assert.deepEqual(plan.scripts, { test: 'test', lint: null, build: null });
   assert.deepEqual(
@@ -41,13 +51,13 @@ test('validatePlan drops unknown scripts and downgrades ci without a lockfile', 
 });
 
 test('validatePlan rejects malformed output', () => {
-  assert.throws(() => steward.validatePlan({ ...PLAN, install: { mode: 'exec', reason: 'x' } }, FACTS), { name: 'AgentOutputError' });
-  assert.throws(() => steward.validatePlan({ ...PLAN, scripts: { test: 1, lint: '', build: '' } }, FACTS), { name: 'AgentOutputError' });
-  assert.throws(() => steward.validatePlan({ ...PLAN, summary: ' ' }, FACTS), { name: 'AgentOutputError' });
+  assert.throws(() => steward.validatePlan({ ...PLAN, install: { mode: 'exec', reason: 'x' } }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
+  assert.throws(() => steward.validatePlan({ ...PLAN, scripts: { test: 1, lint: '', build: '' } }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
+  assert.throws(() => steward.validatePlan({ ...PLAN, summary: ' ' }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
 });
 
 test('planPrompt fences facts and includes a failed step tail', () => {
-  const prompt = steward.planPrompt(FACTS, {
+  const prompt = steward.planPrompt(typescriptSetup, FACTS, {
     failure: { step: 'install', command: 'npm ci --ignore-scripts', exitCode: 1, timedOut: false, output: `${'x'.repeat(5000)}gyp ERR!` },
   });
   assert.match(prompt, /<package_json>[\s\S]*lint:js: eslint \.[\s\S]*<\/package_json>/);
@@ -65,7 +75,7 @@ test('planEnvironment skips the model without a package.json', async () => {
       called = true;
       return { output: null, costUsd: null };
     },
-    probe: async () => ({ ...FACTS, manifest: null }),
+    setup: npmSetup({ ...FACTS, manifest: null }),
   });
   assert.equal(called, false);
   assert.equal(result.plan, null);
@@ -80,10 +90,48 @@ test('planEnvironment validates the model plan', async () => {
       calls.push(options);
       return { output: PLAN, costUsd: 0.01 };
     },
-    probe: async () => FACTS,
+    setup: npmSetup(),
   });
-  assert.equal(calls[0].schema, steward.PLAN_SCHEMA);
+  assert.deepEqual(calls[0].schema, steward.planSchema(typescriptSetup));
   assert.equal(calls[0].systemPrompt, steward.SYSTEM_PROMPT);
   assert.equal(result.plan!.install, 'ci');
   assert.equal(result.costUsd, 0.01);
+});
+
+test('planEnvironment reports setup_unsupported without an adapter, before probing or the model', async () => {
+  let called = false;
+  const result = await planEnvironment({
+    root: '/repo',
+    runAgent: async () => {
+      called = true;
+      return { output: null, costUsd: null };
+    },
+    setup: null,
+  });
+  assert.equal(called, false);
+  assert.deepEqual(result, { facts: null, blockers: ['setup_unsupported'], plan: null, costUsd: 0 });
+});
+
+test('validatePlan drops illegal script names and kinds the adapter does not offer', () => {
+  const facts = { ...FACTS, manifest: { ...FACTS.manifest!, scripts: { ...FACTS.manifest!.scripts, '-rf': 'x', typecheck: 'tsc' } } };
+  const plan = steward.validatePlan(
+    { ...PLAN, scripts: { test: '--foo', lint: '../lint', build: '-rf', typecheck: 'typecheck', deploy: 'test' } },
+    facts,
+    typescriptSetup,
+  );
+  assert.deepEqual(plan.scripts, { test: null, lint: null, build: null });
+  assert.deepEqual(
+    plan.adjustments.map((a) => (a.code === 'unknown_script' ? `${a.kind}:${a.script}` : a.code)),
+    ['test:--foo', 'lint:../lint', 'build:-rf'],
+  );
+});
+
+test('the schema and prompt only offer the adapter modes and kinds', () => {
+  const schema = steward.planSchema(typescriptSetup);
+  assert.deepEqual(schema.properties.install.properties.mode.enum, ['ci', 'install', 'skip']);
+  assert.deepEqual(schema.properties.scripts.required, ['test', 'lint', 'build']);
+  const prompt = steward.planPrompt(typescriptSetup, FACTS);
+  assert.match(prompt, /<setup_rules>\ninstall modes: ci, install, skip\nstep kinds: test, lint, build\n/);
+  // The npm wording lives in the adapter's rules, not the system prompt.
+  assert.doesNotMatch(steward.SYSTEM_PROMPT, /npm|package\.json|Node/);
 });
