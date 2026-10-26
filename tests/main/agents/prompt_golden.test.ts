@@ -4,7 +4,9 @@
 // each must stay byte for byte the same, except where a prompt now uses the
 // profile (Coding Agent's submit checks, CARM-21; Architect's manifest hint,
 // CARM-23; Product Lead's test layout, CARM-23; the test name format in
-// Product Lead's plan and Coding Agent, CARM-22). Re-record only for an
+// Product Lead's plan and Coding Agent, CARM-22). Product Lead and Tutor
+// render the built-in programming course pack here, which must give the same
+// bytes (CARM-28). Re-record only for an
 // intended prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
 import { describe, expect, test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -20,6 +22,7 @@ import type { AppContext } from '../../../src/main/app_context.ts';
 import type { CheckOutcome, EvidenceItem } from '../../../src/main/evidence.ts';
 import type { TaskDefinition } from '../../../src/main/tasks.ts';
 import type { ProjectProfile } from '../../../src/shared/project_profile.ts';
+import { PROGRAMMING_COURSE } from '../../../src/shared/course_pack.ts';
 
 // What effective_steps gives a TypeScript repository with taskpilot.toml.
 const TS_PROFILE: ProjectProfile = {
@@ -97,11 +100,11 @@ const DIFF = {
 };
 
 test('system prompts', async () => {
-  await expect(productLead.SYSTEM_PROMPT).toMatchFileSnapshot(golden('product_lead_system'));
+  await expect(productLead.systemPrompt(PROGRAMMING_COURSE)).toMatchFileSnapshot(golden('product_lead_system'));
   await expect(architect.SYSTEM_PROMPT).toMatchFileSnapshot(golden('architect_system'));
   await expect(architect.ADJUDICATE_SYSTEM_PROMPT).toMatchFileSnapshot(golden('architect_adjudicate_system'));
   await expect(qa.SYSTEM_PROMPT).toMatchFileSnapshot(golden('qa_system'));
-  await expect(tutor.SYSTEM_PROMPT).toMatchFileSnapshot(golden('tutor_system'));
+  await expect(tutor.systemPrompt(PROGRAMMING_COURSE)).toMatchFileSnapshot(golden('tutor_system'));
   await expect(tutor.GRADE_SYSTEM_PROMPT).toMatchFileSnapshot(golden('tutor_grade_system'));
   await expect(releaseManager.SYSTEM_PROMPT).toMatchFileSnapshot(golden('release_system'));
 });
@@ -137,12 +140,12 @@ describe.each(PROFILES)('%s', (_name, profile) => {
   test('Product Lead plan', async () => {
     const suffix = profile ? '_profile' : '';
     const questions = [{ text: '锁定时长？', answer: '15 分钟' }, { text: '是否通知用户？' }];
-    await expect(productLead.planPrompt({ ...REQUIREMENT, questions, interfaces: INTERFACES, linkTests: true, profile })).toMatchFileSnapshot(
-      golden(`product_lead_plan_tests${suffix}`),
-    );
-    await expect(productLead.planPrompt({ ...REQUIREMENT, questions: [], interfaces: null, linkTests: false, profile })).toMatchFileSnapshot(
-      golden(`product_lead_plan_no_tests${suffix}`),
-    );
+    await expect(
+      productLead.planPrompt({ ...REQUIREMENT, questions, interfaces: INTERFACES, linkTests: true, profile, course: PROGRAMMING_COURSE }),
+    ).toMatchFileSnapshot(golden(`product_lead_plan_tests${suffix}`));
+    await expect(
+      productLead.planPrompt({ ...REQUIREMENT, questions: [], interfaces: null, linkTests: false, profile, course: PROGRAMMING_COURSE }),
+    ).toMatchFileSnapshot(golden(`product_lead_plan_no_tests${suffix}`));
   });
 
   // With a profile the manifest hint names the repository's manifests, so it has its own golden.
@@ -230,7 +233,7 @@ test('Coding Agent lists only the submit-stage checks, with their labels and com
 // The test name format adds only its own line to the default profile's plan
 // (the test layout line is CARM-23's).
 test("Product Lead's plan with the default profile only adds the test name format line", () => {
-  const input = { ...REQUIREMENT, questions: [], interfaces: INTERFACES, linkTests: true };
+  const input = { ...REQUIREMENT, questions: [], interfaces: INTERFACES, linkTests: true, course: PROGRAMMING_COURSE };
   const bare = productLead.planPrompt({ ...input, profile: { ...TS_PROFILE, testNameFormat: null } }).split('\n');
   const withProfile = productLead.planPrompt({ ...input, profile: TS_PROFILE }).split('\n');
   const at = withProfile.findIndex((line, index) => line !== bare[index]);
@@ -244,4 +247,26 @@ test("Product Lead's plan with the default profile only adds the test name forma
     productLead.planPrompt({ ...input, linkTests: false, profile: TS_PROFILE }),
     productLead.planPrompt({ ...input, linkTests: false, profile: { ...TS_PROFILE, testNameFormat: null } }),
   );
+});
+
+// Another pack's text reaches every prompt that reads one (CARM-28).
+test('Product Lead and Tutor render the course pack they are given', () => {
+  const pack = {
+    ...PROGRAMMING_COURSE,
+    id: 'os',
+    learner: 'a student learning operating systems',
+    tutorGuide: ['The student knows basic C.', 'Connect every step to the kernel mechanism behind it.'],
+    difficultyGuide: ['- easy: uses an existing kernel facility.'],
+    practiceGuide: ['- practice: the core mechanism of the lab.'],
+  };
+  const system = productLead.systemPrompt(pack);
+  assert.match(system, /plan software work for a student learning operating systems\. Each package/);
+  assert.doesNotMatch(system, /new to programming/);
+  const plan = productLead.planPrompt({ ...REQUIREMENT, questions: [], interfaces: null, linkTests: true, course: pack });
+  assert.ok(plan.includes('Difficulty, for a student learning operating systems:\n- easy: uses an existing kernel facility.\n\nMode,'));
+  assert.ok(plan.includes('Coding Agent:\n- practice: the core mechanism of the lab.\n\n<requirement>'));
+  assert.doesNotMatch(plan, /async code|boilerplate/);
+  const tutorSystem = tutor.systemPrompt(pack);
+  assert.ok(tutorSystem.includes('\nThe student knows basic C. Connect every step to the kernel mechanism behind it. Your job is to help them'));
+  assert.doesNotMatch(tutorSystem, /new to programming/);
 });

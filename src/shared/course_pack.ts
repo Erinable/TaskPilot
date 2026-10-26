@@ -1,6 +1,7 @@
 // A course pack: who the learner is and how their work is planned, explained
-// and graded, for one learning domain. Product Lead and Tutor will read it
-// instead of the programming assumptions in their prompts.
+// and graded, for one learning domain. Product Lead, Tutor's step explanation
+// and the reference run read it instead of programming assumptions; grading
+// still has its own text.
 //
 // [人工决策-2026-10-25 23:51:35] 课程包本期只做结构，不切换读取（CARM-16 决策 B）：prompt 仍用原文，
 // PROGRAMMING_COURSE 由测试保证与原文一致，切换在 T7。

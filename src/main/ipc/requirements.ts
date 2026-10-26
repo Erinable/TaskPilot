@@ -13,9 +13,10 @@ import type { AppContext } from '../app_context.ts';
 import type { RequirementStore } from '../requirement_store.ts';
 import type { IpcMainLike } from './handler.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
+import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 
 type RequirementItem = Awaited<ReturnType<RequirementStore['get']>>;
-type PromptInput = Omit<RequirementItem, 'interfaces'> & { files: string[]; interfaces: string | null; profile: ProjectProfile | null };
+type PromptInput = Omit<RequirementItem, 'interfaces'> & { files: string[]; interfaces: string | null; profile: ProjectProfile | null; course: CoursePack };
 
 // Repository paths Product Lead sees: tracked files only (gitignored and
 // untracked files are left out), capped, and never their contents.
@@ -43,7 +44,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     buildPrompt: (input: PromptInput) => string,
     schema: claudeCli.JsonSchema,
     validate: (raw: unknown) => Output,
-    finish: (id: string, output: Output, costUsd: number) => Promise<unknown>,
+    finish: (id: string, output: Output, costUsd: number, course: CourseRef) => Promise<unknown>,
   ) => {
     const store = requireRequirements();
     const architectRunner = ctx.runnerFor('architect', { kind: 'requirement', id });
@@ -63,9 +64,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     const { path: envPath } = await ctx.commandPath();
     // Not awaited: the renderer polls requirements:get for the result.
     const settled = (async () => {
-      let outcome: { output: Output; costUsd: number } | { error: unknown };
+      let outcome: { output: Output; costUsd: number; course: CourseRef } | { error: unknown };
       try {
         const profile = await ctx.profile(config);
+        // The pack in use now; a repository pack not yet confirmed is never it (../courses.ts).
+        const course = await ctx.course(config);
         // Architect summarizes the touched code once, during clarification;
         // planning reuses it. Re-clarifying refreshes it.
         let interfaces = item.interfaces?.text ?? null;
@@ -92,13 +95,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         }
         throwIfCancelled(controller.signal);
         const { output, costUsd } = await productRunner({
-          prompt: buildPrompt({ ...item, files, interfaces, profile }),
-          systemPrompt: productLead.SYSTEM_PROMPT,
+          prompt: buildPrompt({ ...item, files, interfaces, profile, course: course.pack }),
+          systemPrompt: productLead.systemPrompt(course.pack),
           schema,
           envPath,
           signal: controller.signal,
         });
-        outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost };
+        outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost, course: course.ref };
       } catch (error) {
         outcome = { error };
       }
@@ -114,7 +117,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if ('error' in outcome) await fail(outcome.error);
       else {
         const { costUsd } = outcome;
-        await finish(id, outcome.output, costUsd)
+        await finish(id, outcome.output, costUsd, outcome.course)
           .then(() => record({ kind: 'requirement_finished', requirementId: id, title: store.get(id).title || title, step, costUsd }))
           .catch(fail);
       }
@@ -177,7 +180,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         (input) => productLead.planPrompt({ ...input, linkTests }),
         productLead.PLAN_SCHEMA,
         (raw) => productLead.validatePlan(raw, { linkTests }),
-        (r, output, cost) => requireRequirements().finishPlan(r, output, cost),
+        // [人工决策-2026-10-26 15:38:21] 规划时把生效课程包的 CourseRef 快照到计划上，发布时带到工作包定义。
+        (r, output, cost, course) => requireRequirements().finishPlan(r, { ...output, course }, cost),
       );
     }),
   );
@@ -199,7 +203,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const store = requireRequirements();
       const item = store.get(requireString(id, 'id'));
       if (item.status !== 'reviewing' || !item.plan) return failWith('There is no plan to publish', 'invalid_state');
-      const definitions = productLead.toTaskDefinitions(item, item.plan.packages);
+      const definitions = productLead.toTaskDefinitions(item, item.plan.packages, item.plan.course);
       const published = await store.publish(item.id, definitions);
       ctx.store.add(definitions);
       ctx.onPackagesPublished?.(definitions);

@@ -3,6 +3,7 @@
 import type { ErrorInfo } from './envelope.ts';
 import type * as packageTypes from './packages.ts';
 import type { AcceptanceCriterion } from './workspace.ts';
+import type { CourseRef } from '../course_pack.ts';
 
 export type RequirementStatus = 'draft' | 'clarifying' | 'answering' | 'planning' | 'reviewing' | 'published' | 'failed';
 
@@ -36,7 +37,8 @@ export type PlanPackage = {
   dependsOn?: number[];
 };
 
-export type RequirementPlan = { summary: string; packages: PlanPackage[] };
+// course: the pack it was planned with; absent on older plans (programming).
+export type RequirementPlan = { summary: string; packages: PlanPackage[]; course?: CourseRef };
 
 export type InterfaceModule = {
   path: string;

@@ -144,11 +144,21 @@ test('profileBlock() renders only the named sections, and nothing without a prof
 });
 
 // [人工决策-2026-10-25 23:51:35] 课程包本期只做结构不切换读取：内置包必须与 prompt 原文一致，T7 切换时才能零变化。
-test('the built-in programming course pack is the text Product Lead and Tutor use today', () => {
-  const plan = productLead.planPrompt({ text: 'x', files: [], linkTests: true });
-  assert.ok(productLead.SYSTEM_PROMPT.includes(`plan software work for ${PROGRAMMING_COURSE.learner}.`));
-  assert.ok(plan.includes([`Difficulty, for ${PROGRAMMING_COURSE.learner}:`, ...PROGRAMMING_COURSE.difficultyGuide].join('\n')));
-  assert.ok(plan.includes(PROGRAMMING_COURSE.practiceGuide.join('\n')));
+// [人工决策-2026-10-26 15:38:21] T7b 起 Product Lead 和 Tutor 讲解从课程包渲染，直接比对渲染结果与原文（golden）；
+// 判卷 prompt 仍是原文，T7c 切换。
+test('the built-in programming course pack renders the text Product Lead and Tutor used before packs', async () => {
+  const golden = (name: string) => fs.readFile(path.join(import.meta.dirname, 'agents/__golden__', `${name}.txt`), 'utf8');
+  const requirement = {
+    title: '登录失败锁定',
+    text: '连续 5 次密码错误后锁定账户 15 分钟。',
+    files: ['package.json', 'src/auth/login.ts', 'src/auth/session.ts', 'tests/auth/login.test.ts'],
+  };
+  assert.equal(productLead.systemPrompt(PROGRAMMING_COURSE), await golden('product_lead_system'));
+  assert.equal(tutor.systemPrompt(PROGRAMMING_COURSE), await golden('tutor_system'));
+  assert.equal(
+    productLead.planPrompt({ ...requirement, questions: [], interfaces: null, linkTests: false, course: PROGRAMMING_COURSE }),
+    await golden('product_lead_plan_no_tests'),
+  );
   assert.ok(tutor.GRADE_SYSTEM_PROMPT.includes(`a desktop app where ${PROGRAMMING_COURSE.learner} practises`));
   assert.ok(
     tutor.GRADE_SYSTEM_PROMPT.includes(`- Mark three things. ${PROGRAMMING_COURSE.rubric.map((item) => `${item.id}: ${item.description}.`).join(' ')}`),

@@ -4,6 +4,7 @@
 import type { CodingRun } from '../coding_types.ts';
 import type { ErrorInfo } from './envelope.ts';
 import type * as workspaceTypes from './workspace.ts';
+import type { CourseRef } from '../course_pack.ts';
 
 export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
 
@@ -104,6 +105,8 @@ export type TaskDefinition = {
   dependsOn?: string[];
   // The plan's estimate as a number; older packages only have `estimate`.
   estimateHours?: number;
+  // The course pack it was planned with; absent on older packages (programming).
+  course?: CourseRef;
 };
 
 // The parts of a definition Architect's replan replaces.

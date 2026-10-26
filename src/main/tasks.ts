@@ -4,6 +4,7 @@
 // rendered as <code>.
 import type { ModeRecommendation, PackageDifficulty } from '../shared/ipc/packages.ts';
 import type { WorkPackageStatus } from './work_package_status.ts';
+import type { CourseRef } from '../shared/course_pack.ts';
 import { isInside } from './workspace.ts';
 
 export const PRIORITIES = ['high', 'medium', 'low'] as const;
@@ -45,6 +46,9 @@ export interface TaskDefinition {
   // The requirement it was planned from (see ./agents/product_lead.ts).
   // Absent on packages planned before it was recorded.
   requirementId?: string;
+  // The course pack it was planned with. Absent on packages planned before
+  // packs were read, which count as programming.
+  course?: CourseRef;
 }
 
 // The part of a definition Architect can replan.

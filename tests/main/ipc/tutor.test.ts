@@ -60,3 +60,13 @@ test('tutor: a running answer can be cancelled; an out-of-range step is refused'
   assert.equal(state.error.code, 'agent_cancelled');
   assert.equal((await call(CHANNELS.tutorAsk, 'auth-edge-tests', 9)).error.code, 'invalid_step');
 });
+
+test('tutor: explains with the tutorGuide of the course pack in use', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent(), seedState: { 'auth-edge-tests': fixtures.claimedState } });
+  await fixtures.useOsPack(h);
+  await h.call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  await fixtures.settleTutor(h.call, 'auth-edge-tests', 0);
+  const system = fixtures.callFor(h.agentCalls, 'tutor').systemPrompt!;
+  assert.match(system, /\nConnect every step to the mechanism behind it\. Your job is to help them do one step/);
+  assert.doesNotMatch(system, /new to programming/);
+});
