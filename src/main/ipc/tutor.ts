@@ -73,10 +73,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             const read = root ? await readTracked(root, task.fileScope.slice(0, tutorAgent.MAX_TUTOR_FILES)) : { files: [], skipped: [] };
             const missing = read.skipped.filter((item) => item.reason === 'not_tracked').map((item) => item.path);
             const profile = await ctx.profile(config);
+            const course = await ctx.course(config);
             throwIfCancelled(controller.signal);
             const { output, costUsd } = await tutorRunner({
               prompt: tutorAgent.tutorPrompt({ task, stepIndex, sources: read.files, missing, profile }),
-              systemPrompt: tutorAgent.SYSTEM_PROMPT,
+              systemPrompt: tutorAgent.systemPrompt(course.pack),
               schema: tutorAgent.TUTOR_SCHEMA,
               envPath,
               signal: controller.signal,

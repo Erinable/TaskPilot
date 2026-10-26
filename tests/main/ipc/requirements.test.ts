@@ -121,3 +121,33 @@ test('requirements: create rejects empty text before any agent runs', async () =
   assert.equal(response.error.field, 'text');
   assert.equal(agentCalls.length, 0);
 });
+
+test('requirements: planning reads the course pack in use and snapshots it onto the plan and packages', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  const { call, agentCalls } = h;
+  const plan = async () => {
+    const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+    await fixtures.settle(call, data.id);
+    await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+    return fixtures.settle(call, data.id);
+  };
+  // Not yet confirmed: Product Lead still plans as programming.
+  await fixtures.useOsPack(h, { confirm: false });
+  const pending = await plan();
+  assert.equal(pending.plan.course.id, 'programming');
+  assert.equal(pending.plan.course.source, 'builtin');
+  assert.match(agentCalls.at(-1)!.systemPrompt!, /for a developer who may be new to programming/);
+
+  const ref = await fixtures.useOsPack(h);
+  const item = await plan();
+  const planCall = agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'plan').at(-1)!;
+  assert.match(planCall.systemPrompt!, /plan software work for a student learning operating systems\./);
+  assert.match(planCall.prompt, /Difficulty, for a student learning operating systems:\n- easy: uses an existing kernel facility\./);
+  assert.match(planCall.prompt, /- practice: the core mechanism of the lab\./);
+  assert.match(agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'clarify').at(-1)!.systemPrompt!, /a student learning operating systems/);
+  assert.deepEqual(item.plan.course, ref);
+
+  await call(CHANNELS.requirementsPublish, item.id);
+  const generated = (await call(CHANNELS.listTasks)).data.find((task) => task.requirementId === item.id);
+  assert.deepEqual(generated.course, ref);
+});

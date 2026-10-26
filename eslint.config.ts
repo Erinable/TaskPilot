@@ -7,6 +7,13 @@ import vue from 'eslint-plugin-vue';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+// What agents/ must not import: they render the data they are given and
+// never read repository configuration or course packs themselves.
+const AGENT_IMPORT_BANS = [
+  { group: ['**/presets/*', '**/project_config.ts', '**/courses.ts', '**/course_file.ts'], message: 'Agents receive data; load it in the caller.' },
+  { group: ['smol-toml'], message: 'Agents receive data; parse TOML in the caller.' },
+];
+
 export default tseslint.config(
   { ignores: ['out/**', 'node_modules/**', 'evals/*/reports/**', '**/*.d.ts'] },
   js.configs.recommended,
@@ -63,6 +70,16 @@ export default tseslint.config(
         { object: 'window', property: 'taskpilot', message: 'Call the main process through a store in src/renderer/src/stores/.' },
       ],
     },
+  },
+  {
+    // [人工决策-2026-10-26 15:38:21] agents/ 只接收课程包等数据结构并渲染，不读 presets、project_config、课程包加载器或 toml。
+    files: ['src/main/agents/**/*.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: AGENT_IMPORT_BANS }] },
+  },
+  {
+    // Writes the CLIs' own TOML config, not repository configuration.
+    files: ['src/main/agents/native_model_profile.ts'],
+    rules: { 'no-restricted-imports': ['error', { patterns: AGENT_IMPORT_BANS.filter((ban) => !ban.group.includes('smol-toml')) }] },
   },
   {
     // The config module, scripts and tests may read the environment directly.

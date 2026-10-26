@@ -57,15 +57,12 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
         prepared = await runtime.prepare(root, baseline, { runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         if (controller.signal.aborted) throw Object.assign(new Error('Reference run was cancelled'), { code: 'coding_aborted' });
         const profile = await ctx.profile(config);
+        // [人工决策-2026-10-26 15:38:21] 参考答案的指令来自当前生效课程包的 referenceGuide。
+        const course = await ctx.course(config);
         const result = await runtime.run({
           runName: prepared.runName,
           config: runtimeConfig,
-          prompt: runtime.codingPrompt(
-            task,
-            'Write the complete solution to this work package. It is a reference answer for a learner, so follow the repository conventions closely.',
-            null,
-            profile,
-          ),
+          prompt: runtime.codingPrompt(task, course.pack.referenceGuide, null, profile),
           timeoutMs: timeoutMinutes * 60 * 1000,
           signal: controller.signal,
           sandbox,

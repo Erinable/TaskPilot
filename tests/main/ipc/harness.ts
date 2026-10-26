@@ -464,3 +464,41 @@ export const publishChain = async (h: Awaited<ReturnType<typeof harness>>) => {
   await h.call(CHANNELS.requirementsPublish, data.id);
   return { first: `${data.id}-wp1`, second: `${data.id}-wp2` };
 };
+
+// A repository course pack (src/main/courses.ts), for the tests that switch packs.
+export const OS_PACK = `
+schemaVersion = 1
+id = "os"
+version = "0.1.0"
+domain = "operating-systems"
+title = "操作系统实验"
+summary = "在教学内核里动手。"
+learner = "a student learning operating systems"
+tutorGuide = ["Connect every step to the mechanism behind it."]
+difficultyGuide = ["- easy: uses an existing kernel facility."]
+practiceGuide = ["- practice: the core mechanism of the lab."]
+referenceGuide = "Write the complete solution to this lab step."
+
+[[rubric]]
+id = "concept"
+label = "原理"
+dimension = "thinking"
+description = "the model of the mechanism"
+
+[[rubric]]
+id = "mechanism"
+label = "实现"
+dimension = "writing"
+description = "locking and error paths"
+`;
+
+// Selects OS_PACK in taskpilot.toml and, unless `confirm` is false, confirms it on this machine.
+export const useOsPack = async ({ call, root }: Pick<Awaited<ReturnType<typeof harness>>, 'call' | 'root'>, { confirm = true } = {}) => {
+  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "os"\n');
+  await fs.mkdir(path.join(root, '.taskpilot/courses'), { recursive: true });
+  await fs.writeFile(path.join(root, '.taskpilot/courses/os.toml'), OS_PACK);
+  const { data } = await call(CHANNELS.workspaceGet);
+  const shown = data.course.state.ref;
+  if (confirm) await call(CHANNELS.workspaceConfirmCourse, 'os', shown.contentHash);
+  return shown;
+};

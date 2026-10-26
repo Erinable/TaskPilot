@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import { summarizeForRequirement } from '../../src/main/agents/pipeline.ts';
 import * as cli from '../../src/main/agents/claude_cli.ts';
 import * as productLead from '../../src/main/agents/product_lead.ts';
+import { PROGRAMMING_COURSE } from '../../src/shared/course_pack.ts';
 import { cases, answerFor } from './fixtures.ts';
 import { check } from './checks.ts';
 import { CRITERIA, judge } from './judge.ts';
@@ -104,14 +105,14 @@ const runCase = async (testCase: EvalCase, { withJudge, withArchitect }: { withJ
     }
     base.interfaces = architect.text;
   }
-  const call = (prompt: string, schema: JsonSchema) => cli.runStructured({ prompt, systemPrompt: productLead.SYSTEM_PROMPT, schema });
+  const call = (prompt: string, schema: JsonSchema) => cli.runStructured({ prompt, systemPrompt: productLead.systemPrompt(PROGRAMMING_COURSE), schema });
 
   const c = await call(productLead.clarifyPrompt(base), productLead.CLARIFY_SCHEMA);
   const clarify = productLead.validateClarify(c.output);
   const answers = clarify.questions.map((question) => answerFor(testCase, question));
 
   const questions = clarify.questions.map((text, i) => ({ text, answer: answers[i] }));
-  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true }), productLead.PLAN_SCHEMA);
+  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true, course: PROGRAMMING_COURSE }), productLead.PLAN_SCHEMA);
   const plan = productLead.validatePlan(p.output, { linkTests: true });
 
   const run: CaseRun = {

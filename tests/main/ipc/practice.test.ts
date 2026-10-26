@@ -199,3 +199,12 @@ test('practice: grading reads the developer notes and keeps repeated only when t
   const prompt = h.agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'grade').at(-1)!.prompt;
   assert.match(prompt, /<developer_notes>\n- \[writing\] 用例要有断言: 测试必须有断言\n/, 'Tutor reads the summary, not the body');
 });
+
+test('practice: the reference run is told the referenceGuide of the course pack in use', async () => {
+  const h = await practiceHarness();
+  await fixtures.useOsPack(h);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  assert.match(h.prompts[0], /Write the complete solution to this lab step\./);
+  assert.doesNotMatch(h.prompts[0], /reference answer for a learner/);
+});
