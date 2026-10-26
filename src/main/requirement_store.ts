@@ -16,7 +16,7 @@ import crypto from 'node:crypto';
 import type { TaskCatalog, TaskDefinition } from './tasks.ts';
 import type { Plan } from './agents/product_lead.ts';
 import type { InterfaceSummary, SkippedFile } from './agents/architect.ts';
-import { CONTROL_CHARS } from './text_rules.ts';
+import { CONTROL_CHARS } from '../shared/text_rules.ts';
 import { JsonWriteQueue } from './atomic_json_file.ts';
 
 export const REQUIREMENTS_FILENAME = 'requirements.json';

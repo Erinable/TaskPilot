@@ -23,7 +23,7 @@ import YAML from 'yaml';
 
 import * as markdown from '../shared/note_markdown.ts';
 import { DEFAULT_COURSE_ID, isCourseId } from '../shared/course_pack.ts';
-import { CONTROL_CHARS } from './text_rules.ts';
+import { CONTROL_CHARS } from '../shared/text_rules.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type { GradeCategory } from '../shared/ipc/packages.ts';

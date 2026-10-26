@@ -1,14 +1,16 @@
-// The course pack page: the packs the open repository can pick from, the
-// one in use, picking one on this machine, the full preview shown before a
-// pack is confirmed, and importing a pack file into the global folder. Also
-// the built-in default pack, for records from before packs.
+// Course packs, for the 课程 view and the settings page: the packs the open
+// repository can pick from, the one in use, picking one on this machine,
+// the full preview shown before a pack is confirmed, importing a pack file,
+// and copying a pack to edit it. Also the built-in default pack, for
+// records from before packs.
 //
 // [人工决策-2026-10-26 15:38:21] 确认前把整包内容展示给用户；contentHash 变化时列出改动的字段。
 // 选包只写本机 workspace.json，只影响之后的规划和判卷。
+// [人工决策-2026-10-27 00:55:52] 浏览、复制再改和编辑在侧栏的「课程」视图；设置页只留信任确认和导入。
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { call } from '@/lib/ipc.ts';
+import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -38,6 +40,7 @@ export const useCoursesStore = defineStore('courses', () => {
 
   const reset = () => {
     list.value = null;
+    viewed.value = null;
     closePreview();
   };
 
@@ -150,6 +153,70 @@ export const useCoursesStore = defineStore('courses', () => {
     }
   };
 
+  // ========== Course view ==========
+  // The pack the 课程 view shows on the right.
+  const viewed = ref<courseTypes.CoursePreview | null>(null);
+
+  const view = async (id: string) => {
+    try {
+      viewed.value = await call(window.taskpilot.courses.preview(id));
+    } catch (error) {
+      console.error(error);
+      showToast(`读取课程包失败：${describeError(error)}`);
+    }
+  };
+
+  // Opens the view's list, and the pack in use when nothing is shown yet.
+  const loadView = async () => {
+    await load();
+    const shown = viewed.value?.ref.id;
+    const id = shown && list.value?.entries.some((entry) => entry.id === shown) ? shown : list.value?.current.ref.id;
+    if (id) await view(id);
+  };
+
+  // A refusal that names a field of the form (`id`, `rubric[1].label`) is
+  // returned for the form to show there; anything else is a toast.
+  const fieldError = (error: unknown, action: string) => {
+    console.error(error);
+    if (error instanceof IpcError && error.field && error.code !== 'unknown') return { field: error.field, message: describeError(error) };
+    showToast(`${action}失败：${describeError(error)}`);
+    return null;
+  };
+
+  const saved = (result: courseTypes.CourseSaved) => {
+    list.value = result.list;
+    viewed.value = result.preview;
+  };
+
+  // Copies a pack into the global folder as `id`, then shows the copy.
+  const copy = async (sourceId: string, id: string) => {
+    busy.value = true;
+    try {
+      saved(await call(window.taskpilot.courses.copy(sourceId, id)));
+      showToast(`已复制为「${id}」。可以编辑它；在仓库里用之前要先确认。`);
+      return null;
+    } catch (error) {
+      return fieldError(error, '复制');
+    } finally {
+      busy.value = false;
+    }
+  };
+
+  // Saves an imported or copied pack. The main process validates it again;
+  // a saved pack has new content, so it is pending until confirmed again.
+  const save = async (pack: CoursePack) => {
+    busy.value = true;
+    try {
+      saved(await call(window.taskpilot.courses.save(pack.id, pack)));
+      showToast('已保存。内容变了，要在本机重新确认后才会用于规划和判卷。', 'info');
+      return null;
+    } catch (error) {
+      return fieldError(error, '保存');
+    } finally {
+      busy.value = false;
+    }
+  };
+
   return {
     // List
     list,
@@ -175,5 +242,11 @@ export const useCoursesStore = defineStore('courses', () => {
     // Import
     pickImport,
     importPicked,
+    // Course view
+    viewed,
+    view,
+    loadView,
+    copy,
+    save,
   };
 });

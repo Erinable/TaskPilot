@@ -227,6 +227,10 @@ const api = {
     import: (contentHash: string) => invoke<courseTypes.CourseList>(CHANNELS.coursesImport, contentHash),
     // The built-in default pack, for records from before packs.
     default: () => invoke<CoursePack>(CHANNELS.coursesDefault),
+    // Copies a pack into the global folder as `id`; the copy needs confirming.
+    copy: (sourceId: string, id: string) => invoke<courseTypes.CourseSaved>(CHANNELS.coursesCopy, sourceId, id),
+    // Saves an imported or copied pack from the editor; it needs confirming again.
+    save: (id: string, pack: CoursePack) => invoke<courseTypes.CourseSaved>(CHANNELS.coursesSave, id, pack),
   },
 };
 

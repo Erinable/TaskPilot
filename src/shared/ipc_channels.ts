@@ -100,6 +100,8 @@ export const CHANNELS = {
   coursesPickImport: 'courses:pick-import',
   coursesImport: 'courses:import',
   coursesDefault: 'courses:default',
+  coursesCopy: 'courses:copy',
+  coursesSave: 'courses:save',
   // Resolves once the main process has loaded its stores; true retries a failed start.
   startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.

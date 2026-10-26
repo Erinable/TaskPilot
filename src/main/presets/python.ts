@@ -12,7 +12,7 @@ import { parse as parseToml } from 'smol-toml';
 
 import * as git from '../git.ts';
 import { indexEntries, readTracked } from '../repo_reader.ts';
-import { semverOrNull } from '../semver.ts';
+import { semverOrNull } from '../../shared/semver.ts';
 import { resolveExecutable } from '../workspace.ts';
 import { formatCommandLine } from '../command_line.ts';
 import type { Preset } from './preset.ts';

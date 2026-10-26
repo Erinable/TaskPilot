@@ -8,7 +8,7 @@ import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
-export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes';
+export type ViewName = 'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes' | 'courses';
 
 export const SIDEBAR_STORAGE_KEY = 'taskpilot.sidebar.collapsed';
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'taskpilot.sidebar.width';

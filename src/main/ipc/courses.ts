@@ -1,6 +1,7 @@
 // Course pack channels: the packs the open repository can pick from, a
 // pack's full content (with what changed since this machine confirmed it),
-// picking one in workspace.json, and importing a file into userData/courses/.
+// picking one in workspace.json, importing a file into userData/courses/,
+// and copying a pack there and saving the copy from the pack editor.
 // Confirming the pack in use is workspace:confirm-course (./workspace.ts).
 //
 // [人工决策-2026-10-26 15:38:21] 切换课程包只写本机 workspace.json 的 course，只影响之后的规划和判卷；
@@ -13,6 +14,7 @@ import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import { courseChanges } from '../../shared/course_changes.ts';
 import type * as courseTypes from '../../shared/ipc/courses.ts';
+import { isCourseId } from '../../shared/course_pack.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 import type { AppContext } from '../app_context.ts';
 import type { IpcMainLike } from './handler.ts';
@@ -49,6 +51,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return { current, entries, languages: profile?.languages.map((language) => language.id) ?? [], userDir: courses.userCoursesDir(configDir) };
   };
 
+  const previewOf = async (pack: CoursePack, ref: CourseRef): Promise<courseTypes.CoursePreview> => ({
+    pack,
+    ref,
+    trust: await courses.trustOf(ctx.coursePlaces(), ref),
+    ...(await previousOf(pack, ref)),
+  });
+
   const entryOf = async (rawId: unknown) => {
     const id = requireString(rawId, 'id');
     const entry = (await courses.availableCourses(ctx.coursePlaces())).find((candidate) => candidate.id === id);
@@ -70,9 +79,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   ipcMain.handle(
     CHANNELS.coursesPreview,
     wrap(async (_event, rawId): Promise<courseTypes.CoursePreview> => {
-      const places = ctx.coursePlaces();
-      const { pack, ref } = await courses.loadCourse(places, await entryOf(rawId));
-      return { pack, ref, trust: await courses.trustOf(places, ref), ...(await previousOf(pack, ref)) };
+      const { pack, ref } = await courses.loadCourse(ctx.coursePlaces(), await entryOf(rawId));
+      return previewOf(pack, ref);
     }),
   );
 
@@ -126,6 +134,41 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       await courses.importCourse(configDir, pickedImport.text, pickedImport.ref);
       pickedImport = null;
       return list();
+    }),
+  );
+
+  // [人工决策-2026-10-27 00:55:52] 内置包只读，想改就复制一份：复制品写进全局目录 userData/courses/<newId>.toml，
+  // 来源是 user，要本机确认后才会用。仓库里的包也只能复制再改，不从这里写仓库文件。
+  // Copies any pack here into the global folder under the id the user
+  // gave. The id must be free: not built in, not the repository's, not
+  // imported already. Copying never confirms.
+  ipcMain.handle(
+    CHANNELS.coursesCopy,
+    wrap(async (_event, rawSourceId, rawId): Promise<courseTypes.CourseSaved> => {
+      const places = ctx.coursePlaces();
+      const source = await courses.loadCourse(places, await entryOf(rawSourceId));
+      const id = requireString(rawId, 'id');
+      if (!isCourseId(id)) return failWith('id: must be lowercase letters, digits, - or _, start with a letter and be at most 32 long', 'invalid_course', 'id');
+      if ((await courses.availableCourses(places)).some((entry) => entry.id === id) || (await courses.listUserCourses(configDir)).includes(id))
+        return failWith(`id: "${id}" is already a course pack`, 'course_exists', 'id');
+      const { pack, ref } = await courses.writeUserCourse(configDir, { ...source.pack, id });
+      console.debug(`[courses] copied from=${source.ref.id} id=${id}`);
+      return { list: await list(), preview: await previewOf(pack, ref) };
+    }),
+  );
+
+  // Saves a pack from the pack editor over its file in the global folder.
+  // Only imported or copied packs can be saved, and only under their own
+  // id; the content is validated again here, whatever the editor checked.
+  // A saved pack has a new content hash, so it is pending again.
+  ipcMain.handle(
+    CHANNELS.coursesSave,
+    wrap(async (_event, rawId, rawPack): Promise<courseTypes.CourseSaved> => {
+      const entry = await entryOf(rawId);
+      if (entry.source !== 'user') return failWith(`Course pack ${entry.id} is read-only here; copy it to edit it`, 'course_read_only', 'course');
+      if ((rawPack as { id?: unknown } | null)?.id !== entry.id) return failWith(`id: must stay "${entry.id}"`, 'invalid_course', 'id');
+      const { pack, ref } = await courses.writeUserCourse(configDir, rawPack);
+      return { list: await list(), preview: await previewOf(pack, ref) };
     }),
   );
 };

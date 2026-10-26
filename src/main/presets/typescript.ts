@@ -6,7 +6,7 @@
 // exactly as before: only the steps set in settings run.
 import * as git from '../git.ts';
 import { readTracked } from '../repo_reader.ts';
-import { semverOrNull } from '../semver.ts';
+import { semverOrNull } from '../../shared/semver.ts';
 import { SCRIPT_NAME, parseManifest, typescriptSetup } from './typescript_setup.ts';
 import type { Manifest } from './typescript_setup.ts';
 import type { Preset } from './preset.ts';

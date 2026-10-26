@@ -3,7 +3,7 @@ import { loadNativeConfig } from './cli_native_config.ts';
 import type { NativeCliConfig, NativeConfigOptions } from './cli_native_config.ts';
 import { isObject } from './agents/product_lead.ts';
 import { CODING_HOME, codingModelConfigReader } from './coding_model_config.ts';
-import { CONTROL_CHARS } from './text_rules.ts';
+import { CONTROL_CHARS } from '../shared/text_rules.ts';
 
 const clean = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() && value.length <= 200 && !CONTROL_CHARS.test(value) && !/[\t\r\n]/.test(value) ? value.trim() : null;

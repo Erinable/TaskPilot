@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 
 import * as release from '../../../src/main/agents/release_manager.ts';
 import { planRelease } from '../../../src/main/agents/pipeline.ts';
-import { parseVersion } from '../../../src/main/semver.ts';
+import { parseVersion } from '../../../src/shared/semver.ts';
 import { typescriptPreset } from '../../../src/main/presets/typescript.ts';
 import type { RunStructuredOptions } from '../../../src/main/agents/claude_cli.ts';
 
