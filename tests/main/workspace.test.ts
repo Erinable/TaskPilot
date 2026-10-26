@@ -140,3 +140,12 @@ test('resolveExecutable() skips files that are not executable', { skip: process.
   await fs.chmod(file, 0o644);
   assert.equal(await workspace.resolveExecutable('not-exec', { envPath: dir, platform: 'linux' }), null);
 });
+
+test('course overrides the repository pack on this machine and round-trips', async () => {
+  const dir = await tempDir();
+  assert.equal(workspace.normalize({ version: 3, steps: {} }).course, null);
+  const saved = await workspace.save(dir, { version: 3, root: '/tmp/project', steps: {}, course: 'os' });
+  assert.equal(saved.course, 'os');
+  assert.equal((await workspace.load(dir)).course, 'os');
+  assert.throws(() => workspace.normalize({ version: 3, steps: {}, course: 'Not An Id' }), { code: 'invalid_course', field: 'course' });
+});

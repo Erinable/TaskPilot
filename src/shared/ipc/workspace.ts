@@ -3,6 +3,7 @@
 
 import type { ErrorInfo } from './envelope.ts';
 import type { CheckParser, Diagnostic, StepId, StepSource } from '../check_steps.ts';
+import type { CoursePack, CourseRef, CourseSource } from '../course_pack.ts';
 
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
@@ -167,6 +168,24 @@ export type StepView = {
 export type ProjectFileState =
   { status: 'missing' } | { status: 'invalid'; error: { code: string; message: string; field: string | null } } | { status: 'ok'; preset: string | null };
 
+// How the repository's course pack choice resolved. `pending` is a
+// repository pack this machine has not confirmed (or that changed since):
+// `pack` is shown for the user to confirm, and the built-in programming
+// pack is used until then. `invalid` also falls back to programming.
+export type CourseState =
+  | { status: 'ok' }
+  | { status: 'pending'; pack: CoursePack; ref: CourseRef }
+  | { status: 'invalid'; error: { code: string; message: string; field: string | null } };
+
+export type CourseView = {
+  // The id asked for and who asked: this machine, taskpilot.toml, or nobody.
+  selected: { id: string; from: 'local' | 'project' | 'default' };
+  available: { id: string; source: CourseSource }[];
+  state: CourseState;
+  // The pack in use.
+  ref: CourseRef;
+};
+
 // A recognised language; `preset` is null when TaskPilot has none for it yet.
 export type DetectedLanguage = { manifest: string; language: string; preset: string | null };
 
@@ -179,6 +198,7 @@ export type WorkspaceView = {
   root: string | null;
   steps: StepView[];
   project: ProjectFileState;
+  course: CourseView;
   detected: DetectedLanguage[];
   presets: PresetInfo[];
 };

@@ -15,6 +15,7 @@ export const CHANNELS = {
   workspacePickRoot: 'workspace:pick-root',
   workspaceInfo: 'workspace:info',
   workspaceCreateProject: 'workspace:create-project',
+  workspaceConfirmCourse: 'workspace:confirm-course',
   workspaceOpenFile: 'workspace:open-file',
   diffStat: 'diff:stat',
   diffFile: 'diff:file',

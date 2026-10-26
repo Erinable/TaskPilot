@@ -203,3 +203,12 @@ test('snapshotBaseline commits scoped working-tree files without touching the ch
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('course packs in .taskpilot/courses/ are high-risk; other .taskpilot files are not', () => {
+  for (const file of ['.taskpilot/courses/os.toml', '.taskpilot/courses/sub/x.toml']) {
+    assert.equal(parsePatchPreview(patch(file)).files[0]?.highRisk, true, file);
+    assert.ok(reasons(file).includes(HIGH_RISK), file);
+  }
+  assert.deepEqual(reasons('.taskpilot/coursesx.toml'), []);
+  assert.deepEqual(reasons('docs/.taskpilot/courses/os.toml'), []);
+});

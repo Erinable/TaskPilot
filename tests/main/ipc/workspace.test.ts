@@ -225,3 +225,55 @@ test('verify:run pairs results with the task acceptance criteria', async () => {
   assert.equal(byText['用户不存在和密码错误返回相同的错误'].verified, false);
   assert.equal(byText['所有 auth 测试通过，lint 无错误'].manual, true);
 });
+
+const OS_PACK = `
+schemaVersion = 1
+id = "os"
+version = "0.1.0"
+domain = "operating-systems"
+title = "操作系统实验"
+summary = "在教学内核里动手。"
+learner = "a student learning operating systems"
+tutorGuide = ["Connect every step to the mechanism behind it."]
+difficultyGuide = ["- easy: uses an existing kernel facility."]
+practiceGuide = ["- practice: the core mechanism of the lab."]
+referenceGuide = "Write the complete solution to this lab step."
+
+[[rubric]]
+id = "concept"
+label = "原理"
+dimension = "thinking"
+description = "the model of the mechanism"
+
+[[rubric]]
+id = "mechanism"
+label = "实现"
+dimension = "writing"
+description = "locking and error paths"
+`;
+
+test('workspace:get reports the course pack, and workspace:confirm-course confirms only what was shown', async () => {
+  const { call, root } = await fixtures.harness();
+  let { data } = await call(CHANNELS.workspaceGet);
+  assert.deepEqual(data.course.selected, { id: 'programming', from: 'default' });
+  assert.deepEqual(data.course.state, { status: 'ok' });
+
+  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'course = "os"\n');
+  await fs.mkdir(path.join(root, '.taskpilot/courses'), { recursive: true });
+  await fs.writeFile(path.join(root, '.taskpilot/courses/os.toml'), OS_PACK);
+  ({ data } = await call(CHANNELS.workspaceGet));
+  assert.deepEqual(data.course.selected, { id: 'os', from: 'project' });
+  assert.equal(data.course.state.status, 'pending');
+  assert.equal(data.course.ref.id, 'programming');
+  const shown = data.course.state.ref;
+
+  const stale = await call(CHANNELS.workspaceConfirmCourse, 'os', 'f'.repeat(64));
+  assert.equal(stale.error.code, 'course_changed');
+  const other = await call(CHANNELS.workspaceConfirmCourse, 'programming', shown.contentHash);
+  assert.equal(other.error.code, 'course_not_pending');
+
+  const confirmed = await call(CHANNELS.workspaceConfirmCourse, 'os', shown.contentHash);
+  assert.equal(confirmed.ok, true);
+  assert.deepEqual(confirmed.data.course.state, { status: 'ok' });
+  assert.deepEqual(confirmed.data.course.ref, shown);
+});

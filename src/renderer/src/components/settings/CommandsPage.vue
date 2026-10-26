@@ -30,6 +30,12 @@ const groups = computed(() => {
 const create = (preset: string) => {
   settings.createProject(preset).catch((error) => console.error(error));
 };
+
+const course = computed(() => view.value?.course ?? null);
+const COURSE_FROM = { local: '本机设置', project: 'taskpilot.toml', default: '默认' } as const;
+const confirmCourse = () => {
+  settings.confirmCourse().catch((error) => console.error(error));
+};
 </script>
 
 <template>
@@ -83,6 +89,28 @@ const create = (preset: string) => {
     </button>
   </div>
 
+  <div v-if="course" id="courseState" class="settings-card glass project-file" :class="course.state.status">
+    <AppIcon :name="course.state.status === 'ok' ? 'check-circle' : 'alert'" class="project-icon" />
+    <div class="project-body">
+      <strong>
+        课程包：
+        <span class="scope-badge">{{ course.ref.id }}</span>
+        <small>（来自{{ COURSE_FROM[course.selected.from] }}）</small>
+      </strong>
+      <template v-if="course.state.status === 'pending'">
+        <p class="warn-text" role="status">课程包待确认：仓库里的「{{ course.state.pack.title }}」还没在本机确认，确认前先用内置的「编程」课程包。</p>
+      </template>
+      <p v-else-if="course.state.status === 'invalid'" role="alert">
+        <code>{{ course.state.error.message }}</code>
+        先用内置的「编程」课程包。
+      </p>
+    </div>
+    <button v-if="course.state.status === 'pending'" id="confirmCourse" class="primary-button small" type="button" @click="confirmCourse">
+      <AppIcon name="check-circle" />
+      查看并确认
+    </button>
+  </div>
+
   <template v-if="settings.workspaceDraft && view">
     <section v-for="group in groups" :key="group.id" class="step-group" :data-step-group="group.id">
       <h3 class="settings-section-title">
@@ -114,7 +142,8 @@ const create = (preset: string) => {
   padding: 14px 16px;
   font-size: var(--text-sm);
 }
-.project-file.invalid {
+.project-file.invalid,
+.project-file.pending {
   border-color: var(--warning);
 }
 .project-icon {

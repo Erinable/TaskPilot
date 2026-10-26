@@ -63,6 +63,8 @@ const api = {
     info: () => invoke<workspaceTypes.WorkspaceInfo>(CHANNELS.workspaceInfo),
     // Writes taskpilot.toml naming `preset`; refuses when one exists.
     createProject: (preset: string) => invoke<workspaceTypes.WorkspaceView>(CHANNELS.workspaceCreateProject, preset),
+    // Confirms the repository's course pack with the content hash the user saw.
+    confirmCourse: (id: string, contentHash: string) => invoke<workspaceTypes.WorkspaceView>(CHANNELS.workspaceConfirmCourse, id, contentHash),
     openFile: (filePath: string, line: number | null = null) => invoke<workspaceTypes.OpenedWith>(CHANNELS.workspaceOpenFile, filePath, line),
   },
 
