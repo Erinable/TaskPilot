@@ -10,6 +10,7 @@ import * as evidence from '../evidence.ts';
 import * as stepForm from '../step_form.ts';
 import * as projectConfig from '../project_config.ts';
 import * as presets from '../presets/index.ts';
+import * as courses from '../courses.ts';
 import { checkLine } from '../submit_checks.ts';
 import { openWorkspaceFile } from '../open_file.ts';
 import { toolVersion } from '../tool_version.ts';
@@ -26,11 +27,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   // Every step, merged, as the settings page shows it. The fixed steps are
   // always listed, so one nobody configured reads as skipped.
   const viewOf = async (config: workspace.WorkspaceConfig): Promise<workspaceTypes.WorkspaceView> => {
-    const resolution = await ctx.resolveSteps(config, { always: STEP_KINDS });
+    const [resolution, { pack: _pack, ...course }] = await Promise.all([ctx.resolveSteps(config, { always: STEP_KINDS }), ctx.course(config)]);
     return {
       root: config.root,
       steps: stepForm.stepViews(config, resolution),
       project: resolution.project,
+      course,
       detected: resolution.detected,
       presets: presets.PRESETS.map((preset) => ({ id: preset.id, label: preset.label })),
     };
@@ -118,6 +120,23 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const source = presets.presetById(preset);
       const suggestions = source ? source.suggestions(await source.facts(root, { envPath: (await ctx.commandPath()).path })) : {};
       await projectConfig.createProjectFile(root, preset, { lint: suggestions.lint?.[0] ?? null, custom: suggestions.typecheck?.[0] ?? null });
+      return viewOf(getConfig());
+    }),
+  );
+
+  // Confirms the repository's course pack on this machine, after the user
+  // read it. `contentHash` is the one they were shown: a pack that changed
+  // in between is refused, so nobody confirms content they did not see.
+  ipcMain.handle(
+    CHANNELS.workspaceConfirmCourse,
+    wrap(async (_event, rawId, rawHash): Promise<workspaceTypes.WorkspaceView> => {
+      const id = requireString(rawId, 'id');
+      const contentHash = requireString(rawHash, 'contentHash');
+      requireRoot();
+      const { state } = await ctx.course();
+      if (state.status !== 'pending' || state.ref.id !== id) failWith(`Course pack ${id} is not waiting for confirmation`, 'course_not_pending', 'course');
+      if (state.ref.contentHash !== contentHash) failWith(`Course pack ${id} changed since it was shown`, 'course_changed', 'course');
+      await courses.confirm(ctx.repositories.dataDir(), state.ref);
       return viewOf(getConfig());
     }),
   );

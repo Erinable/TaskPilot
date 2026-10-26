@@ -28,8 +28,10 @@ export const checkLine = (step: CheckStep) => {
 export const submitChecks = (steps: CheckStep[]): SubmitCheck[] =>
   steps.flatMap((step) => (step.stage === 'submit' ? [{ kind: step.id, stage: step.stage, blocking: step.blocking, line: checkLine(step), step }] : []));
 
-// Report files the steps write are not the package's changes.
+// Report files the steps write are not the package's changes. Course packs
+// under .taskpilot/courses/ are the repository's files, so a change to one
+// is shown.
 export const reportIgnore = (steps: CheckStep[]) => {
   const paths = new Set(steps.flatMap((step) => ('path' in step.parser && step.parser.path ? [[step.cwd, step.parser.path].filter(Boolean).join('/')] : [])));
-  return (candidate: string) => paths.has(candidate) || candidate.startsWith('.taskpilot/');
+  return (candidate: string) => paths.has(candidate) || (candidate.startsWith('.taskpilot/') && !candidate.startsWith('.taskpilot/courses/'));
 };

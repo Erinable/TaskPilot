@@ -8,6 +8,7 @@ import type * as noteTypes from '../../src/shared/ipc/notes.ts';
 import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
+import { defaultCourse } from './settings_fakes.ts';
 
 export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
   id: 't1',
@@ -121,6 +122,7 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
             },
           ],
           project: { status: 'missing' },
+          course: defaultCourse(),
           detected: [],
           presets: [],
         }),

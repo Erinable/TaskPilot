@@ -16,6 +16,7 @@ import { env } from './env.ts';
 import { jsonText, writeFileAtomic } from './atomic_json_file.ts';
 import { WorkspaceError } from './command_line.ts';
 import { isStepId } from '../shared/check_steps.ts';
+import { isCourseId } from '../shared/course_pack.ts';
 import * as stepConfig from './step_config.ts';
 import type { StepId } from '../shared/check_steps.ts';
 import type { StoredStep } from './step_config.ts';
@@ -25,14 +26,16 @@ export const CONFIG_FILENAME = 'workspace.json';
 export const CONFIG_VERSION = 3;
 
 // A normalized workspace.json. `steps` holds only what this machine sets;
-// a step left out falls through to taskpilot.toml and the preset.
+// a step left out falls through to taskpilot.toml and the preset. `course`
+// overrides the course pack taskpilot.toml names; null leaves it to the file.
 export interface WorkspaceConfig {
   version: number;
   root: string | null;
   steps: Partial<Record<StepId, StoredStep>>;
+  course: string | null;
 }
 
-export const emptyConfig = (): WorkspaceConfig => ({ version: CONFIG_VERSION, root: null, steps: {} });
+export const emptyConfig = (): WorkspaceConfig => ({ version: CONFIG_VERSION, root: null, steps: {}, course: null });
 
 // v2 stored {test, lint, build, smoke} checks with a stdout or JUnit report.
 // They become steps of the same name; `smoke` has no fixed step and becomes
@@ -73,6 +76,11 @@ export const normalize = (input: unknown): WorkspaceConfig => {
   if (!input || typeof input !== 'object') return config;
   const raw = input as LooseJson;
   if (typeof raw.root === 'string' && raw.root.trim()) config.root = raw.root.trim();
+  // [人工决策-2026-10-26 15:38:21] 本机可覆盖仓库 taskpilot.toml 选的课程包。
+  if (raw.course !== undefined && raw.course !== null) {
+    if (!isCourseId(raw.course)) throw new WorkspaceError('course: must be a course pack id such as "programming"', 'invalid_course', 'course');
+    config.course = raw.course;
+  }
   const steps = raw.steps && typeof raw.steps === 'object' && !Array.isArray(raw.steps) ? raw.steps : raw.version === CONFIG_VERSION ? {} : upgradeSteps(raw);
   for (const [id, value] of Object.entries(steps)) {
     if (!isStepId(id)) throw new WorkspaceError(`steps.${id}: is not a check step`, 'invalid_step', `steps.${id}`);
@@ -81,7 +89,7 @@ export const normalize = (input: unknown): WorkspaceConfig => {
   return config;
 };
 
-export const serialize = (config: WorkspaceConfig) => ({ version: CONFIG_VERSION, root: config.root, steps: config.steps });
+export const serialize = (config: WorkspaceConfig) => ({ version: CONFIG_VERSION, root: config.root, steps: config.steps, course: config.course });
 
 export const load = async (configDir: string): Promise<WorkspaceConfig> => {
   const file = path.join(configDir, CONFIG_FILENAME);

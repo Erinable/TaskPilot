@@ -41,6 +41,7 @@ declare const api: {
     pickRoot: () => Promise<envelopeTypes.IpcResult<string | null>>;
     info: () => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceInfo>>;
     createProject: (preset: string) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceView>>;
+    confirmCourse: (id: string, contentHash: string) => Promise<envelopeTypes.IpcResult<workspaceTypes.WorkspaceView>>;
     openFile: (filePath: string, line?: number | null) => Promise<envelopeTypes.IpcResult<workspaceTypes.OpenedWith>>;
   };
   diff: {

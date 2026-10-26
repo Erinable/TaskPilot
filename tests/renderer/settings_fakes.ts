@@ -44,10 +44,19 @@ export const stepView = (id: workspaceTypes.CheckKind, lines: string[] = []): wo
   };
 };
 
+// The built-in pack in use, as workspace:get reports it with nothing set.
+export const defaultCourse = (): workspaceTypes.CourseView => ({
+  selected: { id: 'programming', from: 'default' },
+  available: [{ id: 'programming', source: 'builtin' }],
+  state: { status: 'ok' },
+  ref: { id: 'programming', version: '1.0.0', contentHash: 'a'.repeat(64), source: 'builtin' },
+});
+
 export const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): workspaceTypes.WorkspaceView => ({
   root: '/repo',
   steps: STEP_KINDS.map((id) => stepView(id, id === 'test' ? ['npm test'] : [])),
   project: { status: 'missing' },
+  course: defaultCourse(),
   detected: [{ manifest: 'package.json', language: 'TypeScript / JavaScript', preset: 'typescript' }],
   presets: [{ id: 'typescript', label: 'TypeScript / JavaScript' }],
   ...overrides,
@@ -118,6 +127,7 @@ export const installApi = () => {
       ),
       check: vi.fn(() => ok(workspaceCheck())),
       createProject: vi.fn((preset: string) => ok(workspaceView({ project: { status: 'ok', preset } }))),
+      confirmCourse: vi.fn(() => ok(workspaceView())),
       pickRoot: vi.fn(() => ok(null)),
       info: vi.fn(() => ok({ configured: false })),
     },

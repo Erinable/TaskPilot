@@ -3,7 +3,15 @@
 // turns it into {command, args} without expanding or executing anything.
 
 export type WorkspaceErrorCode =
-  'invalid_report' | 'invalid_check' | 'invalid_command' | 'unterminated_quote' | 'shell_syntax' | 'invalid_json' | 'invalid_step' | 'invalid_project';
+  | 'invalid_report'
+  | 'invalid_check'
+  | 'invalid_command'
+  | 'unterminated_quote'
+  | 'shell_syntax'
+  | 'invalid_json'
+  | 'invalid_step'
+  | 'invalid_project'
+  | 'invalid_course';
 
 // An executable plus its argument array; never a shell string.
 export interface CommandEntry {

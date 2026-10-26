@@ -8,7 +8,9 @@ out/
 *.tsbuildinfo
 evals/*/reports/
 
-# TaskPilot check reports written into the workspace
-.taskpilot/
+# TaskPilot check reports written into the workspace; course packs in
+# .taskpilot/courses/ belong to the repository and are committed
+/.taskpilot/*
+!/.taskpilot/courses/
 # Local preview server config
 .claude/launch.json

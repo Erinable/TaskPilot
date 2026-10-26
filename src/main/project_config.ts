@@ -3,6 +3,7 @@
 // settings still win over it (./effective_steps.ts).
 //
 //   preset = "typescript"            # or "none"
+//   course = "programming"           # the course pack (./courses.ts)
 //
 //   [steps.lint]
 //   commands = ["npm run lint"]      # one or more, run in order
@@ -31,6 +32,7 @@ import { parse as parseToml, TomlError } from 'smol-toml';
 import { WorkspaceError } from './command_line.ts';
 import { CUSTOM_PREFIX, STEP_KINDS, isStepKind } from '../shared/check_steps.ts';
 import * as stepConfig from './step_config.ts';
+import { isCourseId } from '../shared/course_pack.ts';
 import type { StepId } from '../shared/check_steps.ts';
 import type { StepPatch } from './step_config.ts';
 import type { LooseJson } from './loose_json.ts';
@@ -41,10 +43,11 @@ const MAX_PROJECT_BYTES = 64 * 1024;
 const MAX_CUSTOM = 16;
 
 // The file's validated content. `preset` is null when the file names none
-// ("none" or left out).
-export type ProjectFile = { preset: string | null; steps: Partial<Record<StepId, StepPatch>> };
+// ("none" or left out), `course` when it names no course pack.
+export type ProjectFile = { preset: string | null; course: string | null; steps: Partial<Record<StepId, StepPatch>> };
 
-const TOP_KEYS = new Set(['version', 'preset', 'steps', 'custom']);
+// [人工决策-2026-10-26 15:38:21] 课程包按仓库选：顶层 course 随仓库提交，本机 workspace.json 可覆盖。
+const TOP_KEYS = new Set(['version', 'preset', 'course', 'steps', 'custom']);
 const STEP_KEYS = new Set(['enabled', 'commands', 'cwd', 'timeout', 'required', 'stage', 'parser', 'env']);
 const CUSTOM_KEYS = new Set([...STEP_KEYS, 'label']);
 const PARSER_KEYS = new Set(['format', 'path', 'dialect', 'pattern', 'severity']);
@@ -120,6 +123,9 @@ export const normalizeProject = (value: unknown, presets: readonly string[]): Pr
   if (value.version !== undefined && value.version !== PROJECT_VERSION) stepConfig.stepError('version', `must be ${PROJECT_VERSION}`, 'invalid_project');
   const preset = value.preset ?? 'none';
   if (preset !== 'none' && !presets.includes(preset)) stepConfig.stepError('preset', `must be one of ${[...presets, 'none'].join(', ')}`, 'invalid_project');
+  // Only the form here: which packs exist depends on the repository's files.
+  if (value.course !== undefined && !isCourseId(value.course))
+    stepConfig.stepError('course', 'must be a course pack id such as "programming"', 'invalid_project');
   const steps: ProjectFile['steps'] = {};
   if (value.steps !== undefined) {
     if (!isTable(value.steps)) stepConfig.stepError('steps', 'must be a table', 'invalid_project');
@@ -138,7 +144,7 @@ export const normalizeProject = (value: unknown, presets: readonly string[]): Pr
       steps[`${CUSTOM_PREFIX}${name}`] = toPatch((value.custom as LooseJson)[name], `custom.${name}`, true);
     }
   }
-  return { preset: preset === 'none' ? null : preset, steps };
+  return { preset: preset === 'none' ? null : preset, course: value.course ?? null, steps };
 };
 
 // Parses the file's text; a syntax error names its line and column.
@@ -190,6 +196,9 @@ export const projectTemplate = (preset: string, examples: TemplateExamples) =>
     '# [custom.name]',
     '# label = "My check"',
     `# commands = [${JSON.stringify(examples.custom ?? '<command>')}]`,
+    '',
+    '# The course pack TaskPilot teaches with: built in, or .taskpilot/courses/<id>.toml.',
+    '# course = "programming"',
     '',
   ].join('\n');
 

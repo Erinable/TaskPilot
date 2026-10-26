@@ -40,7 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
         page: 'commands',
         label: '检查步骤',
         icon: 'terminal',
-        keywords: '命令 测试 lint build typecheck format coverage 格式 类型检查 覆盖率 npm test 验证 taskpilot.toml 预设 静态分析',
+        keywords: '命令 测试 lint build typecheck format coverage 格式 类型检查 覆盖率 npm test 验证 taskpilot.toml 预设 静态分析 课程包 course',
       },
       { page: 'setup', label: '环境初始化', icon: 'wand', keywords: '环境初始化 环境管家 安装 依赖 npm install ci node_modules setup 配环境' },
     ],
@@ -466,6 +466,34 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   };
 
+  // ========== Course pack ==========
+  // Confirms the repository's pending course pack after showing what it
+  // tells the agents. Text only: the pack is the repository's content.
+  const confirmCourse = async () => {
+    const state = workspaceView.value?.course.state;
+    if (state?.status !== 'pending') return;
+    const { pack, ref } = state;
+    const rubric = pack.rubric.map((item) => `${item.label}（${item.id}）：${item.description}`).join('\n');
+    const confirmed = await confirmAction({
+      title: `使用仓库里的课程包「${pack.title}」？`,
+      body: [
+        `${pack.summary}`,
+        `学习者：${pack.learner}`,
+        `判卷维度：\n${rubric}`,
+        `这个包来自仓库的 .taskpilot/courses/${ref.id}.toml（版本 ${ref.version}），会作为指令交给 Product Lead 和导师。确认前一直用内置的「编程」课程包；文件内容变化后要重新确认。`,
+      ].join('\n\n'),
+      accept: '确认使用',
+    });
+    if (!confirmed) return;
+    try {
+      workspaceView.value = await call(window.taskpilot.workspace.confirmCourse(ref.id, ref.contentHash));
+      showToast(`已确认课程包「${pack.title}」。`);
+    } catch (error) {
+      console.error(error);
+      showToast(`确认失败：${describeError(error)}`);
+    }
+  };
+
   // ========== Saving ==========
   const saving = ref(false);
   // Shown beside the workspace group label in the nav.
@@ -622,6 +650,8 @@ export const useSettingsStore = defineStore('settings', () => {
     tools,
     stepView,
     createProject,
+    // Course pack
+    confirmCourse,
     // Environment
     environmentLoading,
     environmentError,

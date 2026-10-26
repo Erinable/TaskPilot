@@ -17,6 +17,7 @@ import type * as repositoryTypes from '../../../src/shared/ipc/repositories.ts';
 import type * as settingsTypes from '../../../src/shared/ipc/settings.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
+import { defaultCourse } from '../settings_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -118,6 +119,7 @@ describe('repositories store', () => {
               },
             ],
             project: { status: 'missing' },
+            course: defaultCourse(),
             detected: [],
             presets: [],
           } as workspaceTypes.WorkspaceView),

@@ -6,7 +6,8 @@ import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useSetupStore } from '@/stores/setup.ts';
-import { fail, installApi, ok } from '../settings_fakes.ts';
+import { fail, installApi, ok, workspaceView } from '../settings_fakes.ts';
+import { PROGRAMMING_COURSE } from '@shared/course_pack.ts';
 import { defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type { CliModelCatalog } from '@shared/agent_runtime.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
@@ -305,4 +306,25 @@ test('applying commands reloads settings from disk', async () => {
   expect(api.env.apply).toHaveBeenCalledWith(['test']);
   expect(api.workspace.get).toHaveBeenCalledTimes(2);
   expect(settings.hasUnsavedChanges()).toBe(false);
+});
+
+test('confirmCourse() shows the pending pack and confirms it with the hash shown', async () => {
+  const ref = { id: 'os', version: '0.1.0', contentHash: 'b'.repeat(64), source: 'repository' as const };
+  const pack = { ...PROGRAMMING_COURSE, id: 'os', title: '操作系统实验', summary: '在教学内核里动手。' };
+  const pending = workspaceView({ course: { ...workspaceView().course, selected: { id: 'os', from: 'project' }, state: { status: 'pending', pack, ref } } });
+  api.workspace.get.mockReturnValue(ok(pending));
+  const settings = await loaded();
+
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+  await settings.confirmCourse();
+  expect(api.workspace.confirmCourse).not.toHaveBeenCalled();
+
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  await settings.confirmCourse();
+  const shown = vi.mocked(feedback.confirmAction).mock.calls[1][0];
+  expect(shown.title).toContain('操作系统实验');
+  expect(shown.body).toContain('.taskpilot/courses/os.toml');
+  expect(shown.body).toContain('思路（thinking）');
+  expect(api.workspace.confirmCourse).toHaveBeenCalledWith('os', 'b'.repeat(64));
+  expect(settings.workspaceView?.course.state).toEqual({ status: 'ok' });
 });

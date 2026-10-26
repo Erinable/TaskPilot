@@ -17,6 +17,9 @@ import { readModelCatalog } from './agent_model_catalog.ts';
 import { BackgroundRuns } from './background_runs.ts';
 import * as effectiveSteps from './effective_steps.ts';
 import * as projectConfig from './project_config.ts';
+import * as courses from './courses.ts';
+import { PRESET_IDS } from './presets/index.ts';
+import { WorkspaceError } from './command_line.ts';
 import { buildProfile } from './project_profile.ts';
 import { humanTransitions } from './work_package_store.ts';
 import { TRANSITIONS, label } from './work_package_status.ts';
@@ -199,6 +202,22 @@ export const createAppContext = (deps: AppDeps) => {
       cachedProfile = { key, profile: built };
     }
     return cachedProfile.profile;
+  };
+
+  // The course pack the open repository teaches with (./courses.ts). Read
+  // fresh each time, like the steps. A broken taskpilot.toml names no pack;
+  // the steps report its error.
+  const course = async (config: workspace.WorkspaceConfig = getConfig()) => {
+    let project: string | null = null;
+    if (config.root) {
+      try {
+        const text = await projectConfig.readProjectText(config.root);
+        if (text !== null) project = projectConfig.parseProject(text, PRESET_IDS).course;
+      } catch (error) {
+        if (!(error instanceof WorkspaceError)) throw error;
+      }
+    }
+    return courses.resolveCourse(config.root, repositories.dataDir(), { local: config.course, project });
   };
 
   // Activity is a side record: a failed append is logged and never fails the
@@ -384,6 +403,7 @@ export const createAppContext = (deps: AppDeps) => {
     resolveSteps,
     runnableSteps,
     profile,
+    course,
     record,
     recordCall,
     runnerFor,

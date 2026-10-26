@@ -127,3 +127,16 @@ test("the template shows the preset's own example commands, quoted for TOML", ()
     .join('\n');
   assert.deepEqual(parse(lint).steps.lint?.commands, [{ command: 'cargo', args: ['clippy', '--workspace'] }]);
 });
+
+test('course names a course pack id; left out it is null', () => {
+  assert.equal(parse('').course, null);
+  assert.equal(parse('course = "os"').course, 'os');
+  fails('course = "OS pack"', 'course');
+  fails('course = 1', 'course');
+  // The template's commented example parses once uncommented.
+  const line = projectConfig
+    .projectTemplate('none', { lint: null, custom: null })
+    .split('\n')
+    .find((entry) => entry.startsWith('# course ='));
+  assert.equal(parse((line as string).replace(/^# /, '')).course, 'programming');
+});
