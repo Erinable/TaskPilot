@@ -1,0 +1,50 @@
+Review the submitted work package below.
+For every acceptance criterion, say whether the change meets it, by its index. Then list the problems you found, most severe first, and give a verdict.
+Files changed outside the file scope are listed separately; report one as an issue only if it causes a problem or does not belong to this package.
+
+<work_package>
+Title: 实现登录锁定
+Description: 在 login 里记录失败次数并锁定。
+Steps:
+1. 在 `src/auth/login.ts` 记录失败次数。
+2. 在 `tests/auth/login.test.ts` 加测试。
+File scope:
+- src/auth/login.ts
+- tests/auth/login.test.ts
+</work_package>
+
+<acceptance_criteria>
+0. 第 5 次失败后锁定 [linked test "locks after five failures" failed]
+1. 锁定提示不泄露账户是否存在 [no linked test; judge from the diff]
+</acceptance_criteria>
+
+<check_results>
+## Unit tests (blocking)
+Command: npm test
+Exit code 1; tests 1/2 passed, 0 skipped
+TaskPilot verdict: fail (new_failures); baseline measured on the claimed commit
+Failing now but passing at the baseline (caused by this change):
+- locks after five failures
+Already failing at the baseline (not caused by this change):
+- legacy flake
+</check_results>
+
+<interface_summary author="Architect">
+## src/auth/login.ts
+login(email: string, password: string): Promise<Session>
+</interface_summary>
+
+<out_of_scope_changes>
+README.md
+</out_of_scope_changes>
+
+<unreviewed_files>
+dist/app.js (too_large)
+</unreviewed_files>
+
+<diff>
+<file path="src/auth/login.ts">
+@@ -1 +1,2 @@
++let failures = 0;
+</file>
+</diff>

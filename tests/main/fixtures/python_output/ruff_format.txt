@@ -1,0 +1,2 @@
+demo/__init__.py:2:1: unformatted: File would be reformatted
+1 file would be reformatted, 2 files already formatted

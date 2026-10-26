@@ -1,0 +1,29 @@
+{
+  "version": "1.1.414",
+  "time": "0",
+  "generalDiagnostics": [
+    {
+      "file": "/work/python_sample/demo/__init__.py",
+      "severity": "error",
+      "message": "Type \"Literal['x']\" is not assignable to return type \"int\"\n  \"Literal['x']\" is not assignable to \"int\"",
+      "range": {
+        "start": {
+          "line": 11,
+          "character": 11
+        },
+        "end": {
+          "line": 11,
+          "character": 14
+        }
+      },
+      "rule": "reportReturnType"
+    }
+  ],
+  "summary": {
+    "filesAnalyzed": 3,
+    "errorCount": 1,
+    "warningCount": 0,
+    "informationCount": 0,
+    "timeInSec": 0.427
+  }
+}

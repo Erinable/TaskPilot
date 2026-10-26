@@ -60,7 +60,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const current = tutorState(task.id, stepIndex, step);
       if (current.status === 'running' || current.status === 'done') return current;
       // Fixed at the start, like the other runs.
-      const { root } = ctx.getConfig();
+      const config = ctx.getConfig();
+      const { root } = config;
       const controller = backgroundRuns.start({ kind: 'tutor', key, busy: 'tutor', agent: () => 'tutor', label: ctx.packageLabel(task.id) });
       tutorFailures.delete(key);
       const { path: envPath } = await ctx.commandPath();
@@ -71,9 +72,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             // Scope files as committed; ones the step creates are missing.
             const read = root ? await readTracked(root, task.fileScope.slice(0, tutorAgent.MAX_TUTOR_FILES)) : { files: [], skipped: [] };
             const missing = read.skipped.filter((item) => item.reason === 'not_tracked').map((item) => item.path);
+            const profile = await ctx.profile(config);
             throwIfCancelled(controller.signal);
             const { output, costUsd } = await tutorRunner({
-              prompt: tutorAgent.tutorPrompt({ task, stepIndex, sources: read.files, missing }),
+              prompt: tutorAgent.tutorPrompt({ task, stepIndex, sources: read.files, missing, profile }),
               systemPrompt: tutorAgent.SYSTEM_PROMPT,
               schema: tutorAgent.TUTOR_SCHEMA,
               envPath,

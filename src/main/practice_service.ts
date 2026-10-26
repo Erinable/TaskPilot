@@ -30,6 +30,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
   const startReference = (id: string) => {
     const task = requireTask(id);
     const root = requireRoot();
+    const config = ctx.getConfig();
     const baseline = requireBaseline(id);
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
@@ -55,6 +56,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       try {
         prepared = await runtime.prepare(root, baseline, { runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         if (controller.signal.aborted) throw Object.assign(new Error('Reference run was cancelled'), { code: 'coding_aborted' });
+        const profile = await ctx.profile(config);
         const result = await runtime.run({
           runName: prepared.runName,
           config: runtimeConfig,
@@ -62,6 +64,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
             task,
             'Write the complete solution to this work package. It is a reference answer for a learner, so follow the repository conventions closely.',
             null,
+            profile,
           ),
           timeoutMs: timeoutMinutes * 60 * 1000,
           signal: controller.signal,
@@ -105,6 +108,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     if (!review) failWith('QA has not judged this submission yet', 'review_not_finished');
     if (backgroundRuns.has('grade', id)) return ctx.viewOf(task, state);
     const root = requireRoot();
+    const config = ctx.getConfig();
     const collected = await collectChanges(root, requireBaseline(id), { ignore: reportIgnore(await ctx.runnableSteps().catch(() => [])) });
     const submission = collected.files.map((file) => ({ path: file.path, patch: file.patch }));
     const diffDigest = practice.submissionDigest(submission);
@@ -132,6 +136,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = ctx.runnerFor('tutor', { kind: 'package', id });
     const { path: envPath } = await ctx.commandPath();
+    const profile = await ctx.profile(config);
     const history = ctx.notes
       ? practice.notesForGrade(
           ctx.notes.list().notes,
@@ -149,6 +154,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
             reference: referencePatch && practice.referenceForPrompt(referencePatch),
             review,
             notes: history,
+            profile,
           }),
           systemPrompt: tutorAgent.GRADE_SYSTEM_PROMPT,
           schema: tutorAgent.GRADE_SCHEMA,

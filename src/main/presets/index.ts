@@ -3,9 +3,10 @@
 // reported so the user knows why none is offered.
 import { typescriptPreset } from './typescript.ts';
 import { rustPreset } from './rust.ts';
+import { pythonPreset } from './python.ts';
 import type { Preset } from './preset.ts';
 
-export const PRESETS: Preset[] = [typescriptPreset as Preset, rustPreset as Preset];
+export const PRESETS: Preset[] = [typescriptPreset as Preset, rustPreset as Preset, pythonPreset as Preset];
 
 export const PRESET_IDS = PRESETS.map((preset) => preset.id);
 
@@ -16,7 +17,9 @@ export const presetById = (id: string | null) => PRESETS.find((preset) => preset
 const LANGUAGES: { manifest: string; language: string; preset: string | null }[] = [
   { manifest: 'package.json', language: 'TypeScript / JavaScript', preset: 'typescript' },
   { manifest: 'Cargo.toml', language: 'Rust', preset: 'rust' },
-  { manifest: 'pyproject.toml', language: 'Python', preset: null },
+  { manifest: 'pyproject.toml', language: 'Python', preset: 'python' },
+  { manifest: 'requirements.txt', language: 'Python', preset: 'python' },
+  { manifest: 'setup.py', language: 'Python', preset: 'python' },
 ];
 
 export type Detection = { manifest: string; language: string; preset: string | null };

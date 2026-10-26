@@ -19,6 +19,9 @@ import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
 import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../evidence.ts';
 import type { CheckRun } from '../verification.ts';
 import { CONTROL_CHARS } from '../text_rules.ts';
+import { profileBlock } from './prompt_blocks.ts';
+import type { ProfileSection } from './prompt_blocks.ts';
+import type { ProjectProfile } from '../../shared/project_profile.ts';
 
 const MAX_ISSUES = 12;
 export const VERDICTS = ['pass', 'reject'] as const;
@@ -114,6 +117,11 @@ export const SYSTEM_PROMPT = [
 
 // Prompt
 
+// What of the project profile QA prompts show; empty until a later change
+// moves a language-specific sentence into the profile (see
+// tests/main/agents/prompt_golden.test.ts).
+const PROFILE_SECTIONS: ProfileSection[] = [];
+
 const KIND_NAMES: Record<string, string> = { test: 'Unit tests', lint: 'Lint', build: 'Build', smoke: 'Smoke tests' };
 
 // One block per check: the command, what TaskPilot concluded, and the test
@@ -179,12 +187,14 @@ export const reviewPrompt = ({
   checks = [],
   diff,
   interfaces,
+  profile,
 }: {
   task: ReviewTask;
   acceptance: CriterionEvidence[];
   checks?: { evidence: EvidenceItem; run: CheckOutcome }[];
   diff: ReviewDiff;
   interfaces?: string | null;
+  profile?: ProjectProfile | null;
 }): string => {
   const skipped = diff.skipped.length ? diff.skipped.map((s) => `${s.path} (${s.reason})`).join('\n') : '(none)';
   return [
@@ -221,6 +231,7 @@ export const reviewPrompt = ({
     '<diff>',
     formatDiff(diff.files),
     '</diff>',
+    ...profileBlock(profile, PROFILE_SECTIONS),
   ].join('\n');
 };
 

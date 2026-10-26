@@ -74,6 +74,8 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
     const previous = state.codingRun;
     if (previous && !CODING_STARTABLE.includes(previous.status)) failWith('This package already has a Coding Agent result', 'coding_result_exists');
     const root = requireRoot();
+    // Fixed at the start, like the root: a switch must not change the prompt.
+    const config = ctx.getConfig();
     // The developer's own edits and earlier applied rounds are part of the start.
     const baseline = await runtime.snapshot(root, ctx.requireBaseline(id), task.fileScope);
     const chained = trigger !== 'human' && previous;
@@ -129,10 +131,11 @@ export const createCodingService = (ctx: AppContext, runtime: CodingRuntime, { s
         if (controller.signal.aborted) throw Object.assign(new Error('Coding run was cancelled'), { code: 'coding_aborted' });
         active.workspace = prepared;
         await updateCoding(id, { status: 'running' });
+        const profile = await ctx.profile(config);
         const result = await runtime.run({
           runName: prepared.runName,
           config: runtimeConfig,
-          prompt: runtime.codingPrompt(task, instruction, feedback),
+          prompt: runtime.codingPrompt(task, instruction, feedback, profile),
           timeoutMs: timeoutMinutes * 60 * 1000,
           signal: controller.signal,
           sandbox,

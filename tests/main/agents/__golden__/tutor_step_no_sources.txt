@@ -1,0 +1,28 @@
+Help the developer with step 1 of this work package.
+Give: a plain explanation of what the step asks for; a few concrete actions in order; a short reference snippet (at most about 25 lines) in the style of the existing code, or none if code would not help; and the terms in the step a beginner may not know.
+Files in the scope that do not exist yet are listed as missing: the step may be asking the developer to create them.
+
+<work_package>
+Title: 实现登录锁定
+在 login 里记录失败次数并锁定。
+
+Steps:
+1. 在 `src/auth/login.ts` 记录失败次数。   <- this step
+2. 在 `tests/auth/login.test.ts` 加测试。
+
+File scope:
+src/auth/login.ts
+tests/auth/login.test.ts
+
+Acceptance criteria:
+- 第 5 次失败后锁定
+- 锁定提示不泄露账户是否存在
+</work_package>
+
+<missing_files>
+(none)
+</missing_files>
+
+<sources>
+(no files could be read)
+</sources>

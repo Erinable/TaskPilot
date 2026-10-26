@@ -25,9 +25,11 @@ export const PARSER_FORMATS = ['tests', 'junit', 'json', 'sarif', 'regex', 'exit
 export type ParserFormat = (typeof PARSER_FORMATS)[number];
 
 // JSON dialects: ESLint's `-f json`, Cargo's `--message-format=json` (one
-// JSON message per line, as cargo build / check / clippy print), or
-// TaskPilot's own {diagnostics: [{file, line, column, severity, message, rule}]}.
-export const JSON_DIALECTS = ['eslint', 'cargo', 'diagnostics'] as const;
+// JSON message per line, as cargo build / check / clippy print), Ruff's
+// `check --output-format=json`, mypy's `--output json` (one per line),
+// Pyright's `--outputjson`, or TaskPilot's own
+// {diagnostics: [{file, line, column, severity, message, rule}]}.
+export const JSON_DIALECTS = ['eslint', 'cargo', 'ruff', 'mypy', 'pyright', 'diagnostics'] as const;
 
 export type JsonDialect = (typeof JSON_DIALECTS)[number];
 

@@ -138,7 +138,7 @@ test('detectLanguages() recognises package.json, Cargo.toml and pyproject.toml',
     [
       ['package.json', 'typescript'],
       ['Cargo.toml', 'rust'],
-      ['pyproject.toml', null],
+      ['pyproject.toml', 'python'],
     ],
   );
   assert.deepEqual(detectLanguages(new Set(['README.md'])), []);
