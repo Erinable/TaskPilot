@@ -10,7 +10,9 @@
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 
+import * as git from '../git.ts';
 import { indexEntries, readTracked } from '../repo_reader.ts';
+import { semverOrNull } from '../semver.ts';
 import { resolveExecutable } from '../workspace.ts';
 import { formatCommandLine } from '../command_line.ts';
 import type { Preset } from './preset.ts';
@@ -54,6 +56,20 @@ export const parsePyproject = (content: string): PyProject => {
     devExtra: Array.isArray(project?.['optional-dependencies']?.dev),
     devGroup: Array.isArray(raw['dependency-groups']?.dev),
   };
+};
+
+// pyproject.toml's `[project].version`, else Poetry's
+// `[tool.poetry].version`; null when neither is semver (a `dynamic`
+// version is only known after a build).
+const pyprojectVersion = (content: string | null) => {
+  if (content === null) return null;
+  let raw: LooseJson;
+  try {
+    raw = parseToml(content);
+  } catch {
+    return null;
+  }
+  return semverOrNull(raw.project?.version) ?? semverOrNull(raw.tool?.poetry?.version);
 };
 
 // Installing dependencies can take a while on a cold cache.
@@ -179,4 +195,5 @@ export const pythonPreset: Preset<PythonFacts> = {
   secretFiles: [/(?:^|\/)\.pypirc$/i],
   sandboxEnv: (agentHome) => ({ PIP_CACHE_DIR: path.join(agentHome, '.cache', 'pip'), UV_CACHE_DIR: path.join(agentHome, '.cache', 'uv') }),
   sandboxRead: () => [],
+  version: async (root, commit) => ({ file: 'pyproject.toml', value: pyprojectVersion(await git.showFile(root, commit, 'pyproject.toml')) }),
 };

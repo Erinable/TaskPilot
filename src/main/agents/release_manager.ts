@@ -1,6 +1,6 @@
 // Release Manager: reads what TaskPilot collected about the commits since the
 // last release (subjects, changed paths with line counts, finished work
-// packages, the current package.json version) and proposes a version bump,
+// packages, the current version and the manifest it is read from) and proposes a version bump,
 // release notes and a pre-release checklist. It never sees file contents.
 //
 // [人工决策-2026-10-06 15:56:58] Release Manager 只出版本建议、更新说明和检查清单；TaskPilot 不打 tag、不 commit/push、不跑发布命令，唯一的仓库写入是用户确认后把说明写进指定 .md 文件。
@@ -10,6 +10,7 @@
 // else is dropped.
 import { AgentOutputError, isObject } from './product_lead.ts';
 import { CONTROL_CHARS_NO_CR } from '../text_rules.ts';
+import { parseVersion } from '../semver.ts';
 
 export const BUMPS = ['major', 'minor', 'patch'] as const;
 export const NOTE_GROUPS = ['added', 'fixed', 'changed', 'notes'] as const;
@@ -38,6 +39,8 @@ export interface ReleasePlan {
 
 export interface ReleaseInput {
   currentVersion: string | null;
+  // The manifest currentVersion is read from, e.g. package.json or Cargo.toml.
+  versionFile: string;
   startCommit: string;
   startLabel: string;
   endCommit: string;
@@ -53,7 +56,7 @@ export const SYSTEM_PROMPT = [
   '',
   'You receive what TaskPilot collected since the previous release: commit subjects, changed file paths',
   'with added/removed line counts (never file contents), the work packages finished in that period, and the',
-  'current package.json version. Decide:',
+  'current version with the file it is read from. Decide:',
   '- bump: "major" for incompatible changes to a public interface, "minor" for new backwards-compatible',
   '  features, "patch" for fixes and internal changes only. Give the reason in one or two sentences.',
   '  Do not compute the version number; TaskPilot does that.',
@@ -125,7 +128,7 @@ export const planPrompt = (input: ReleaseInput): string => {
     section(
       'version',
       [
-        `current package.json version: ${input.currentVersion ?? '(none)'}`,
+        `current version (from ${escape(input.versionFile)}): ${input.currentVersion ?? '(none)'}`,
         `previous release point: ${escape(input.startLabel)} (${shortSha(input.startCommit)})`,
         `release commit: ${shortSha(input.endCommit)}`,
       ].join('\n'),
@@ -140,19 +143,6 @@ export const planPrompt = (input: ReleaseInput): string => {
 };
 
 // ========== versions ==========
-
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-
-// {major, minor, patch, prerelease} of a semver string, or null when it is
-// not one (or a part is too large to add to exactly).
-export const parseVersion = (value: unknown) => {
-  if (typeof value !== 'string') return null;
-  const match = SEMVER.exec(value.trim());
-  if (!match) return null;
-  const [major, minor, patch] = [match[1], match[2], match[3]].map(Number);
-  if (![major, minor, patch].every((part) => Number.isSafeInteger(part + 1))) return null;
-  return { major, minor, patch, prerelease: match[4] ?? null };
-};
 
 // The version after `bump`, as npm's semver.inc does it: build metadata is
 // dropped, and a prerelease is released as the version it was leading up to

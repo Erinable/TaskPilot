@@ -4,7 +4,7 @@
 import { typescriptPreset } from './typescript.ts';
 import { rustPreset } from './rust.ts';
 import { pythonPreset } from './python.ts';
-import type { Preset } from './preset.ts';
+import type { CommittedVersion, Preset } from './preset.ts';
 
 export const PRESETS: Preset[] = [typescriptPreset as Preset, rustPreset as Preset, pythonPreset as Preset];
 
@@ -14,6 +14,11 @@ export const presetById = (id: string | null) => PRESETS.find((preset) => preset
 
 // The presets of a repository's languages, as its project profile lists them.
 export const presetsOf = (ids: readonly string[]) => PRESETS.filter((preset) => ids.includes(preset.id));
+
+// How Release Manager reads the committed version: from the first
+// language's preset, or package.json without one, as before presets.
+export const versionReaderOf = (ids: readonly string[]): ((root: string, commit: string) => Promise<CommittedVersion>) =>
+  (presetById(ids[0] ?? null) ?? typescriptPreset).version;
 
 // The Environment Steward's adapter for a repository: that of its first
 // language with one; null when none has.

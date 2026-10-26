@@ -11,6 +11,7 @@ import * as productLead from '../../../src/main/agents/product_lead.ts';
 import * as architect from '../../../src/main/agents/architect.ts';
 import * as qa from '../../../src/main/agents/qa.ts';
 import * as tutor from '../../../src/main/agents/tutor.ts';
+import * as releaseManager from '../../../src/main/agents/release_manager.ts';
 import { createCodingRuntime } from '../../../src/main/coding_runtime.ts';
 import type { AppContext } from '../../../src/main/app_context.ts';
 import type { CheckOutcome, EvidenceItem } from '../../../src/main/evidence.ts';
@@ -99,6 +100,26 @@ test('system prompts', async () => {
   await expect(qa.SYSTEM_PROMPT).toMatchFileSnapshot(golden('qa_system'));
   await expect(tutor.SYSTEM_PROMPT).toMatchFileSnapshot(golden('tutor_system'));
   await expect(tutor.GRADE_SYSTEM_PROMPT).toMatchFileSnapshot(golden('tutor_grade_system'));
+  await expect(releaseManager.SYSTEM_PROMPT).toMatchFileSnapshot(golden('release_system'));
+});
+
+// Release Manager takes no profile; a TypeScript repository's version comes
+// from package.json.
+test('Release Manager', async () => {
+  const input = {
+    currentVersion: '1.4.2',
+    versionFile: 'package.json',
+    startCommit: '0'.repeat(40),
+    startLabel: 'v1.4.2',
+    endCommit: 'f'.repeat(40),
+    commits: [{ sha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', subject: 'feat: 登录锁定' }],
+    commitsTruncated: false,
+    files: [{ path: 'src/auth/login.ts', added: 40, removed: 2, binary: false }],
+    filesTruncated: false,
+    packages: [{ id: 'p1', title: PACKAGE.title, description: PACKAGE.description, acceptance: ACCEPTANCE.map((item) => item.text) }],
+  };
+  await expect(releaseManager.planPrompt(input)).toMatchFileSnapshot(golden('release_plan'));
+  await expect(releaseManager.planPrompt({ ...input, currentVersion: null })).toMatchFileSnapshot(golden('release_plan_no_version'));
 });
 
 describe.each(PROFILES)('%s', (_name, profile) => {

@@ -4,7 +4,9 @@
 //
 // A repository without taskpilot.toml gets no preset steps, so it behaves
 // exactly as before: only the steps set in settings run.
+import * as git from '../git.ts';
 import { readTracked } from '../repo_reader.ts';
+import { semverOrNull } from '../semver.ts';
 import { SCRIPT_NAME, parseManifest, typescriptSetup } from './typescript_setup.ts';
 import type { Manifest } from './typescript_setup.ts';
 import type { Preset } from './preset.ts';
@@ -33,6 +35,16 @@ const npm = (name: string) => (name === 'test' ? { command: 'npm', args: ['test'
 // `file(line,col): error TSxxxx: message` lines, and every other step by
 // its tests or exit code. ESLint's own format is not assumed, since the
 // script's flags are the project's.
+// package.json's `version`, or null.
+const packageVersion = (content: string | null) => {
+  if (content === null) return null;
+  try {
+    return semverOrNull((JSON.parse(content) as { version?: unknown } | null)?.version);
+  } catch {
+    return null;
+  }
+};
+
 const TSC_LINE = '^(?<file>[^\\s(][^(]*)\\((?<line>\\d+),(?<column>\\d+)\\): (?<severity>error|warning) (?<rule>TS\\d+): (?<message>.+)$';
 
 export const typescriptPreset: Preset<TypeScriptFacts> = {
@@ -86,5 +98,6 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
   secretFiles: [],
   sandboxEnv: () => ({}),
   sandboxRead: () => [],
+  version: async (root, commit) => ({ file: 'package.json', value: packageVersion(await git.showFile(root, commit, 'package.json')) }),
   setup: typescriptSetup as SetupAdapter,
 };
