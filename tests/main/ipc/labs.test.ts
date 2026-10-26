@@ -134,7 +134,7 @@ test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, an
 
   await solve(root, FCFS);
   await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
-  const reviewed = await fixtures.settleReview(h.call, 'lab-fcfs');
+  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
   const review = reviewed.review!;
   assert.ok(review.status === 'passed', JSON.stringify(review));
   const grade = review.checks.find((check) => check.kind === 'custom:grade');
@@ -170,7 +170,7 @@ test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by 
   await solve(root, RR_LAB);
   await fs.writeFile(path.join(root, 'src/fcfs.c'), FCFS.files['src/fcfs.c']);
   await h.call(CHANNELS.transition, 'lab-round-robin', 'submit_for_review');
-  const review = (await fixtures.settleReview(h.call, 'lab-round-robin')).review!;
+  const review = (await settleTask(h.call, 'lab-round-robin', (task) => task.review?.status !== 'running')).review!;
   assert.ok(review.status === 'rejected', JSON.stringify(review));
   assert.ok(review.reasons.includes('tests_failed'));
   assert.equal(review.acceptance[0].status, 'verified', 'its own test passes');
