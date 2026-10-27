@@ -152,6 +152,9 @@ declare const api: {
   practice: {
     reference: (id: string) => Promise<envelopeTypes.IpcResult<string>>;
     grade: (id: string, skipReference: boolean) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    explain: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    answer: (id: string, answers: (string | null)[]) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
+    saveExplanation: (id: string) => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>;
   };
   notes: {
     list: (since: number | null) => Promise<envelopeTypes.IpcResult<noteTypes.NoteList | null>>;

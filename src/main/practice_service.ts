@@ -11,6 +11,8 @@ import * as codingExec from './coding_exec.ts';
 import * as practice from './practice.ts';
 import * as courses from './courses.ts';
 import * as tutorAgent from './agents/tutor.ts';
+import * as hintLeak from './hint_leak.ts';
+import { gradeScores } from './grade_scores.ts';
 import { billableCodingUsage, codingCancelled, codingFailure } from './coding_runtime.ts';
 import { reportIgnore } from './submit_checks.ts';
 import { collectChanges } from './review_diff.ts';
@@ -22,6 +24,11 @@ import type * as codingWorkspace from './coding_workspace.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type { AppContext } from './app_context.ts';
 import type { CodingRuntime } from './coding_runtime.ts';
+
+// The share of the submission's added lines matching code TaskPilot showed:
+// Tutor's snippets for this package and, once read, the reference's added lines.
+const similarityOf = (submission: { patch: string }[], shown: string[]): number =>
+  hintLeak.copiedShare(submission.map((file) => hintLeak.addedLines(file.patch)).join('\n'), shown);
 
 export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) => {
   const { store, backgroundRuns, getPreferences, requireTask, requireRoot, requireBaseline, recordCall } = ctx;
@@ -167,6 +174,13 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       return ctx.viewOf(task, store.get(id));
     }
     const referencePatch = reference?.status === 'ready' ? await fs.readFile(referenceFile(id), 'utf8').catch(() => null) : null;
+    // Code the developer was shown: the snippets of every hint level opened,
+    // and the reference once read.
+    const snippets = state.hints.flatMap((use) => {
+      const saved = ctx.tutor?.get(id, use.stepIndex, task.steps[use.stepIndex] ?? '', use.level);
+      return saved?.answer.snippet ? [saved.answer.snippet.code] : [];
+    });
+    const shown = [...snippets, ...(referencePatch && reference?.revealedAt ? [hintLeak.addedLines(referencePatch)] : [])];
     const controller = backgroundRuns.start({ kind: 'grade', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) });
     await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = ctx.runnerFor('tutor', { kind: 'package', id });
@@ -199,11 +213,18 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
           signal: controller.signal,
         });
         throwIfCancelled(controller.signal);
-        finished = {
-          status: 'done',
-          report: tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path), hasNotes: history.length > 0, course }),
-          costUsd: costUsd ?? 0,
-        };
+        const report = tutorAgent.validateGrade(output, { changedPaths: submission.map((file) => file.path), hasNotes: history.length > 0, course });
+        // [人工决策-2026-10-27 00:36:21] 两个分数由 TaskPilot 按公式算（./grade_scores.ts），模型只提供 rubric 的 levels。
+        const scores = gradeScores({
+          review: wireReview,
+          rubric: course.rubric,
+          levels: report.levels ?? {},
+          hints: state.hints,
+          reference,
+          similarity: similarityOf(submission, shown),
+        });
+        console.debug(`[grade] scores package=${id} quality=${scores.quality} independence=${scores.independence}`);
+        finished = { status: 'done', report, scores, costUsd: costUsd ?? 0 };
       } catch (error) {
         const cancelled = controller.signal.aborted;
         if (!cancelled) console.error('[grade] run failed', error);
@@ -232,6 +253,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
             diffDigest,
             review: wireReview,
             report: finished.report,
+            independence: finished.scores?.independence,
             difficulty: task.lab?.difficulty ?? task.difficulty?.level ?? null,
             hintLevel: practice.usedHintLevel(state),
             at: finishedAt,
@@ -250,7 +272,11 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     if (state.referenceRun?.status !== 'ready') failWith('There is no reference solution', 'no_reference');
     const lock = practice.referenceLock({ referenceRun: state.referenceRun, review: toWireState(state).review }, practice.usedHintLevel(state));
     if (!lock?.unlocked) failWith('Pass every test of this package first, or use the hints up to L5', 'reference_locked');
-    if (!state.referenceRun.revealedAt) await store.setReferenceRun(id, { ...state.referenceRun, revealedAt: new Date().toISOString() }, state.referenceRun.id);
+    // Why it opened is kept: read through the hint ladder before the tests all passed costs independence.
+    if (!state.referenceRun.revealedAt) {
+      const revealedWith = lock.reason === 'hints_used' ? 'hints_used' : 'tests_passed';
+      await store.setReferenceRun(id, { ...state.referenceRun, revealedAt: new Date().toISOString(), revealedWith }, state.referenceRun.id);
+    }
     return fs.readFile(referenceFile(id), 'utf8');
   };
 

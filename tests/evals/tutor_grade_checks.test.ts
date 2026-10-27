@@ -87,7 +87,8 @@ test('every case is graded through the real prompt, schema and validation (stub 
     const graded = await gradeCase(testCase, course, async (options) => {
       seen = { prompt: options.prompt, systemPrompt: options.systemPrompt!, enum: (options.schema as any).properties.comments.items.properties.category.enum };
       const file = Object.keys(testCase.submission)[0];
-      return { output: { summary: 's', strengths: [], comments: [comment(course.rubric[0].id, file, true)] }, costUsd: 0 };
+      const levels = Object.fromEntries(course.rubric.map((item) => [item.id, 2]));
+      return { output: { summary: 's', strengths: [], comments: [comment(course.rubric[0].id, file, true)], levels }, costUsd: 0 };
     });
     assert.deepEqual(
       seen.enum,

@@ -324,6 +324,13 @@ const recoverInterruptedAgents = (state: WorkPackageState) => {
   if (state.grade && ['waiting', 'running'].includes(state.grade.status)) {
     state.grade = { ...state.grade, status: 'failed', error: { code: 'agent_interrupted', message: 'Grading was interrupted when the app closed' } };
   }
+  const explanation = state.grade?.explanation;
+  if (state.grade && explanation && ['picking', 'reviewing'].includes(explanation.status)) {
+    state.grade = {
+      ...state.grade,
+      explanation: { ...explanation, status: 'failed', error: { code: 'agent_interrupted', message: 'Tutor was interrupted when the app closed' } },
+    };
+  }
 };
 
 export class WorkPackageStore {

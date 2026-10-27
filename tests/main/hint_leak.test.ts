@@ -47,3 +47,23 @@ test('code is found in fenced blocks and inline spans of the text, never in plai
   assert.deepEqual(hintLeak.codeInText('没有代码，只有文字。'), []);
   assert.equal(hintLeak.addedLines('--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n context'), 'new');
 });
+
+test('copiedShare: the share of the code in runs of three or more lines matching what was shown', () => {
+  const shown = 'int total = 0;\nfor (int i = 0; i < n; i++) total += values[i];\nreturn total / n;';
+  // The same three lines renamed and reformatted, plus three of the developer's own.
+  const code = [
+    'int sum = 0;',
+    'for (int k = 0; k < count; k++)   sum += xs[k];',
+    'return sum / count;',
+    'printf("%d\\n", sum);',
+    'if (count == 0) return -1;',
+    'free(xs);',
+  ].join('\n');
+  assert.equal(hintLeak.copiedShare(code, [shown]), 0.5);
+  // Two matching lines are no run.
+  assert.equal(hintLeak.copiedShare('int sum = 0;\nfor (int k = 0; k < count; k++) sum += xs[k];\nfree(xs);', [shown]), 0);
+  // Overlapping runs from several pieces count each line once.
+  assert.equal(hintLeak.copiedShare(shown, [shown, shown]), 1);
+  assert.equal(hintLeak.copiedShare('', [shown]), 0);
+  assert.equal(hintLeak.copiedShare(code, []), 0);
+});

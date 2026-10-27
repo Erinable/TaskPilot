@@ -10,6 +10,7 @@ import { createLabService } from './lab_service.ts';
 import { createLabGenerationService } from './lab_generation_service.ts';
 import { createCourseInterviewService } from './course_interview_service.ts';
 import { createPracticeService } from './practice_service.ts';
+import { createExplanationService } from './explanation_service.ts';
 import { createReviewService } from './review_service.ts';
 import * as activityIpc from './ipc/activity.ts';
 import * as codingIpc from './ipc/coding.ts';
@@ -58,7 +59,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const practice = createPracticeService(ctx, runtime);
   const coding = createCodingService(ctx, runtime, { startReview: review.startReview });
 
-  packagesIpc.register(ipcMain, ctx, { review, practice });
+  packagesIpc.register(ipcMain, ctx, { review, practice, explanation: createExplanationService(ctx) });
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });

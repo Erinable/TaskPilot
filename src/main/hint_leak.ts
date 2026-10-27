@@ -109,19 +109,27 @@ export const prepareReference = (patch: string): LeakReference => {
   return { lines: normalisedLines(added), grams: gramsOf(added) };
 };
 
-// The longest run of consecutive lines of `lines` equal to consecutive reference lines.
-const longestRun = (lines: string[], reference: string[]): number => {
-  let best = 0;
+// Calls `visit(lineIndex, length)` for each line of `lines` that ends a run
+// of consecutive lines equal to consecutive reference lines.
+const eachRun = (lines: string[], reference: string[], visit: (lineIndex: number, length: number) => void) => {
   let previous = new Array<number>(reference.length + 1).fill(0);
-  for (const line of lines) {
+  for (const [lineIndex, line] of lines.entries()) {
     const current = new Array<number>(reference.length + 1).fill(0);
     for (let index = 0; index < reference.length; index += 1) {
       if (reference[index] !== line) continue;
       current[index + 1] = previous[index] + 1;
-      if (current[index + 1] > best) best = current[index + 1];
+      visit(lineIndex, current[index + 1]);
     }
     previous = current;
   }
+};
+
+// The longest run of consecutive lines of `lines` equal to consecutive reference lines.
+const longestRun = (lines: string[], reference: string[]): number => {
+  let best = 0;
+  eachRun(lines, reference, (_lineIndex, length) => {
+    if (length > best) best = length;
+  });
   return best;
 };
 
@@ -136,4 +144,23 @@ export const checkLeak = (pieces: string[], reference: LeakReference): LeakVerdi
   const shared = [...grams].filter((gram) => reference.grams.has(gram)).length;
   const overlap = grams.size >= MIN_GRAMS ? shared / grams.size : 0;
   return { leaked: run >= LEAK_MIN_RUN || overlap > LEAK_MAX_OVERLAP, run, overlap };
+};
+
+// How much of the developer's code (`code`, the lines their change adds)
+// was taken from code TaskPilot showed them (`shown`: Tutor's snippets, the
+// reference's added lines), 0 to 1: the share of its meaningful lines that
+// sit in a run of LEAK_MIN_RUN or more lines equal to consecutive lines of
+// one piece, with the same normalisation as the leak check. A single common
+// line (`return x;`) never counts on its own.
+export const copiedShare = (code: string, shown: string[]): number => {
+  const lines = normalisedLines(code);
+  if (!lines.length) return 0;
+  const copied = new Set<number>();
+  for (const piece of shown) {
+    eachRun(lines, normalisedLines(piece), (lineIndex, length) => {
+      if (length < LEAK_MIN_RUN) return;
+      for (let index = lineIndex - length + 1; index <= lineIndex; index += 1) copied.add(index);
+    });
+  }
+  return copied.size / lines.length;
 };

@@ -204,3 +204,13 @@ test('a broken mastery.json starts empty instead of failing startup', async () =
   await fs.writeFile(path.join(configDir, mastery.MASTERY_FILENAME), JSON.stringify({ records: [{ course: 'os' }, null], seen: [1] }));
   assert.deepEqual((await new mastery.MasteryStore(configDir).load()).list(), []);
 });
+
+test('an attempt carries the grade’s independence score; none is null', async () => {
+  const store = await new mastery.MasteryStore(await dir()).load();
+  await store.record(submission({ independence: 85 }));
+  await store.record(submission({ diffDigest: 'd2' }));
+  assert.deepEqual(
+    store.get('os', 'round-robin')!.attempts.map((attempt) => attempt.independence),
+    [85, null],
+  );
+});
