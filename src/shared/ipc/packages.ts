@@ -65,6 +65,9 @@ export type ReferenceRun = {
   files: { path: string; added: number; removed: number }[];
   costUsd: number | null;
   revealedAt: string | null;
+  // Why it was open when first read; absent when unread, and on references
+  // read before this was kept. hints_used means before the tests all passed.
+  revealedWith?: 'tests_passed' | 'hints_used';
   source?: 'run' | 'lab';
 };
 
@@ -80,7 +83,58 @@ export type GradeCategory = string;
 // repeated: one of the developer's notes already describes this mistake.
 export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string; repeated: boolean };
 // errorTags: the kinds of mistake Tutor named; absent on grades made before tags.
-export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[]; errorTags?: string[] };
+// levels: Tutor's level, 1 to 4, for each rubric item id; absent on grades made before scores.
+export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[]; errorTags?: string[]; levels?: Record<string, number> };
+// The two scores TaskPilot works out from a grade (../../main/grade_scores.ts),
+// each 0–100, and what went into them, so every point can be shown.
+// quality: tests and acceptance (of 40, by the share passed), QA's verdict
+// (of 20) and the rubric levels (of 40). independence: 100 less what the
+// developer used inside TaskPilot: hint levels (each level once), the
+// reference read before the tests all passed, and how much of the
+// submission matches code TaskPilot showed them.
+export type GradeScores = {
+  quality: number;
+  independence: number;
+  signals: {
+    tests: { passed: number; total: number; points: number };
+    qa: { passed: boolean; points: number };
+    rubric: { points: number };
+    hints: { level: number; deduction: number }[];
+    reference: { beforePass: boolean; deduction: number };
+    // ratio: the share of the submission's code matching what was shown, 0 to 1.
+    similarity: { ratio: number; deduction: number };
+  };
+};
+// After a grade made with the reference, Tutor picks up to three key
+// differences from it and asks the developer why the reference does it that
+// way; the developer explains each (or skips it), Tutor replies once, and
+// the whole can be saved as one note. It counts towards neither score.
+export type ExplanationItem = {
+  // A rubric item id of the grade's pack.
+  category: GradeCategory;
+  file: string | null;
+  // What the reference does differently, in plain words.
+  difference: string;
+  // Null when skipped, or not yet written.
+  answer: string | null;
+  // Tutor's one reply; null before it, and for a skipped item.
+  feedback: { correct: boolean; missed: string | null } | null;
+};
+// picking: Tutor is choosing the differences; answering: waiting for the
+// developer; reviewing: Tutor is replying; failed keeps the items, so a
+// failed reply can be asked again with the same answers.
+export type GradeExplanation = {
+  status: 'picking' | 'answering' | 'reviewing' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt: string | null;
+  error: ErrorInfo | null;
+  items: ExplanationItem[];
+  // At least one item was explained and Tutor replied.
+  completed: boolean;
+  // The note it was saved as; null before.
+  noteId: string | null;
+  costUsd: number;
+};
 // The course pack a grade was made with, and its rubric as it was then.
 export type GradeCourse = Pick<CourseRef, 'id' | 'version' | 'contentHash'> & { rubric: RubricItem[] };
 // waiting: QA has finished but the reference is still being written.
@@ -97,6 +151,9 @@ export type Grade = {
   costUsd: number;
   // [人工决策-2026-10-26 15:38:21] 判卷时快照课程包和 rubric；旧记录没有这个字段，显示时按内置 programming 包处理，不改写旧文件。
   course?: GradeCourse;
+  // [人工决策-2026-10-27 00:36:21] 判卷分开打质量分和独立完成度；判卷后让学生解释和参考实现的差异。旧记录没有这两个字段，显示时不报错。
+  scores?: GradeScores;
+  explanation?: GradeExplanation;
 };
 // A work package definition: hand-written samples and published packages.
 export type TaskDefinition = {

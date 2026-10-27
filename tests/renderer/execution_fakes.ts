@@ -171,6 +171,9 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
     practice: {
       reference: vi.fn(() => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n')),
       grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),
+      explain: vi.fn((_id: string) => ok(current.task)),
+      answer: vi.fn((_id: string, _answers: (string | null)[]) => ok(current.task)),
+      saveExplanation: vi.fn((_id: string) => ok(current.task)),
     },
     courses: { default: vi.fn(() => ok(PROGRAMMING_COURSE)) },
     tutor: {

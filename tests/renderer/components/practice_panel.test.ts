@@ -165,4 +165,78 @@ describe('PracticePanel', () => {
     expect(wrapper.find('img').exists()).toBe(false);
     expect(wrapper.text()).toContain(payload);
   });
+
+  test('an old grade without scores or an explanation shows neither, without failing', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: OPEN });
+    expect(wrapper.find('[data-scores]').exists()).toBe(false);
+    // The explanation can still be started on it.
+    expect(wrapper.find('[data-action="explain"]').exists()).toBe(true);
+  });
+
+  test('both scores show with every line of their breakdown and what independence counts', async () => {
+    const scores: packageTypes.GradeScores = {
+      quality: 74,
+      independence: 45,
+      signals: {
+        tests: { passed: 3, total: 4, points: 30 },
+        qa: { passed: true, points: 20 },
+        rubric: { points: 24 },
+        hints: [
+          { level: 2, deduction: 0 },
+          { level: 3, deduction: 5 },
+        ],
+        reference: { beforePass: true, deduction: 40 },
+        similarity: { ratio: 0.34, deduction: 10 },
+      },
+    };
+    const report = { ...GRADE.report!, levels: { thinking: 3, writing: 2, style: 4 } };
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: { ...GRADE, report, scores }, referenceLock: OPEN });
+    const quality = wrapper.get('[data-score="quality"]').text();
+    expect(quality).toContain('74');
+    expect(quality).toContain('3/4 通过，30/40 分');
+    expect(quality).toContain('通过，20/20 分');
+    expect(quality).toContain('思路3/4 级');
+    const independence = wrapper.get('[data-score="independence"]').text();
+    expect(independence).toContain('45');
+    expect(independence).toContain('用了 L3 提示−5');
+    expect(independence).not.toContain('L2');
+    expect(independence).toContain('测试全过之前看了参考答案−40');
+    expect(independence).toContain('和看过的代码雷同 34%−10');
+    expect(wrapper.get('[data-independence-note]').text()).toContain('独立完成度只统计 TaskPilot 内的辅助');
+  });
+
+  test('explaining: each difference takes an answer, skipped ones go as null, then the result can be saved', async () => {
+    const items: packageTypes.ExplanationItem[] = [
+      { category: 'thinking', file: 'src/auth.ts', difference: '参考实现先处理空密码。', answer: null, feedback: null },
+      { category: 'style', file: null, difference: '参考实现用了全名。', answer: null, feedback: null },
+    ];
+    const explanation: packageTypes.GradeExplanation = {
+      status: 'answering',
+      startedAt: '',
+      finishedAt: null,
+      error: null,
+      items,
+      completed: false,
+      noteId: null,
+      costUsd: 0,
+    };
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: { ...GRADE, explanation }, referenceLock: OPEN });
+    expect(wrapper.findAll('[data-difference]')).toHaveLength(2);
+    await wrapper.get('[data-answer="0"]').setValue('  空密码会让后面的比较出错。 ');
+    await wrapper.get('[data-action="answer"]').trigger('click');
+    await flushPromises();
+    expect(api.practice.answer).toHaveBeenCalledWith('t1', ['空密码会让后面的比较出错。', null]);
+
+    const done = {
+      ...explanation,
+      status: 'done' as const,
+      completed: true,
+      items: [{ ...items[0], answer: '空密码', feedback: { correct: false, missed: '没说为什么要提前返回。' } }, { ...items[1] }],
+    };
+    const finished = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: { ...GRADE, explanation: done }, referenceLock: OPEN });
+    expect(finished.get('[data-feedback]').text()).toContain('漏了：没说为什么要提前返回。');
+    expect(finished.text()).toContain('（跳过）');
+    await finished.get('[data-action="save-explanation"]').trigger('click');
+    expect(api.practice.saveExplanation).toHaveBeenCalledWith('t1');
+  });
 });

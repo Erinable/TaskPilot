@@ -203,6 +203,11 @@ const api = {
     reference: (id: string) => invoke<string>(CHANNELS.referenceGet, id),
     // Grades now: a retry, or without waiting for the reference.
     grade: (id: string, skipReference: boolean) => invoke<packageTypes.TaskView>(CHANNELS.gradeStart, id, skipReference),
+    // Tutor picks the key differences from the reference (once it may be read).
+    explain: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.explainStart, id),
+    // One answer per difference, in order; null skips one.
+    answer: (id: string, answers: (string | null)[]) => invoke<packageTypes.TaskView>(CHANNELS.explainAnswer, id, answers),
+    saveExplanation: (id: string) => invoke<packageTypes.TaskView>(CHANNELS.explainSaveNote, id),
   },
 
   notes: {

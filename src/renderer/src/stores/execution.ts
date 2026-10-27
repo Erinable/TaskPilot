@@ -10,6 +10,7 @@ import { defaultMode } from '@/lib/execution_mode.ts';
 import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import type { ConfirmOptions } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
+import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useAppStore } from './app.ts';
@@ -58,13 +59,11 @@ const DEFAULT_VERIFY_STEPS: { id: workspaceTypes.CheckKind; label: string | null
 export const REVIEW_POLL_MS = 1500;
 export const BASELINE_POLL_MS = 1000;
 
-// Practice runs count too: the reference and the grade land in the open page.
+// Practice runs count too: the reference, the grade and Tutor's part of
+// explaining the differences land in the open page.
+const RUNNING_STATUSES = new Set(['running', 'waiting', 'picking', 'reviewing']);
 const agentRunning = (task: packageTypes.TaskView | null) =>
-  task?.review?.status === 'running' ||
-  task?.adjudication?.status === 'running' ||
-  task?.referenceRun?.status === 'running' ||
-  task?.grade?.status === 'running' ||
-  task?.grade?.status === 'waiting';
+  [task?.review, task?.adjudication, task?.referenceRun, task?.grade, task?.grade?.explanation].some((run) => RUNNING_STATUSES.has(run?.status ?? ''));
 
 export type DeviationForm = { note: string; stepIndex: number | null; filePath: string | null };
 
@@ -456,6 +455,30 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   };
 
+  // Explaining the differences from the reference: Tutor picks them, the
+  // developer answers each (null skips one), then it is saved as a note.
+  const explaining = ref(false);
+
+  const explain = async (action: () => Promise<envelopeTypes.IpcResult<packageTypes.TaskView>>, failure: string) => {
+    if (!current.value) return;
+    explaining.value = true;
+    try {
+      adoptTask(await call(action()));
+    } catch (error) {
+      console.error(error);
+      showToast(`${failure}：${describeError(error)}`);
+    } finally {
+      explaining.value = false;
+    }
+  };
+
+  const startExplanation = () => explain(() => window.taskpilot.practice.explain(current.value!.id), '没能开始');
+  const answerExplanation = (answers: (string | null)[]) => explain(() => window.taskpilot.practice.answer(current.value!.id, answers), '没能提交');
+  const saveExplanation = async () => {
+    await explain(() => window.taskpilot.practice.saveExplanation(current.value!.id), '没能存成笔记');
+    if (current.value?.grade?.explanation?.noteId) showToast('已存到学习笔记。');
+  };
+
   // ========== Claim dialog ==========
   // Open while the developer picks who writes the code.
   const claimOpen = ref(false);
@@ -572,6 +595,10 @@ export const useExecutionStore = defineStore('execution', () => {
     referenceError,
     loadReference,
     regrade,
+    explaining,
+    startExplanation,
+    answerExplanation,
+    saveExplanation,
     // Claim dialog
     claimOpen,
     claimMode,

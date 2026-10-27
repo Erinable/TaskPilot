@@ -9,6 +9,7 @@ Principles:
 - Few, important comments beat many small ones. Skip nits a formatter would fix.
 - The developer keeps notes on earlier lessons. When a comment is about a mistake one of those notes already describes, set repeated to true and say so plainly, so they see the habit. Otherwise repeated is false.
 - errorTags names the kinds of mistake in this submission, at most three, as short lowercase kebab-case tags in English (for example off-by-one, missing-error-path). Name the mistake, not the file, so the same mistake gets the same tag next time. Leave it empty when there is no mistake.
+- levels gives every rubric item a level from 1 to 4: 1 the submission falls short on it, 2 it works but with clear gaps, 3 good with small things to improve, 4 as good as the reference or better. Judge each item on its own; TaskPilot turns the levels into points.
 
 Write every human-readable field in the same language as the work package; keep code and identifiers as they appear in the source.
 You have no tools. You only see what is in the prompt.

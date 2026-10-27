@@ -5,7 +5,8 @@
     "summary",
     "strengths",
     "comments",
-    "errorTags"
+    "errorTags",
+    "levels"
   ],
   "properties": {
     "summary": {
@@ -77,6 +78,35 @@
       "items": {
         "type": "string",
         "description": "A kind of mistake, short lowercase kebab-case, e.g. off-by-one"
+      }
+    },
+    "levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "thinking",
+        "writing",
+        "style"
+      ],
+      "properties": {
+        "thinking": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Level for thinking"
+        },
+        "writing": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Level for writing"
+        },
+        "style": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Level for style"
+        }
       }
     }
   }

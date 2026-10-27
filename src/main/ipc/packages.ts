@@ -7,6 +7,7 @@ import { wrap } from './handler.ts';
 import { CHANNELS } from '../../shared/ipc_channels.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app_context.ts';
+import type { ExplanationService } from '../explanation_service.ts';
 import type { PracticeService } from '../practice_service.ts';
 import type { ReviewService } from '../review_service.ts';
 import type { TransitionName } from '../work_package_status.ts';
@@ -15,7 +16,11 @@ import type { IpcMainLike } from './handler.ts';
 
 const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies packageTypes.ExecutionMode[];
 
-export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practice }: { review: ReviewService; practice: PracticeService }) => {
+export const register = (
+  ipcMain: IpcMainLike,
+  ctx: AppContext,
+  { review, practice, explanation }: { review: ReviewService; practice: PracticeService; explanation: ExplanationService },
+) => {
   const { store, backgroundRuns, requireTask } = ctx;
 
   // Aborts one run of `kind` for a package, if any; true when there was one.
@@ -92,6 +97,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
         backgroundRuns.get('baseline', id)?.abort();
         backgroundRuns.get('reference', id)?.abort();
         backgroundRuns.get('grade', id)?.abort();
+        backgroundRuns.get('explain', id)?.abort();
       }
       // store.transition() rejects names that are not transitions.
       const before = store.get(id).status;
@@ -170,5 +176,23 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { review, practi
       if (typeof skipReference !== 'boolean') failWith('skipReference must be boolean', 'invalid_argument', 'skipReference');
       return practice.startGrade(requireString(rawId, 'id'), { force: true, skipReference });
     }),
+  );
+
+  // Explaining the differences from the reference (../explanation_service.ts):
+  // Tutor picks them, the developer answers (null skips one), and the result
+  // is saved as a note.
+  ipcMain.handle(
+    CHANNELS.explainStart,
+    wrap((_event, rawId): Promise<packageTypes.TaskView> => explanation.start(requireString(rawId, 'id'))),
+  );
+
+  ipcMain.handle(
+    CHANNELS.explainAnswer,
+    wrap((_event, rawId, answers): Promise<packageTypes.TaskView> => explanation.answer(requireString(rawId, 'id'), answers)),
+  );
+
+  ipcMain.handle(
+    CHANNELS.explainSaveNote,
+    wrap((_event, rawId): Promise<packageTypes.TaskView> => explanation.saveNote(requireString(rawId, 'id'))),
   );
 };

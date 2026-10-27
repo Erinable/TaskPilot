@@ -338,28 +338,39 @@ const RELEASE_PLAN = {
 export const stepOf = (schema) =>
   schema.properties.strengths
     ? 'grade'
-    : schema.properties.hints
-      ? 'tutor'
-      : schema.properties.bump
-        ? 'release'
-        : schema.properties.verdict
-          ? 'review'
-          : schema.properties.decision
-            ? 'adjudicate'
-            : schema.properties.install
-              ? 'env'
-              : schema.properties.packages
-                ? 'plan'
-                : schema.properties.questions
-                  ? 'clarify'
-                  : schema.properties.modules
-                    ? 'summarize'
-                    : 'select';
+    : schema.properties.differences
+      ? 'differences'
+      : schema.properties.replies
+        ? 'feedback'
+        : schema.properties.hints
+          ? 'tutor'
+          : schema.properties.bump
+            ? 'release'
+            : schema.properties.verdict
+              ? 'review'
+              : schema.properties.decision
+                ? 'adjudicate'
+                : schema.properties.install
+                  ? 'env'
+                  : schema.properties.packages
+                    ? 'plan'
+                    : schema.properties.questions
+                      ? 'clarify'
+                      : schema.properties.modules
+                        ? 'summarize'
+                        : 'select';
 export const TUTOR_ANSWER = {
   explanation: '在测试文件里加一个用例，检查邮箱大小写不同也能登录。',
   hints: ['打开 tests/auth/login-user.test.ts', '仿照已有用例写一个新的 test()'],
   snippet: { language: 'ts', code: "test('email is case-insensitive', () => {\n  // ...\n});" },
   terms: [{ term: '用例', meaning: '一个独立的测试，检查一种情况。' }],
+};
+
+export const DIFFERENCES_OUTPUT = {
+  differences: [
+    { category: 'thinking', file: 'tests/auth/login-user.test.ts', difference: '参考实现先写了一个会失败的用例。' },
+    { category: 'writing', file: 'src/not-in-reference.ts', difference: '参考实现把断言放在了一处。' },
+  ],
 };
 
 const GRADE_REPORT = {
@@ -392,7 +403,20 @@ export const fakeAgent =
       adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,
       release: () => overrides.release ?? RELEASE_PLAN,
       tutor: () => overrides.tutor ?? TUTOR_ANSWER,
-      grade: () => overrides.grade ?? GRADE_REPORT,
+      // A grade without levels gets level 3 on every rubric item the schema asks for.
+      grade: () => {
+        const report = overrides.grade ?? GRADE_REPORT;
+        if (report instanceof Error || 'levels' in (report as object)) return report;
+        return { ...report, levels: Object.fromEntries(schema.properties.levels.required.map((id) => [id, 3])) };
+      },
+      differences: () => overrides.differences ?? DIFFERENCES_OUTPUT,
+      feedback: () =>
+        overrides.feedback ?? {
+          replies: Array.from({ length: schema.properties.replies.minItems }, (_, index) => ({
+            correct: index === 0,
+            missed: index === 0 ? null : '没提到断言要集中。',
+          })),
+        },
     }[stepOf(schema)]();
     if (output instanceof Error) throw output;
     return { output, costUsd: 0.02 };

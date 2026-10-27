@@ -31,7 +31,8 @@ export type MasteryAttempt = {
   packageId: string;
   repoId: string;
   result: AttemptResult;
-  // Independence score 0–100; null until grades carry one (T10).
+  // Independence score 0–100 from the grade (./grade_scores.ts); null on
+  // attempts recorded before grades carried one.
   independence: number | null;
   errorTypes: string[];
 };
@@ -84,6 +85,8 @@ export type GradedSubmission = {
   diffDigest: string;
   review: Review | null;
   report: Pick<GradeReport, 'comments' | 'errorTags'>;
+  // The grade's independence score; null when it has none.
+  independence?: number | null;
   at: string;
 };
 
@@ -185,7 +188,7 @@ export class MasteryStore {
       packageId: submission.packageId,
       repoId: submission.repoId,
       result: attemptResult(submission.review),
-      independence: null,
+      independence: submission.independence ?? null,
       errorTypes: errorTypesOf(submission.report),
     };
     for (const conceptId of concepts) {

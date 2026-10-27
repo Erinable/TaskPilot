@@ -401,3 +401,171 @@ test('practice: a package without concepts writes no mastery', async () => {
   await h.shutdown();
   assert.deepEqual(h.mastery.list(), []);
 });
+
+// [人工决策-2026-10-27 00:36:21] 判卷写入 Grade.scores：分数由 TaskPilot 算，模型只给 rubric 的 levels。
+test('practice: a done grade carries both scores, worked out from the levels, the review and the help used', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  // L1 to L3 at step 0, L3 again at step 1: L3 is deducted once.
+  for (const [step, level] of [
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [1, 1],
+    [1, 2],
+    [1, 3],
+  ]) {
+    await h.call(CHANNELS.tutorAsk, 'auth-edge-tests', step, level);
+    await fixtures.settleTutor(h.call, 'auth-edge-tests', step);
+  }
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  const grade = graded.grade!;
+  assert.deepEqual(fixtures.callFor(h.agentCalls, 'grade').schema.properties.levels.required, ['thinking', 'writing', 'style']);
+  assert.deepEqual(grade.report!.levels, { thinking: 3, writing: 3, style: 3 });
+  // Tests and acceptance all passed (40), QA accepted (20), every item at 3: 2/3 of 40.
+  assert.deepEqual([grade.scores!.signals.tests.points, grade.scores!.signals.qa.points, grade.scores!.signals.rubric.points], [40, 20, 27]);
+  assert.equal(grade.scores!.quality, 87);
+  assert.deepEqual(grade.scores!.signals.hints, [
+    { level: 1, deduction: 0 },
+    { level: 2, deduction: 0 },
+    { level: 3, deduction: 5 },
+  ]);
+  assert.equal(grade.scores!.signals.reference.beforePass, false);
+  assert.equal(grade.scores!.independence, 100 - 5 - grade.scores!.signals.similarity.deduction);
+});
+
+test('practice: the reference read through the hint ladder before the tests passed, and copied, costs independence', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  for (const level of [1, 2, 3, 4, 5]) {
+    await h.call(CHANNELS.tutorAsk, 'auth-edge-tests', 0, level);
+    await fixtures.settleTutor(h.call, 'auth-edge-tests', 0);
+  }
+  assert.equal((await h.call(CHANNELS.referenceGet, 'auth-edge-tests')).data, REFERENCE_PATCH);
+  assert.equal(h.store.get('auth-edge-tests').referenceRun!.revealedWith, 'hints_used');
+  // The developer pastes the reference's lines (three of them, so they make a run).
+  await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
+  await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'test("reference", () => {});\nconst a = 1 + 2;\nconst b = a * 3;\n');
+  h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const graded = await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  const { signals, independence } = graded.grade!.scores!;
+  assert.deepEqual(signals.reference, { beforePass: true, deduction: 40 });
+  assert.deepEqual(
+    signals.hints.map((hint) => hint.deduction),
+    [0, 0, 5, 10, 20],
+  );
+  assert.equal(independence, Math.max(0, 100 - 35 - 40 - signals.similarity.deduction));
+});
+
+const gradedWithReference = async (agent = fixtures.fakeAgent()) => {
+  const h = await practiceHarness({ agent });
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  return h;
+};
+
+const settleExplanation = (h, status: string) => settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.explanation?.status === status);
+
+// [人工决策-2026-10-27 00:36:21] 判卷后让学生解释和参考实现的差异：最多 3 处、可跳过、Tutor 只回一轮，存成带 concepts/course/category 的笔记。
+test('practice: explaining the differences: Tutor picks them, answers get one reply, and it is saved as a note', async () => {
+  const h = await gradedWithReference();
+  const before = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data as TaskView;
+  const scores = before.grade!.scores;
+  await h.call(CHANNELS.explainStart, 'auth-edge-tests');
+  const picked = await settleExplanation(h, 'answering');
+  const pickCall = fixtures.callFor(h.agentCalls, 'differences');
+  assert.match(pickCall.prompt, /<reference_solution>\ndiff --git/);
+  assert.deepEqual(pickCall.schema.properties.differences.items.properties.category.enum, ['thinking', 'writing', 'style']);
+  assert.deepEqual(
+    picked.grade!.explanation!.items.map((item) => [item.category, item.file, item.answer]),
+    [
+      ['thinking', 'tests/auth/login-user.test.ts', null],
+      // Not a file the reference changes.
+      ['writing', null, null],
+    ],
+  );
+  assert.equal((await h.call(CHANNELS.explainStart, 'auth-edge-tests')).error.code, 'invalid_state');
+  assert.equal((await h.call(CHANNELS.explainAnswer, 'auth-edge-tests', ['只有一条'])).error.code, 'invalid_argument');
+
+  // The second is skipped: only the first reaches Tutor.
+  await h.call(CHANNELS.explainAnswer, 'auth-edge-tests', ['先让测试失败，才能确认它测到了东西。', '  ']);
+  const done = await settleExplanation(h, 'done');
+  const feedbackCall = fixtures.callFor(h.agentCalls, 'feedback');
+  assert.equal(feedbackCall.schema.properties.replies.minItems, 1);
+  assert.match(feedbackCall.prompt, /Why, in the developer’s words: 先让测试失败/);
+  assert.doesNotMatch(feedbackCall.prompt, /index="1"/);
+  const explanation = done.grade!.explanation!;
+  assert.deepEqual(
+    explanation.items.map((item) => [item.answer, item.feedback]),
+    [
+      ['先让测试失败，才能确认它测到了东西。', { correct: true, missed: null }],
+      [null, null],
+    ],
+  );
+  assert.equal(explanation.completed, true);
+  // Explaining counts towards neither score.
+  assert.deepEqual(done.grade!.scores, scores);
+  assert.doesNotMatch(JSON.stringify(done), /test\("reference"/, 'the reference itself never reaches the renderer');
+
+  await h.call(CHANNELS.explainSaveNote, 'auth-edge-tests');
+  const saved = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data as TaskView;
+  const noteId = saved.grade!.explanation!.noteId!;
+  const note = h.notes.get(noteId);
+  assert.equal(note.title, '参考实现为什么这样做：补充登录模块边界测试');
+  assert.equal(note.category, 'thinking');
+  assert.equal(note.course, 'programming');
+  assert.equal(note.source!.packageId, 'auth-edge-tests');
+  assert.match(note.body, /## 1\. 参考实现先写了一个会失败的用例。[\s\S]*我的解释：先让测试失败[\s\S]*导师：对。[\s\S]*我的解释：（跳过）/);
+  // Saving again keeps the one note.
+  await h.call(CHANNELS.explainSaveNote, 'auth-edge-tests');
+  assert.equal(h.notes.list().notes.length, 1);
+});
+
+test('practice: skipping every difference ends the explanation without a reply and not completed', async () => {
+  const h = await gradedWithReference();
+  await h.call(CHANNELS.explainStart, 'auth-edge-tests');
+  await settleExplanation(h, 'answering');
+  const done = (await h.call(CHANNELS.explainAnswer, 'auth-edge-tests', [null, ''])).data as TaskView;
+  assert.equal(done.grade!.explanation!.status, 'done');
+  assert.equal(done.grade!.explanation!.completed, false);
+  assert.equal(fixtures.callFor(h.agentCalls, 'feedback'), undefined);
+});
+
+test('practice: a failed reply keeps the answers and can be asked again', async () => {
+  const h = await gradedWithReference(fixtures.fakeAgent({ feedback: new Error('model down') }));
+  await h.call(CHANNELS.explainStart, 'auth-edge-tests');
+  await settleExplanation(h, 'answering');
+  await h.call(CHANNELS.explainAnswer, 'auth-edge-tests', ['一', '二']);
+  const failed = await settleExplanation(h, 'failed');
+  assert.deepEqual(
+    failed.grade!.explanation!.items.map((item) => item.answer),
+    ['一', '二'],
+  );
+  assert.equal(failed.grade!.explanation!.completed, false);
+  assert.equal((await h.call(CHANNELS.explainSaveNote, 'auth-edge-tests')).error.code, 'invalid_state');
+});
+
+test('practice: explaining needs a grade made with the reference, and the reference unlocked', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  assert.equal((await h.call(CHANNELS.explainStart, 'auth-edge-tests')).error.code, 'grade_not_done');
+  h.setCommands({
+    test: {
+      command: process.execPath,
+      args: ['-e', "console.log('ok 1 - login is case-insensitive for the email\\nnot ok 2 - account locks after five failed attempts')"],
+    },
+  });
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal((await h.call(CHANNELS.explainStart, 'auth-edge-tests')).error.code, 'reference_locked');
+});

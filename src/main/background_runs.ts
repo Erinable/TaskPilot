@@ -19,6 +19,7 @@ const RUN_KINDS = [
   'coding-checks',
   'reference',
   'grade',
+  'explain',
   'note-summary',
 ] as const;
 export type RunKind = (typeof RUN_KINDS)[number];

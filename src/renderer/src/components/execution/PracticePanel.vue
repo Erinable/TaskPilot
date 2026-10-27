@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // Practice mode on the execution page: whether the reference solution is
 // ready (its content stays locked until every test of the package passed or
-// the hints were used up to L5), Tutor's grading of the submission, and the
+// the hints were used up to L5), Tutor's grading of the submission with its
+// two scores, explaining the differences from the reference, and the
 // reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
 import { computed, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import GradeExplanation from '@/components/execution/GradeExplanation.vue';
+import GradeScores from '@/components/execution/GradeScores.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
@@ -64,10 +67,10 @@ const gradeText = computed((): string | null => {
 
 // [人工决策-2026-10-26 15:38:21] 维度和标签来自判卷时快照的 rubric；旧记录没有快照，按内置 programming 包显示。
 // The default pack comes from the main process; until it answers an old grade lists nothing.
+const rubric = computed(() => grade.value?.course?.rubric ?? courses.defaultPack?.rubric ?? []);
 const byCategory = computed(() => {
   const comments = grade.value?.report?.comments ?? [];
-  const rubric = grade.value?.course?.rubric ?? courses.defaultPack?.rubric ?? [];
-  return rubric
+  return rubric.value
     .map((item) => ({ category: item.id, label: item.label, comments: comments.filter((comment) => comment.category === item.id) }))
     .filter((group) => group.comments.length);
 });
@@ -130,6 +133,8 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 
       <template v-if="grade.report">
         <p class="practice-summary">{{ grade.report.summary }}</p>
+        <!-- Grades from before scores have none; nothing is shown for them. -->
+        <GradeScores v-if="grade.scores" :scores="grade.scores" :report="grade.report" :rubric="rubric" />
         <div v-if="grade.report.strengths.length" class="practice-group">
           <h3>做得好的地方</h3>
           <ul>
@@ -156,6 +161,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
             </button>
           </article>
         </div>
+        <GradeExplanation v-if="grade.withReference && unlocked" :explanation="grade.explanation ?? null" />
       </template>
     </div>
 
