@@ -111,6 +111,8 @@ export type PlanPackage = {
   recommendedMode?: packageTypes.ModeRecommendation;
   // 1-based numbers of earlier packages; absent on plans saved before it existed.
   dependsOn?: number[];
+  // Concept ids of the pack's skeleton; absent when none were tagged.
+  concepts?: string[];
 };
 
 // course: the pack it was planned with; absent on older plans (programming).

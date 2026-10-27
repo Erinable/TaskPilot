@@ -6,7 +6,8 @@
 // CARM-23; Product Lead's test layout, CARM-23; the test name format in
 // Product Lead's plan and Coding Agent, CARM-22). Product Lead and Tutor
 // render the built-in programming course pack here, which must give the same
-// bytes (CARM-28), and so does the grading prompt and its schema (CARM-29). Re-record only for an
+// bytes (CARM-28), and so does the grading prompt and its schema (CARM-29), except
+// for the errorTags line and field mastery added (CARM-44). Re-record only for an
 // intended prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
 import { describe, expect, test } from 'vitest';
 import assert from 'node:assert/strict';

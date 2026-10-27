@@ -10,6 +10,7 @@ const note = (id: string, overrides: Partial<noteTypes.NoteMeta> = {}): noteType
   title: id,
   category: null,
   course: null,
+  concepts: [],
   tags: [],
   inlineTags: [],
   source: null,

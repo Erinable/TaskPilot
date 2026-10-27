@@ -60,8 +60,8 @@ export const register = (
     id: string,
     step: requirementTypes.RequirementStep,
     buildPrompt: (input: PromptInput) => string,
-    schema: claudeCli.JsonSchema,
-    validate: (raw: unknown) => Output,
+    schema: (course: CoursePack) => claudeCli.JsonSchema,
+    validate: (raw: unknown, course: CoursePack) => Output,
     finish: (id: string, output: Output, costUsd: number, course: CourseRef) => Promise<unknown>,
   ) => {
     const store = requireRequirements();
@@ -115,11 +115,11 @@ export const register = (
         const { output, costUsd } = await productRunner({
           prompt: buildPrompt({ ...item, files, interfaces, profile, course: course.pack }),
           systemPrompt: productLead.systemPrompt(course.pack),
-          schema,
+          schema: schema(course.pack),
           envPath,
           signal: controller.signal,
         });
-        outcome = { output: validate(output), costUsd: (costUsd ?? 0) + architectCost, course: course.ref };
+        outcome = { output: validate(output, course.pack), costUsd: (costUsd ?? 0) + architectCost, course: course.ref };
       } catch (error) {
         outcome = { error };
       }
@@ -149,8 +149,13 @@ export const register = (
   const clarify = (id: string) => (isCourse(id) ? courseInterview.clarify(id).then(toWireRequirement) : clarifyProject(id));
 
   const clarifyProject = (id: string) =>
-    startRun(id, 'clarifying', productLead.clarifyPrompt, productLead.CLARIFY_SCHEMA, productLead.validateClarify, (rid, output, cost) =>
-      requireRequirements().finishClarify(rid, output, cost),
+    startRun(
+      id,
+      'clarifying',
+      productLead.clarifyPrompt,
+      () => productLead.CLARIFY_SCHEMA,
+      productLead.validateClarify,
+      (rid, output, cost) => requireRequirements().finishClarify(rid, output, cost),
     );
 
   ipcMain.handle(
@@ -204,8 +209,9 @@ export const register = (
         rid,
         'planning',
         (input) => productLead.planPrompt({ ...input, linkTests }),
-        productLead.PLAN_SCHEMA,
-        (raw) => productLead.validatePlan(raw, { linkTests }),
+        productLead.planSchema,
+        // Concepts only from the skeleton of the pack planned with.
+        (raw, course) => productLead.validatePlan(raw, { linkTests, concepts: (course.concepts ?? []).map((concept) => concept.id) }),
         // [人工决策-2026-10-26 15:38:21] 规划时把生效课程包的 CourseRef 快照到计划上，发布时带到工作包定义。
         (r, output, cost, course) => requireRequirements().finishPlan(r, { ...output, course }, cost),
       );

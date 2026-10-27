@@ -201,6 +201,10 @@ export const validateAnswer = (raw: unknown): TutorAnswer => {
 export type GradeCategory = string;
 const MAX_COMMENTS = 12;
 const MAX_STRENGTHS = 4;
+export const MAX_ERROR_TAGS = 3;
+// An error tag: short kebab-case, so the same kind of mistake counts together
+// across grades (../mastery_store.ts).
+const ERROR_TAG = /^[a-z][a-z0-9-]{0,31}$/;
 
 export interface GradeComment {
   category: GradeCategory;
@@ -216,6 +220,8 @@ export interface GradeReport {
   summary: string;
   strengths: string[];
   comments: GradeComment[];
+  // The kinds of mistake in this submission; absent on grades made before tags.
+  errorTags?: string[];
 }
 
 export interface GradeInput {
@@ -259,6 +265,7 @@ export const gradeSystemPrompt = (course: CoursePack): string =>
     '- Do not repeat QA. Mention a QA issue only to explain how to avoid that kind of mistake.',
     '- Few, important comments beat many small ones. Skip nits a formatter would fix.',
     '- The developer keeps notes on earlier lessons. When a comment is about a mistake one of those notes already describes, set repeated to true and say so plainly, so they see the habit. Otherwise repeated is false.',
+    `- errorTags names the kinds of mistake in this submission, at most ${COUNT_WORDS[MAX_ERROR_TAGS]}, as short lowercase kebab-case tags in English (for example off-by-one, missing-error-path). Name the mistake, not the file, so the same mistake gets the same tag next time. Leave it empty when there is no mistake.`,
     '',
     'Write every human-readable field in the same language as the work package; keep code and identifiers as they appear in the source.',
     'You have no tools. You only see what is in the prompt.',
@@ -304,7 +311,7 @@ export const gradePrompt = ({ task, submission, reference, review, notes = [], p
 export const gradeSchema = (course: CoursePack) => ({
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'strengths', 'comments'],
+  required: ['summary', 'strengths', 'comments', 'errorTags'],
   properties: {
     summary: { type: 'string', description: 'Two or three sentences on the submission as a whole' },
     strengths: { type: 'array', maxItems: MAX_STRENGTHS, items: { type: 'string' } },
@@ -325,8 +332,22 @@ export const gradeSchema = (course: CoursePack) => ({
         },
       },
     },
+    errorTags: {
+      type: 'array',
+      maxItems: MAX_ERROR_TAGS,
+      items: { type: 'string', description: 'A kind of mistake, short lowercase kebab-case, e.g. off-by-one' },
+    },
   },
 });
+
+// Tags are a side channel for mastery: a malformed one is dropped, never
+// fails the grade.
+const errorTags = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((tag): tag is string => typeof tag === 'string').map((tag) => tag.trim()))]
+        .filter((tag) => ERROR_TAG.test(tag))
+        .slice(0, MAX_ERROR_TAGS)
+    : [];
 
 // changedPaths: the submission's files. A comment pointing anywhere else
 // keeps its text but loses the location, so it never links to a file the
@@ -358,6 +379,7 @@ export const validateGrade = (
         repeated: hasNotes && item.repeated === true,
       };
     }),
+    errorTags: errorTags(raw.errorTags),
   };
 };
 

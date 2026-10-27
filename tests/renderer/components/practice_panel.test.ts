@@ -99,14 +99,23 @@ describe('PracticePanel', () => {
       { ...GRADE.report!.comments[0], category: 'concept', observation: '锁拿晚了。' },
       { ...GRADE.report!.comments[1], category: 'mechanism', observation: '漏了错误路径。' },
     ];
-    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: { ...GRADE, course, report: { ...GRADE.report!, comments } } });
+    const wrapper = await mountPanel({
+      referenceRun: READY,
+      review: REVIEWED,
+      grade: { ...GRADE, course, report: { ...GRADE.report!, comments } },
+      concepts: ['round-robin', 'priority-sched'],
+    });
     const groups = wrapper.findAll('[data-category]');
     expect(groups.map((group) => group.attributes('data-category'))).toEqual(['mechanism', 'concept']);
     expect(groups.map((group) => group.get('h3').text())).toEqual(['实现', '原理']);
     expect(wrapper.get('[data-category="concept"]').text()).toContain('锁拿晚了。');
     await wrapper.get('[data-category="concept"] [data-action="save-note"]').trigger('click');
     await flushPromises();
-    expect(api.notes.create).toHaveBeenCalledWith(expect.objectContaining({ category: 'concept', course: 'os' }), true);
+    // The package's concepts come along.
+    expect(api.notes.create).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'concept', course: 'os', concepts: ['round-robin', 'priority-sched'] }),
+      true,
+    );
   });
 
   test('a grade saved before course packs shows the programming rubric', async () => {
@@ -140,6 +149,8 @@ describe('PracticePanel', () => {
         category: 'thinking',
         // A grade from before packs has no snapshot: programming.
         course: 'programming',
+        // A package without concepts.
+        concepts: [],
         body: '没有考虑空密码。\n\n## 下次可以\n\n先列出输入的几种情况再写代码。\n',
         source: expect.objectContaining({ packageId: 't1', packageTitle: '邮箱登录', file: 'src/auth.ts', line: 4 }),
       }),

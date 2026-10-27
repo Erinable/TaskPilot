@@ -20,6 +20,8 @@ import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 
 export const MAX_QUESTIONS = 5;
 export const MAX_PACKAGES = 6;
+// Concepts of the pack's skeleton a package may be tagged with.
+export const MAX_PACKAGE_CONCEPTS = 3;
 const PRIORITIES = ['high', 'medium', 'low'] as const;
 export const DIFFICULTIES = ['easy', 'medium', 'hard'] as const;
 export const PLANNED_MODES = ['practice', 'ai'] as const;
@@ -71,6 +73,9 @@ export interface PlanPackage {
   // 1-based numbers of earlier packages in the same plan; absent on plans
   // saved before dependencies existed.
   dependsOn?: number[];
+  // Concept ids of the pack's skeleton the package practises; absent when
+  // the pack has no skeleton or none fit.
+  concepts?: string[];
 }
 
 export interface Plan {
@@ -205,6 +210,7 @@ export const planPrompt = ({
     'Mode, whether the developer should practise the package or hand it to Coding Agent:',
     ...course.practiceGuide,
     '',
+    ...conceptLines(course),
     '<requirement>',
     title ? `Title: ${title}` : null,
     text,
@@ -223,6 +229,17 @@ export const planPrompt = ({
     .filter((line) => line !== null)
     .join('\n');
 };
+
+// [人工决策-2026-10-27 00:36:21] 项目任务也挂知识点：只能从当前课程包骨架里选 0–3 个，宁可不打也不乱打。
+// A pack without a skeleton (programming) adds nothing, so its prompt stays the same.
+const conceptLines = (course: CoursePack): string[] =>
+  course.concepts?.length
+    ? [
+        `Concepts: the concepts of this course a package practises, at most ${MAX_PACKAGE_CONCEPTS}, by id from this list only. Tag a concept only when doing the package clearly exercises it; leave concepts empty when none fits. A wrong tag is worse than none.`,
+        ...course.concepts.map((concept) => `- ${concept.id}: ${concept.label}`),
+        '',
+      ]
+    : [];
 
 // Output schemas, passed to the CLI as --json-schema
 
@@ -304,6 +321,25 @@ export const PLAN_SCHEMA = {
   },
 };
 
+// PLAN_SCHEMA, plus `concepts` from the pack's skeleton when it has one.
+export const planSchema = (course: Pick<CoursePack, 'concepts'>) => {
+  if (!course.concepts?.length) return PLAN_SCHEMA;
+  const item = PLAN_SCHEMA.properties.packages.items;
+  const concepts = {
+    type: 'array',
+    maxItems: MAX_PACKAGE_CONCEPTS,
+    items: { type: 'string', enum: course.concepts.map((concept) => concept.id) },
+    description: 'Ids of the course concepts this package practises; empty when none fits',
+  };
+  return {
+    ...PLAN_SCHEMA,
+    properties: {
+      ...PLAN_SCHEMA.properties,
+      packages: { ...PLAN_SCHEMA.properties.packages, items: { ...item, properties: { ...item.properties, concepts } } },
+    },
+  };
+};
+
 // Validation: the CLI enforces the schema, but this layer does not rely on it.
 
 // Typed as a declaration so calls narrow: TypeScript only treats a call as
@@ -366,9 +402,21 @@ export const validateClarify = (raw: unknown): Clarification => {
   };
 };
 
+// A package's concepts: only ids of `allowed` (the pack's skeleton), each
+// once. Tags are never worth failing a plan over: anything else is dropped,
+// and a list longer than MAX_PACKAGE_CONCEPTS is dropped whole, since it
+// reads as guessing.
+const packageConcepts = (value: unknown, allowed: ReadonlySet<string>): string[] => {
+  if (!Array.isArray(value)) return [];
+  const known = [...new Set(value.filter((id): id is string => typeof id === 'string' && allowed.has(id)))];
+  return known.length > MAX_PACKAGE_CONCEPTS ? [] : known;
+};
+
 // linkTests as for planPrompt(): when false, test names the model added anyway
 // are dropped, so no criterion waits for a test that will never run.
-export const validatePlan = (raw: unknown, { linkTests }: { linkTests: boolean }): Plan => {
+// concepts: the ids a package may be tagged with; none without a skeleton.
+export const validatePlan = (raw: unknown, { linkTests, concepts = [] }: { linkTests: boolean; concepts?: string[] }): Plan => {
+  const allowed = new Set(concepts);
   if (!isObject(raw)) fail('output', 'is not an object');
   const packages = list(raw.packages, 'packages', { min: 1, max: MAX_PACKAGES }).map((pkg, i) => {
     const at = `packages[${i}]`;
@@ -376,6 +424,7 @@ export const validatePlan = (raw: unknown, { linkTests }: { linkTests: boolean }
     const hours = pkg.estimateHours;
     if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0.25 || hours > 16) fail(`${at}.estimateHours`, 'must be between 0.25 and 16');
     const fileScope = [...new Set(list(pkg.fileScope, `${at}.fileScope`, { min: 1, max: 15 }).map((p, j) => scopePath(p, `${at}.fileScope[${j}]`)))];
+    const tagged = packageConcepts(pkg.concepts, allowed);
     return {
       title: text(pkg.title, `${at}.title`, 60),
       description: text(pkg.description, `${at}.description`, 120),
@@ -396,6 +445,7 @@ export const validatePlan = (raw: unknown, { linkTests }: { linkTests: boolean }
       difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
       recommendedMode: recommendedMode(pkg.mode, `${at}.mode`),
       dependsOn: dependencies(pkg.dependsOn, i, `${at}.dependsOn`),
+      ...(tagged.length ? { concepts: tagged } : {}),
     };
   });
   return { summary: text(raw.summary, 'summary', 800), packages };
@@ -447,5 +497,6 @@ export const toTaskDefinitions = (requirement: { id: string; title: string }, pa
     // Plans saved before modes existed have none.
     ...(pkg.recommendedMode ? { recommendedMode: pkg.recommendedMode } : {}),
     ...(course ? { course } : {}),
+    ...(pkg.concepts?.length ? { concepts: pkg.concepts } : {}),
     requirementId: requirement.id,
   }));
