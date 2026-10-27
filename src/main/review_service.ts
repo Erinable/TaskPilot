@@ -9,7 +9,9 @@ import * as verification from './verification.ts';
 import { reportIgnore, submitChecks } from './submit_checks.ts';
 import { adjudicateDeviation, reviewWorkPackage, throwIfCancelled } from './agents/pipeline.ts';
 import { agentTransitionOf, toWireState } from './app_context.ts';
+import { runHiddenTests } from './lab_hidden.ts';
 import type { AppContext } from './app_context.ts';
+import type { Grader } from './lab_verify.ts';
 import type { BaselineChecks, BaselineChecksStatus } from './work_package_store.ts';
 
 // Tracked files and HEAD; untracked files (build output) are allowed to appear.
@@ -25,8 +27,9 @@ const treeState = async (root: string) => {
 };
 
 // `onJudged` runs once QA's verdict is recorded: what follows a review
-// (grading, the next coding round) belongs to other domains.
-export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (id: string) => Promise<void> }) => {
+// (grading, the next coding round) belongs to other domains. `grader` runs a
+// course lab's hidden tests (./lab_hidden.ts).
+export const createReviewService = (ctx: AppContext, { onJudged, grader }: { onJudged: (id: string) => Promise<void>; grader: Grader }) => {
   const { store, backgroundRuns, requireTask } = ctx;
 
   // Starts QA in the background. The renderer polls tasks:get for the
@@ -47,6 +50,11 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
         const steps = await ctx.runnableSteps(config);
         const checks = submitChecks(steps);
         const profile = await ctx.profile(config);
+        // A course lab's hidden tests: one more blocking check, names only.
+        const hidden = task.lab
+          ? await runHiddenTests({ root, dataDir: ctx.repositories.dataDir(), labId: task.lab.id, grader, envPath, signal: controller.signal })
+          : null;
+        throwIfCancelled(controller.signal);
         const result = await reviewWorkPackage(task, {
           root,
           baseline,
@@ -59,6 +67,7 @@ export const createReviewService = (ctx: AppContext, { onJudged }: { onJudged: (
           ignore: reportIgnore(steps),
           interfaces: ctx.interfacesFor(task),
           profile,
+          extra: hidden ? [hidden] : [],
           envPath,
           signal: controller.signal,
         });

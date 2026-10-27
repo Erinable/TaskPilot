@@ -36,7 +36,7 @@ export const STEP_HINTS: Record<StepKind, string> = {
 };
 
 // Custom steps TaskPilot itself names: v2's smoke check became custom:smoke.
-const KNOWN_CUSTOM: Record<string, string> = { 'custom:smoke': '冒烟测试' };
+const KNOWN_CUSTOM: Record<string, string> = { 'custom:smoke': '冒烟测试', 'custom:hidden-tests': '隐藏测试' };
 
 // A custom step's own label, else its name.
 export const stepLabel = (id: StepId | string, label: string | null = null) =>

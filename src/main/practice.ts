@@ -1,15 +1,17 @@
-// Practice mode's pure rules: where a reference patch is kept, what Tutor
-// is shown when grading, and when a submission needs grading at all.
+// Practice mode's pure rules: where a reference patch is kept, when it
+// opens, what Tutor is shown when grading, and when a submission needs
+// grading at all.
 //
-// [人工决策-2026-10-24 12:51:21] 练习模式先交卷再看参考答案：参考答案在领取时后台生成，
-// 首次提交审查前主进程不返回补丁；QA 出结论后（通过或驳回）由 Tutor 判卷，判卷不改变工作包状态。
+// [人工决策-2026-10-27 00:51:12] 参考答案要「本包测试全部通过」或「提示梯度已用到 L5」才解锁，
+// 课程 lab 和项目 practice 包同一规则（取代 2026-10-24 12:51:21 的「首次提交后即可看」）。
+// 参考答案在领取时后台生成（lab 自带）；QA 出结论后（通过或驳回）由 Tutor 判卷，判卷不改变工作包状态。
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import * as noteCourses from '../shared/note_courses.ts';
 import type { CoursePack } from '../shared/course_pack.ts';
 import type { NoteMeta } from '../shared/ipc/notes.ts';
-import type { Grade, GradeCategory, Review } from '../shared/ipc/packages.ts';
+import type { Grade, GradeCategory, ReferenceLock, ReferenceRun, Review } from '../shared/ipc/packages.ts';
 
 export const REFERENCES_DIRNAME = 'references';
 // What of the reference Tutor reads; the submission is capped by review_diff.
@@ -38,6 +40,41 @@ export const referenceForPrompt = (patch: string): string => {
     kept += segment;
   }
   return `${kept}\n(The rest of the reference solution was left out for length.)`;
+};
+
+// The top rung of the hint ladder (L1–L5).
+const MAX_HINT_LEVEL = 5;
+
+// Whether the package's tests all passed in its latest finished review:
+// every blocking check (the repository's submit steps, a lab's public and
+// hidden tests) passed, and every acceptance criterion with a linked test
+// was verified. QA's own verdict does not count; with nothing to run there
+// is nothing that passed.
+const testsPassed = (review: Review | null): boolean => {
+  if (!review || (review.status !== 'passed' && review.status !== 'rejected')) return false;
+  const checks = review.checks.filter((check) => check.blocking);
+  const linked = review.acceptance.filter((criterion) => criterion.test);
+  if (!checks.length && !linked.length) return false;
+  return checks.every((check) => check.status === 'pass') && linked.every((criterion) => criterion.status === 'verified');
+};
+
+// The highest hint rung this package has used. The hint ladder is T7's;
+// until it lands no rung is ever used, so this condition never opens the
+// reference.
+export const usedHintLevel = (_state: { referenceRun: ReferenceRun | null }): number | null => null;
+
+// Whether the reference may be read now, and why. `hintLevel` is the
+// highest hint rung used, null while there is no hint ladder (before T7),
+// which never opens it. Once read it stays open.
+export const referenceLock = (
+  { referenceRun, review }: { referenceRun: ReferenceRun | null; review: Review | null },
+  hintLevel: number | null,
+): ReferenceLock | null => {
+  if (referenceRun?.status !== 'ready') return null;
+  if (referenceRun.revealedAt) return { unlocked: true, reason: 'revealed' };
+  if (testsPassed(review)) return { unlocked: true, reason: 'tests_passed' };
+  if (hintLevel !== null && hintLevel >= MAX_HINT_LEVEL) return { unlocked: true, reason: 'hints_used' };
+  return { unlocked: false, reason: review && review.status !== 'running' ? 'tests_not_passed' : 'not_submitted' };
 };
 
 // QA's conclusion in the words Tutor needs; null when QA did not finish.

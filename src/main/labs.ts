@@ -266,6 +266,15 @@ export const writePrivate = async (dataDir: string, labId: string, secret: LabPr
   if (secret.rubric) await fs.writeFile(path.join(dir, RUBRIC_FILENAME), `${JSON.stringify(secret.rubric, null, 2)}\n`, { mode: 0o600 });
 };
 
+// A lab's hidden test files by name; empty when it has none.
+export const readHidden = async (dataDir: string, labId: string): Promise<Record<string, string>> => {
+  const dir = path.join(labDir(dataDir, labId), HIDDEN_DIRNAME);
+  const names = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => (error.code === 'ENOENT' ? [] : Promise.reject(error)));
+  return Object.fromEntries(
+    await Promise.all(names.filter((name) => FLAT_NAME.test(name)).map(async (name) => [name, await fs.readFile(path.join(dir, name), 'utf8')])),
+  );
+};
+
 // ========== work packages ==========
 
 // The id of a lab's package; lab ids are unique in a repository.

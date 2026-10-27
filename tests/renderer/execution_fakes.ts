@@ -34,6 +34,7 @@ export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packag
   codingRun: null,
   mode: null,
   referenceRun: null,
+  referenceLock: null,
   grade: null,
   baselineChecks: { status: 'measured', reason: null, commit: 'abcdef12', checks: {}, startedAt: '', finishedAt: null },
   adjudication: null,

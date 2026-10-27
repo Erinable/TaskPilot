@@ -29,6 +29,8 @@ export const REASONS: Record<string, string> = {
   report_too_large: 'JUnit 报告超过 5 MB',
   report_invalid: 'JUnit 报告无法解析',
   command_missing: '找不到可执行文件',
+  hidden_failed: '有隐藏测试没有通过（只显示测试名）',
+  sandbox_unavailable: '隐藏测试只在 macOS 沙箱里运行，这台机器上没有沙箱',
 };
 
 const UNAVAILABLE: Record<string, string> = {

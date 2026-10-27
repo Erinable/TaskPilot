@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Practice mode on the execution page: whether the reference solution is
-// ready (its content stays locked until the first submission), Tutor's
-// grading of the submission, and the reference beside the developer's diff.
+// ready (its content stays locked until every test of the package passed or
+// the hints were used up to L5), Tutor's grading of the submission, and the
+// reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
 import { computed, onMounted, ref, watch } from 'vue';
 
@@ -31,19 +32,25 @@ type PracticeView = { text: string; tone: '' | 'success' | 'danger' };
 
 const run = computed(() => props.task.referenceRun);
 const grade = computed(() => props.task.grade);
-// The patch is only handed over once QA has seen a submission.
-const unlocked = computed(() => run.value?.status === 'ready' && props.task.review !== null);
+// The main process decides; the patch is only handed over once unlocked.
+const unlocked = computed(() => props.task.referenceLock?.unlocked === true);
+
+// [人工决策-2026-10-27 00:51:12] 测试全过或提示用到 L5 才解锁；项目 practice 包也一样，不再是提交一次就能看。
+const LOCKED_TEXT: Record<string, string> = {
+  not_submitted: '参考答案已经写好。本包的测试全部通过，或者提示用到 L5 之后才能看。',
+  tests_not_passed: '参考答案还锁着：上次提交还有测试没通过。测试全部通过，或者提示用到 L5 之后才能看。',
+};
 
 const referenceText = computed((): PracticeView => {
   const reference = run.value;
   if (!reference) return { text: '这次没有参考答案。', tone: '' };
-  if (reference.status === 'running') return { text: 'Coding Agent 正在后台写一份参考答案。你先自己写，交卷后才能看。', tone: '' };
+  if (reference.status === 'running') return { text: 'Coding Agent 正在后台写一份参考答案。你先自己写，测试全部通过后才能看。', tone: '' };
   if (reference.status === 'failed')
     return { text: `参考答案没有写成：${describeErrorInfo(reference.error ?? { code: 'coding_failed', message: '' })}。判卷会只看你的代码。`, tone: 'danger' };
   if (reference.status === 'cancelled') return { text: '参考答案已取消。', tone: '' };
   return unlocked.value
     ? { text: `参考答案改了 ${reference.files.length} 个文件，可以和你的写法对照着看。`, tone: 'success' }
-    : { text: '参考答案已经写好，交卷后解锁。', tone: 'success' };
+    : { text: LOCKED_TEXT[props.task.referenceLock?.reason ?? 'not_submitted'], tone: 'success' };
 });
 
 const gradeText = computed((): string | null => {

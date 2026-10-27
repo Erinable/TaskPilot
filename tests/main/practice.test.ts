@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import * as practice from '../../src/main/practice.ts';
 import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
-import type { Grade } from '../../src/shared/ipc/packages.ts';
+import type { Grade, ReferenceRun, Review } from '../../src/shared/ipc/packages.ts';
 
 const grade = (overrides: Partial<Grade> = {}): Grade => ({
   id: 'g1',
@@ -132,4 +132,61 @@ test('grading reads the same file, then the same pack, then other packs on a sha
   assert.deepEqual(practice.notesForGrade([note('os-concurrency', { category: 'concurrency', course: 'os' })], [], PROGRAMMING_COURSE, PACKS), [
     { category: 'thinking', title: 'os-concurrency', summary: 'os-concurrency 正文' },
   ]);
+});
+
+// ========== reference lock ==========
+
+const READY_RUN: ReferenceRun = { id: 'r1', status: 'ready', startedAt: '', finishedAt: '', error: null, files: [], costUsd: 0, revealedAt: null };
+const check = (status: 'pass' | 'fail', blocking = true) =>
+  ({ kind: 'test', stage: 'submit', blocking, baseline: 'measured', status, reason: null, newFailures: [], preexisting: [], fixed: [], run: null }) as const;
+const judged = ({ checks = [check('pass')], acceptance = ['verified'] }: { checks?: ReturnType<typeof check>[]; acceptance?: string[] } = {}) =>
+  ({
+    status: 'rejected',
+    startedAt: '',
+    finishedAt: '',
+    error: null,
+    reasons: [],
+    attention: [],
+    checks,
+    verification: null,
+    acceptance: acceptance.map((status) => ({ text: 'c', test: 't', status, verified: status === 'verified', manual: false })),
+    report: null,
+    diff: { files: [], skipped: [], outOfScope: [] },
+    costUsd: 0,
+  }) as unknown as Review;
+
+test('the reference stays locked before a submission and while its tests do not all pass', () => {
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: null }, null), { unlocked: false, reason: 'not_submitted' });
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: { status: 'running', startedAt: '', finishedAt: null, error: null } }, null), {
+    unlocked: false,
+    reason: 'not_submitted',
+  });
+  const notPassed = { unlocked: false, reason: 'tests_not_passed' };
+  // A blocking check failed (a lab's hidden tests are one), or a linked test did not pass.
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: judged({ checks: [check('pass'), check('fail')] }) }, null), notPassed);
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: judged({ acceptance: ['verified', 'missing'] }) }, null), notPassed);
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: judged({ checks: [], acceptance: [] }) }, null), notPassed, 'nothing ran');
+  // QA's own pass is not a test.
+  assert.deepEqual(
+    practice.referenceLock({ referenceRun: READY_RUN, review: { ...judged({ checks: [check('fail')] }), status: 'passed' } as Review }, null),
+    notPassed,
+  );
+  assert.equal(practice.referenceLock({ referenceRun: { ...READY_RUN, status: 'running' }, review: judged() }, null), null, 'no ready reference');
+});
+
+test('the reference opens once every test passed, or the hints were used up to L5, and stays open once read', () => {
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: judged() }, null), { unlocked: true, reason: 'tests_passed' });
+  // An advisory check does not hold it back.
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: judged({ checks: [check('pass'), check('fail', false)] }) }, null), {
+    unlocked: true,
+    reason: 'tests_passed',
+  });
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: null }, 5), { unlocked: true, reason: 'hints_used' });
+  assert.deepEqual(practice.referenceLock({ referenceRun: READY_RUN, review: null }, 4), { unlocked: false, reason: 'not_submitted' });
+  assert.deepEqual(practice.referenceLock({ referenceRun: { ...READY_RUN, revealedAt: 'x' }, review: judged({ checks: [check('fail')] }) }, null), {
+    unlocked: true,
+    reason: 'revealed',
+  });
+  // Until the hint ladder exists no rung is used, so that branch never opens it.
+  assert.equal(practice.usedHintLevel({ referenceRun: READY_RUN }), null);
 });

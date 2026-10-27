@@ -8,12 +8,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import * as labs from '../../../src/main/labs.ts';
+import * as verification from '../../../src/main/verification.ts';
 import * as workspace from '../../../src/main/workspace.ts';
 import { env } from '../../../src/main/env.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { FCFS_LAB, HIDDEN_MARKERS, REFERENCE_MARKERS, RR_LAB, SCHED_PLAN } from '../fixtures/sched_lab.ts';
 import * as fixtures from './harness.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
+import type { Grader } from '../../../src/main/lab_verify.ts';
 
 // Runs real git and make per test.
 vi.setConfig({ testTimeout: 60_000 });
@@ -53,9 +55,30 @@ const settleTask = async (call: fixtures.TestCall, id: string, done: (task: Task
 
 const git = async (root: string, ...args: string[]) => (await fixtures.run('git', ['-C', root, ...args])).stdout;
 
-const labHarness = async () => {
+// `make grade` on the files the review hands over, like the sandboxed
+// grader but unsandboxed: the fixture's code is ours. Keeps what it saw.
+const plainGrader =
+  (seen: Record<string, string>[]): Grader =>
+  async (files, { signal, envPath }) => {
+    seen.push(files);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-grade-'));
+    try {
+      for (const [file, content] of Object.entries(files)) {
+        await fs.mkdir(path.dirname(path.join(dir, file)), { recursive: true });
+        await fs.writeFile(path.join(dir, file), content);
+      }
+      const run = await verification.run({ root: dir, commands: { grade: { command: 'make', args: ['grade'] } } }, 'grade', { signal, envPath });
+      return { built: run.exitCode === 0, results: Object.fromEntries(run.results.map((entry) => [entry.name, entry.passed])), output: run.output };
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  };
+
+const labHarness = async ({ grader }: { grader?: Grader } = {}) => {
   const prepared: string[] = [];
+  const graded: Record<string, string>[] = [];
   const h = await fixtures.harness({
+    labGrader: grader ?? plainGrader(graded),
     agent: fixtures.fakeAgent(),
     coding: {
       codingProbe: async () => fixtures.codingRuntime(),
@@ -71,7 +94,7 @@ const labHarness = async () => {
   vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(home, 'gitconfig'));
   await fs.writeFile(path.join(home, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n');
   onTestFinished(() => void vi.unstubAllEnvs());
-  return { ...h, prepared };
+  return { ...h, prepared, graded };
 };
 
 test('a lab repository is created, committed, opened and published as a chain of practice packages', async () => {
@@ -141,11 +164,84 @@ test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, an
   assert.equal(grade?.status, 'pass');
   assert.equal(grade?.blocking, true);
   assert.equal(review.acceptance[0].status, 'verified');
+  const hidden = review.checks.find((check) => check.kind === 'custom:hidden-tests');
+  assert.equal(hidden?.status, 'pass');
+  assert.equal(hidden?.blocking, true);
+  assert.ok(!review.attention.some((item) => 'kind' in item && item.kind === 'custom:hidden-tests'), 'no baseline is expected for hidden tests');
+  // The hidden tests ran on the student's tree with TaskPilot's own Makefile.
+  assert.equal(h.graded.length, 1);
+  assert.ok(Object.keys(h.graded[0]).includes('tests/public/01_fcfs_order.sh'));
+  assert.equal(h.graded[0].Makefile, labs.MAKEFILE);
   const qaPrompt = fixtures.callFor(h.agentCalls, 'review').prompt;
   for (const marker of [...HIDDEN_MARKERS, 'hint-marker']) assert.ok(!qaPrompt.includes(marker), marker);
 
-  // Once QA has judged, the reference opens as it does for any practice package.
+  // Every test passed, so the reference opens.
+  assert.deepEqual(reviewed.referenceLock, { unlocked: true, reason: 'tests_passed' });
   assert.equal((await h.call(CHANNELS.referenceGet, 'lab-fcfs')).data, FCFS.private.reference);
+});
+
+// Passes the public tests (their jobs come in arrival order) but runs every
+// job in input order, so the hidden "out of arrival order" test fails.
+const unsorted = async (root: string) => {
+  await solve(root, FCFS);
+  const file = path.join(root, 'src/fcfs.c');
+  const solved = await fs.readFile(file, 'utf8');
+  const sorting = solved.slice(solved.indexOf('  for (int i = 1; i < count; i++) {'), solved.indexOf('  int time = 0;'));
+  assert.ok(sorting.includes('jobs[at] = current;'));
+  await fs.writeFile(file, solved.replace(sorting, ''));
+};
+
+// [人工决策-2026-10-27 00:51:12] 隐藏测试失败驳回提交，UI 和 IPC 只给测试名，参考答案保持锁定。
+test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its name reaches QA and the renderer', async () => {
+  const h = await labHarness();
+  const root = await emptyFolder();
+  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
+  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+
+  await unsorted(root);
+  await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
+  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  const review = reviewed.review!;
+  assert.ok(review.status === 'rejected', JSON.stringify(review));
+  assert.ok(review.reasons.includes('tests_failed'));
+  assert.equal(review.checks.find((check) => check.kind === 'custom:grade')?.status, 'pass', 'the public tests pass');
+  const hidden = review.checks.find((check) => check.kind === 'custom:hidden-tests')!;
+  assert.equal(hidden.status, 'fail');
+  assert.equal(hidden.reason, 'hidden_failed');
+  assert.deepEqual(hidden.newFailures, ['fcfs sorts jobs given out of arrival order']);
+  assert.ok(hidden.run && !('error' in hidden.run));
+  assert.equal(hidden.run.outputTail, null);
+  assert.equal(hidden.run.command, 'make grade (hidden tests)');
+
+  // Neither the script nor its input or expected value is anywhere the renderer reads.
+  const script = FCFS.private.hidden['01_fcfs_order.sh'];
+  const seen = await rendererView(h.call);
+  for (const secret of ['hidden-marker-fcfs', "printf 'b 2 1", 'a 1\\nb 3', script]) assert.ok(!seen.includes(secret), secret);
+  assert.deepEqual(reviewed.referenceLock, { unlocked: false, reason: 'tests_not_passed' });
+  assert.equal((await h.call(CHANNELS.referenceGet, 'lab-fcfs')).error.code, 'reference_locked');
+});
+
+test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiable and the reference locked', async () => {
+  const h = await labHarness({
+    grader: async () => {
+      throw Object.assign(new Error('no sandbox'), { code: 'sandbox_unavailable' });
+    },
+  });
+  const root = await emptyFolder();
+  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
+  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  await solve(root, FCFS);
+  await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
+  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  const review = reviewed.review!;
+  assert.ok(review.status === 'passed', JSON.stringify(review));
+  const hidden = review.checks.find((check) => check.kind === 'custom:hidden-tests')!;
+  assert.deepEqual([hidden.status, hidden.reason], ['unverifiable', 'sandbox_unavailable']);
+  // The human sees it at acceptance; an unverifiable check is not a pass.
+  assert.ok(review.attention.some((item) => item.code === 'check_unverifiable' && item.kind === 'custom:hidden-tests'));
+  assert.deepEqual(reviewed.referenceLock, { unlocked: false, reason: 'tests_not_passed' });
 });
 
 // Applies a lab's reference to the working tree, as a student's solution.
