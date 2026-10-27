@@ -65,6 +65,9 @@ export interface CourseInterview {
   // The first lab's generation once the path is confirmed (../lab_generation_service.ts);
   // only what the learner may see, the lab itself stays private.
   lab?: LabGeneration | null;
+  // The lab repository the path's labs are written into, once created; the
+  // requirement is copied there and this one points at it.
+  repositoryId?: string | null;
 }
 
 export interface RequirementQuestion {
@@ -234,6 +237,10 @@ export class RequirementStore implements TaskCatalog {
     return structuredClone(this.#mustGet(id));
   }
 
+  has(id: string): boolean {
+    return this.#items.has(id);
+  }
+
   // `course` makes a course requirement; its form is checked by the caller.
   async create({ title, text, course }: { title?: unknown; text?: unknown; course?: coursePlan.GoalForm }): Promise<Requirement> {
     const now = this.#now().toISOString();
@@ -395,6 +402,17 @@ export class RequirementStore implements TaskCatalog {
     const { item, course } = this.#course(id, ['published']);
     if (!course.plan) return fail('There is no confirmed path', 'invalid_state');
     return this.#update(id, { course: { ...course, lab }, costUsd: item.costUsd + costUsd });
+  }
+
+  // A confirmed course path as given: the copy the lab repository keeps
+  // once created for it, or the one left where the interview ran, which
+  // then only points at the lab repository (`course.repositoryId`).
+  async putCourse(item: Requirement): Promise<Requirement> {
+    if (item.kind !== 'course' || item.status !== 'published' || !item.course?.plan) return fail('Not a confirmed course path', 'invalid_state');
+    this.#items.set(item.id, structuredClone({ ...item, packages: [], updatedAt: this.#now().toISOString() }));
+    this.#rebuildCatalog();
+    await this.#persist();
+    return this.get(item.id);
   }
 
   async finishPlan(id: string, plan: Plan, costUsd: number | null = 0): Promise<Requirement> {

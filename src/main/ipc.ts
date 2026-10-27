@@ -63,7 +63,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });
-  const labGeneration = createLabGenerationService(ctx, { grader });
+  const labs = createLabService(ctx);
+  const labGeneration = createLabGenerationService(ctx, { grader, labService: labs });
   requirementsIpc.register(ipcMain, ctx, { courseInterview: createCourseInterviewService(ctx), labGeneration });
   activityIpc.register(ipcMain, ctx, { runtime });
   environmentIpc.register(ipcMain, ctx);
@@ -76,7 +77,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   repositoriesIpc.register(ipcMain, ctx);
 
   return {
-    labs: createLabService(ctx),
+    labs,
     labGeneration,
     // Cancels running agents and waits for their final writes.
     // On quit: nothing may still be writing once this resolves.

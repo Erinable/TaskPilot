@@ -23,6 +23,7 @@ import { useTasksStore } from './tasks.ts';
 import { useTutorStore } from './tutor.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as repositoryTypes from '@shared/ipc/repositories.ts';
+import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
 const BUSY_LABELS: Record<repositoryTypes.BusyKind, string> = {
   requirement: '需求',
@@ -123,6 +124,29 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     }
   };
 
+  // A switch made by another action, such as creating a lab repository,
+  // which opens the new repository itself. Resolves to the action's result,
+  // or null when the user backed out or it failed.
+  const switchWith = async <T>(action: () => Promise<T>, failure: string): Promise<T | null> => {
+    if (switching.value) return null;
+    switching.value = true;
+    try {
+      if (!(await confirmCancel()) || !(await leaveCurrent())) return null;
+      const result = await action();
+      apply(await call(window.taskpilot.repositories.list()));
+      await reloadAll();
+      return result;
+    } catch (error) {
+      console.error('[repositories] switch failed', error);
+      showToast(`${failure}：${describeError(error)}`);
+      // The action may have switched before failing; show where things are.
+      await refresh();
+      return null;
+    } finally {
+      switching.value = false;
+    }
+  };
+
   const switchTo = async (id: string) => {
     if (id === currentId.value) return true;
     const switched = await runSwitch(() => window.taskpilot.repositories.switch(id));
@@ -166,6 +190,21 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     }
   };
 
+  // ========== Lab repository ==========
+  // Writes a course's lab whose self-check passed into its lab repository.
+  // The first one asks for an empty folder, creates the repository there and
+  // switches to it like any switch; later ones are added to the open one.
+  const placeLab = async (item: requirementTypes.Requirement) => {
+    const requirements = useRequirementsStore();
+    if (item.course?.repositoryId) return requirements.addLab(item);
+    const root = await pickFolder();
+    if (!root) return false;
+    const placed = await switchWith(() => call(window.taskpilot.requirements.labPlace(item.id, root)), '创建实验仓库失败');
+    if (!placed) return false;
+    showToast('实验仓库建好了，第一个 lab 已经在工作队列里。');
+    return true;
+  };
+
   // Points a moved repository at its new folder. No switch, so no cancel.
   const relocate = async (id: string) => {
     const root = await pickFolder();
@@ -192,8 +231,11 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     refresh,
     // Switching
     switchTo,
+    switchWith,
     // Adding and relocating
     add,
     relocate,
+    // Lab repository
+    placeLab,
   };
 });

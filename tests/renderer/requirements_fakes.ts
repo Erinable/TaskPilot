@@ -150,6 +150,20 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
           }),
         ),
       ),
+      labPlace: vi.fn((id: string) =>
+        ok(
+          requirement({
+            id,
+            kind: 'course',
+            status: 'published',
+            course: { ...coursePathInterview(), lab: labGeneration({ stage: 1, placed: true }), repositoryId: 'lab-repo' },
+          }),
+        ),
+      ),
+    },
+    repositories: {
+      list: vi.fn(() => ok({ current: 'lab-repo', repositories: [] })),
+      busy: vi.fn(() => ok([])),
     },
     // MilestonePicker loads the release state when a requirement detail mounts.
     release: {
@@ -157,6 +171,7 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
     },
     agent: { status: vi.fn(() => ok<settingsTypes.AgentStatus>(agentStatus())) },
     workspace: {
+      pickRoot: vi.fn(() => ok<string | null>('/Users/me/sched-lab')),
       info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
       get: vi.fn(() =>
         ok({ root: null, steps: [], project: { status: 'missing' }, course: defaultCourse(), detected: [], presets: [] } as workspaceTypes.WorkspaceView),

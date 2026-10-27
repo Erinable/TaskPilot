@@ -8,7 +8,9 @@ import QueueView from '../../../src/renderer/src/views/QueueView.vue';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
-import { installApi, requirement } from '../requirements_fakes.ts';
+import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
+import { coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
+import { taskView } from '../execution_fakes.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -268,5 +270,30 @@ describe('QueueView board', () => {
     const wrapper = render();
     await flushPromises();
     expect(wrapper.find('.board-hint').text()).toContain('同时在做 2 个');
+  });
+
+  test('in a lab repository the stage bar sits above the queue, with the course that points at it', async () => {
+    const api = (window as unknown as { taskpilot: ReturnType<typeof installApi> }).taskpilot;
+    api.repositories.list.mockImplementation(() => Promise.resolve({ ok: true as const, data: { current: 'lab-repo', repositories: [] } }));
+    useRepositoriesStore().currentId = 'lab-repo';
+    useRequirementsStore().items = [
+      requirement({
+        kind: 'course',
+        status: 'published',
+        course: { ...coursePathInterview(), repositoryId: 'lab-repo', lab: labGeneration({ stage: 1, placed: true }) },
+      }),
+    ];
+    // A project repository's packages carry no lab: no bar.
+    useTasksStore().tasks = [taskView({ status: 'pending' })];
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.find('[data-lab-stages]').exists()).toBe(false);
+    useTasksStore().tasks = [
+      taskView({ id: 'lab-round-robin', status: 'done', title: '时间片轮转', lab: { id: 'round-robin', stage: 1, difficulty: 'easy' } }),
+    ];
+    await flushPromises();
+    expect(wrapper.get('[data-lab-stages] [data-stage="1"]').attributes('data-state')).toBe('passed');
+    // The course is known, so the next lab can be asked for.
+    expect(wrapper.find('[data-action="next-lab"]').exists()).toBe(true);
   });
 });

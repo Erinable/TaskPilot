@@ -120,6 +120,9 @@ const api = {
     labGenerate: (id: string, conceptId?: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabGenerate, id, conceptId),
     // Marks a concept still to learn skipped after the path was confirmed.
     courseSkip: (id: string, conceptId: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCourseSkip, id, conceptId),
+    // Writes the lab whose self-check passed into the lab repository; the
+    // first one creates it in `root`, an empty folder, and opens it.
+    labPlace: (id: string, root?: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabPlace, id, root),
   },
 
   agent: {

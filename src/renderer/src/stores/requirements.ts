@@ -298,6 +298,25 @@ export const useRequirementsStore = defineStore('requirements', () => {
     startPolling();
   };
 
+  // ========== Lab repository ==========
+  // Adds the lab whose self-check passed to the open lab repository as its
+  // next stage. The first lab creates the repository instead, which is a
+  // switch (stores/repositories.ts placeLab).
+  const addLab = async (item: requirementTypes.Requirement) => {
+    const next = await courseAction(() => call(window.taskpilot.requirements.labPlace(item.id)), '写入实验仓库失败');
+    if (!next) return false;
+    await useTasksStore().reloadQueue();
+    showToast(`已把「${next.course?.lab?.lab?.title ?? 'lab'}」加入实验仓库。`);
+    return true;
+  };
+
+  // The next lab of the open lab repository: the estimate first, as for
+  // the first lab, in the requirement center.
+  const nextLab = async (item: requirementTypes.Requirement) => {
+    await open({ id: item.id });
+    await loadLabEstimate(item);
+  };
+
   // Saves the edited draft into the global folder. A refusal naming a field
   // is returned for the editor to show there.
   const saveDraft = async (item: requirementTypes.Requirement, pack: CoursePack) => {
@@ -341,8 +360,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const announceLab = (lab: requirementTypes.LabGeneration) => {
-    if (lab.status === 'ready') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」生成好了，自验证已通过。`, 'info');
-    else if (lab.status === 'needs_review') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」自验证没有通过，等你决定怎么办。`);
+    if (lab.status === 'ready') announceAgent(`lab「${lab.lab?.title ?? ''}」生成好了，自验证已通过。`, 'info');
+    else if (lab.status === 'needs_review') announceAgent(`lab「${lab.lab?.title ?? ''}」自验证没有通过，等你决定怎么办。`);
     else if (lab.status === 'failed' && lab.error?.code !== 'agent_cancelled') announceAgent(`生成 lab 失败：${describeErrorInfo(lab.error)}`);
   };
 
@@ -450,6 +469,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     labEstimate,
     loadLabEstimate,
     generateLab,
+    // Lab repository
+    addLab,
+    nextLab,
     // Polling
     startPolling,
     stopPolling,

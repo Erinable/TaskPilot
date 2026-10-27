@@ -21,6 +21,7 @@ import { formatCost } from '@/lib/activity.ts';
 import InlineCode from '@/components/InlineCode.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
 import CourseEditor from '@/components/courses/CourseEditor.vue';
+import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import AgentBubble from './AgentBubble.vue';
 import * as model from './requirement_model.ts';
@@ -32,6 +33,7 @@ import type { PathStatus } from '@shared/course_plan.ts';
 const props = defineProps<{ item: requirementTypes.Requirement; course: requirementTypes.CourseInterview }>();
 
 const store = useRequirementsStore();
+const repositories = useRepositoriesStore();
 
 const report = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
@@ -101,6 +103,13 @@ const onGenerate = () => {
   cancellingLab.value = false;
   report(store.generateLab(props.item));
 };
+// The stage the lab shown (or the next one, once it is written) is for.
+const labStage = computed(() => {
+  const current = lab.value;
+  if (!current) return 1;
+  return current.placed ? (current.stage ?? 1) + 1 : (current.stage ?? 1);
+});
+const labName = computed(() => (labStage.value === 1 ? '第一个 lab' : `第 ${labStage.value} 阶段 lab`));
 const verify = computed(() => lab.value?.verify ?? null);
 const lastRound = computed(() => verify.value?.rounds.at(-1) ?? null);
 const otherConcepts = computed(() => model.otherPlannedConcepts(props.course));
@@ -238,10 +247,10 @@ const verifyProgress = computed(() => {
             取消
           </button>
         </template>
-        <template v-else-if="lab?.status === 'ready' && lab.lab">
+        <template v-else-if="lab?.status === 'ready' && lab.lab && !(lab.placed && estimate)">
           <h3>
             <AppIcon name="flask" />
-            第一个 lab：{{ lab.lab.title }}
+            {{ `${labName}：${lab.lab.title}` }}
           </h3>
           <p>{{ lab.lab.summary }}</p>
           <p class="course-path-note">
@@ -252,6 +261,13 @@ const verifyProgress = computed(() => {
           <p v-if="verify" class="course-path-note" data-field="verify-result">
             {{ `自验证第 ${verify.rounds.length} 轮通过（参考解、初始代码、变异检测、一致性），自验证花费 ${formatCost(verify.costUsd)}。` }}
           </p>
+          <p v-if="lab.placed" class="course-path-note" data-field="lab-placed">已写入实验仓库，在工作队列的阶段条里打开它。</p>
+          <div v-else class="req-actions">
+            <button class="primary-button" type="button" data-action="place-lab" :disabled="store.courseBusy" @click="report(repositories.placeLab(item))">
+              <AppIcon name="folder" />
+              {{ course.repositoryId ? '加入实验仓库' : '选一个空文件夹，建实验仓库' }}
+            </button>
+          </div>
         </template>
         <template v-else-if="lab?.status === 'needs_review' && lab.lab && !estimate">
           <p class="course-warning" role="alert">
@@ -284,7 +300,7 @@ const verifyProgress = computed(() => {
             <span>{{ lab.error?.code === 'agent_cancelled' ? '已取消生成。' : `生成失败：${describeErrorInfo(lab.error)}` }}</span>
           </p>
           <template v-if="estimate">
-            <h3>生成第一个 lab</h3>
+            <h3>{{ `生成${labName}` }}</h3>
             <p>
               覆盖知识点：
               <code v-for="entry in estimate.concepts" :key="entry.id" class="path-chip">{{ entry.label }}</code>
@@ -304,7 +320,7 @@ const verifyProgress = computed(() => {
           <div v-else class="req-actions">
             <button class="primary-button" type="button" data-action="estimate-lab" :disabled="store.courseBusy" @click="report(store.loadLabEstimate(item))">
               <AppIcon :name="store.courseBusy ? 'spinner' : 'flask'" :class="{ spin: store.courseBusy }" />
-              {{ lab?.status === 'failed' ? '重新生成第一个 lab' : '生成第一个 lab' }}
+              {{ lab?.status === 'failed' ? `重新生成${labName}` : `生成${labName}` }}
             </button>
           </div>
         </template>

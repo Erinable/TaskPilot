@@ -48,6 +48,7 @@ export const CHANNELS = {
   requirementsLabEstimate: 'requirements:lab-estimate',
   requirementsLabGenerate: 'requirements:lab-generate',
   requirementsCourseSkip: 'requirements:course-skip',
+  requirementsLabPlace: 'requirements:lab-place',
   agentStatus: 'agent:status',
   agentRuntimes: 'agent:runtimes',
   agentModels: 'agent:models',

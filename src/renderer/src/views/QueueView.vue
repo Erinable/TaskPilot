@@ -15,6 +15,9 @@ import type { QueueFilter } from '@/lib/queue_filter.ts';
 import { LAYOUT_STORAGE_KEY, actionOf, estimateAccuracy, readLayout, timeText } from '@/lib/board.ts';
 import type { QueueLayout } from '@/lib/board.ts';
 import QueueBoard from '@/components/queue/QueueBoard.vue';
+import LabStages from '@/components/queue/LabStages.vue';
+import { labCourse } from '@/lib/lab_stages.ts';
+import { useRepositoriesStore } from '@/stores/repositories.ts';
 import type { IconName } from '@/lib/icons.ts';
 
 const PRIORITY_LABELS: Record<string, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
@@ -23,6 +26,9 @@ const app = useAppStore();
 const tasks = useTasksStore();
 const requirements = useRequirementsStore();
 const execution = useExecutionStore();
+const repositories = useRepositoriesStore();
+// In a lab repository, the course whose labs it holds, for the stage bar.
+const course = computed(() => labCourse(requirements.items, repositories.currentId));
 
 // Greeting and date follow the business time zone, like every day label.
 const now = new Date();
@@ -91,6 +97,8 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
     </div>
 
     <OnboardingChecklist />
+
+    <LabStages :tasks="tasks.tasks" :course="course" />
 
     <section v-if="hasHistory" class="metrics-row">
       <div class="metric-card glass">
