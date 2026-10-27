@@ -59,7 +59,7 @@ Keep automated tests under `tests/`, static files under `assets/`, and scripts u
 - `npm run format` / `npm run format:check` — Prettier (`.prettierrc.json`). The one-time formatting commit is listed in `.git-blame-ignore-revs`.
 - `npm run eval:product-lead` / `eval:qa` / `eval:architect` / `eval:tutor-grade` / `eval:lab-gen` — eval harnesses for Product Lead, QA, Architect, Tutor's grading and the lab generator (real model calls, cost money); Node runs the `.ts` files directly.
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, test and build on Ubuntu and macOS. Do not introduce duplicate commands that bypass these scripts.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, test and build on Ubuntu and macOS, with uv, Rust, cc and make installed at pinned versions; its `analyze` job fails when jscpd's duplication exceeds the `.jscpd.json` threshold (1%). Do not introduce duplicate commands that bypass these scripts.
 
 ## Coding Style & Naming Conventions
 
@@ -82,6 +82,8 @@ Stack: electron-vite + TypeScript + Vue 3 + Pinia + Element Plus + UnoCSS, teste
 ## Testing Guidelines
 
 Place tests in `tests/`, using the same path and module name as the code under test. Name tests with the framework’s conventional suffix, such as `*.test.ts` or `test_*.py`. Every behavior change should include a focused regression test when practical. Run the full configured test command locally before submitting a pull request; report any unavailable or failing checks in the PR description.
+
+Tests that drive external tools (uv, python3, cargo, cc, make, perl) gate on `hasTools()` from `tests/fixtures/required_tools.ts`: a machine without a tool skips the test, but with `CI` set a missing tool fails the test file. A new tool such a test needs is installed in `ci.yml` at a pinned version.
 
 ## Commit & Pull Request Guidelines
 

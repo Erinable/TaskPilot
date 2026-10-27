@@ -296,14 +296,14 @@ CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、
 ```bash
 npm run analyze:cycles       # Knip：静态运行时循环依赖，以及无法解析的导入
 npm run analyze:unused       # Knip：未使用文件、导出、类型、依赖，以及未声明的依赖
-npm run analyze:duplicates   # jscpd：src/ 中至少 10 行、80 tokens 的重复代码块
+npm run analyze:duplicates   # jscpd：src/ 中至少 10 行、80 tokens 的重复代码块，重复率超过 1% 失败
 npm run analyze:complexity   # ESLint：报告 src/ 中圈复杂度超过 20 的函数
 npm run check:complexity     # 与 HEAD 比较，只阻断新增或加重的超限函数
 ```
 
 Knip 通过 Electron Vite 和 Vitest 插件识别应用与测试入口；`knip.json` 补充独立评测入口和 `@`、`@shared` 别名，不会把全部源码都当作入口。检测到循环会返回非零退出码。循环检查默认不包含类型导入和动态导入，不代表模块分层规则已经通过检查。
 
-重复检测跳过类型声明，不扫描测试和生成目录；控制台之外的 JSON 报告写入已被 git 忽略的 `.taskpilot/analysis/duplicates/`。CI 将报告上传为 `duplicate-code-report`，保留 14 天，再运行循环检查，因此循环检查失败也不会丢失已生成的报告。目前不设置重复率失败阈值，只用于人工判断是否值得抽取公共实现；工具执行失败仍会使 CI 失败。
+重复检测跳过类型声明，不扫描测试和生成目录；控制台之外的 JSON 报告写入已被 git 忽略的 `.taskpilot/analysis/duplicates/`。CI 将报告上传为 `duplicate-code-report`，保留 14 天，再运行循环检查，因此循环检查失败也不会丢失已生成的报告。重复率超过 `.jscpd.json` 的 `threshold`（1%）时命令返回非零，CI 的 `analyze` 失败；报告仍会先写出并上传。阈值以内的重复块由人工判断是否值得抽取公共实现。
 
 未使用代码报告需要结合 Vue 模板、动态引用和脚本入口人工判断，不应直接据此批量删除。本地只运行与当前问题最相关的一项，不默认串联全部分析。
 

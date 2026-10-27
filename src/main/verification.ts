@@ -139,10 +139,12 @@ const execute = async (
     timeout: timeoutMs,
     signal,
     // A test runner that inherits a TTY may emit colour codes; ask it not to.
+    // Cargo lets an inherited CARGO_TERM_COLOR=always beat NO_COLOR, which
+    // breaks parsing its `Running` lines, so that one is set as well.
     // envPath (from ./shell_env.js) overrides the inherited PATH, which is
     // minimal when the app is launched from Finder rather than a terminal.
     // `env` is the check's own variables, validated in workspace.js.
-    env: { ...processEnv(), ...env, ...(envPath ? { PATH: envPath } : {}), NO_COLOR: '1', FORCE_COLOR: '0' },
+    env: { ...processEnv(), ...env, ...(envPath ? { PATH: envPath } : {}), NO_COLOR: '1', FORCE_COLOR: '0', CARGO_TERM_COLOR: 'never' },
   });
 
   if (error?.code === 'ENOENT') {

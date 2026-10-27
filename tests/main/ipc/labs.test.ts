@@ -9,10 +9,9 @@ import path from 'node:path';
 
 import * as labs from '../../../src/main/labs.ts';
 import * as verification from '../../../src/main/verification.ts';
-import * as workspace from '../../../src/main/workspace.ts';
-import { env } from '../../../src/main/env.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { FCFS_LAB, HIDDEN_MARKERS, REFERENCE_MARKERS, RR_LAB, SCHED_PLAN } from '../fixtures/sched_lab.ts';
+import * as requiredTools from '../../fixtures/required_tools.ts';
 import * as fixtures from './harness.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { Grader } from '../../../src/main/lab_verify.ts';
@@ -20,7 +19,7 @@ import type { Grader } from '../../../src/main/lab_verify.ts';
 // Runs real git and make per test.
 vi.setConfig({ testTimeout: 60_000 });
 
-const hasTools = (await Promise.all(['cc', 'make'].map((tool) => workspace.resolveExecutable(tool, { envPath: env.path }).then(Boolean)))).every(Boolean);
+const hasTools = await requiredTools.hasTools('cc', 'make');
 
 const PRIVATE_MARKERS = [...REFERENCE_MARKERS, ...HIDDEN_MARKERS, 'hint-marker'];
 const FCFS = { ...FCFS_LAB, private: { ...FCFS_LAB.private, hints: [{ level: 1, text: 'hint-marker 先排序。', code: null }] } };

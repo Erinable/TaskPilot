@@ -1,6 +1,7 @@
 {
   "minLines": 10,
   "minTokens": 80,
+  "threshold": 1,
   "ignore": ["**/*.d.ts"],
   "reporters": ["console", "json"],
   "output": ".taskpilot/analysis/duplicates"
