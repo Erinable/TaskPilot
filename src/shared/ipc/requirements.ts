@@ -39,26 +39,49 @@ export type CourseInterview = {
 
 // What the learner sees of a lab being generated: never its code, solution,
 // tests or hints, only their counts. `phase` is the call running: the
-// statement and tests (spec), then the code.
+// statement and tests (spec), then the code, then the self-check (verify)
+// and its repairs. `ready` means the self-check passed; `needs_review` that
+// it still failed after two repairs.
 export type LabGeneration = {
-  status: 'running' | 'ready' | 'failed';
-  phase: 'spec' | 'code' | null;
+  status: 'running' | 'ready' | 'needs_review' | 'failed';
+  phase: 'spec' | 'code' | 'verify' | 'repair' | null;
   concepts: string[];
   difficulty: packageTypes.Difficulty;
   startedAt: string;
   finishedAt: string | null;
   costUsd: number;
   lab: { id: string; title: string; summary: string; estimateHours: number; starterFiles: number; publicTests: number; hiddenTests: number } | null;
+  // The self-check so far; absent on labs generated before it existed.
+  verify?: LabVerify | null;
   error: ErrorInfo | null;
 };
 
-// requirements:lab-estimate: what generating the first lab would cover and
-// roughly cost, shown before the learner confirms. `usd` is null when no
-// price is known for the model (sync prices on the cost page).
+export type LabVerifyCheck = 'reference' | 'starter' | 'mutants' | 'consistency';
+
+// One self-check round: each check's verdict (mutants is null when skipped
+// because the solution failed), the mutant counts and the number of review
+// issues. Test names, mutants and issues themselves stay private.
+export type LabVerifyRound = {
+  round: number;
+  checks: Record<LabVerifyCheck, boolean | null>;
+  mutants: { killed: number; publicKilled: number; total: number } | null;
+  issues: number;
+  repaired: boolean;
+};
+
+// `round` is the round running or the last one; `maxRounds` counts the first and the retries.
+export type LabVerify = { round: number; maxRounds: number; rounds: LabVerifyRound[]; costUsd: number };
+
+// requirements:lab-estimate: what generating the first lab and checking it
+// would cover and roughly cost, shown before the learner confirms. `usd` is
+// null when no price is known for the model (sync prices on the cost page).
+// `calls` is a run whose first self-check passes; `maxCalls` one that
+// repairs twice.
 export type LabEstimate = {
   concepts: { id: string; label: string }[];
   difficulty: packageTypes.Difficulty;
   calls: number;
+  maxCalls: number;
   tokens: { input: number; output: number };
   model: string | null;
   usd: { low: number; high: number } | null;

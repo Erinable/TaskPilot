@@ -6,9 +6,12 @@
 //   npm run eval:lab-gen                         every case, ~$6, no judge
 //   npm run eval:lab-gen -- --case round-robin
 //   npm run eval:lab-gen -- --label my-change
+//   npm run eval:lab-gen -- --verify             also the app's self-check with repairs (T5), several dollars more per case
 import path from 'node:path';
 
 import * as generator from '../../src/main/agents/lab_generator.ts';
+import * as verifier from '../../src/main/agents/lab_verifier.ts';
+import * as labVerify from '../../src/main/lab_verify.ts';
 import * as courses from '../../src/main/courses.ts';
 import { toLabArtifact } from '../../src/main/lab_generation_service.ts';
 import { runAgent, runSuite } from '../shared/harness.ts';
@@ -17,12 +20,34 @@ import { check, runLab } from './checks.ts';
 import type { CaseOutcome } from '../shared/harness.ts';
 import type { LabCase } from './cases.ts';
 import type { LabRun } from './checks.ts';
+import type { RunAgent } from '../../src/main/agents/claude_cli.ts';
 
 const BUILTIN = await courses.loadBuiltinCourses(path.join(import.meta.dirname, '..', '..', courses.BUILTIN_COURSES_DIR));
 const OS = BUILTIN.get('os')!.pack;
 
+const VERIFY = process.argv.includes('--verify');
+
 // `calls` is what the CLI reported per call, for calibrating the app's estimate.
-type Run = { lab: generator.GeneratedLab | null; error: string | null; grade: LabRun | null; calls: { costUsd: number | null; tokens: unknown }[] };
+type Run = {
+  lab: generator.GeneratedLab | null;
+  error: string | null;
+  grade: LabRun | null;
+  verify: labVerify.LabVerifyReport | null;
+  calls: { costUsd: number | null; tokens: unknown }[];
+};
+
+// The self-check as the app runs it after generating, with real calls.
+const selfCheck = (request: generator.LabRequest, lab: generator.GeneratedLab, counted: RunAgent) =>
+  labVerify.verifyLab(
+    lab,
+    { stage: request.stage, base: labVerify.FIRST_STAGE_BASE },
+    {
+      grade: labVerify.sandboxGrader(),
+      writeMutants: (current) => verifier.writeMutants(request, current, { runAgent: counted }),
+      judge: (current) => verifier.judgeConsistency(request, current, { runAgent: counted }),
+      repair: (current, failure) => generator.repair(request, current, failure, { runAgent: counted }),
+    },
+  );
 
 const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
   const started = Date.now();
@@ -30,6 +55,7 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
   let lab: generator.GeneratedLab | null = null;
   let error: string | null = null;
   let grade: LabRun | null = null;
+  let verify: labVerify.LabVerifyReport | null = null;
   let costUsd = 0;
   const calls: Run['calls'] = [];
   // Spend is counted per call, so a lab refused after its first call still costs.
@@ -42,6 +68,7 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
   try {
     lab = (await generator.generate(request, { runAgent: counted })).lab;
     grade = await runLab(await toLabArtifact(lab, request));
+    if (VERIFY) verify = (await selfCheck(request, lab, counted)).report;
   } catch (caught) {
     const coded = caught as Error & { code?: string };
     error = `${coded.code ?? ''} ${coded.message}`.trim();
@@ -51,8 +78,18 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
     seconds: Math.round((Date.now() - started) / 1000),
     agentCostUsd: costUsd,
     judgeCostUsd: 0,
-    run: { lab, error, grade, calls },
-    checks: check(lab, error, grade),
+    run: { lab, error, grade, verify, calls },
+    checks: {
+      ...check(lab, error, grade),
+      ...(VERIFY
+        ? {
+            selfCheck: {
+              pass: verify?.status === 'passed',
+              detail: verify ? `${verify.status} after ${verify.rounds.length} round(s), $${verify.costUsd.toFixed(2)}` : 'not run',
+            },
+          }
+        : {}),
+    },
     scores: null,
   };
 };
@@ -60,7 +97,12 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
 // The eval's target: the share of cases whose first lab runs.
 const suite = (results: CaseOutcome<Run, never>[]) => {
   const runs = results.filter((result) => result.checks.runs?.pass).length;
-  return { firstRoundRuns: `${runs}/${results.length}`, firstRoundRunRate: results.length ? Math.round((runs / results.length) * 100) : null };
+  const passed = results.filter((result) => result.checks.selfCheck?.pass).length;
+  return {
+    firstRoundRuns: `${runs}/${results.length}`,
+    firstRoundRunRate: results.length ? Math.round((runs / results.length) * 100) : null,
+    ...(VERIFY ? { selfCheckPassed: `${passed}/${results.length}` } : {}),
+  };
 };
 
 runSuite({ suiteDir: import.meta.dirname, cases, criteria: [], runCase, suite }).catch((error) => {

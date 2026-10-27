@@ -29,8 +29,10 @@ import type { CodingDeps } from './coding_runtime.ts';
 import type { IpcMainLike } from './ipc/handler.ts';
 import type { LabService } from './lab_service.ts';
 import type { LabGenerationService } from './lab_generation_service.ts';
+import type { Grader } from './lab_verify.ts';
 
-export type IpcDeps = AppDeps & { coding?: CodingDeps };
+// `labGrader` replaces the lab self-check's sandboxed `make grade` (tests).
+export type IpcDeps = AppDeps & { coding?: CodingDeps; labGrader?: Grader };
 
 // `labs` and `labGeneration` are for main-process callers (the self-check);
 // the renderer never hands TaskPilot a lab or reads one, since a lab carries
@@ -55,7 +57,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });
-  const labGeneration = createLabGenerationService(ctx);
+  const labGeneration = createLabGenerationService(ctx, { grader: deps.labGrader });
   requirementsIpc.register(ipcMain, ctx, { courseInterview: createCourseInterviewService(ctx), labGeneration });
   activityIpc.register(ipcMain, ctx, { runtime });
   environmentIpc.register(ipcMain, ctx);

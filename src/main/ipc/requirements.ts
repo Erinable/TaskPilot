@@ -275,13 +275,18 @@ export const register = (
   );
 
   // ========== First lab ==========
+  // `conceptId` picks another concept still to learn on the path, after a
+  // self-check that ended in needs_review; without it the first one is used.
+  const conceptOf = (value: unknown) => (value === undefined || value === null ? null : requireString(value, 'conceptId'));
   ipcMain.handle(
     CHANNELS.requirementsLabEstimate,
-    wrap((_event, id): Promise<requirementTypes.LabEstimate> => labGeneration.estimate(requireString(id, 'id'))),
+    wrap((_event, id, conceptId): Promise<requirementTypes.LabEstimate> => labGeneration.estimate(requireString(id, 'id'), conceptOf(conceptId))),
   );
 
   ipcMain.handle(
     CHANNELS.requirementsLabGenerate,
-    wrap(async (_event, id): Promise<requirementTypes.Requirement> => toWireRequirement(await labGeneration.start(requireString(id, 'id')))),
+    wrap(async (_event, id, conceptId): Promise<requirementTypes.Requirement> =>
+      toWireRequirement(await labGeneration.start(requireString(id, 'id'), conceptOf(conceptId))),
+    ),
   );
 };

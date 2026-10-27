@@ -12,7 +12,8 @@ Checks per case (`checks.ts`):
 
 - `validates`: the output passed every check in `lab_generator.ts` and `checkLab`.
 - `runs`, the eval's criterion: the starter code and the reference both build, and `make grade` reports every test it should (the public tests on the starter; public and hidden with the reference). It does not ask that they pass.
-- `referencePasses` and `starterFails`: what T5's self-check will demand, recorded here for reference: the reference passes every test, and the starter passes no public test.
+- `referencePasses` and `starterFails`: two of the self-check's demands, recorded here for reference: the reference passes every test, and the starter passes no public test.
+- `selfCheck`, with `--verify` only: the app's whole self-check (`src/main/lab_verify.ts`: reference, starter, mutants, consistency, at most two repairs) with real calls passed. `run.verify` keeps its report, and `suite.selfCheckPassed` counts the cases. No baseline yet: T12 records one.
 
 `suite.firstRoundRunRate` is the share of cases whose first lab runs. The target for CARM-40 is at least 60%.
 
@@ -20,6 +21,7 @@ Checks per case (`checks.ts`):
 npm run eval:lab-gen                         # every case, ~$7–10
 npm run eval:lab-gen -- --case round-robin   # ~$2.5
 npm run eval:lab-gen -- --label my-change
+npm run eval:lab-gen -- --verify             # also the self-check, a few dollars more per case
 ```
 
 Reports go to `reports/` (gitignored). Each case's `run.calls` keeps the tokens the CLI reported per call, which the app's estimate (`lab_generation_service.ts`) is calibrated on.
