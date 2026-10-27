@@ -4,6 +4,8 @@
 // and the MAX_ERROR_TYPES most frequent error types. An attempt is written
 // once a practised package's grade is done, once per concept the package
 // carries, and once per submission (repository, package, diffDigest).
+// Beside the records, the review schedule of notes that carry concepts
+// (./lab_progress.ts), one entry per note reviewed at least once.
 //
 // [人工决策-2026-10-27 00:36:21] 掌握度一期用简单记录（最近 N 次明细 + 累计 + 错误类型 Top 10），不做 BKT。
 // [人工决策-2026-10-27 00:51:12] 掌握度存全局 userData/mastery.json，不按仓库分。
@@ -13,7 +15,9 @@ import path from 'node:path';
 import { JsonWriteQueue } from './atomic_json_file.ts';
 import { isLabConcept } from './project_config.ts';
 import { testsPassed } from './practice.ts';
-import type { ExecutionMode, GradeReport, Review } from '../shared/ipc/packages.ts';
+import { MAX_NOTES } from './note_store.ts';
+import type { ReviewSchedule } from '../shared/ipc/mastery.ts';
+import type { Difficulty, ExecutionMode, GradeReport, Review } from '../shared/ipc/packages.ts';
 
 export const MASTERY_FILENAME = 'mastery.json';
 const MASTERY_VERSION = 1;
@@ -23,6 +27,8 @@ export const MAX_ERROR_TYPES = 10;
 export const MAX_RECORDS = 2000;
 // Submissions remembered for de-duplication, oldest forgotten first.
 export const MAX_SEEN = 5000;
+// Review schedules kept: one per note at most.
+export const MAX_SCHEDULES = MAX_NOTES;
 
 export type AttemptResult = 'pass' | 'partial' | 'fail';
 
@@ -34,6 +40,10 @@ export type MasteryAttempt = {
   // Independence score 0–100; null until grades carry one (T10).
   independence: number | null;
   errorTypes: string[];
+  // The package's difficulty and the highest hint level opened (null for
+  // none), for the next lab's difficulty; absent on attempts written before.
+  difficulty?: Difficulty | null;
+  hintLevel?: number | null;
 };
 
 export type MasteryRecord = {
@@ -47,7 +57,7 @@ export type MasteryRecord = {
   errorCounts: { type: string; count: number }[];
 };
 
-type SavedState = { version: number; records: MasteryRecord[]; seen: string[] };
+type SavedState = { version: number; records: MasteryRecord[]; seen: string[]; reviews: ReviewSchedule[] };
 
 // Tests that ran in the review's blocking checks, the hidden ones included.
 const testCounts = (review: Review & { status: 'passed' | 'rejected' }) => {
@@ -84,6 +94,8 @@ export type GradedSubmission = {
   diffDigest: string;
   review: Review | null;
   report: Pick<GradeReport, 'comments' | 'errorTags'>;
+  difficulty: Difficulty | null;
+  hintLevel: number | null;
   at: string;
 };
 
@@ -136,10 +148,18 @@ const isRecord = (value: unknown): value is MasteryRecord => {
   return typeof record?.course === 'string' && typeof record.conceptId === 'string' && Array.isArray(record.attempts) && Boolean(record.totals);
 };
 
+const isSchedule = (value: unknown): value is ReviewSchedule => {
+  const schedule = value as ReviewSchedule | null;
+  return (
+    typeof schedule?.noteId === 'string' && Number.isInteger(schedule.box) && typeof schedule.dueDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(schedule.dueDay)
+  );
+};
+
 export class MasteryStore {
   #file: string;
   #records = new Map<string, MasteryRecord>();
   #seen = new Set<string>();
+  #reviews = new Map<string, ReviewSchedule>();
   #writes = new JsonWriteQueue();
 
   constructor(configDir: string) {
@@ -153,6 +173,7 @@ export class MasteryStore {
         this.#records.set(recordKey(record.course, record.conceptId), record);
       }
       this.#seen = new Set((Array.isArray(saved?.seen) ? saved.seen : []).filter((key) => typeof key === 'string'));
+      for (const schedule of (Array.isArray(saved?.reviews) ? saved.reviews : []).filter(isSchedule)) this.#reviews.set(schedule.noteId, schedule);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
       if (error instanceof SyntaxError) console.error('[mastery] mastery.json is not valid JSON; starting empty', error);
@@ -173,6 +194,29 @@ export class MasteryStore {
     return record ? structuredClone(record) : null;
   }
 
+  // One course's records, by concept id.
+  ofCourse(course: string): Map<string, MasteryRecord> {
+    const records = new Map<string, MasteryRecord>();
+    for (const record of this.#records.values()) if (record.course === course) records.set(record.conceptId, structuredClone(record));
+    return records;
+  }
+
+  // Every note's saved review schedule, by note id.
+  reviews(): Map<string, ReviewSchedule> {
+    return new Map([...this.#reviews].map(([noteId, schedule]) => [noteId, { ...schedule }]));
+  }
+
+  // Saves a note's schedule after a review. Schedules of notes not in
+  // `noteIds` (deleted, renamed or without concepts now) are dropped.
+  async setReview(schedule: ReviewSchedule, noteIds: Set<string>): Promise<void> {
+    for (const noteId of this.#reviews.keys()) if (!noteIds.has(noteId)) this.#reviews.delete(noteId);
+    this.#reviews.delete(schedule.noteId);
+    this.#reviews.set(schedule.noteId, { ...schedule });
+    for (const old of [...this.#reviews.keys()].slice(0, Math.max(0, this.#reviews.size - MAX_SCHEDULES))) this.#reviews.delete(old);
+    await this.#persist();
+    console.debug(`[mastery] review note=${schedule.noteId} box=${schedule.box} due=${schedule.dueDay}`);
+  }
+
   // Writes one attempt per concept of a graded submission; returns the
   // concepts written, none when it was not practised, has no concepts or
   // was recorded before.
@@ -187,6 +231,8 @@ export class MasteryStore {
       result: attemptResult(submission.review),
       independence: null,
       errorTypes: errorTypesOf(submission.report),
+      difficulty: submission.difficulty,
+      hintLevel: submission.hintLevel,
     };
     for (const conceptId of concepts) {
       const id = recordKey(submission.course, conceptId);
@@ -206,6 +252,11 @@ export class MasteryStore {
   #persist = () =>
     this.#writes.write(() => ({
       file: this.#file,
-      value: { version: MASTERY_VERSION, records: [...this.#records.values()], seen: [...this.#seen] } satisfies SavedState,
+      value: {
+        version: MASTERY_VERSION,
+        records: [...this.#records.values()],
+        seen: [...this.#seen],
+        reviews: [...this.#reviews.values()],
+      } satisfies SavedState,
     }));
 }

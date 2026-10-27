@@ -47,6 +47,7 @@ export const CHANNELS = {
   requirementsCourseConfirmDraft: 'requirements:course-confirm-draft',
   requirementsLabEstimate: 'requirements:lab-estimate',
   requirementsLabGenerate: 'requirements:lab-generate',
+  requirementsCourseSkip: 'requirements:course-skip',
   agentStatus: 'agent:status',
   agentRuntimes: 'agent:runtimes',
   agentModels: 'agent:models',
@@ -113,6 +114,8 @@ export const CHANNELS = {
   coursesDefault: 'courses:default',
   coursesCopy: 'courses:copy',
   coursesSave: 'courses:save',
+  masteryReviews: 'mastery:reviews',
+  masteryReview: 'mastery:review',
   // Resolves once the main process has loaded its stores; true retries a failed start.
   startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.

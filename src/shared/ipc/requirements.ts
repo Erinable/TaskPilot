@@ -77,9 +77,15 @@ export type LabVerify = { round: number; maxRounds: number; rounds: LabVerifyRou
 // null when no price is known for the model (sync prices on the cost page).
 // `calls` is a run whose first self-check passes; `maxCalls` one that
 // repairs twice.
+// `change` says how the difficulty moved from the concept's last lab (or
+// the lab just done); `stuck` lists the concept's notes when its labs kept
+// failing at easy, so the learner reviews them or marks the concept skipped
+// (requirements:course-skip) instead of generating it again.
 export type LabEstimate = {
   concepts: { id: string; label: string }[];
   difficulty: packageTypes.Difficulty;
+  change: 'lowered' | 'raised' | 'kept';
+  stuck: { notes: { id: string; title: string }[] } | null;
   calls: number;
   maxCalls: number;
   tokens: { input: number; output: number };

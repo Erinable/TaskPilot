@@ -5,6 +5,7 @@ import type * as codingTypes from '../shared/coding_types.ts';
 import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as masteryTypes from '../shared/ipc/mastery.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type * as releaseTypes from '../shared/ipc/release.ts';
@@ -85,6 +86,7 @@ declare const api: {
     courseConfirmDraft: (id: string, contentHash: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     labEstimate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.LabEstimate>>;
     labGenerate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    courseSkip: (id: string, conceptId: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
   };
   agent: {
     status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;
@@ -164,6 +166,10 @@ declare const api: {
     reveal: () => Promise<envelopeTypes.IpcResult<boolean>>;
     openUrl: (url: string) => Promise<envelopeTypes.IpcResult<boolean>>;
     courses: () => Promise<envelopeTypes.IpcResult<noteTypes.NoteCourses>>;
+  };
+  mastery: {
+    reviews: () => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewList>>;
+    review: (noteId: string, remembered: boolean) => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewSchedule>>;
   };
   courses: {
     list: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;

@@ -372,6 +372,16 @@ export class RequirementStore implements TaskCatalog {
     return this.#update(id, { course: { ...course, plan: { ...course.plan, path, goal: { ...course.plan.goal, knownConcepts } } } });
   }
 
+  // The learner marked a planned concept skipped after the path was
+  // confirmed, when its labs kept failing at the easiest level.
+  async skipCourseConcept(id: string, conceptId: string): Promise<Requirement> {
+    const { course } = this.#course(id, ['published']);
+    if (!course.plan?.path.some((entry) => entry.conceptId === conceptId && entry.status === 'planned'))
+      return fail(`${conceptId} is not a concept still to learn on the path`, 'invalid_argument', 'conceptId');
+    const path = course.plan.path.map((entry) => (entry.conceptId === conceptId ? { ...entry, status: 'skipped' as const } : entry));
+    return this.#update(id, { course: { ...course, plan: { ...course.plan, path } } });
+  }
+
   // The learner confirmed the path. Its labs are published later, so the
   // requirement adds nothing to the queue.
   async confirmCoursePath(id: string): Promise<Requirement> {

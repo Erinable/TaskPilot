@@ -16,6 +16,7 @@ import * as codingIpc from './ipc/coding.ts';
 import * as commitIpc from './ipc/commit.ts';
 import * as coursesIpc from './ipc/courses.ts';
 import * as environmentIpc from './ipc/environment.ts';
+import * as masteryIpc from './ipc/mastery.ts';
 import * as notesIpc from './ipc/notes.ts';
 import * as packagesIpc from './ipc/packages.ts';
 import * as releaseIpc from './ipc/release.ts';
@@ -70,6 +71,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   tutorIpc.register(ipcMain, ctx);
   notesIpc.register(ipcMain, ctx);
   coursesIpc.register(ipcMain, ctx);
+  masteryIpc.register(ipcMain, ctx);
   repositoriesIpc.register(ipcMain, ctx);
 
   return {
