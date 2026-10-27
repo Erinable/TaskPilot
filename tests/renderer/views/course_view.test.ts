@@ -9,6 +9,7 @@ vi.setConfig({ testTimeout: 20_000 });
 import CourseView from '@/views/CourseView.vue';
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
+import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
@@ -282,4 +283,50 @@ test('我想学… opens the requirement center on the course form', async () =>
   const open = vi.spyOn(requirements, 'open').mockResolvedValue(undefined);
   await wrapper.get('[data-action="learn"]').trigger('click');
   expect(open).toHaveBeenCalledWith({ compose: 'course' });
+});
+
+test('a pack shows its lab repositories and how its concepts stand, and opens the mastery page on it', async () => {
+  const concept = (id: string, state: 'new' | 'learning' | 'passed' | 'mastered') => ({
+    id,
+    label: id,
+    summary: '',
+    prerequisites: [],
+    state,
+    totals: { attempts: 0, pass: 0, partial: 0, fail: 0 },
+    attempts: [],
+  });
+  api.mastery.course.mockImplementation((id: string) =>
+    ok({
+      course: { id, title: '操作系统实验' },
+      concepts: [concept('fcfs', 'mastered'), concept('round-robin', 'passed'), concept('mlfq', 'new')],
+      errorTypes: [],
+      repositories: [
+        { id: 'r-lab', name: 'sched-lab', labs: 2, current: false },
+        { id: 'r-open', name: 'other-lab', labs: 1, current: true },
+      ],
+    }),
+  );
+  const wrapper = await mountView();
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  expect(api.mastery.course).toHaveBeenLastCalledWith('os');
+  const section = wrapper.get('[data-section="course-mastery"]');
+  expect(section.get('[data-repository="r-lab"]').text()).toContain('sched-lab');
+  expect(section.get('[data-repository="r-lab"]').text()).toContain('2 个 lab');
+  expect(section.get('[data-repository="r-open"]').text()).toContain('已打开');
+  expect(section.findAll('[data-field="mastery-counts"] span').map((count) => count.text())).toEqual(['未开始 1', '学习中 0', '通过过 1', '已掌握 1']);
+  expect(section.get('[data-field="mastery-counts"]').text()).toContain('3 个知识点');
+  const switchTo = vi.spyOn(useRepositoriesStore(), 'switchTo').mockResolvedValue(true);
+  await section.get('[data-repository="r-lab"] [data-action="open-repository"]').trigger('click');
+  expect(switchTo).toHaveBeenCalledWith('r-lab');
+  await section.get('[data-action="open-mastery"]').trigger('click');
+  await flushPromises();
+  expect(useAppStore().view).toBe('mastery');
+});
+
+test('a pack without lab repositories says how to get one; one without a skeleton shows no counts', async () => {
+  const wrapper = await mountView();
+  const section = wrapper.get('[data-section="course-mastery"]');
+  expect(section.text()).toContain('还没有用它建的实验仓库');
+  expect(section.find('[data-field="mastery-counts"]').exists()).toBe(false);
 });

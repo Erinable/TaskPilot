@@ -174,6 +174,7 @@ declare const api: {
   mastery: {
     reviews: () => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewList>>;
     review: (noteId: string, remembered: boolean) => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewSchedule>>;
+    course: (id?: string) => Promise<envelopeTypes.IpcResult<masteryTypes.CourseMastery>>;
   };
   courses: {
     list: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;

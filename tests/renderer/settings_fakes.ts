@@ -2,6 +2,7 @@
 // {ok: true, data} unless a test overrides it.
 import { vi } from 'vitest';
 import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
+import type * as masteryTypes from '@shared/ipc/mastery.ts';
 import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
@@ -224,6 +225,10 @@ export const installApi = () => {
       info: vi.fn(() => ok({ configDir: '/config', files: ['workspace.json'], packages: { total: 3, claimed: 1, deviations: 0 } })),
       resetProgress: vi.fn(() => ok({ total: 3, claimed: 0, deviations: 0 })),
       reveal: vi.fn(() => ok(true)),
+    },
+    // The 课程 view's mastery summary; no lab repository and nothing attempted.
+    mastery: {
+      course: vi.fn((id: string) => ok<masteryTypes.CourseMastery>({ course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [], repositories: [] })),
     },
     env: {
       get: vi.fn(() => ok(envState())),

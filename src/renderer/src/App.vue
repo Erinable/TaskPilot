@@ -30,6 +30,8 @@ import { hideSplash } from './lib/splash.ts';
 
 // Notes bring KaTeX and syntax highlighting; they load when first opened.
 const NotesView = defineAsyncComponent(() => import('./views/NotesView.vue'));
+// Draws a mermaid graph, so it loads like the notes page.
+const MasteryView = defineAsyncComponent(() => import('./views/MasteryView.vue'));
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -119,6 +121,7 @@ onBeforeUnmount(() => {
           <TeamView v-else-if="app.view === 'team'" />
           <CostView v-else-if="app.view === 'costs'" />
           <NotesView v-else-if="app.view === 'notes'" />
+          <MasteryView v-else-if="app.view === 'mastery'" />
           <CourseView v-else-if="app.view === 'courses'" />
         </div>
         <!-- Settings stays mounted so unsaved drafts survive leaving and coming back. -->

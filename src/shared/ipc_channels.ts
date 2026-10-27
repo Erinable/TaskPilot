@@ -120,6 +120,7 @@ export const CHANNELS = {
   coursesSave: 'courses:save',
   masteryReviews: 'mastery:reviews',
   masteryReview: 'mastery:review',
+  masteryCourse: 'mastery:course',
   // Resolves once the main process has loaded its stores; true retries a failed start.
   startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.

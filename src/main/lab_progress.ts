@@ -7,7 +7,7 @@
 import { businessDay } from './activity_log.ts';
 import type { Concept } from '../shared/course_pack.ts';
 import type { NoteMeta } from '../shared/ipc/notes.ts';
-import type { ReviewSchedule } from '../shared/ipc/mastery.ts';
+import type { ConceptMastery, ConceptState, CourseMastery, ReviewSchedule } from '../shared/ipc/mastery.ts';
 import type { PathEntry } from '../shared/course_plan.ts';
 import type { Difficulty } from '../shared/ipc/packages.ts';
 import type { MasteryAttempt, MasteryRecord } from './mastery_store.ts';
@@ -26,6 +26,45 @@ export const isMastered = (record: Pick<MasteryRecord, 'attempts'> | null): bool
     recent.length === MASTERY_STREAK &&
     recent.every((attempt) => attempt.result === 'pass' && (attempt.independence === null || attempt.independence >= MASTERY_INDEPENDENCE))
   );
+};
+
+// How a concept stands, for the mastery page.
+export const conceptState = (record: MasteryRecord | null): ConceptState => {
+  if (!record?.totals.attempts) return 'new';
+  if (isMastered(record)) return 'mastered';
+  return record.totals.pass > 0 ? 'passed' : 'learning';
+};
+
+// Error types shown on the mastery page.
+export const TOP_ERROR_TYPES = 5;
+
+// One course's skeleton with each concept's standing and its attempts, and
+// the most frequent error types summed over the course's records.
+export const courseMastery = (
+  course: { id: string; title: string; concepts: Concept[] },
+  records: Map<string, MasteryRecord>,
+): Omit<CourseMastery, 'repositories'> => {
+  const concepts = course.concepts.map((concept): ConceptMastery => {
+    const record = records.get(concept.id) ?? null;
+    return {
+      id: concept.id,
+      label: concept.label,
+      summary: concept.summary,
+      prerequisites: concept.prerequisites,
+      state: conceptState(record),
+      totals: record?.totals ?? { attempts: 0, pass: 0, partial: 0, fail: 0 },
+      attempts: (record?.attempts ?? [])
+        .toReversed()
+        .map(({ at, packageId, repoId, result, independence }) => ({ at, packageId, repoId, result, independence })),
+    };
+  });
+  const counts = new Map<string, number>();
+  for (const record of records.values()) for (const entry of record.errorCounts) counts.set(entry.type, (counts.get(entry.type) ?? 0) + entry.count);
+  const errorTypes = [...counts]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type))
+    .slice(0, TOP_ERROR_TYPES);
+  return { course: { id: course.id, title: course.title }, concepts, errorTypes };
 };
 
 // ========== Difficulty ==========

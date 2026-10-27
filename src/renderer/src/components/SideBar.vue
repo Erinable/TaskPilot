@@ -35,7 +35,7 @@ const showQueue = async () => {
 };
 
 const TEAM_VIEWS: ViewName[] = ['team', 'activity', 'costs'];
-const openView = async (view: 'map' | 'release' | 'team' | 'notes' | 'courses') => {
+const openView = async (view: 'map' | 'release' | 'team' | 'notes' | 'mastery' | 'courses') => {
   if (await app.navigate(view)) execution.close();
 };
 
@@ -93,6 +93,16 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       >
         <AppIcon name="list-checks" class="nav-icon" />
         <span class="nav-label">学习笔记</span>
+      </button>
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'mastery' }"
+        :title="app.sidebarCollapsed ? '掌握度' : undefined"
+        data-nav="mastery"
+        @click="openView('mastery')"
+      >
+        <AppIcon name="target" class="nav-icon" />
+        <span class="nav-label">掌握度</span>
       </button>
       <button
         class="nav-item"

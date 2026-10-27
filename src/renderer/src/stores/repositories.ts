@@ -14,6 +14,7 @@ import { useCommitStore } from './commit.ts';
 import { useCoursesStore } from './courses.ts';
 import { useEngineeringMapStore } from './engineering_map.ts';
 import { useExecutionStore } from './execution.ts';
+import { useMasteryStore } from './mastery.ts';
 import { useNotificationsStore } from './notifications.ts';
 import { useOnboardingStore } from './onboarding.ts';
 import { useReleaseStore } from './release.ts';
@@ -86,6 +87,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     useCommitStore().reset();
     useCoursesStore().reset();
     useEngineeringMapStore().reset();
+    useMasteryStore().reset();
     useOnboardingStore().reset();
     useTutorStore().reset();
     if (app.view === 'execution') await app.navigate('queue');
