@@ -1,10 +1,11 @@
+import type { ContractApi } from '../shared/ipc/contracts.ts';
 import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
 import type * as codingTypes from '../shared/coding_types.ts';
-import type * as commitTypes from '../shared/ipc/commit.ts';
 import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as masteryTypes from '../shared/ipc/mastery.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type * as releaseTypes from '../shared/ipc/release.ts';
@@ -85,6 +86,7 @@ declare const api: {
     courseConfirmDraft: (id: string, contentHash: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     labEstimate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.LabEstimate>>;
     labGenerate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    courseSkip: (id: string, conceptId: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
   };
   agent: {
     status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;
@@ -141,10 +143,6 @@ declare const api: {
     relocate: (id: string, root: string) => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>;
     busy: () => Promise<envelopeTypes.IpcResult<repositoryTypes.BusyRun[]>>;
   };
-  commit: {
-    preview: (id: string) => Promise<envelopeTypes.IpcResult<commitTypes.CommitPreview>>;
-    create: (id: string, message: string, files: string[]) => Promise<envelopeTypes.IpcResult<commitTypes.CommitResult>>;
-  };
   tutor: {
     get: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
     ask: (id: string, stepIndex: number, level: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
@@ -172,6 +170,10 @@ declare const api: {
     openUrl: (url: string) => Promise<envelopeTypes.IpcResult<boolean>>;
     courses: () => Promise<envelopeTypes.IpcResult<noteTypes.NoteCourses>>;
   };
+  mastery: {
+    reviews: () => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewList>>;
+    review: (noteId: string, remembered: boolean) => Promise<envelopeTypes.IpcResult<masteryTypes.ReviewSchedule>>;
+  };
   courses: {
     list: () => Promise<envelopeTypes.IpcResult<courseTypes.CourseList>>;
     preview: (id: string) => Promise<envelopeTypes.IpcResult<courseTypes.CoursePreview>>;
@@ -184,7 +186,7 @@ declare const api: {
   };
 };
 
-export type TaskPilotApi = typeof api;
+export type TaskPilotApi = ContractApi & typeof api;
 
 declare global {
   interface Window {

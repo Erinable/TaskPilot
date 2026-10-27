@@ -253,7 +253,9 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
             diffDigest,
             review: wireReview,
             report: finished.report,
-            independence: finished.scores?.independence ?? null,
+            independence: finished.scores?.independence,
+            difficulty: task.lab?.difficulty ?? task.difficulty?.level ?? null,
+            hintLevel: practice.usedHintLevel(state),
             at: finishedAt,
           })
           .catch((error) => console.error('[mastery] record failed', error));

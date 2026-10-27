@@ -3,15 +3,17 @@
 // bundled, so it shares channel names with the main process.
 import { contextBridge, ipcRenderer } from 'electron';
 
+import { buildApi } from '../shared/ipc/contract.ts';
+import { CONTRACTS } from '../shared/ipc/contracts.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 import type { Channel } from '../shared/ipc_channels.ts';
 import type * as activityTypes from '../shared/ipc/activity.ts';
 import type * as agentRuntimeTypes from '../shared/agent_runtime.ts';
 import type * as codingTypes from '../shared/coding_types.ts';
-import type * as commitTypes from '../shared/ipc/commit.ts';
 import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as masteryTypes from '../shared/ipc/mastery.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type * as releaseTypes from '../shared/ipc/release.ts';
@@ -31,6 +33,8 @@ const timeZoneArg = process.argv.find((arg) => arg.startsWith(TIME_ZONE_ARG));
 if (!timeZoneArg) throw new Error('The main process did not pass the business time zone');
 
 const api = {
+  // The domains in the contract tables; the rest below are written out until they move.
+  ...buildApi(CONTRACTS, ipcRenderer),
   // IANA name; day boundaries and displayed times follow it.
   businessTimeZone: timeZoneArg.slice(TIME_ZONE_ARG.length),
   // Calls back with whether the window is full screen, now and on each change.
@@ -114,6 +118,8 @@ const api = {
     labEstimate: (id: string, conceptId?: string) => invoke<requirementTypes.LabEstimate>(CHANNELS.requirementsLabEstimate, id, conceptId),
     // Starts generating and self-checking the first lab after the learner saw the estimate.
     labGenerate: (id: string, conceptId?: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabGenerate, id, conceptId),
+    // Marks a concept still to learn skipped after the path was confirmed.
+    courseSkip: (id: string, conceptId: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCourseSkip, id, conceptId),
   },
 
   agent: {
@@ -182,12 +188,6 @@ const api = {
     busy: () => invoke<repositoryTypes.BusyRun[]>(CHANNELS.repositoriesBusy),
   },
 
-  commit: {
-    preview: (id: string) => invoke<commitTypes.CommitPreview>(CHANNELS.commitPreview, id),
-    // `files` is the list the developer reviewed; a changed list is refused.
-    create: (id: string, message: string, files: string[]) => invoke<commitTypes.CommitResult>(CHANNELS.commitCreate, id, message, files),
-  },
-
   tutor: {
     get: (id: string, stepIndex: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorGet, id, stepIndex),
     // Opens hint level `level` (at most one above the highest opened);
@@ -232,6 +232,13 @@ const api = {
     openUrl: (url: string) => invoke<boolean>(CHANNELS.notesOpenUrl, url),
     // The packs whose categories the notes page names, and the one in use.
     courses: () => invoke<noteTypes.NoteCourses>(CHANNELS.notesCourses),
+  },
+
+  mastery: {
+    // The notes due for review on the business day.
+    reviews: () => invoke<masteryTypes.ReviewList>(CHANNELS.masteryReviews),
+    // The learner's verdict on a note due today; returns its next schedule.
+    review: (noteId: string, remembered: boolean) => invoke<masteryTypes.ReviewSchedule>(CHANNELS.masteryReview, noteId, remembered),
   },
 
   courses: {

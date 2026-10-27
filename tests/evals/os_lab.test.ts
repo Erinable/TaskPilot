@@ -15,6 +15,7 @@ import * as workspace from '../../src/main/workspace.ts';
 import { env } from '../../src/main/env.ts';
 import { PRESET_IDS } from '../../src/main/presets/index.ts';
 import { BUILTIN, OS_COURSE } from '../fixtures/builtin_courses.ts';
+import * as requiredTools from '../fixtures/required_tools.ts';
 import { fixtureRepo } from '../../evals/shared/harness.ts';
 import { OS_LAB, osReference } from '../../evals/shared/os_lab.ts';
 
@@ -39,9 +40,7 @@ test('the OS lab picks the built-in os pack without confirming it', async () => 
   );
 });
 
-const hasTools = (await Promise.all(['cc', 'make', 'perl'].map((tool) => workspace.resolveExecutable(tool, { envPath: env.path }).then(Boolean)))).every(
-  Boolean,
-);
+const hasTools = await requiredTools.hasTools('cc', 'make', 'perl');
 
 test.skipIf(!hasTools)(
   'custom:grade fails on the unfinished lab and passes with the reference solutions',

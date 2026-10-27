@@ -63,6 +63,8 @@ const submission = (overrides: Partial<mastery.GradedSubmission> = {}): mastery.
   diffDigest: 'd1',
   review: review('passed', [check(3, 3)]),
   report: report as mastery.GradedSubmission['report'],
+  difficulty: 'easy',
+  hintLevel: 3,
   at: '2026-10-27T00:02:00.000Z',
   ...overrides,
 });
@@ -103,6 +105,8 @@ test('a graded submission writes one attempt per concept, and survives a reload'
       result: 'pass',
       independence: null,
       errorTypes: ['concept', 'mechanism', 'off-by-one'],
+      difficulty: 'easy',
+      hintLevel: 3,
     },
   ]);
   assert.deepEqual(record.totals, { attempts: 1, pass: 1, partial: 0, fail: 0 });

@@ -27,6 +27,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # Tools the end-to-end preset and lab tests drive. Under CI a missing one
+      # fails its test file (tests/fixtures/required_tools.ts) instead of skipping.
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: 0.13.6
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          components: clippy, rustfmt
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential=12.10ubuntu1 make=4.3-4.1build2
+      - if: runner.os == 'macOS'
+        run: sudo xcode-select --switch /Applications/Xcode_26.6.app
       # Electron's postinstall downloads its binary; the build and tests do not need it.
       - run: npm ci
         env:

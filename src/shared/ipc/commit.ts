@@ -1,4 +1,6 @@
 // Committing an accepted package (commit:*).
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 export type CommitSkipReason = 'out_of_scope' | 'secret' | 'rename';
 
@@ -13,3 +15,9 @@ export type CommitPreview = {
 };
 
 export type CommitResult = { commit: string; files: string[] };
+
+export const commitContract = {
+  preview: invoke<[id: string], CommitPreview>('commit:preview'),
+  // `files` is the list the developer reviewed; a changed list is refused.
+  create: invoke<[id: string, message: string, files: string[]], CommitResult>('commit:create'),
+} satisfies Contract;

@@ -3,10 +3,10 @@
 // artifact as the app does, then runs `make grade` on the starter code and
 // on the reference with the hidden tests. Needs cc and make.
 //
-//   npm run eval:lab-gen                         every case, ~$6, no judge
+//   npm run eval:lab-gen                         every case, ~$10–14, no judge
 //   npm run eval:lab-gen -- --case round-robin
 //   npm run eval:lab-gen -- --label my-change
-//   npm run eval:lab-gen -- --verify             also the app's self-check with repairs (T5), several dollars more per case
+//   npm run eval:lab-gen -- --verify             also the app's self-check with repairs (T5), every case ~$22–25
 import path from 'node:path';
 
 import * as generator from '../../src/main/agents/lab_generator.ts';
@@ -94,14 +94,36 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
   };
 };
 
+const percent = (count: number, total: number) => (total ? Math.round((count / total) * 100) : null);
+
+// With --verify, what the app would show per lab: ready after the first
+// round, ready after repairs, needs_review, or failed (the generation was
+// refused, so no self-check ran). Rounds and cost are over the labs that
+// were checked; cost is generation and self-check together.
+const selfCheckSuite = (results: CaseOutcome<Run, never>[]) => {
+  const checked = results.filter((result) => result.run.verify);
+  const reports = checked.map((result) => result.run.verify!);
+  const firstRound = reports.filter((report) => report.status === 'passed' && report.rounds.length === 1).length;
+  const needsReview = reports.filter((report) => report.status === 'needs_review').length;
+  const rounds = reports.reduce((sum, report) => sum + report.rounds.length, 0);
+  const cost = checked.reduce((sum, result) => sum + result.agentCostUsd, 0);
+  return {
+    selfCheckPassed: `${reports.length - needsReview}/${results.length}`,
+    firstRoundPassRate: percent(firstRound, results.length),
+    needsReviewRate: percent(needsReview, results.length),
+    failedRate: percent(results.length - checked.length, results.length),
+    meanRounds: checked.length ? Math.round((rounds / checked.length) * 100) / 100 : null,
+    meanLabCostUsd: checked.length ? Math.round((cost / checked.length) * 100) / 100 : null,
+  };
+};
+
 // The eval's target: the share of cases whose first lab runs.
 const suite = (results: CaseOutcome<Run, never>[]) => {
   const runs = results.filter((result) => result.checks.runs?.pass).length;
-  const passed = results.filter((result) => result.checks.selfCheck?.pass).length;
   return {
     firstRoundRuns: `${runs}/${results.length}`,
-    firstRoundRunRate: results.length ? Math.round((runs / results.length) * 100) : null,
-    ...(VERIFY ? { selfCheckPassed: `${passed}/${results.length}` } : {}),
+    firstRoundRunRate: percent(runs, results.length),
+    ...(VERIFY ? selfCheckSuite(results) : {}),
   };
 };
 

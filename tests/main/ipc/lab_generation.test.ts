@@ -415,3 +415,128 @@ test('cancelling during the self-check stops it and keeps what was spent', async
   assert.equal(item.course.lab.error.code, 'agent_cancelled');
   assert.equal(item.course.lab.costUsd, 0.8, 'the generation was spent');
 });
+
+// ========== Next lab (src/main/lab_progress.ts) ==========
+
+// A finished review with `passed` of 3 tests passing.
+const finishedReview = (passed: number) => ({
+  status: passed === 3 ? 'passed' : 'rejected',
+  error: null,
+  startedAt: '2026-10-27T00:00:00Z',
+  finishedAt: '2026-10-27T00:01:00Z',
+  reasons: [],
+  attention: [],
+  checks: [
+    {
+      kind: 'test',
+      stage: 'submit',
+      blocking: true,
+      baseline: 'measured',
+      status: passed === 3 ? 'pass' : 'fail',
+      reason: null,
+      newFailures: [],
+      preexisting: [],
+      fixed: [],
+      run: {
+        kind: 'test',
+        command: 'make grade',
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 1,
+        summary: { total: 3, passed, failed: 3 - passed, skipped: 0, ok: passed === 3 },
+        report: null,
+        failing: [],
+        outputTail: null,
+      },
+    },
+  ],
+  verification: null,
+  acceptance: [],
+  report: null,
+  diff: { files: [], skipped: [], outOfScope: [] },
+  costUsd: 0,
+});
+
+const gradeOnce = (
+  h,
+  conceptId: string,
+  passed: number,
+  { difficulty = 'easy', hintLevel = null, digest }: { difficulty?: string; hintLevel?: number | null; digest: string },
+) =>
+  h.mastery.record({
+    mode: 'practice',
+    course: 'os',
+    concepts: [conceptId],
+    packageId: `lab-${conceptId}`,
+    repoId: 'repo1',
+    diffDigest: digest,
+    review: finishedReview(passed),
+    report: { comments: [], errorTags: [] },
+    difficulty,
+    hintLevel,
+    at: new Date(Date.UTC(2026, 9, 27, 1) + Number(digest.slice(1)) * 60_000).toISOString(),
+  });
+
+test('the CARM-33 example: after round-robin first passes with L3, the next lab is priority-sched at the same difficulty', async () => {
+  const path = { ...RR_PATH, path: RR_PATH.path.map((entry) => (entry.conceptId === 'priority-sched' ? { ...entry, status: 'planned' } : entry)) };
+  const h = await harness({ agent: team({ path }) });
+  const id = await confirmedCourse(h);
+  assert.deepEqual(
+    (await h.call(CHANNELS.requirementsLabEstimate, id)).data.concepts.map((entry) => entry.id),
+    ['round-robin'],
+  );
+  // Rejected on a hidden test first, then 8/8 with L1 and L3 opened.
+  await gradeOnce(h, 'round-robin', 2, { hintLevel: 3, digest: 'd1' });
+  await gradeOnce(h, 'round-robin', 3, { hintLevel: 3, digest: 'd2' });
+  const { data, error } = await h.call(CHANNELS.requirementsLabEstimate, id);
+  assert.equal(error, undefined, JSON.stringify(error));
+  assert.deepEqual(
+    data.concepts.map((entry) => entry.id),
+    ['priority-sched'],
+  );
+  assert.equal(data.difficulty, 'easy');
+  assert.equal(data.change, 'kept');
+  assert.equal(data.stuck, null);
+});
+
+test('a concept failing at easy twice is stuck: the estimate lists its notes, and skipping it moves the path on', async () => {
+  const path = { ...RR_PATH, path: RR_PATH.path.map((entry) => (entry.conceptId === 'priority-sched' ? { ...entry, status: 'planned' } : entry)) };
+  const h = await harness({ agent: team({ path }) });
+  const id = await confirmedCourse(h);
+  await h.notes.create({
+    title: 'RR 入队顺序',
+    body: '先入队新到的作业。',
+    category: 'mechanism',
+    course: 'os',
+    concepts: ['round-robin'],
+    tags: [],
+    source: null,
+  });
+  await h.notes.create({ title: '别的笔记', body: '无关。', category: null, tags: [], source: null });
+  await gradeOnce(h, 'round-robin', 0, { digest: 'd1' });
+  let estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.deepEqual([estimate.concepts[0].id, estimate.difficulty, estimate.stuck], ['round-robin', 'easy', null]);
+  await gradeOnce(h, 'round-robin', 1, { digest: 'd2' });
+  estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.equal(estimate.concepts[0].id, 'round-robin');
+  assert.deepEqual(estimate.stuck, { notes: [{ id: 'RR 入队顺序.md', title: 'RR 入队顺序' }] });
+  // Skipping is refused for a concept that is not still to learn.
+  assert.equal((await h.call(CHANNELS.requirementsCourseSkip, id, 'fcfs')).error.code, 'invalid_argument');
+  const skipped = await h.call(CHANNELS.requirementsCourseSkip, id, 'round-robin');
+  assert.equal(skipped.error, undefined, JSON.stringify(skipped.error));
+  assert.equal(skipped.data.course.plan.path.find((entry) => entry.conceptId === 'round-robin').status, 'skipped');
+  estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.deepEqual(
+    estimate.concepts.map((entry) => entry.id),
+    ['priority-sched'],
+  );
+});
+
+test('two fails at medium lower the next lab to easy', async () => {
+  const h = await harness({ agent: team() });
+  const id = await confirmedCourse(h);
+  await gradeOnce(h, 'round-robin', 0, { difficulty: 'medium', digest: 'd1' });
+  await gradeOnce(h, 'round-robin', 0, { difficulty: 'medium', digest: 'd2' });
+  const estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.deepEqual([estimate.difficulty, estimate.change, estimate.stuck], ['easy', 'lowered', null]);
+});

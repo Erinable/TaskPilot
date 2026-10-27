@@ -1,5 +1,12 @@
 // IPC channel names shared by the main process and the preload, so the two cannot drift.
+// Domains in the contract tables (./ipc/contracts.ts) derive theirs; the rest are
+// listed here until they move.
+// [人工决策-2026-10-27 15:20:30] CHANNELS 从契约表派生并保留给测试用，键名 = 命名空间 + 方法名首字母大写。
+import { channelsOf } from './ipc/contract.ts';
+import { CONTRACTS } from './ipc/contracts.ts';
+
 export const CHANNELS = {
+  ...channelsOf(CONTRACTS),
   listTasks: 'tasks:list',
   getTask: 'tasks:get',
   transition: 'package:transition',
@@ -40,6 +47,7 @@ export const CHANNELS = {
   requirementsCourseConfirmDraft: 'requirements:course-confirm-draft',
   requirementsLabEstimate: 'requirements:lab-estimate',
   requirementsLabGenerate: 'requirements:lab-generate',
+  requirementsCourseSkip: 'requirements:course-skip',
   agentStatus: 'agent:status',
   agentRuntimes: 'agent:runtimes',
   agentModels: 'agent:models',
@@ -80,8 +88,6 @@ export const CHANNELS = {
   repositoriesSwitch: 'repositories:switch',
   repositoriesRelocate: 'repositories:relocate',
   repositoriesBusy: 'repositories:busy',
-  commitPreview: 'commit:preview',
-  commitCreate: 'commit:create',
   tutorGet: 'tutor:get',
   tutorAsk: 'tutor:ask',
   tutorCancel: 'tutor:cancel',
@@ -111,6 +117,8 @@ export const CHANNELS = {
   coursesDefault: 'courses:default',
   coursesCopy: 'courses:copy',
   coursesSave: 'courses:save',
+  masteryReviews: 'mastery:reviews',
+  masteryReview: 'mastery:review',
   // Resolves once the main process has loaded its stores; true retries a failed start.
   startupReady: 'startup:ready',
   // main → renderer: the window entered or left full screen.
