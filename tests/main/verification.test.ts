@@ -1,4 +1,4 @@
-import { test, onTestFinished } from 'vitest';
+import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -244,6 +244,22 @@ test('runStep() passes the step env but never lets it replace PATH', async () =>
     { envPath: '/tp/bin' },
   );
   assert.equal(result.output.trim(), 'yes|/tp/bin');
+});
+
+test('runStep() turns colour off, including an inherited CARGO_TERM_COLOR', async () => {
+  vi.stubEnv('CARGO_TERM_COLOR', 'always');
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  const result = await verification.runStep(
+    process.cwd(),
+    step({
+      commands: [
+        { command: process.execPath, args: ['-e', 'console.log([process.env.NO_COLOR, process.env.FORCE_COLOR, process.env.CARGO_TERM_COLOR].join("|"))'] },
+      ],
+    }),
+  );
+  assert.equal(result.output.trim(), '1|0|never');
 });
 
 test("runStep() runs a step's commands in order and stops at the first failure", async () => {
