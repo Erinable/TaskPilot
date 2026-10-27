@@ -19,6 +19,9 @@ import { parsePatchPreview } from '../../../src/main/coding_workspace.ts';
 import type { RunStructuredOptions, StructuredResult } from '../../../src/main/agents/claude_cli.ts';
 import type { Channel } from '../../../src/shared/ipc_channels.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
+import { buildApi } from '../../../src/shared/ipc/contract.ts';
+import { CONTRACTS } from '../../../src/shared/ipc/contracts.ts';
+import type { ContractApi } from '../../../src/shared/ipc/contracts.ts';
 import { WorkPackageStore } from '../../../src/main/work_package_store.ts';
 import { SAMPLE_REQUIREMENT } from '../fixtures/sample_tasks.ts';
 import { REQUIREMENTS_FILENAME, RequirementStore } from '../../../src/main/requirement_store.ts';
@@ -201,7 +204,10 @@ export const harness = async ({
     },
   );
 
+  // Untyped, for the tests that send malformed arguments on purpose.
   const call = (channel: Channel, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+  // Typed from the contract tables, as the renderer calls it; no events reach it.
+  const api: ContractApi = buildApi(CONTRACTS, { invoke: async (channel, ...args) => call(channel as Channel, ...args), on: () => undefined });
   const setCommands = (commands) => {
     config = workspace.normalize({ root: config.root, commands });
   };
@@ -217,6 +223,9 @@ export const harness = async ({
     setShellPathPrefix,
     // Null only with withRepo: false, and those tests never read it.
     call,
+    api,
+    // Every channel registered, for the contract coverage test.
+    channels: () => [...handlers.keys()],
     store,
     root: root!,
     configDir,

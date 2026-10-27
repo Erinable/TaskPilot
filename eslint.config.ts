@@ -77,6 +77,16 @@ export default tseslint.config(
     rules: { 'no-restricted-imports': ['error', { patterns: AGENT_IMPORT_BANS }] },
   },
   {
+    // [人工决策-2026-10-27 15:20:30] src/shared 不得引用 src/main：契约表的返回类型只能用 shared 里的类型，main 里的私有产物类型（参考解、隐藏测试、提示梯度）因此写不进任何 IPC 契约。
+    files: ['src/shared/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['**/main/**'], message: 'src/shared is shared with the renderer; it must not import from src/main.' }] },
+      ],
+    },
+  },
+  {
     // Writes the CLIs' own TOML config, not repository configuration.
     files: ['src/main/agents/native_model_profile.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: AGENT_IMPORT_BANS.filter((ban) => !ban.group.includes('smol-toml')) }] },

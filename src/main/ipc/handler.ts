@@ -2,6 +2,7 @@
 import type { CodedError } from '../coded_error.ts';
 import type { Channel } from '../../shared/ipc_channels.ts';
 import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
+import type { Contract, HandlersOf } from '../../shared/ipc/contract.ts';
 
 // Electron's ipcMain, or a stand-in exposing `handle`.
 export type IpcMainLike = { handle(channel: Channel, listener: (event: unknown, ...args: unknown[]) => unknown): void };
@@ -28,3 +29,16 @@ export const wrap =
       return toFailure(error);
     }
   };
+
+// Registers one handler per invoke channel of a contract table. The table
+// types each handler's result, and a missing or extra handler does not compile.
+export const registerContract = <C extends Contract>(ipcMain: IpcMainLike, contract: C, handlers: HandlersOf<C>) => {
+  const byName = handlers as Record<string, (...args: unknown[]) => unknown>;
+  for (const [name, spec] of Object.entries(contract)) {
+    if (spec.kind === 'invoke')
+      ipcMain.handle(
+        spec.channel as Channel,
+        wrap((_event, ...args) => byName[name](...args)),
+      );
+  }
+};
