@@ -7,14 +7,17 @@
 //
 // [人工决策-2026-10-27 00:55:52] 侧栏新增「课程」一级视图，浏览、复制再改和表单编辑都在这里；
 // 内置包只读，只显示「复制再改」。保存后 contentHash 变了，要重新确认，界面要讲清楚。
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
 import CourseEditor from '@/components/courses/CourseEditor.vue';
 import CoursePreviewDialog from '@/components/courses/CoursePreviewDialog.vue';
 import { SOURCE_LABELS, TRUST_LABELS, changeText, copyIdFor, languageMismatch, sourcePath } from '@/lib/course_model.ts';
+import { STATE_LABELS, stateCounts } from '@/lib/mastery_model.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
+import { useMasteryStore } from '@/stores/mastery.ts';
+import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { isCourseId } from '@shared/course_pack.ts';
@@ -86,6 +89,21 @@ const submitCopy = async () => {
     editing.value = true;
   }
 };
+
+// ========== Labs and mastery ==========
+// The pack's lab repositories and how its concepts stand (mastery is global).
+const mastery = useMasteryStore();
+const repositories = useRepositoriesStore();
+const summary = computed(() => (mastery.summary && mastery.summary.course.id === viewed.value?.ref.id ? mastery.summary : null));
+const counts = computed(() => (summary.value ? stateCounts(summary.value.concepts) : null));
+const MASTERY_STATES = Object.keys(STATE_LABELS) as (keyof typeof STATE_LABELS)[];
+watch(
+  () => viewed.value?.ref.id,
+  (id) => {
+    if (id) run(mastery.loadSummary(id));
+  },
+  { immediate: true },
+);
 
 const openSettings = () => run(useSettingsStore().open('courses'));
 const learn = () => run(useRequirementsStore().open({ compose: 'course' }));
@@ -227,6 +245,32 @@ onMounted(() => run(courses.loadView()));
             </ul>
           </section>
 
+          <section v-if="summary && !editing" class="course-mastery" data-section="course-mastery" aria-label="实验仓库和掌握情况">
+            <h3>实验仓库</h3>
+            <ul v-if="summary.repositories.length" class="course-mastery-repos">
+              <li v-for="repository in summary.repositories" :key="repository.id" :data-repository="repository.id">
+                <strong>{{ repository.name }}</strong>
+                <small>{{ `${repository.labs} 个 lab` }}</small>
+                <span v-if="repository.current" class="scope-badge in-use">已打开</span>
+                <button v-else class="secondary-button small" type="button" data-action="open-repository" @click="run(repositories.switchTo(repository.id))">
+                  切换过去
+                </button>
+              </li>
+            </ul>
+            <p v-else class="course-mastery-empty">还没有用它建的实验仓库。点「我想学…」走一遍访谈，第一个 lab 生成后就能建。</p>
+            <template v-if="counts && summary.concepts.length">
+              <h3>掌握情况</h3>
+              <p class="course-mastery-counts" data-field="mastery-counts">
+                {{ `${summary.concepts.length} 个知识点：` }}
+                <span v-for="state in MASTERY_STATES" :key="state" :class="`count-${state}`">{{ `${STATE_LABELS[state]} ${counts[state]}` }}</span>
+              </p>
+              <button class="secondary-button small" type="button" data-action="open-mastery" @click="run(mastery.openCourse(summary.course.id))">
+                <AppIcon name="target" />
+                看掌握度
+              </button>
+            </template>
+          </section>
+
           <CourseEditor v-if="editing && editable" :key="viewed.ref.contentHash" :pack="viewed.pack" @close="editing = false" />
           <CourseContent v-else :pack="viewed.pack" :changes="viewed.changes" />
         </div>
@@ -243,6 +287,50 @@ onMounted(() => run(courses.loadView()));
 </template>
 
 <style scoped>
+.course-mastery {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+  font-size: var(--text-lg);
+}
+.course-mastery h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.course-mastery-repos {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.course-mastery-repos li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.course-mastery small,
+.course-mastery-empty {
+  color: var(--text-secondary);
+  font-size: var(--text-lg);
+}
+.course-mastery-empty {
+  margin: 0;
+}
+.course-mastery-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+}
+.count-mastered {
+  color: var(--success);
+}
+.course-mastery > button {
+  justify-self: start;
+}
 .course-columns {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(360px, 3fr);

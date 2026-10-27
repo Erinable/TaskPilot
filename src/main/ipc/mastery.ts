@@ -4,7 +4,12 @@
 //
 // [人工决策-2026-10-27 00:36:21] 带 concepts 的笔记按 Leitner 1 / 3 / 7 / 14 / 30 天排期；自评「记得」进下一档，「不记得」回第 1 档；
 // 到期日按业务时区（env.businessTimeZone）的日界算。
+import path from 'node:path';
+
 import { failWith, requireString } from '../coded_error.ts';
+import * as courses from '../courses.ts';
+import * as projectConfig from '../project_config.ts';
+import { PRESET_IDS } from '../presets/index.ts';
 import * as progress from '../lab_progress.ts';
 import { businessDay } from '../activity_log.ts';
 import { env as appEnv } from '../env.ts';
@@ -39,6 +44,50 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         .slice(0, MAX_DUE)
         .map((schedule) => ({ ...schedule, title: notes.get(schedule.noteId)!.title, concepts: notes.get(schedule.noteId)!.concepts }));
       return { today: day, due, total: all.length };
+    }),
+  );
+
+  // The registered lab repositories teaching `course`: one taskpilot.toml
+  // read per repository in the registry, which the learner keeps short. A
+  // missing or broken file is not a lab repository.
+  const labRepositories = async (course: string) => {
+    const current = ctx.repositories.current?.id ?? null;
+    const found = await Promise.all(
+      ctx.repositories.list().map(async (entry) => {
+        try {
+          const text = await projectConfig.readProjectText(entry.root);
+          const project = text === null ? null : projectConfig.parseProject(text, PRESET_IDS);
+          return project?.course === course && project.labs.length
+            ? [{ id: entry.id, name: path.basename(entry.root), labs: project.labs.length, current: entry.id === current }]
+            : [];
+        } catch (error) {
+          console.debug(`[mastery] not a lab repository id=${entry.id} code=${(error as { code?: string }).code ?? 'unknown'}`);
+          return [];
+        }
+      }),
+    );
+    return found.flat();
+  };
+
+  // One course pack's concepts with how each stands, for the mastery page:
+  // the pack in use when no id is given. Built-in packs, the repository's
+  // and imported ones can be read; a pack's content is shown already on the
+  // 课程 page, and mastery records are global.
+  ipcMain.handle(
+    CHANNELS.masteryCourse,
+    wrap(async (_event, rawId): Promise<masteryTypes.CourseMastery> => {
+      const places = ctx.coursePlaces();
+      let pack;
+      if (rawId === undefined || rawId === null) pack = (await ctx.course()).pack;
+      else {
+        const id = requireString(rawId, 'course');
+        const entry = (await courses.availableCourses(places)).find((candidate) => candidate.id === id);
+        pack = (await courses.loadCourse(places, entry ?? failWith(`Course pack ${id} is not available here`, 'unknown_course', 'course'))).pack;
+      }
+      return {
+        ...progress.courseMastery({ id: pack.id, title: pack.title, concepts: pack.concepts ?? [] }, requireMastery().ofCourse(pack.id)),
+        repositories: await labRepositories(pack.id),
+      };
     }),
   );
 

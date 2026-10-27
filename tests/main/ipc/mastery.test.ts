@@ -70,3 +70,101 @@ test('mastery: a deleted note’s schedule is dropped at the next review', async
   await h.call(CHANNELS.masteryReview, '乙.md', true);
   assert.deepEqual([...h.mastery.reviews().keys()], ['乙.md']);
 });
+
+// One graded submission of `conceptId` in the os pack.
+const attempt = (h, conceptId: string, passed: boolean, digest: string, { independence = 95, errorTags = [] as string[] } = {}) =>
+  h.mastery.record({
+    mode: 'practice',
+    course: 'os',
+    concepts: [conceptId],
+    packageId: `lab-${conceptId}`,
+    repoId: 'repo1',
+    diffDigest: digest,
+    review: {
+      status: passed ? 'passed' : 'rejected',
+      error: null,
+      startedAt: '2026-10-27T01:00:00.000Z',
+      finishedAt: '2026-10-27T01:05:00.000Z',
+      reasons: [],
+      attention: [],
+      checks: [
+        {
+          kind: 'test',
+          stage: 'submit',
+          blocking: true,
+          baseline: 'clean',
+          status: passed ? 'pass' : 'fail',
+          reason: null,
+          newFailures: [],
+          preexisting: [],
+          fixed: [],
+          run: {
+            kind: 'test',
+            command: 'make grade',
+            exitCode: 0,
+            timedOut: false,
+            durationMs: 1,
+            summary: { total: 3, passed: passed ? 3 : 1, failed: passed ? 0 : 2, skipped: 0, ok: passed },
+            report: null,
+            failing: [],
+            outputTail: null,
+          },
+        },
+      ],
+      verification: null,
+      acceptance: [],
+      report: null,
+      diff: { files: [], skipped: [], outOfScope: [] },
+      costUsd: 0,
+    },
+    report: { comments: [], errorTags },
+    independence,
+    difficulty: 'easy',
+    hintLevel: 3,
+    at: `2026-10-27T0${digest.length}:00:00.000Z`,
+  });
+
+test('mastery:course: the os skeleton with each concept’s standing and attempts, and the top error types (the CARM-33 example)', async () => {
+  const h = await fixtures.harness();
+  // round-robin: rejected on a hidden test, then passed with L3 (independence 95).
+  await attempt(h, 'round-robin', false, 'd1', { errorTags: ['missed-edge-case'] });
+  await attempt(h, 'round-robin', true, 'd22', { errorTags: ['missed-edge-case'] });
+  // fcfs: passed twice, mastered.
+  await attempt(h, 'fcfs', true, 'd3');
+  await attempt(h, 'fcfs', true, 'd44', { errorTags: ['naming'] });
+  const { data, error } = await h.call(CHANNELS.masteryCourse, 'os');
+  assert.equal(error, undefined, JSON.stringify(error));
+  assert.equal(data.course.id, 'os');
+  const byId = new Map<string, any>(data.concepts.map((concept) => [concept.id, concept]));
+  assert.ok(byId.size > 5, 'every concept of the skeleton is listed');
+  assert.deepEqual(
+    ['process-state', 'fcfs', 'round-robin', 'priority-sched'].map((id) => byId.get(id).state),
+    ['new', 'mastered', 'passed', 'new'],
+  );
+  assert.deepEqual(byId.get('round-robin').totals, { attempts: 2, pass: 1, partial: 0, fail: 1 });
+  assert.deepEqual(
+    byId.get('round-robin').attempts.map((entry) => [entry.result, entry.packageId, entry.independence]),
+    [
+      ['pass', 'lab-round-robin', 95],
+      ['fail', 'lab-round-robin', 95],
+    ],
+    'newest first',
+  );
+  assert.deepEqual(byId.get('round-robin').prerequisites, ['fcfs', 'timer-interrupt'], 'from the skeleton, for the graph');
+  assert.deepEqual(data.errorTypes[0], { type: 'missed-edge-case', count: 2 });
+  assert.ok(data.errorTypes.length <= 5);
+  // The harness's repository is a project, not one of os's lab repositories.
+  assert.deepEqual(data.repositories, []);
+  await fs.writeFile(
+    path.join(h.root, 'taskpilot.toml'),
+    'course = "os"\n\n[[labs]]\nid = "round-robin"\nstage = 1\ndir = "labs/01-round-robin"\nconcepts = ["round-robin"]\n',
+  );
+  assert.deepEqual((await h.call(CHANNELS.masteryCourse, 'os')).data.repositories, [
+    { id: h.repositories.current!.id, name: path.basename(h.root), labs: 1, current: true },
+  ]);
+  // Without an id: the pack in use (programming, which has no skeleton).
+  await fs.rm(path.join(h.root, 'taskpilot.toml'));
+  const inUse = (await h.call(CHANNELS.masteryCourse)).data;
+  assert.deepEqual([inUse.course.id, inUse.concepts, inUse.errorTypes, inUse.repositories], ['programming', [], [], []]);
+  assert.equal((await h.call(CHANNELS.masteryCourse, 'nope')).error.code, 'unknown_course');
+});

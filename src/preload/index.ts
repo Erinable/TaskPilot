@@ -242,6 +242,8 @@ const api = {
     reviews: () => invoke<masteryTypes.ReviewList>(CHANNELS.masteryReviews),
     // The learner's verdict on a note due today; returns its next schedule.
     review: (noteId: string, remembered: boolean) => invoke<masteryTypes.ReviewSchedule>(CHANNELS.masteryReview, noteId, remembered),
+    // One course pack's concepts and how each stands; the pack in use without an id.
+    course: (id?: string) => invoke<masteryTypes.CourseMastery>(CHANNELS.masteryCourse, id),
   },
 
   courses: {

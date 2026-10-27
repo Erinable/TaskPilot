@@ -68,10 +68,13 @@ describe('SideBar', () => {
     expect(useAppStore().sidebarCollapsed).toBe(false);
     vi.restoreAllMocks();
   });
-  test('课程 is a top-level view beside the notes', async () => {
+  test('掌握度 and 课程 are top-level views beside the notes', async () => {
     const wrapper = mount(SideBar);
     const labels = wrapper.findAll('nav.main-nav .nav-label').map((node) => node.text());
-    expect(labels.slice(labels.indexOf('学习笔记'), labels.indexOf('学习笔记') + 2)).toEqual(['学习笔记', '课程']);
+    expect(labels.slice(labels.indexOf('学习笔记'), labels.indexOf('学习笔记') + 3)).toEqual(['学习笔记', '掌握度', '课程']);
+    await wrapper.get('[data-nav="mastery"]').trigger('click');
+    await flushPromises();
+    expect(useAppStore().view).toBe('mastery');
     await wrapper.get('[data-nav="courses"]').trigger('click');
     await flushPromises();
     expect(useAppStore().view).toBe('courses');
