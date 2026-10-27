@@ -812,6 +812,29 @@ code {
 .tutor-hints {
   padding-left: 1.4em;
 }
+.tutor-ladder {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.tutor-level {
+  display: grid;
+  gap: var(--space-2);
+}
+.tutor-level + .tutor-level {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-soft);
+}
+.tutor-level h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.tutor-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
 .tutor-snippet {
   overflow: hidden;
   background: var(--glass-bg-strong);

@@ -132,6 +132,24 @@ test('a grade saved without a course snapshot loads unchanged', async () => {
   assert.equal(await fs.readFile(file, 'utf8'), before);
 });
 
+// State saved before the hint ladder has no hints or snippetCopies.
+test('hint levels are recorded once per step, survive a reload and load empty from older state', async () => {
+  const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
+  onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(configDir, STATE_FILENAME), JSON.stringify({ a: { status: 'in_progress', baseline: 'abc' } }));
+  const { store } = await newStore(configDir);
+  assert.deepEqual([store.get('a').hints, store.get('a').snippetCopies], [[], 0]);
+  const use = { stepIndex: 0, level: 1, at: '2026-10-27T00:00:00.000Z', filtered: false };
+  await store.recordHint('a', use);
+  await store.recordHint('a', { ...use, at: 'later' });
+  await store.recordHint('a', { ...use, level: 2, filtered: true });
+  await store.countSnippetCopy('a');
+  await store.flush();
+  const reloaded = (await newStore(configDir)).store.get('a');
+  assert.deepEqual(reloaded.hints, [use, { ...use, level: 2, filtered: true }]);
+  assert.equal(reloaded.snippetCopies, 1);
+});
+
 test('a corrupt state file falls back to seeded defaults', async () => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-store-'));
   onTestFinished(() => fs.rm(configDir, { recursive: true, force: true }));
@@ -262,10 +280,13 @@ test('a dismissal returns the package with progress intact and can be contested 
 test('a replan swaps the definition, resets execution, and can be reverted until claimed', async () => {
   const { store, configDir } = await newStore();
   await inDeviation(store);
+  const use = { stepIndex: 0, level: 3, at: '2026-10-27T00:00:00.000Z', filtered: false };
+  await store.recordHint('a', use);
   const replanned = await store.completeAdjudication('a', replan);
   assert.equal(replanned.status, 'pending');
   assert.equal(replanned.baseline, null);
   assert.deepEqual(replanned.completedSteps, []);
+  assert.deepEqual(replanned.hints, []);
   assert.equal(replanned.revision!.version, 1);
   assert.deepEqual(store.effective(SAMPLE[0]).steps, ['新步骤']);
   assert.deepEqual(store.effective(SAMPLE[0]).fileScope, ['src/y.ts']);
@@ -279,6 +300,8 @@ test('a replan swaps the definition, resets execution, and can be reverted until
   assert.equal(reverted.status, 'in_progress');
   assert.equal(reverted.baseline, 'c1');
   assert.deepEqual(reverted.completedSteps, [0]);
+  // The hint levels of the restored claim come back with it.
+  assert.deepEqual(reverted.hints, [use]);
   assert.equal(reverted.revision, null);
   assert.equal(reverted.deviations[0].resolution!.reverted, true);
   assert.deepEqual(store.effective(SAMPLE[0]).steps, ['one', 'two']);

@@ -74,12 +74,12 @@ const plainGrader =
     }
   };
 
-const labHarness = async ({ grader }: { grader?: Grader } = {}) => {
+const labHarness = async ({ grader, agent }: { grader?: Grader; agent?: fixtures.FakeAgent } = {}) => {
   const prepared: string[] = [];
   const graded: Record<string, string>[] = [];
   const h = await fixtures.harness({
     labGrader: grader ?? plainGrader(graded),
-    agent: fixtures.fakeAgent(),
+    agent: agent ?? fixtures.fakeAgent(),
     coding: {
       codingProbe: async () => fixtures.codingRuntime(),
       codingPrepare: async (_root, _baseline, options) => {
@@ -348,4 +348,44 @@ test('a lab repository needs an empty folder outside any repository and a known 
   assert.equal(h.repositories.list().length, 1);
   // A project repository is not a lab repository.
   assert.equal((await h.labs.addLab(RR_LAB).catch((error) => error)).code, 'not_lab_repository');
+});
+
+// [人工决策-2026-10-27 00:36:21] Tutor 失败时回退到 lab 预生成的 hints.json；隐藏测试从不进 Tutor 的 prompt。
+test("Tutor falls back on the lab's own hint ladder and never sees the hidden tests", async () => {
+  let tutorFails = false;
+  const agent: fixtures.FakeAgent = async (options) => {
+    if (tutorFails && fixtures.stepOf(options.schema) === 'tutor') throw Object.assign(new Error('CLI crashed'), { code: 'agent_failed' });
+    return fixtures.fakeAgent()(options);
+  };
+  const h = await labHarness({ agent });
+  const root = await emptyFolder();
+  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
+  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+
+  // Tutor answers step 1 itself; its prompt holds nothing private.
+  await h.call(CHANNELS.tutorAsk, 'lab-fcfs', 0, 1);
+  assert.equal((await fixtures.settleTutor(h.call, 'lab-fcfs', 0)).levels[0].source, 'tutor');
+  const prompt = fixtures.callFor(h.agentCalls, 'tutor').prompt;
+  for (const marker of PRIVATE_MARKERS) assert.ok(!prompt.includes(marker), marker);
+
+  // Tutor fails at step 2: the lab's L1 hint stands in and counts as opened.
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => errors.mockRestore());
+  tutorFails = true;
+  await h.call(CHANNELS.tutorAsk, 'lab-fcfs', 1, 1);
+  const fallback = await fixtures.settleTutor(h.call, 'lab-fcfs', 1);
+  assert.equal(fallback.status, 'done');
+  assert.deepEqual([fallback.levels[0].source, fallback.levels[0].answer.explanation], ['lab', 'hint-marker 先排序。']);
+  assert.deepEqual(
+    h.store.get('lab-fcfs').hints.map((use) => [use.stepIndex, use.level]),
+    [
+      [0, 1],
+      [1, 1],
+    ],
+  );
+  // The lab has no L2 hint: the failure shows and can be retried.
+  await h.call(CHANNELS.tutorAsk, 'lab-fcfs', 1, 2);
+  const failed = await fixtures.settleTutor(h.call, 'lab-fcfs', 1);
+  assert.deepEqual([failed.status, failed.pending, failed.opened], ['failed', 2, 1]);
 });

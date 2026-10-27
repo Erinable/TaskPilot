@@ -60,6 +60,8 @@ export const state = (task: packageTypes.TaskView): packageTypes.WorkPackageStat
   mode: task.mode,
   referenceRun: task.referenceRun,
   grade: task.grade,
+  hints: [],
+  snippetCopies: 0,
 });
 
 const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
@@ -172,8 +174,11 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
     },
     courses: { default: vi.fn(() => ok(PROGRAMMING_COURSE)) },
     tutor: {
-      get: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'idle', answer: null, error: null, costUsd: 0 })),
-      ask: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'running', answer: null, error: null, costUsd: 0 })),
+      get: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'idle', levels: [], pending: null, opened: 0, maxLevel: 5, error: null })),
+      ask: vi.fn((_id: string, _stepIndex: number, level: number) =>
+        ok<tutorTypes.TutorState>({ status: 'running', levels: [], pending: level, opened: level - 1, maxLevel: 5, error: null }),
+      ),
+      copied: vi.fn(() => ok(1)),
       cancel: vi.fn(() => ok(true)),
     },
   };

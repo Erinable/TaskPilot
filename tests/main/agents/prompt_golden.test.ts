@@ -7,7 +7,8 @@
 // Product Lead's plan and Coding Agent, CARM-22). Product Lead and Tutor
 // render the built-in programming course pack here, which must give the same
 // bytes (CARM-28), and so does the grading prompt and its schema (CARM-29), except
-// for the errorTags line and field mastery added (CARM-44). Re-record only for an
+// for the errorTags line and field mastery added (CARM-44). Tutor's step prompt and its
+// system prompt's "teach" line changed for the hint ladder (CARM-43). Re-record only for an
 // intended prompt change: `npx vitest run tests/main/agents/prompt_golden.test.ts -u`.
 import { describe, expect, test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -188,10 +189,18 @@ describe.each(PROFILES)('%s', (_name, profile) => {
 
   test('Tutor step and grade', async () => {
     const task = { title: PACKAGE.title, intro: PACKAGE.description, steps: PACKAGE.steps, fileScope: PACKAGE.fileScope, acceptance: ACCEPTANCE };
-    await expect(tutor.tutorPrompt({ task, stepIndex: 1, sources: SOURCES, missing: ['tests/auth/lock.test.ts'], profile })).toMatchFileSnapshot(
+    await expect(tutor.tutorPrompt({ task, stepIndex: 1, level: 1, sources: SOURCES, missing: ['tests/auth/lock.test.ts'], profile })).toMatchFileSnapshot(
       golden('tutor_step'),
     );
-    await expect(tutor.tutorPrompt({ task, stepIndex: 0, sources: [], missing: [], profile })).toMatchFileSnapshot(golden('tutor_step_no_sources'));
+    await expect(tutor.tutorPrompt({ task, stepIndex: 0, level: 1, sources: [], missing: [], profile })).toMatchFileSnapshot(golden('tutor_step_no_sources'));
+    // The hint ladder (CARM-43): the higher levels, with earlier answers and failing tests.
+    const earlier = [1, 2, 3].map((level) => ({ level, answer: { explanation: `L${level} 的说明`, hints: [`L${level} 的提示`], snippet: null, terms: [] } }));
+    await expect(
+      tutor.tutorPrompt({ task, stepIndex: 1, level: 4, earlier, failingTests: ['第 5 次失败后锁定'], sources: SOURCES, missing: [], profile }),
+    ).toMatchFileSnapshot(golden('tutor_step_l4'));
+    await expect(
+      tutor.tutorPrompt({ task, stepIndex: 1, level: 5, earlier, retryReason: 'Retry reason.', sources: [], missing: [], profile }),
+    ).toMatchFileSnapshot(golden('tutor_step_l5_retry'));
     const submission = [{ path: 'src/auth/login.ts', patch: '+let failures = 0;' }];
     const review = { passed: false, summary: '没有锁定', issues: ['缺少计数重置'] };
     const notes = [

@@ -1,12 +1,20 @@
-// Tutor answers, one per work package step, in the repository's tutor.json.
-// Each answer is keyed on the step's text as well as its index, so a replan
-// that rewrites a step never shows help for the old wording. Answers are
-// help text, not execution state: resetting progress leaves them.
+// Tutor answers, one per level of the hint ladder per work package step, in
+// the repository's tutor.json. Each answer is keyed on the step's text as
+// well as its index, so a replan that rewrites a step never shows help for
+// the old wording. Answers are help text, not execution state: resetting
+// progress leaves them, and which levels the developer opened is kept in
+// the package's state (WorkPackageState.hints), not here.
+//
+// Records written before the ladder have no level. They load as L1 with the
+// code L1 may not carry taken out, so an old answer never shows more than
+// its level allows.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { TutorAnswer } from './agents/tutor.ts';
+import { validateAnswer } from './agents/tutor.ts';
 import { JsonWriteQueue } from './atomic_json_file.ts';
+import { isHintLevel } from '../shared/hint_ladder.ts';
+import type { TutorAnswer } from './agents/tutor.ts';
 
 export const TUTOR_FILENAME = 'tutor.json';
 // Packages kept; the oldest answers go first beyond this.
@@ -16,12 +24,30 @@ export interface TutorRecord {
   packageId: string;
   stepIndex: number;
   step: string;
+  level: number;
   answer: TutorAnswer;
+  // The output filter took code out of the answer.
+  filtered: boolean;
+  // Tutor wrote it, or it is the lab's pre-written hint (Tutor had failed).
+  source: 'tutor' | 'lab';
   costUsd: number;
   createdAt: string;
 }
 
-const keyOf = (packageId: string, stepIndex: number) => `${packageId}#${stepIndex}`;
+const keyOf = (packageId: string, stepIndex: number, level: number) => `${packageId}#${stepIndex}#${level}`;
+
+// A saved record as this version reads it; null when it cannot be used.
+const upgrade = (record: Partial<TutorRecord> | null): TutorRecord | null => {
+  if (typeof record?.packageId !== 'string' || !Number.isInteger(record.stepIndex) || typeof record.step !== 'string') return null;
+  if (record.level !== undefined) return isHintLevel(record.level) ? (record as TutorRecord) : null;
+  try {
+    const { answer, filtered } = validateAnswer(record.answer, 1);
+    return { ...(record as TutorRecord), level: 1, answer, filtered, source: 'tutor' };
+  } catch (error) {
+    console.error('[tutor] dropped an unreadable saved answer', error);
+    return null;
+  }
+};
 
 export class TutorStore {
   #file: string;
@@ -35,9 +61,9 @@ export class TutorStore {
   async load(): Promise<this> {
     try {
       const saved: unknown = JSON.parse(await fs.readFile(this.#file, 'utf8'));
-      for (const record of (Array.isArray(saved) ? saved : []) as TutorRecord[]) {
-        if (typeof record?.packageId !== 'string' || !Number.isInteger(record.stepIndex) || typeof record.step !== 'string') continue;
-        this.#records.set(keyOf(record.packageId, record.stepIndex), record);
+      for (const raw of (Array.isArray(saved) ? saved : []) as Partial<TutorRecord>[]) {
+        const record = upgrade(raw);
+        if (record) this.#records.set(keyOf(record.packageId, record.stepIndex, record.level), record);
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
@@ -57,14 +83,14 @@ export class TutorStore {
     return this.#writes.flush();
   }
 
-  // The answer for this step, if its text is unchanged since it was asked.
-  get(packageId: string, stepIndex: number, step: string): TutorRecord | null {
-    const record = this.#records.get(keyOf(packageId, stepIndex));
+  // The answer at this level of this step, if its text is unchanged since it was asked.
+  get(packageId: string, stepIndex: number, step: string, level: number): TutorRecord | null {
+    const record = this.#records.get(keyOf(packageId, stepIndex, level));
     return record && record.step === step ? structuredClone(record) : null;
   }
 
   async put(record: TutorRecord): Promise<TutorRecord> {
-    this.#records.set(keyOf(record.packageId, record.stepIndex), record);
+    this.#records.set(keyOf(record.packageId, record.stepIndex, record.level), record);
     // Bounded: drop whole packages, oldest answer first.
     const packages = [...new Set([...this.#records.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((item) => item.packageId))];
     for (const dropped of packages.slice(MAX_PACKAGES)) {

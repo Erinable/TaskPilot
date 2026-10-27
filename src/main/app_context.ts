@@ -137,7 +137,7 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState, 
     referenceRun: state.referenceRun ?? null,
     referenceLock: practice.referenceLock(
       { referenceRun: state.referenceRun ?? null, review: state.review ?? null },
-      practice.usedHintLevel({ referenceRun: state.referenceRun ?? null }),
+      practice.usedHintLevel({ hints: packageState.hints ?? [] }),
     ),
     grade: state.grade ?? null,
     revision: state.revision && {

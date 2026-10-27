@@ -132,7 +132,7 @@ test('repositories: switching cancels a running tutor answer so it cannot land i
     return fixtures.fakeAgent()(options);
   };
   const { call } = await fixtures.harness({ agent, seedState: { 'auth-edge-tests': fixtures.claimedState } });
-  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0, 1);
   // Adding a repository switches to it; the switch must stop the tutor first.
   const switching = call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), true);
   for (let index = 0; index < 200 && !cancelled; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -169,7 +169,7 @@ test('repositories: a switch drops the coding events and tutor failures of the r
   await call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: '实现边界测试' });
   assert.equal((await fixtures.settleCoding(call, 'auth-edge-tests')).codingRun?.status, 'ready');
   assert.equal((await call(CHANNELS.codingEvents, 'auth-edge-tests', -1)).data.events.length, 1);
-  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0);
+  await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0, 1);
   assert.equal((await fixtures.settleTutor(call, 'auth-edge-tests', 0)).status, 'failed');
 
   const first = (await call(CHANNELS.repositoriesList)).data.current;

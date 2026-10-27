@@ -14,6 +14,7 @@
 import { AgentOutputError, isObject, list, scopePath, text } from './product_lead.ts';
 import { looksSecret } from '../repo_reader.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
+import { HINT_CODE_LINES, HINT_LEVELS } from '../../shared/hint_ladder.ts';
 import type { RunAgent } from './claude_cli.ts';
 import type { Concept, CoursePack } from '../../shared/course_pack.ts';
 import type { CoursePlan } from '../../shared/course_plan.ts';
@@ -30,9 +31,6 @@ const MAX_LAB_BYTES = 256 * 1024;
 const MAX_STEPS = 8;
 const MAX_ACCEPTANCE = 8;
 const MAX_RUBRIC_NOTES = 3;
-const HINT_LEVELS = [1, 2, 3, 4, 5] as const;
-// Lines of code a hint may carry, by level: none up to L3 (T7's ladder).
-const HINT_CODE_LINES: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 3, 5: 10 };
 const LAB_ID = /^[a-z][a-z0-9-]{0,39}$/;
 const PATH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const TEST_NAME_MAX = 80;

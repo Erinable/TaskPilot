@@ -5,6 +5,7 @@ import type { CodingRun } from '../coding_types.ts';
 import type { ErrorInfo } from './envelope.ts';
 import type * as workspaceTypes from './workspace.ts';
 import type { CourseRef, RubricItem } from '../course_pack.ts';
+import type { HintUse } from '../hint_ladder.ts';
 
 export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
 
@@ -262,6 +263,9 @@ export type WorkPackageState = {
   // Practice only; cleared on release and replan.
   referenceRun: ReferenceRun | null;
   grade: Grade | null;
+  // The hint ladder levels opened in this claim and the snippets copied (../hint_ladder.ts).
+  hints: HintUse[];
+  snippetCopies: number;
 };
 
 // The effective definition (Architect's replan laid over it) plus its state.

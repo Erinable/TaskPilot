@@ -85,6 +85,7 @@ export const CHANNELS = {
   tutorGet: 'tutor:get',
   tutorAsk: 'tutor:ask',
   tutorCancel: 'tutor:cancel',
+  tutorCopied: 'tutor:copied',
   referenceGet: 'reference:get',
   gradeStart: 'grade:start',
   notesList: 'notes:list',

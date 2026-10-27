@@ -187,6 +187,9 @@ test('the reference opens once every test passed, or the hints were used up to L
     unlocked: true,
     reason: 'revealed',
   });
-  // Until the hint ladder exists no rung is used, so that branch never opens it.
-  assert.equal(practice.usedHintLevel({ referenceRun: READY_RUN }), null);
+  // The highest level opened at any step of this claim counts.
+  const use = (stepIndex: number, level: number) => ({ stepIndex, level, at: '2026-10-27T00:00:00Z', filtered: false });
+  assert.equal(practice.usedHintLevel({ hints: [] }), null);
+  assert.equal(practice.usedHintLevel({ hints: [use(0, 1), use(0, 2), use(1, 1)] }), 2);
+  assert.equal(practice.usedHintLevel({ hints: [use(0, 1), use(2, 5)] }), 5);
 });
