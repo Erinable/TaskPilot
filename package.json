@@ -27,7 +27,8 @@
     "format:check": "prettier --check .",
     "eval:qa": "node evals/qa/run.ts",
     "eval:architect": "node evals/architect/run.ts",
-    "eval:tutor-grade": "node evals/tutor-grade/run.ts"
+    "eval:tutor-grade": "node evals/tutor-grade/run.ts",
+    "eval:lab-gen": "node evals/lab-gen/run.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

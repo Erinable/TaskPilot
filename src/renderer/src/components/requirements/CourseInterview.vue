@@ -6,9 +6,15 @@
 //
 // [人工决策-2026-10-27 00:55:52] 学生可以把节点标为"已会"或"跳过"、调整顺序；骨架本身不能改。
 // 起草的课程包在编辑器里预览和编辑，保存后在本机确认才会用来规划路径。
+// Once the path is confirmed, the first lab is generated after the learner
+// saw what it covers and roughly what it costs; only its title and counts
+// are ever shown here, never its code, tests or hints.
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import { elapsedSince, useNow } from '@/lib/elapsed.ts';
+import { describeErrorInfo } from '@/lib/errors.ts';
+import { formatCost } from '@/lib/activity.ts';
 import InlineCode from '@/components/InlineCode.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
 import CourseEditor from '@/components/courses/CourseEditor.vue';
@@ -77,6 +83,21 @@ const savedChoice = computed(() => {
   return choice && 'course' in choice && !draft.value && !plan.value ? choice.course : null;
 });
 const onSaveDraft = (pack: CoursePack) => store.saveDraft(props.item, pack);
+
+// ========== First lab ==========
+const lab = computed(() => props.course.lab ?? null);
+const estimate = computed(() => (store.labEstimate?.requirementId === props.item.id ? store.labEstimate.estimate : null));
+const now = useNow();
+const labElapsed = computed(() => (lab.value?.status === 'running' ? elapsedSince(lab.value.startedAt, now.value) : null));
+const cancellingLab = ref(false);
+const onCancelLab = () => {
+  cancellingLab.value = true;
+  report(store.cancelRun(props.item));
+};
+const onGenerate = () => {
+  cancellingLab.value = false;
+  report(store.generateLab(props.item));
+};
 </script>
 
 <template>
@@ -185,6 +206,61 @@ const onSaveDraft = (pack: CoursePack) => store.saveDraft(props.item, pack);
           <small v-else class="course-path-status">{{ model.PATH_STATUS_LABELS[entry.status] }}</small>
         </li>
       </ol>
+      <section v-if="published" class="course-lab glass" data-section="first-lab" aria-live="polite">
+        <template v-if="lab?.status === 'running'">
+          <div class="agent-running">
+            <AppIcon name="spinner" class="spin" />
+            <span>{{ lab.phase ? model.LAB_PHASE_LABELS[lab.phase] : '正在生成 lab…' }}</span>
+          </div>
+          <small>已用 {{ labElapsed ?? '0 秒' }}，花费 {{ formatCost(lab.costUsd) }}。通常 2 到 4 分钟，可以先去做别的事。</small>
+          <button class="secondary-button small" type="button" data-action="cancel-lab" :disabled="cancellingLab" @click="onCancelLab">
+            <AppIcon name="x" />
+            取消
+          </button>
+        </template>
+        <template v-else-if="lab?.status === 'ready' && lab.lab">
+          <h3>
+            <AppIcon name="flask" />
+            第一个 lab：{{ lab.lab.title }}
+          </h3>
+          <p>{{ lab.lab.summary }}</p>
+          <p class="course-path-note">
+            {{
+              `预计 ${lab.lab.estimateHours} 小时 · ${lab.lab.starterFiles} 个初始文件 · ${lab.lab.publicTests} 个公开测试 · ${lab.lab.hiddenTests} 个隐藏测试 · 花费 ${formatCost(lab.costUsd)}`
+            }}
+          </p>
+          <p class="course-path-note">接下来 TaskPilot 会先自己跑一遍检查，确认参考解能通过、初始代码不能通过，再建实验仓库。</p>
+        </template>
+        <template v-else>
+          <p v-if="lab?.status === 'failed'" class="course-warning" role="alert">
+            <AppIcon name="alert" />
+            <span>{{ lab.error?.code === 'agent_cancelled' ? '已取消生成。' : `生成失败：${describeErrorInfo(lab.error)}` }}</span>
+          </p>
+          <template v-if="estimate">
+            <h3>生成第一个 lab</h3>
+            <p>
+              覆盖知识点：
+              <code v-for="entry in estimate.concepts" :key="entry.id" class="path-chip">{{ entry.label }}</code>
+              · 难度 {{ model.DIFFICULTY_LABELS[estimate.difficulty] }}
+            </p>
+            <p data-field="estimate">
+              预计费用 {{ model.estimateText(estimate) }}，调用 {{ estimate.calls }} 次模型。费用只做统计，以实际为准；之后的自验证还会再花一些。
+            </p>
+            <div class="req-actions">
+              <button class="primary-button" type="button" data-action="generate-lab" :disabled="store.courseBusy" @click="onGenerate">
+                <AppIcon name="wand" />
+                确认并生成
+              </button>
+            </div>
+          </template>
+          <div v-else class="req-actions">
+            <button class="primary-button" type="button" data-action="estimate-lab" :disabled="store.courseBusy" @click="report(store.loadLabEstimate(item))">
+              <AppIcon :name="store.courseBusy ? 'spinner' : 'flask'" :class="{ spin: store.courseBusy }" />
+              {{ lab?.status === 'failed' ? '重新生成第一个 lab' : '生成第一个 lab' }}
+            </button>
+          </div>
+        </template>
+      </section>
       <p v-if="!published" class="course-path-note">只能调整顺序和标记；前置知识点必须排在前面。知识点本身来自课程包，想改要去「课程」里复制一份再改。</p>
       <div v-if="!published" class="req-actions sticky">
         <button class="secondary-button" type="button" :disabled="store.acting !== null || store.courseBusy" @click="report(store.editAnswers(item))">
@@ -317,5 +393,24 @@ const onSaveDraft = (pack: CoursePack) => store.saveDraft(props.item, pack);
 }
 .course-draft h3 {
   margin: 0;
+}
+.course-lab {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: 12px;
+}
+.course-lab h3,
+.course-lab p {
+  margin: 0;
+}
+.course-lab .course-warning {
+  display: flex;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+.course-lab .course-warning .icon {
+  flex: none;
+  color: var(--warning);
 }
 </style>

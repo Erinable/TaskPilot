@@ -33,6 +33,35 @@ export type CourseInterview = {
   pathConcepts: Concept[];
   // A drafted pack, validated, until the learner saves and confirms it.
   draft: { pack: CoursePack; contentHash: string } | null;
+  // The first lab's generation, once the path is confirmed; absent before.
+  lab?: LabGeneration | null;
+};
+
+// What the learner sees of a lab being generated: never its code, solution,
+// tests or hints, only their counts. `phase` is the call running: the
+// statement and tests (spec), then the code.
+export type LabGeneration = {
+  status: 'running' | 'ready' | 'failed';
+  phase: 'spec' | 'code' | null;
+  concepts: string[];
+  difficulty: packageTypes.Difficulty;
+  startedAt: string;
+  finishedAt: string | null;
+  costUsd: number;
+  lab: { id: string; title: string; summary: string; estimateHours: number; starterFiles: number; publicTests: number; hiddenTests: number } | null;
+  error: ErrorInfo | null;
+};
+
+// requirements:lab-estimate: what generating the first lab would cover and
+// roughly cost, shown before the learner confirms. `usd` is null when no
+// price is known for the model (sync prices on the cost page).
+export type LabEstimate = {
+  concepts: { id: string; label: string }[];
+  difficulty: packageTypes.Difficulty;
+  calls: number;
+  tokens: { input: number; output: number };
+  model: string | null;
+  usd: { low: number; high: number } | null;
 };
 
 // requirements:course-save-draft: the requirement, now choosing the saved

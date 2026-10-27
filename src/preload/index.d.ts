@@ -83,6 +83,8 @@ declare const api: {
     coursePath: (id: string, path: PathEntry[]) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     courseSaveDraft: (id: string, pack: CoursePack) => Promise<envelopeTypes.IpcResult<requirementTypes.CourseDraftSaved>>;
     courseConfirmDraft: (id: string, contentHash: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    labEstimate: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.LabEstimate>>;
+    labGenerate: (id: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
   };
   agent: {
     status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;

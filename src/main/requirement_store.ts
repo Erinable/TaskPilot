@@ -18,6 +18,7 @@ import type { Plan } from './agents/product_lead.ts';
 import type { InterfaceSummary, SkippedFile } from './agents/architect.ts';
 import type { Concept, CoursePack } from '../shared/course_pack.ts';
 import type * as coursePlan from '../shared/course_plan.ts';
+import type { LabGeneration } from '../shared/ipc/requirements.ts';
 import { CONTROL_CHARS } from '../shared/text_rules.ts';
 import { JsonWriteQueue } from './atomic_json_file.ts';
 
@@ -61,6 +62,9 @@ export interface CourseInterview {
   // page and their prerequisites for checking a reordered path.
   pathConcepts: Concept[];
   draft: CourseDraft | null;
+  // The first lab's generation once the path is confirmed (../lab_generation_service.ts);
+  // only what the learner may see, the lab itself stays private.
+  lab?: LabGeneration | null;
 }
 
 export interface RequirementQuestion {
@@ -179,6 +183,13 @@ export class RequirementStore implements TaskCatalog {
           item.status = 'failed';
           item.error = { code: 'agent_interrupted', message: `TaskPilot 在 ${item.kind === 'course' ? 'Tutor' : 'Product Lead'} 运行时退出了` };
         }
+        if (item.course?.lab?.status === 'running')
+          item.course.lab = {
+            ...item.course.lab,
+            status: 'failed',
+            phase: null,
+            error: { code: 'agent_interrupted', message: 'TaskPilot 在生成 lab 时退出了' },
+          };
         this.#items.set(item.id, item);
       }
     } catch (error) {
@@ -367,6 +378,13 @@ export class RequirementStore implements TaskCatalog {
     const { course } = this.#course(id, ['reviewing']);
     if (!course.plan) return fail('There is no path to confirm', 'invalid_state');
     return this.#update(id, { status: 'published' });
+  }
+
+  // The first lab's generation state; `costUsd` is what this update adds.
+  async setCourseLab(id: string, lab: LabGeneration, costUsd = 0): Promise<Requirement> {
+    const { item, course } = this.#course(id, ['published']);
+    if (!course.plan) return fail('There is no confirmed path', 'invalid_state');
+    return this.#update(id, { course: { ...course, lab }, costUsd: item.costUsd + costUsd });
   }
 
   async finishPlan(id: string, plan: Plan, costUsd: number | null = 0): Promise<Requirement> {

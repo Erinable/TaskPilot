@@ -8,7 +8,7 @@ import ElementPlus from 'element-plus';
 
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
-import { courseInterview, coursePathInterview, installApi, requirement } from '../requirements_fakes.ts';
+import { courseInterview, coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -133,6 +133,53 @@ describe('course interview', () => {
     await flushPromises();
     expect(api.requirements.courseConfirmDraft).toHaveBeenCalledWith('r1', 'saved-hash');
     expect(api.requirements.plan).toHaveBeenLastCalledWith('r1', undefined);
+    store.stopPolling();
+    wrapper.unmount();
+  });
+
+  test('a confirmed path shows the first lab’s estimate before anything runs, then its progress, then only its title and counts', async () => {
+    state.list = [requirement({ kind: 'course', status: 'published', course: coursePathInterview() })];
+    const { wrapper, store } = await render();
+    expect(wrapper.find('[data-action="generate-lab"]').exists()).toBe(false);
+    await wrapper.get('[data-action="estimate-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.labEstimate).toHaveBeenCalledWith('r1');
+    expect(api.requirements.labGenerate).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-field="estimate"]').text()).toContain('约 $0.42–$1.35');
+    expect(wrapper.get('[data-section="first-lab"]').text()).toContain('时间片轮转');
+
+    state.list = [
+      requirement({ kind: 'course', status: 'published', course: { ...coursePathInterview(), lab: labGeneration({ status: 'running', phase: 'spec' }) } }),
+    ];
+    await wrapper.get('[data-action="generate-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.labGenerate).toHaveBeenCalledWith('r1');
+    expect(wrapper.get('[data-section="first-lab"]').text()).toContain('正在写题面和测试');
+    expect(store.isPolling()).toBe(true);
+    await wrapper.get('[data-action="cancel-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.cancel).toHaveBeenCalledWith('r1');
+    store.stopPolling();
+    wrapper.unmount();
+  });
+
+  test('a generated lab shows its title and counts; a failed one offers to generate again', async () => {
+    state.list = [requirement({ kind: 'course', status: 'published', course: { ...coursePathInterview(), lab: labGeneration() } })];
+    let { wrapper, store } = await render();
+    const ready = wrapper.get('[data-section="first-lab"]').text();
+    expect(ready).toContain('第一个 lab：时间片轮转调度');
+    expect(ready).toContain('3 个公开测试 · 5 个隐藏测试');
+    expect(ready).toContain('$1.20');
+    store.stopPolling();
+    wrapper.unmount();
+
+    const error = { code: 'agent_bad_output', message: 'hiddenTests[0].names[0] must not give away an input' };
+    state.list = [
+      requirement({ kind: 'course', status: 'published', course: { ...coursePathInterview(), lab: labGeneration({ status: 'failed', lab: null, error }) } }),
+    ];
+    ({ wrapper, store } = await render());
+    expect(wrapper.get('[data-section="first-lab"] [role="alert"]').text()).toContain('生成失败');
+    expect(wrapper.get('[data-action="estimate-lab"]').text()).toContain('重新生成第一个 lab');
     store.stopPolling();
     wrapper.unmount();
   });

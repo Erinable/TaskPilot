@@ -7,6 +7,7 @@ import { createAppContext } from './app_context.ts';
 import { createCodingRuntime } from './coding_runtime.ts';
 import { createCodingService } from './coding_service.ts';
 import { createLabService } from './lab_service.ts';
+import { createLabGenerationService } from './lab_generation_service.ts';
 import { createCourseInterviewService } from './course_interview_service.ts';
 import { createPracticeService } from './practice_service.ts';
 import { createReviewService } from './review_service.ts';
@@ -27,12 +28,14 @@ import type { AppDeps } from './app_context.ts';
 import type { CodingDeps } from './coding_runtime.ts';
 import type { IpcMainLike } from './ipc/handler.ts';
 import type { LabService } from './lab_service.ts';
+import type { LabGenerationService } from './lab_generation_service.ts';
 
 export type IpcDeps = AppDeps & { coding?: CodingDeps };
 
-// `labs` is for main-process callers (the lab generator); the renderer never
-// hands TaskPilot a lab, which carries the private parts.
-export type IpcHandle = { shutdown: () => Promise<void>; labs: LabService };
+// `labs` and `labGeneration` are for main-process callers (the self-check);
+// the renderer never hands TaskPilot a lab or reads one, since a lab carries
+// the private parts.
+export type IpcHandle = { shutdown: () => Promise<void>; labs: LabService; labGeneration: LabGenerationService };
 
 export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHandle => {
   const ctx = createAppContext(deps);
@@ -52,7 +55,8 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });
-  requirementsIpc.register(ipcMain, ctx, { courseInterview: createCourseInterviewService(ctx) });
+  const labGeneration = createLabGenerationService(ctx);
+  requirementsIpc.register(ipcMain, ctx, { courseInterview: createCourseInterviewService(ctx), labGeneration });
   activityIpc.register(ipcMain, ctx, { runtime });
   environmentIpc.register(ipcMain, ctx);
   releaseIpc.register(ipcMain, ctx);
@@ -64,6 +68,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
 
   return {
     labs: createLabService(ctx),
+    labGeneration,
     // Cancels running agents and waits for their final writes.
     // On quit: nothing may still be writing once this resolves.
     shutdown: async () => {

@@ -75,6 +75,30 @@ describe('requirement model', () => {
       { text: ' now', code: false },
     ]);
   });
+
+  test('a confirmed course keeps polling while its first lab is generated, and the poll key follows the lab', () => {
+    const lab = { status: 'running' as const, phase: 'code' as const };
+    const generating = requirement({ status: 'published', course: { lab } as never });
+    expect(model.isRunning(generating)).toBe(false);
+    expect(model.labRunning(generating)).toBe(true);
+    expect(model.anyPolled([requirement({ status: 'published' }), generating])).toBe(true);
+    expect(model.pollKey(generating)).toBe('published::running:code');
+    expect(model.LAB_PHASE_LABELS.code).toContain('参考解');
+  });
+
+  test('the lab estimate reads as a dollar range, or as tokens when no price is known', () => {
+    const estimate = {
+      concepts: [],
+      difficulty: 'easy' as const,
+      calls: 2,
+      tokens: { input: 30500, output: 26000 },
+      model: null,
+      usd: { low: 0.4, high: 1.355 },
+    };
+    expect(model.estimateText(estimate)).toBe('约 $0.40–$1.35');
+    expect(model.estimateText({ ...estimate, usd: null })).toBe('价格未知（默认模型，约 31k 输入 + 26k 输出 token）');
+    expect(model.DIFFICULTY_LABELS.medium).toBe('中等');
+  });
 });
 
 describe('requirements store', () => {
