@@ -15,6 +15,7 @@ import type { StepId as CheckKind } from '../shared/check_steps.ts';
 
 import type { CodingRun } from '../shared/coding_types.ts';
 import type { ExecutionMode, Grade, ReferenceRun } from '../shared/ipc/packages.ts';
+import type { HintUse } from '../shared/hint_ladder.ts';
 export const STATE_FILENAME = 'work-packages.json';
 
 // Why an agent run failed.
@@ -142,6 +143,9 @@ export interface ReplanUndo {
   review: Review | null;
   // Absent on undo records saved before modes existed.
   mode?: ExecutionMode | null;
+  // Absent on undo records saved before the hint ladder.
+  hints?: HintUse[];
+  snippetCopies?: number;
 }
 
 // Runtime state of one work package.
@@ -168,6 +172,11 @@ export interface WorkPackageState {
   completedAt: string | null;
   // Dependencies the developer chose to skip; they no longer block claiming.
   waivedDependencies: string[];
+  // The hint ladder levels opened in this claim, each level of a step once,
+  // and how often a Tutor snippet was copied. Release and replan clear them,
+  // like the practice records; saved before the ladder, they load empty.
+  hints: HintUse[];
+  snippetCopies: number;
 }
 
 export interface StoreSummary {
@@ -215,6 +224,8 @@ const initialState = (task: Pick<TaskDefinition, 'status'>): WorkPackageState =>
   grade: null,
   completedAt: null,
   waivedDependencies: [],
+  hints: [],
+  snippetCopies: 0,
 });
 
 const BASELINE_STATUSES: string[] = ['measuring', 'measured', 'unavailable', 'contaminated'];
@@ -244,6 +255,23 @@ export const humanTransitions = (entry: WorkPackageState): TransitionName[] =>
 
 // The task fields the store needs: its id and seed status.
 type StoreTask = Pick<TaskDefinition, 'id' | 'status'>;
+
+// Puts back the plan and the claim a replan replaced.
+const revertReplan = (entry: WorkPackageState) => {
+  // The guard checked there is something to revert.
+  const undo = entry.replanUndo as ReplanUndo;
+  (lastDeviation(entry) as Deviation & { resolution: DeviationResolution }).resolution.reverted = true;
+  entry.revision = undo.revision;
+  entry.baseline = undo.baseline;
+  entry.claimedAt = undo.claimedAt;
+  entry.completedSteps = undo.completedSteps;
+  entry.baselineChecks = undo.baselineChecks;
+  entry.review = undo.review;
+  entry.mode = undo.mode ?? null;
+  entry.hints = undo.hints ?? [];
+  entry.snippetCopies = undo.snippetCopies ?? 0;
+  entry.replanUndo = null;
+};
 
 const recoverCodingRun = (state: WorkPackageState) => {
   if (state.codingRun && !state.codingRun.cli) state.codingRun = { ...state.codingRun, cli: 'codex', model: '', thinking: 'default' };
@@ -405,6 +433,8 @@ export class WorkPackageStore {
       entry.mode = null;
       entry.referenceRun = null;
       entry.grade = null;
+      entry.hints = [];
+      entry.snippetCopies = 0;
     }
     if (name === 'report_deviation') {
       if (!deviation?.note?.trim()) {
@@ -425,19 +455,7 @@ export class WorkPackageStore {
       (lastDeviation(entry) as Deviation & { resolution: DeviationResolution }).resolution.contested = true;
       entry.adjudication = null;
     }
-    if (name === 'revert_replan') {
-      // The guard checked there is something to revert.
-      const undo = entry.replanUndo as ReplanUndo;
-      (lastDeviation(entry) as Deviation & { resolution: DeviationResolution }).resolution.reverted = true;
-      entry.revision = undo.revision;
-      entry.baseline = undo.baseline;
-      entry.claimedAt = undo.claimedAt;
-      entry.completedSteps = undo.completedSteps;
-      entry.baselineChecks = undo.baselineChecks;
-      entry.review = undo.review;
-      entry.mode = undo.mode ?? null;
-      entry.replanUndo = null;
-    }
+    if (name === 'revert_replan') revertReplan(entry);
     if (name === 'accepted' || name === 'acceptance_rejected') {
       // The human's call on QA's pass; the review itself stays as QA wrote it.
       entry.review = { ...(entry.review as Review), humanVerdict: name, humanAt: new Date().toISOString() };
@@ -609,6 +627,8 @@ export class WorkPackageStore {
         baselineChecks: entry.baselineChecks,
         review: entry.review,
         mode: entry.mode,
+        hints: entry.hints,
+        snippetCopies: entry.snippetCopies,
       };
       entry.revision = {
         version: (entry.revision?.version ?? 0) + 1,
@@ -627,6 +647,8 @@ export class WorkPackageStore {
       entry.mode = null;
       entry.referenceRun = null;
       entry.grade = null;
+      entry.hints = [];
+      entry.snippetCopies = 0;
     }
     entry.adjudication = {
       ...entry.adjudication,
@@ -684,6 +706,25 @@ export class WorkPackageStore {
     const entry = this.get(id);
     if (expect !== undefined && entry.grade?.id !== expect) return null;
     entry.grade = grade ? structuredClone(grade) : null;
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  // Records that a hint level was opened at a step; a level opened before
+  // is not counted again.
+  async recordHint(id: string, use: HintUse): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    if (entry.hints.some((item) => item.stepIndex === use.stepIndex && item.level === use.level)) return structuredClone(entry);
+    entry.hints = [...entry.hints, structuredClone(use)];
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  async countSnippetCopy(id: string): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    entry.snippetCopies += 1;
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);

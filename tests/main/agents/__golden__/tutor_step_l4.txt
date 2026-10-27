@@ -1,0 +1,50 @@
+Help the developer with step 2 of this work package, at level 4 of 5.
+Level 4 of 5: from the failing public tests below, which function and which case goes wrong, and why. explanation: the cause. hints: how to check it. snippet: at most 3 lines that point at the problem, or null.
+Also give the terms in the step a beginner may not know. Do not repeat the earlier levels; go one step further than them.
+Files in the scope that do not exist yet are listed as missing: the step may be asking the developer to create them.
+
+<work_package>
+Title: 实现登录锁定
+在 login 里记录失败次数并锁定。
+
+Steps:
+1. 在 `src/auth/login.ts` 记录失败次数。
+2. 在 `tests/auth/login.test.ts` 加测试。   <- this step
+
+File scope:
+src/auth/login.ts
+tests/auth/login.test.ts
+
+Acceptance criteria:
+- 第 5 次失败后锁定
+- 锁定提示不泄露账户是否存在
+</work_package>
+
+<earlier_levels>
+L1: L1 的说明
+- L1 的提示
+
+L2: L2 的说明
+- L2 的提示
+
+L3: L3 的说明
+- L3 的提示
+</earlier_levels>
+
+<failing_tests>
+第 5 次失败后锁定
+</failing_tests>
+
+<missing_files>
+(none)
+</missing_files>
+
+<sources>
+<file path="src/auth/login.ts">
+export const login = async (email: string, password: string) => {};
+</file>
+
+<file path="tests/auth/login.test.ts">
+test('login succeeds', () => {});
+</file>
+</sources>

@@ -45,10 +45,11 @@ export const useTutorStore = defineStore('tutor', () => {
     if (opened === session) apply(taskId, stepIndex, next);
   };
 
-  const ask = async (taskId: string, stepIndex: number) => {
+  // Opens `level` of the step's hint ladder.
+  const ask = async (taskId: string, stepIndex: number, level: number) => {
     const opened = session;
     try {
-      const next = await call(window.taskpilot.tutor.ask(taskId, stepIndex));
+      const next = await call(window.taskpilot.tutor.ask(taskId, stepIndex, level));
       if (opened === session) apply(taskId, stepIndex, next);
     } catch (error) {
       console.error('[tutor] ask failed', error);
@@ -60,6 +61,8 @@ export const useTutorStore = defineStore('tutor', () => {
     await call(window.taskpilot.tutor.cancel(taskId, stepIndex)).catch((error) => console.error(error));
     await refresh(taskId, stepIndex);
   };
+
+  const copied = (taskId: string) => call(window.taskpilot.tutor.copied(taskId)).catch((error) => console.error(error));
 
   // ========== Lifecycle ==========
   const reset = () => {
@@ -75,6 +78,7 @@ export const useTutorStore = defineStore('tutor', () => {
     refresh,
     ask,
     cancel,
+    copied,
     stop,
     // Lifecycle
     reset,

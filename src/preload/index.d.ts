@@ -147,8 +147,9 @@ declare const api: {
   };
   tutor: {
     get: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
-    ask: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
+    ask: (id: string, stepIndex: number, level: number) => Promise<envelopeTypes.IpcResult<tutorTypes.TutorState>>;
     cancel: (id: string, stepIndex: number) => Promise<envelopeTypes.IpcResult<boolean>>;
+    copied: (id: string) => Promise<envelopeTypes.IpcResult<number>>;
   };
   practice: {
     reference: (id: string) => Promise<envelopeTypes.IpcResult<string>>;

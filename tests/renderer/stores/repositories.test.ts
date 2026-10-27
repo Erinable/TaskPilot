@@ -91,7 +91,7 @@ describe('repositories store', () => {
   });
 
   test('switching clears what the views read for the old repository', async () => {
-    const tutorState: tutorTypes.TutorState = { status: 'done', answer: null, error: null, costUsd: 0 };
+    const tutorState: tutorTypes.TutorState = { status: 'done', levels: [], pending: null, opened: 1, maxLevel: 5, error: null };
     const preview: commitTypes.CommitPreview = { files: ['a.ts'], skipped: [], message: 'feat: a' };
     const map: activityTypes.EngineeringMap = { modules: [], conventions: [], gaps: [], files: ['a.ts'], truncated: false };
     Object.assign(window.taskpilot, {

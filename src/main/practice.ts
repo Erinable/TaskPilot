@@ -8,7 +8,11 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import * as labs from './labs.ts';
 import * as noteCourses from '../shared/note_courses.ts';
+import { MAX_HINT_LEVEL, openedLevel } from '../shared/hint_ladder.ts';
+import type { HintUse } from '../shared/hint_ladder.ts';
+import type { TaskDefinition } from './tasks.ts';
 import type { CoursePack } from '../shared/course_pack.ts';
 import type { NoteMeta } from '../shared/ipc/notes.ts';
 import type { Grade, GradeCategory, ReferenceLock, ReferenceRun, Review } from '../shared/ipc/packages.ts';
@@ -19,6 +23,10 @@ export const MAX_REFERENCE_PROMPT_BYTES = 64 * 1024;
 
 // One file per package, overwritten by its next reference run.
 export const referencePath = (dataDir: string, packageId: string) => path.join(dataDir, REFERENCES_DIRNAME, `${encodeURIComponent(packageId)}.patch`);
+
+// A lab's reference is kept with its private files; a run's per package.
+export const referenceFileOf = (dataDir: string, task: Pick<TaskDefinition, 'id' | 'lab'>) =>
+  task.lab ? labs.referencePath(dataDir, task.lab.id) : referencePath(dataDir, task.id);
 
 // Identifies one submission, so the same change is never graded twice.
 export const submissionDigest = (files: { path: string; patch: string }[]): string => {
@@ -42,9 +50,6 @@ export const referenceForPrompt = (patch: string): string => {
   return `${kept}\n(The rest of the reference solution was left out for length.)`;
 };
 
-// The top rung of the hint ladder (L1–L5).
-const MAX_HINT_LEVEL = 5;
-
 // Whether the package's tests all passed in its latest finished review:
 // every blocking check (the repository's submit steps, a lab's public and
 // hidden tests) passed, and every acceptance criterion with a linked test
@@ -58,14 +63,13 @@ const testsPassed = (review: Review | null): boolean => {
   return checks.every((check) => check.status === 'pass') && linked.every((criterion) => criterion.status === 'verified');
 };
 
-// The highest hint rung this package has used. The hint ladder is T7's;
-// until it lands no rung is ever used, so this condition never opens the
-// reference.
-export const usedHintLevel = (_state: { referenceRun: ReferenceRun | null }): number | null => null;
+// The highest hint level this claim of the package opened, at any step;
+// null before the first.
+export const usedHintLevel = ({ hints }: { hints: HintUse[] }): number | null => openedLevel(hints) || null;
 
 // Whether the reference may be read now, and why. `hintLevel` is the
-// highest hint rung used, null while there is no hint ladder (before T7),
-// which never opens it. Once read it stays open.
+// highest hint level opened (null for none); L5 opens it. Once read it
+// stays open.
 export const referenceLock = (
   { referenceRun, review }: { referenceRun: ReferenceRun | null; review: Review | null },
   hintLevel: number | null,

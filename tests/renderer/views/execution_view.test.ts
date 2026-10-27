@@ -206,25 +206,71 @@ describe('ExecutionView', () => {
     wrapper.unmount();
   });
 
-  test('"这一步怎么做？" asks Tutor for unfinished steps and shows its answer as text', async () => {
+  test('"这一步怎么做？" opens L1 for unfinished steps and shows its answer as text', async () => {
     current.task = taskView({ completedSteps: [1] });
     const { wrapper } = await mountOpen();
     expect(wrapper.findAll('[data-tutor]').map((node) => node.attributes('data-tutor'))).toEqual(['0']);
     const answer: tutorTypes.TutorAnswer = {
       explanation: '新增 `login()` <img src=x>',
       hints: ['打开 src/auth.ts'],
-      snippet: { language: 'ts', code: 'export const login = () => {};' },
+      snippet: null,
       terms: [{ term: '导出', meaning: '让别的文件能用' }],
     };
-    api.tutor.ask.mockResolvedValueOnce({ ok: true, data: { status: 'done', answer, error: null, costUsd: 0.01 } });
+    const done = (levels: tutorTypes.TutorLevel[]): tutorTypes.TutorState => ({
+      status: 'done',
+      levels,
+      pending: null,
+      opened: levels.length,
+      maxLevel: 5,
+      error: null,
+    });
+    api.tutor.ask.mockResolvedValueOnce({ ok: true, data: done([{ level: 1, answer, filtered: false, source: 'tutor', costUsd: 0.01 }]) });
     await wrapper.get('[data-tutor="0"] .link-button').trigger('click');
     await flushPromises();
-    expect(api.tutor.ask).toHaveBeenCalledWith('t1', 0);
+    expect(api.tutor.ask).toHaveBeenCalledWith('t1', 0, 1);
     const card = wrapper.get('.tutor-card');
     expect(card.find('img').exists()).toBe(false);
+    expect(card.get('[data-ladder]').text()).toBe('已用 L1 / 共 5 级');
     expect(card.get('.tutor-explanation code').text()).toBe('login()');
-    expect(card.get('pre code').text()).toBe('export const login = () => {};');
+    expect(card.find('pre').exists()).toBe(false);
     expect(card.get('.tutor-terms dt').text()).toBe('导出');
+    wrapper.unmount();
+  });
+
+  test('the hint ladder opens the next level on request, shows every opened level and counts copies', async () => {
+    const level = (number: number, snippet: tutorTypes.TutorAnswer['snippet'] = null): tutorTypes.TutorLevel => ({
+      level: number,
+      answer: { explanation: `L${number} 说明`, hints: [], snippet, terms: [] },
+      filtered: number === 3,
+      source: number === 2 ? 'lab' : 'tutor',
+      costUsd: 0,
+    });
+    const three = [level(1), level(2), level(3)];
+    api.tutor.get.mockResolvedValue({ ok: true, data: { status: 'done', levels: three, pending: null, opened: 3, maxLevel: 5, error: null } });
+    const { wrapper } = await mountOpen();
+    await wrapper.get('[data-tutor="0"] .link-button').trigger('click');
+    await flushPromises();
+    // Opening shows what is already open; it asks for nothing.
+    expect(api.tutor.ask).not.toHaveBeenCalled();
+    const card = wrapper.get('.tutor-card');
+    expect(card.get('[data-ladder]').text()).toBe('已用 L3 / 共 5 级');
+    expect(card.findAll('[data-level]').map((node) => node.attributes('data-level'))).toEqual(['1', '2', '3']);
+    expect(card.get('[data-level="2"]').text()).toContain('lab 自带的提示');
+    expect(card.get('[data-level="3"]').text()).toContain('已经去掉');
+
+    const four = [...three, level(4, { language: 'ts', code: 'if (count >= MAX) lock();' })];
+    api.tutor.ask.mockResolvedValueOnce({ ok: true, data: { status: 'done', levels: four, pending: null, opened: 4, maxLevel: 5, error: null } });
+    expect(card.get('[data-next-level]').text()).toContain('看 L4');
+    await card.get('[data-next-level]').trigger('click');
+    await flushPromises();
+    expect(api.tutor.ask).toHaveBeenCalledWith('t1', 0, 4);
+    expect(wrapper.get('[data-ladder]').text()).toBe('已用 L4 / 共 5 级');
+    expect(wrapper.get('[data-level="4"] pre code').text()).toBe('if (count >= MAX) lock();');
+
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    await wrapper.get('[data-level="4"] .tutor-snippet-head button').trigger('click');
+    await flushPromises();
+    expect(api.tutor.copied).toHaveBeenCalledWith('t1');
     wrapper.unmount();
   });
 

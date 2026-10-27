@@ -9,7 +9,6 @@ import path from 'node:path';
 import { asAgentError, failWith } from './coded_error.ts';
 import * as codingExec from './coding_exec.ts';
 import * as practice from './practice.ts';
-import * as labs from './labs.ts';
 import * as courses from './courses.ts';
 import * as tutorAgent from './agents/tutor.ts';
 import { billableCodingUsage, codingCancelled, codingFailure } from './coding_runtime.ts';
@@ -27,11 +26,7 @@ import type { CodingRuntime } from './coding_runtime.ts';
 export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) => {
   const { store, backgroundRuns, getPreferences, requireTask, requireRoot, requireBaseline, recordCall } = ctx;
 
-  // A lab's reference is kept with its private files; a run's per package.
-  const referenceFile = (id: string) => {
-    const lab = requireTask(id).lab;
-    return lab ? labs.referencePath(ctx.repositories.dataDir(), lab.id) : practice.referencePath(ctx.repositories.dataDir(), id);
-  };
+  const referenceFile = (id: string) => practice.referenceFileOf(ctx.repositories.dataDir(), requireTask(id));
 
   // A lab's reference passed its self-check when the lab was written: it is
   // ready at the claim, and only its file list leaves the main process.

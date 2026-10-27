@@ -190,9 +190,12 @@ const api = {
 
   tutor: {
     get: (id: string, stepIndex: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorGet, id, stepIndex),
-    // Starts Tutor in the background; poll get() for the answer.
-    ask: (id: string, stepIndex: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorAsk, id, stepIndex),
+    // Opens hint level `level` (at most one above the highest opened);
+    // Tutor writes it in the background, poll get() for the answer.
+    ask: (id: string, stepIndex: number, level: number) => invoke<tutorTypes.TutorState>(CHANNELS.tutorAsk, id, stepIndex, level),
     cancel: (id: string, stepIndex: number) => invoke<boolean>(CHANNELS.tutorCancel, id, stepIndex),
+    // Counts a copied snippet; returns the package's count.
+    copied: (id: string) => invoke<number>(CHANNELS.tutorCopied, id),
   },
 
   practice: {

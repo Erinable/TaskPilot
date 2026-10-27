@@ -48,8 +48,9 @@ const MAX_LAB_BYTES = 512 * 1024;
 const MAX_FILES = 32;
 const MAX_HINTS = 5;
 
-// One rung of the hint ladder, L1 to L5; T7's Tutor falls back on these.
-type LabHint = { level: number; text: string; code: string | null };
+// One level of the hint ladder (../shared/hint_ladder.ts), written with the
+// lab; Tutor falls back on it when it cannot answer.
+export type LabHint = { level: number; text: string; code: string | null };
 
 // The parts of a lab only TaskPilot keeps. `verify` is the self-check
 // report, null until one has run; `rubric` is what grading looks for in this
@@ -273,6 +274,17 @@ export const readHidden = async (dataDir: string, labId: string): Promise<Record
   return Object.fromEntries(
     await Promise.all(names.filter((name) => FLAT_NAME.test(name)).map(async (name) => [name, await fs.readFile(path.join(dir, name), 'utf8')])),
   );
+};
+
+// A lab's pre-written hint ladder; empty when it has none or it cannot be read.
+export const readHints = async (dataDir: string, labId: string): Promise<LabHint[]> => {
+  const file = path.join(labDir(dataDir, labId), HINTS_FILENAME);
+  try {
+    return hints(JSON.parse(await fs.readFile(file, 'utf8')));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[labs] hints unreadable', error);
+    return [];
+  }
 };
 
 // ========== work packages ==========
