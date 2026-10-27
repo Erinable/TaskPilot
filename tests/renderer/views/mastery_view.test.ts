@@ -87,6 +87,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi() as typeof api;
   Object.assign(api, {
+    businessTimeZone: 'Asia/Shanghai',
     mastery: {
       course: vi.fn((id?: string) => ok(id && id !== 'os' ? { ...OS_MASTERY, course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [] } : OS_MASTERY)),
       reviews: vi.fn(() =>
