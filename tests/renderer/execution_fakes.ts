@@ -3,12 +3,12 @@
 import { vi } from 'vitest';
 
 import type * as codingTypes from '../../src/shared/coding_types.ts';
-import type * as commitTypes from '../../src/shared/ipc/commit.ts';
 import type * as noteTypes from '../../src/shared/ipc/notes.ts';
 import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
+import { fakeApi, ok } from './ipc_fakes.ts';
 import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
@@ -60,8 +60,6 @@ export const state = (task: packageTypes.TaskView): packageTypes.WorkPackageStat
   referenceRun: task.referenceRun,
   grade: task.grade,
 });
-
-const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 // Installs window.taskpilot; `task` is what getTask() returns now.
 export const installApi = (current: { task: packageTypes.TaskView }) => {
@@ -129,16 +127,12 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
         }),
       ),
     },
-    commit: {
-      preview: vi.fn(() =>
-        ok<commitTypes.CommitPreview>({
-          files: ['src/auth.ts'],
-          skipped: [{ path: 'notes.md', reason: 'out_of_scope' }],
-          message: '邮箱登录\n\nTaskPilot 工作包 t1',
-        }),
-      ),
-      create: vi.fn((_id: string, _message: string, files: string[]) => ok<commitTypes.CommitResult>({ commit: 'c0ffee1234', files })),
-    },
+    ...fakeApi({
+      commit: {
+        preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+        create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
+      },
+    }),
     notes: {
       list: vi.fn(() => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
       create: vi.fn((input: noteTypes.NoteInput) =>

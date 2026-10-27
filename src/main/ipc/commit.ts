@@ -1,9 +1,8 @@
 // Committing a finished package (../git_commit.ts).
 import { failWith, requireString } from '../coded_error.ts';
 import * as gitCommit from '../git_commit.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
-import type * as commitTypes from '../../shared/ipc/commit.ts';
+import { registerContract } from './handler.ts';
+import { commitContract } from '../../shared/ipc/commit.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app_context.ts';
 import type { TaskDefinition } from '../tasks.ts';
@@ -26,18 +25,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return task;
   };
 
-  ipcMain.handle(
-    CHANNELS.commitPreview,
-    wrap(async (_event, rawId): Promise<commitTypes.CommitPreview> => {
+  registerContract(ipcMain, commitContract, {
+    preview: async (rawId) => {
       const task = requireCommittable(requireString(rawId, 'id'));
       const { committable, skipped } = await gitCommit.preview(ctx.requireRoot(), task.fileScope);
       return { files: committable, skipped, message: suggestedMessage(task) };
-    }),
-  );
-
-  ipcMain.handle(
-    CHANNELS.commitCreate,
-    wrap(async (_event, rawId, rawMessage, rawFiles): Promise<commitTypes.CommitResult> => {
+    },
+    create: async (rawId, rawMessage, rawFiles) => {
       const task = requireCommittable(requireString(rawId, 'id'));
       const message = gitCommit.validateMessage(rawMessage);
       if (!Array.isArray(rawFiles) || rawFiles.some((file) => typeof file !== 'string')) failWith('files must be a list of paths', 'invalid_argument');
@@ -45,6 +39,6 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const commit = await gitCommit.commitPaths(ctx.requireRoot(), task.fileScope, files, message);
       console.debug(`[commit] package=${task.id} files=${files.length} commit=${commit.slice(0, 8)}`);
       return { commit, files };
-    }),
-  );
+    },
+  });
 };

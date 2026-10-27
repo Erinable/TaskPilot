@@ -5,6 +5,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
+import { channelsOf } from '../../src/shared/ipc/contract.ts';
+import { CONTRACTS } from '../../src/shared/ipc/contracts.ts';
 import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
 import * as fixtures from './ipc/harness.ts';
 
@@ -13,11 +15,29 @@ vi.setConfig({ testTimeout: 20_000 });
 
 test('preload exposes every channel the main process registers', async () => {
   // The preload shares CHANNELS with the main process; guard against a
-  // channel being registered but never exposed to the renderer.
+  // channel being registered but never exposed to the renderer. The contract
+  // tables are exposed whole (tests/preload/index.test.ts).
   const preload = await fs.readFile(path.join(import.meta.dirname, '..', '..', 'src', 'preload', 'index.ts'), 'utf8');
-  for (const key of Object.keys(CHANNELS)) {
+  const fromTables = Object.keys(channelsOf(CONTRACTS));
+  for (const key of Object.keys(CHANNELS).filter((key) => !fromTables.includes(key))) {
     assert.ok(new RegExp(`CHANNELS\\.${key}\\b`).test(preload), `preload/index.ts does not reference CHANNELS.${key}`);
   }
+});
+
+test('every invoke channel is registered, and nothing else', async () => {
+  const { channels } = await fixtures.harness();
+  // Registered by src/main/index.ts, or sent by it.
+  const outside: string[] = [CHANNELS.startupReady, CHANNELS.windowFullScreen];
+  const tableInvokes = Object.values(CONTRACTS).flatMap((contract) =>
+    Object.values(contract).flatMap((spec) => (spec.kind === 'invoke' ? [spec.channel] : [])),
+  );
+  for (const channel of tableInvokes) assert.ok(channels().includes(channel as never), `${channel} is in a contract table but not registered`);
+  assert.deepEqual(
+    [...channels()].sort(),
+    Object.values(CHANNELS)
+      .filter((channel) => !outside.includes(channel))
+      .sort(),
+  );
 });
 
 test('handlers return {ok:true,data} instead of throwing', async () => {
