@@ -12,6 +12,7 @@ import MasteryView from '@/views/MasteryView.vue';
 import { conceptGraph, conceptLinks, stateCounts } from '@/lib/mastery_model.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import { useMasteryStore } from '@/stores/mastery.ts';
 import { useNotesStore } from '@/stores/notes.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import * as feedback from '@/lib/feedback.ts';
@@ -211,4 +212,15 @@ test('graph labels never become mermaid syntax, and links follow the course', ()
   const links = conceptLinks('round-robin', 'programming', [RR_NOTE, note('p.md', { course: null, concepts: ['round-robin'] })], [], 'programming');
   expect(links.notes.map((entry) => entry.id)).toEqual(['p.md']);
   expect(stateCounts(OS_MASTERY.concepts)).toEqual({ new: 2, learning: 0, passed: 1, mastered: 0 });
+});
+
+test('opened from a grade, the page shows that pack with its concept picked', async () => {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  await useMasteryStore().openCourse('os', 'round-robin');
+  const wrapper = mount(MasteryView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+  onTestFinished(() => wrapper.unmount());
+  await flushPromises();
+  expect(api.mastery.course).toHaveBeenCalledWith('os');
+  expect(wrapper.get('[data-section="concept"] h3').text()).toBe('时间片轮转（RR）');
 });

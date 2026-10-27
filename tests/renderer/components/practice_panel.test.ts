@@ -5,7 +5,9 @@ import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 
 import PracticePanel from '../../../src/renderer/src/components/execution/PracticePanel.vue';
+import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
+import { useMasteryStore } from '../../../src/renderer/src/stores/mastery.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 
@@ -238,5 +240,59 @@ describe('PracticePanel', () => {
     expect(finished.text()).toContain('（跳过）');
     await finished.get('[data-action="save-explanation"]').trigger('click');
     expect(api.practice.saveExplanation).toHaveBeenCalledWith('t1');
+  });
+
+  // The CARM-33 example's grading step: round-robin passed with L1 and L3
+  // opened, quality 86 and independence 95 (L3 −5), then the difference
+  // explained and saved as the note RR 入队顺序.
+  test('the CARM-33 example: two scores, the L3 deduction, when it was graded, and that it went into mastery', async () => {
+    const scores: packageTypes.GradeScores = {
+      quality: 86,
+      independence: 95,
+      signals: {
+        tests: { passed: 8, total: 8, points: 40 },
+        qa: { passed: true, points: 20 },
+        rubric: { points: 26 },
+        hints: [
+          { level: 1, deduction: 0 },
+          { level: 3, deduction: 5 },
+        ],
+        reference: { beforePass: false, deduction: 0 },
+        similarity: { ratio: 0, deduction: 0 },
+      },
+    };
+    const course = {
+      id: 'os',
+      version: '0.2.0',
+      contentHash: 'h',
+      rubric: [{ id: 'mechanism', label: '原理', dimension: 'thinking' as const, description: '' }],
+    };
+    const grade = { ...GRADE, finishedAt: '2026-10-27T03:00:00.000Z', course, scores, report: { ...GRADE.report!, comments: [], levels: { mechanism: 3 } } };
+    const wrapper = await mountPanel({
+      referenceRun: READY,
+      review: REVIEWED,
+      grade,
+      referenceLock: OPEN,
+      concepts: ['fcfs', 'round-robin'],
+      course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' },
+      lab: { id: 'round-robin', stage: 1, difficulty: 'easy' },
+    });
+    expect(wrapper.get('[data-score="quality"]').text()).toContain('86');
+    expect(wrapper.get('[data-score="quality"]').text()).toContain('8/8 通过，40/40 分');
+    const independence = wrapper.get('[data-score="independence"]').text();
+    expect(independence).toContain('95');
+    expect(independence).toContain('用了 L3 提示−5');
+    expect(wrapper.get('[data-field="graded-at"]').text()).toBe('2026-10-27 11:00:00');
+    const mastery = wrapper.get('[data-field="mastery"]');
+    expect(mastery.findAll('code').map((code) => code.text())).toEqual(['fcfs', 'round-robin']);
+    await mastery.get('[data-action="open-mastery"]').trigger('click');
+    await flushPromises();
+    expect(useAppStore().view).toBe('mastery');
+    expect([useMasteryStore().courseId, useMasteryStore().selected]).toEqual(['os', 'fcfs']);
+  });
+
+  test('a package Coding Agent wrote records no mastery, so the panel does not say it did', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: OPEN, mode: 'ai', concepts: ['round-robin'] });
+    expect(wrapper.find('[data-field="mastery"]').exists()).toBe(false);
   });
 });
