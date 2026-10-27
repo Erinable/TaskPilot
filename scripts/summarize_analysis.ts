@@ -41,7 +41,7 @@ const duplicates = (value: DuplicateReport) => {
         `| ${code(`${item.firstFile.name}:${item.firstFile.start}-${item.firstFile.end}`)} | ${code(`${item.secondFile.name}:${item.secondFile.start}-${item.secondFile.end}`)} | ${item.lines} |`,
     );
   return [
-    `${total.clones} 个重复块，${total.duplicatedLines} 行重复代码，重复率 ${total.percentage.toFixed(2)}%。仅报告，不设置重复率失败阈值。`,
+    `${total.clones} 个重复块，${total.duplicatedLines} 行重复代码，重复率 ${total.percentage.toFixed(2)}%。重复率超过 .jscpd.json 的 threshold 时失败。`,
     ...(rows.length ? ['', '| 位置一 | 位置二 | 重复行数 |', '| --- | --- | ---: |', ...rows] : []),
     ...(value.duplicates.length > MAX_ROWS ? ['', `仅显示重复行数最多的 ${MAX_ROWS} 项，完整结果见附件。`] : []),
   ].join('\n');

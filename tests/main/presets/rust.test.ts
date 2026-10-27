@@ -13,6 +13,7 @@ import * as workspace from '../../../src/main/workspace.ts';
 import { detectLanguages } from '../../../src/main/presets/index.ts';
 import { parseCargoManifest, rustPreset } from '../../../src/main/presets/rust.ts';
 import { env } from '../../../src/main/env.ts';
+import * as requiredTools from '../../fixtures/required_tools.ts';
 import type { CheckStep } from '../../../src/main/step_config.ts';
 
 const run = promisify(execFile);
@@ -171,7 +172,7 @@ const fixtureRepo = async () => {
   return root;
 };
 
-const hasCargo = await workspace.resolveExecutable('cargo', { envPath: env.path }).then(Boolean);
+const hasCargo = await requiredTools.hasTools('cargo');
 
 test.skipIf(!hasCargo)(
   'every Rust preset step runs green on the sample workspace',

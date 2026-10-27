@@ -15,6 +15,7 @@ import * as workspace from '../../../src/main/workspace.ts';
 import { detectLanguages } from '../../../src/main/presets/index.ts';
 import { PYTEST_REPORT, parsePyproject, pythonPreset } from '../../../src/main/presets/python.ts';
 import { env } from '../../../src/main/env.ts';
+import * as requiredTools from '../../fixtures/required_tools.ts';
 import type { PythonFacts } from '../../../src/main/presets/python.ts';
 import type { CheckStep } from '../../../src/main/step_config.ts';
 
@@ -203,8 +204,8 @@ const fixtureRepo = async () => {
   return root;
 };
 
-const uvPath = await workspace.resolveExecutable('uv', { envPath: env.path });
-const hasPython = await workspace.resolveExecutable('python3', { envPath: env.path }).then(Boolean);
+const hasUv = await requiredTools.hasTools('uv');
+const hasPython = await requiredTools.hasTools('python3');
 // The same PATH without any directory holding uv, for the venv + pip fallback.
 const withoutUv = env.path
   .split(path.delimiter)
@@ -251,7 +252,7 @@ const runAll = async (envPath: string, setup: string) => {
   );
 };
 
-test.skipIf(!uvPath)('every Python preset step runs green on the sample with uv', () => runAll(env.path, 'uv'), 300_000);
+test.skipIf(!hasUv)('every Python preset step runs green on the sample with uv', () => runAll(env.path, 'uv'), 300_000);
 
 test.skipIf(!hasPython || process.platform === 'win32')(
   'every Python preset step runs green on the sample with venv + pip',
