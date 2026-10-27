@@ -188,6 +188,7 @@ export const reviewWorkPackage = async (
     collect = collectChanges,
     interfaces = null,
     profile = null,
+    extra = [],
     envPath,
     signal,
   }: {
@@ -201,6 +202,10 @@ export const reviewWorkPackage = async (
     collect?: CollectChanges;
     interfaces?: string | null;
     profile?: ProjectProfile | null;
+    // Checks the caller ran and judged itself (a lab's hidden tests). They
+    // count like the others but have no baseline by design, and no
+    // acceptance criterion links to their tests.
+    extra?: { evidence: EvidenceItem; run: CheckOutcome }[];
     envPath?: string | null;
     signal?: AbortSignal;
   },
@@ -219,9 +224,11 @@ export const reviewWorkPackage = async (
     throwIfCancelled(signal);
   }
   const ran = checks.filter((check) => runs[check.kind]);
-  const items = ran.map((check) => evidence.evaluate(check, runs[check.kind], evidence.usableBaseline(baselines[check.kind], check.line)));
-  const acceptance = evidence.criteriaStatus(task.acceptance ?? [], runs, items, baselines);
-  const paired = ran.map((check, index) => ({ evidence: items[index], run: runs[check.kind] }));
+  const evaluated = ran.map((check) => evidence.evaluate(check, runs[check.kind], evidence.usableBaseline(baselines[check.kind], check.line)));
+  const acceptance = evidence.criteriaStatus(task.acceptance ?? [], runs, evaluated, baselines);
+  const items = [...evaluated, ...extra.map((check) => check.evidence)];
+  const paired = [...ran.map((check, index) => ({ evidence: evaluated[index], run: runs[check.kind] })), ...extra];
+  const extraKinds = new Set(extra.map((check) => check.evidence.kind));
 
   const scope = new Set(task.fileScope ?? []);
   const collected = await collect(root, baseline, { prioritize: (p) => scope.has(p), ...(ignore ? { ignore } : {}) });
@@ -237,7 +244,7 @@ export const reviewWorkPackage = async (
       passed: reasons.length === 0,
       reasons,
       evidence: items,
-      attention: evidence.attention(items, acceptance),
+      attention: evidence.attention(items, acceptance).filter((item) => !(item.code === 'no_baseline' && extraKinds.has(item.kind))),
       checks: paired.map(({ evidence: e, run }) => ({ ...e, run: qa.compactRun(run) })),
       verification: qa.compactRun(runs.test ?? null),
       acceptance,

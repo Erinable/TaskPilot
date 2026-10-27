@@ -80,8 +80,9 @@ const STEP_NAMES: Record<StepKind, string> = {
   test: 'Unit tests',
   coverage: 'Coverage',
 };
-// Custom steps TaskPilot itself names: v2's smoke check became custom:smoke.
-const KNOWN_CUSTOM: Record<string, string> = { 'custom:smoke': 'Smoke tests' };
+// Custom steps TaskPilot itself names: v2's smoke check became custom:smoke;
+// custom:hidden-tests is a course lab's hidden tests at review.
+const KNOWN_CUSTOM: Record<string, string> = { 'custom:smoke': 'Smoke tests', 'custom:hidden-tests': 'Hidden tests' };
 
 // A step's label: its own (taskpilot.toml's, for a custom step), else the
 // fixed step's name, else the custom step's name.

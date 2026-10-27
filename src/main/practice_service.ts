@@ -225,12 +225,13 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     return ctx.viewOf(task, store.get(id));
   };
 
-  // [人工决策-2026-10-24 12:51:21] 先交卷再看：首次提交审查之前不返回参考补丁。
+  // [人工决策-2026-10-27 00:51:12] 本包测试全部通过或提示梯度用到 L5 之后才返回参考补丁，课程 lab 和项目 practice 包同一规则（./practice.ts referenceLock）。
   const revealReference = async (id: string): Promise<string> => {
     requireTask(id);
     const state = store.get(id);
     if (state.referenceRun?.status !== 'ready') failWith('There is no reference solution', 'no_reference');
-    if (!state.review) failWith('Submit your own solution first', 'reference_locked');
+    const lock = practice.referenceLock({ referenceRun: state.referenceRun, review: toWireState(state).review }, practice.usedHintLevel(state));
+    if (!lock?.unlocked) failWith('Pass every test of this package first, or use the hints up to L5', 'reference_locked');
     if (!state.referenceRun.revealedAt) await store.setReferenceRun(id, { ...state.referenceRun, revealedAt: new Date().toISOString() }, state.referenceRun.id);
     return fs.readFile(referenceFile(id), 'utf8');
   };

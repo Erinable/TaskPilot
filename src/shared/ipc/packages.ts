@@ -51,7 +51,8 @@ export type LabRef = { id: string; stage: number; difficulty: Difficulty };
 
 // Coding Agent's reference solution for a practised package, generated in
 // the background from the claimed commit and never applied. Its patch stays
-// in the main process until the developer first submits (revealedAt).
+// in the main process until it unlocks (ReferenceLock); revealedAt is when
+// it was first read.
 // A course lab's reference ships with the lab instead (source 'lab'): it is
 // ready at the claim and no run is started. Absent source: a run.
 export type ReferenceRun = {
@@ -65,6 +66,11 @@ export type ReferenceRun = {
   revealedAt: string | null;
   source?: 'run' | 'lab';
 };
+
+// Whether a ready reference may be read. It opens once the package's tests
+// all passed in a review (tests_passed) or the hint ladder was used up to L5
+// (hints_used), and stays open once read (revealed).
+export type ReferenceLock = { unlocked: boolean; reason: 'not_submitted' | 'tests_not_passed' | 'tests_passed' | 'hints_used' | 'revealed' };
 
 // Tutor's marking of a practised submission against the reference, along
 // the rubric of the course pack in use (for programming: thinking, writing,
@@ -271,6 +277,8 @@ export type TaskView = TaskDefinition & {
   codingRun: CodingRun | null;
   mode: ExecutionMode | null;
   referenceRun: ReferenceRun | null;
+  // Null unless the reference is ready.
+  referenceLock: ReferenceLock | null;
   grade: Grade | null;
   // Null when never replanned; the definition itself is already applied.
   revision: Omit<Revision, 'definition'> | null;

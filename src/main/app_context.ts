@@ -18,6 +18,7 @@ import { BackgroundRuns } from './background_runs.ts';
 import * as effectiveSteps from './effective_steps.ts';
 import * as projectConfig from './project_config.ts';
 import * as courses from './courses.ts';
+import * as practice from './practice.ts';
 import { PRESET_IDS } from './presets/index.ts';
 import { WorkspaceError } from './command_line.ts';
 import { buildProfile } from './project_profile.ts';
@@ -131,6 +132,10 @@ export const buildTaskView = (task: TaskDefinition, packageState: PackageState, 
     codingRun: state.codingRun ?? null,
     mode: state.mode ?? null,
     referenceRun: state.referenceRun ?? null,
+    referenceLock: practice.referenceLock(
+      { referenceRun: state.referenceRun ?? null, review: state.review ?? null },
+      practice.usedHintLevel({ referenceRun: state.referenceRun ?? null }),
+    ),
     grade: state.grade ?? null,
     revision: state.revision && {
       version: state.revision.version,

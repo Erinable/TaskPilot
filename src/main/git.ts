@@ -216,6 +216,12 @@ export const diffFolders = async (cwd: string, from: string, to: string): Promis
   }
 };
 
+// Every file of the working tree git would commit: tracked ones still on
+// disk and untracked ones not ignored. Paths only; deleted tracked files are
+// left to the caller, which reads each path.
+export const workingFiles = async (cwd: string): Promise<string[]> =>
+  (await git(cwd, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])).split('\0').filter(Boolean);
+
 // Summary used by the workspace header and as a work package baseline.
 export const describe = async (cwd: string): Promise<RepoDescription> => {
   const [commit, branch, entries] = await Promise.all([head(cwd), currentBranch(cwd), status(cwd)]);

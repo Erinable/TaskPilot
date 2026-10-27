@@ -69,7 +69,7 @@ const writeSubmission = async (root: string) => {
   await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
 };
 
-test('practice: claiming starts a reference run that stays hidden until the first submission', async () => {
+test('practice: claiming starts a reference run that stays hidden until the package passes its tests', async () => {
   const h = await practiceHarness();
   await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
   const ready = await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
@@ -80,12 +80,39 @@ test('practice: claiming starts a reference run that stays hidden until the firs
   assert.doesNotMatch(JSON.stringify(ready), /reference\(\)|test\("reference"/);
   assert.equal((await h.call(CHANNELS.referenceGet, 'auth-edge-tests')).error.code, 'reference_locked');
 
+  assert.deepEqual(ready.referenceLock, { unlocked: false, reason: 'not_submitted' });
+
   await writeSubmission(h.root);
   await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
   await fixtures.settleReview(h.call, 'auth-edge-tests');
+  assert.deepEqual((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.referenceLock, { unlocked: true, reason: 'tests_passed' });
   const revealed = await h.call(CHANNELS.referenceGet, 'auth-edge-tests');
   assert.equal(revealed.data, REFERENCE_PATCH);
-  assert.ok((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.referenceRun.revealedAt);
+  const after = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data;
+  assert.ok(after.referenceRun.revealedAt);
+  assert.deepEqual(after.referenceLock, { unlocked: true, reason: 'revealed' });
+});
+
+// [人工决策-2026-10-27 00:51:12] 项目 practice 包也要测试全过才解锁：提交一次但测试没全过，参考答案仍锁着。
+test('practice: a submission whose tests do not all pass leaves the reference locked', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  // One linked test fails.
+  h.setCommands({
+    test: {
+      command: process.execPath,
+      args: ['-e', "console.log('ok 1 - login is case-insensitive for the email\\nnot ok 2 - account locks after five failed attempts')"],
+    },
+  });
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  const reviewed = await fixtures.settleReview(h.call, 'auth-edge-tests');
+  assert.equal(reviewed.review.status, 'rejected');
+  const view = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data as TaskView;
+  assert.deepEqual(view.referenceLock, { unlocked: false, reason: 'tests_not_passed' });
+  assert.equal((await h.call(CHANNELS.referenceGet, 'auth-edge-tests')).error.code, 'reference_locked');
+  assert.equal(view.referenceRun!.revealedAt, null);
 });
 
 test('practice: once QA has judged, Tutor grades against the reference without moving the package', async () => {

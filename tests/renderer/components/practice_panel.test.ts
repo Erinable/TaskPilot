@@ -25,6 +25,7 @@ const READY: packageTypes.ReferenceRun = {
   revealedAt: null,
 };
 const REVIEWED = { status: 'rejected', startedAt: '', finishedAt: '', error: null } as unknown as packageTypes.Review;
+const OPEN: packageTypes.ReferenceLock = { unlocked: true, reason: 'tests_passed' };
 const GRADE: packageTypes.Grade = {
   id: 'g1',
   status: 'done',
@@ -63,15 +64,19 @@ beforeEach(() => {
 });
 
 describe('PracticePanel', () => {
-  test('a ready reference stays locked until the first submission', async () => {
-    const wrapper = await mountPanel({ referenceRun: READY, review: null });
-    expect(wrapper.get('[data-reference-status]').text()).toContain('交卷后解锁');
-    expect(wrapper.find('[data-reference]').exists()).toBe(false);
+  test('a ready reference stays locked until every test passed or the hints are used up', async () => {
+    const before = await mountPanel({ referenceRun: READY, review: null, referenceLock: { unlocked: false, reason: 'not_submitted' } });
+    expect(before.get('[data-reference-status]').text()).toContain('测试全部通过，或者提示用到 L5 之后才能看');
+    expect(before.find('[data-reference]').exists()).toBe(false);
+    // A submission that QA judged is not enough: its tests must all pass.
+    const failing = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: { unlocked: false, reason: 'tests_not_passed' } });
+    expect(failing.get('[data-reference-status]').text()).toContain('还有测试没通过');
+    expect(failing.find('[data-reference]').exists()).toBe(false);
     expect(api.practice.reference).not.toHaveBeenCalled();
   });
 
-  test('after QA, the grade shows by category and the reference can be read beside it', async () => {
-    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE });
+  test('once unlocked, the grade shows by category and the reference can be read beside it', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: OPEN });
     expect(api.practice.reference).toHaveBeenCalledWith('t1');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('先列出输入的几种情况再写代码。');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('src/auth.ts:4');
