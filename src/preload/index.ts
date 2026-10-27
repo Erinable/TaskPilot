@@ -12,6 +12,7 @@ import type * as commitTypes from '../shared/ipc/commit.ts';
 import type * as courseTypes from '../shared/ipc/courses.ts';
 import type * as envelopeTypes from '../shared/ipc/envelope.ts';
 import type * as envTypes from '../shared/ipc/environment.ts';
+import type * as masteryTypes from '../shared/ipc/mastery.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type * as releaseTypes from '../shared/ipc/release.ts';
@@ -114,6 +115,8 @@ const api = {
     labEstimate: (id: string, conceptId?: string) => invoke<requirementTypes.LabEstimate>(CHANNELS.requirementsLabEstimate, id, conceptId),
     // Starts generating and self-checking the first lab after the learner saw the estimate.
     labGenerate: (id: string, conceptId?: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabGenerate, id, conceptId),
+    // Marks a concept still to learn skipped after the path was confirmed.
+    courseSkip: (id: string, conceptId: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCourseSkip, id, conceptId),
   },
 
   agent: {
@@ -227,6 +230,13 @@ const api = {
     openUrl: (url: string) => invoke<boolean>(CHANNELS.notesOpenUrl, url),
     // The packs whose categories the notes page names, and the one in use.
     courses: () => invoke<noteTypes.NoteCourses>(CHANNELS.notesCourses),
+  },
+
+  mastery: {
+    // The notes due for review on the business day.
+    reviews: () => invoke<masteryTypes.ReviewList>(CHANNELS.masteryReviews),
+    // The learner's verdict on a note due today; returns its next schedule.
+    review: (noteId: string, remembered: boolean) => invoke<masteryTypes.ReviewSchedule>(CHANNELS.masteryReview, noteId, remembered),
   },
 
   courses: {

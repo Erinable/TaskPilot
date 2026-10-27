@@ -295,4 +295,13 @@ export const register = (
       toWireRequirement(await labGeneration.start(requireString(id, 'id'), conceptOf(conceptId))),
     ),
   );
+
+  // The learner gives up on a concept still to learn after its labs kept
+  // failing at easy; the next lab skips it.
+  ipcMain.handle(
+    CHANNELS.requirementsCourseSkip,
+    wrap(async (_event, id, conceptId): Promise<requirementTypes.Requirement> =>
+      toWireRequirement(await requireRequirements().skipCourseConcept(requireString(id, 'id'), requireString(conceptId, 'conceptId'))),
+    ),
+  );
 };

@@ -26,16 +26,21 @@ import * as labs from './labs.ts';
 import * as generator from './agents/lab_generator.ts';
 import * as verifier from './agents/lab_verifier.ts';
 import * as labVerify from './lab_verify.ts';
+import * as progress from './lab_progress.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import { estimateMicros, loadPrices, priceFor } from './model_prices.ts';
 import type { AppContext } from './app_context.ts';
 import type { Requirement } from './requirement_store.ts';
 import type { RunAgent } from './agents/claude_cli.ts';
-import type { Concept, CoursePack } from '../shared/course_pack.ts';
+import { DEFAULT_COURSE_ID } from '../shared/course_pack.ts';
+import type { CoursePack } from '../shared/course_pack.ts';
 import type { Difficulty } from '../shared/ipc/packages.ts';
+import type { MasteryRecord } from './mastery_store.ts';
 import type * as requirementTypes from '../shared/ipc/requirements.ts';
 
 const DRAFTS_DIRNAME = 'lab_drafts';
+// Notes offered for review when the learner is stuck on a concept.
+const MAX_STUCK_NOTES = 10;
 const DRAFT_FILENAME = 'lab.json';
 const VERIFY_FILENAME = 'verify.json';
 
@@ -57,8 +62,9 @@ const VERIFY_OUTPUT_TOKENS = { low: 15_000, high: 40_000 };
 const VERIFY_ROUNDS = { low: 1, high: 2 };
 const REPAIRS = { low: 0, high: 1 };
 
-// The first lab's difficulty from the form's level; T9 adjusts later labs
-// from mastery. Not yet confirmed by the user (see the CARM-40 hand-off).
+// The first lab's difficulty from the form's level; later labs adjust it
+// from mastery (./lab_progress.ts). Not yet confirmed by the user (see the
+// CARM-40 hand-off).
 const FIRST_DIFFICULTY: Record<requirementTypes.CourseInterview['form']['level'], Difficulty> = { new: 'easy', basic: 'easy', solid: 'medium' };
 
 // What the generator writes, private: the request it was written for and the
@@ -117,19 +123,23 @@ export const toLabArtifact = async (
   }
 };
 
-// The concepts the first lab covers: the first concept on the path still to
-// learn, or the one the learner picked instead (a self-check that ended in
-// needs_review offers another), which must be on the path and still to
-// learn. Choosing later labs is T9's.
-const firstConcepts = (item: Requirement, conceptId: string | null): Concept[] => {
+// The concept and difficulty of the next lab: the one ./lab_progress.ts
+// picks from the path and the course's mastery, or the one the learner
+// picked instead (a self-check that ended in needs_review offers another),
+// which must be on the path and still to learn.
+export const nextLab = (item: Requirement, records: Map<string, MasteryRecord>, conceptId: string | null = null) => {
   const plan = item.course?.plan ?? failWith('There is no confirmed path', 'invalid_state');
-  const planned = plan.path.filter((candidate) => candidate.status === 'planned');
-  const entry = conceptId
-    ? (planned.find((candidate) => candidate.conceptId === conceptId) ??
-      failWith(`${conceptId} is not a concept still to learn on the path`, 'invalid_argument', 'conceptId'))
-    : (planned[0] ?? failWith('Every concept on the path is known or skipped', 'nothing_to_learn'));
-  const concept = [...item.course!.pathConcepts, ...plan.extraConcepts].find((candidate) => candidate.id === entry.conceptId);
-  return [concept ?? failWith(`The path names an unknown concept ${entry.conceptId}`, 'invalid_state')];
+  const concepts = [...item.course!.pathConcepts, ...plan.extraConcepts];
+  const start = FIRST_DIFFICULTY[item.course!.form.level];
+  const next = progress.nextConcept({ path: plan.path, concepts, records, start, only: conceptId });
+  if (!next && conceptId) return failWith(`${conceptId} is not a concept still to learn on the path`, 'invalid_argument', 'conceptId');
+  if (!next) {
+    if (plan.path.some((candidate) => candidate.status === 'planned' && !progress.isMastered(records.get(candidate.conceptId) ?? null)))
+      return failWith('Every concept left waits on a prerequisite that has not passed', 'nothing_to_learn');
+    return failWith('Every concept on the path is known, skipped or mastered', 'nothing_to_learn');
+  }
+  const concept = concepts.find((candidate) => candidate.id === next.conceptId);
+  return { ...next, concept: concept ?? failWith(`The path names an unknown concept ${next.conceptId}`, 'invalid_state') };
 };
 
 const wireLab = (lab: generator.GeneratedLab): NonNullable<requirementTypes.LabGeneration['lab']> => ({
@@ -164,17 +174,28 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
     return { item, pack };
   };
 
-  const requestFor = async (id: string, conceptId: string | null): Promise<generator.LabRequest> => {
+  const requestFor = async (id: string, conceptId: string | null) => {
     const { item, pack } = await courseOf(id);
-    return {
+    const next = nextLab(item, ctx.mastery?.ofCourse(pack.id) ?? new Map(), conceptId);
+    console.debug(`[lab-gen] next requirement=${id} concept=${next.conceptId} difficulty=${next.difficulty} change=${next.change} stuck=${next.stuck}`);
+    const request: generator.LabRequest = {
       course: pack,
       goal: item.course!.plan!.goal,
-      concepts: firstConcepts(item, conceptId),
-      difficulty: FIRST_DIFFICULTY[item.course!.form.level],
+      concepts: [next.concept],
+      difficulty: next.difficulty,
       stage: 1,
       existing: { labIds: [], files: [], build: null },
     };
+    return { request, next, course: pack.id };
   };
+
+  // [人工决策-2026-10-27 00:36:21] 不能卡住：同一知识点连续 2 次 fail 自动降一级；降到 easy 还 fail，
+  // 提示学生先复习这个知识点的笔记，或把它标成跳过（requirements:course-skip）。
+  const stuckNotes = (course: string, conceptId: string) =>
+    (ctx.notes?.list().notes ?? [])
+      .filter((note) => note.concepts.includes(conceptId) && (note.course ?? DEFAULT_COURSE_ID) === course)
+      .slice(0, MAX_STUCK_NOTES)
+      .map((note) => ({ id: note.id, title: note.title }));
 
   // ========== Estimate ==========
   // Prompts are measured; the code call's input adds the spec it is given.
@@ -182,7 +203,7 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
   // The self-check's calls (mutants and the review each round, a repair
   // between rounds) are counted in, since the run makes them unasked.
   const estimate = async (id: string, conceptId: string | null = null): Promise<requirementTypes.LabEstimate> => {
-    const request = await requestFor(id, conceptId);
+    const { request, next, course } = await requestFor(id, conceptId);
     const promptTokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN) + CLI_OVERHEAD_TOKENS;
     const specInput = promptTokens(generator.systemPrompt() + generator.specPrompt(request));
     const verifyInput = promptTokens(verifier.mutantSystemPrompt() + verifier.consistencySystemPrompt()) + 2 * LAB_JSON_TOKENS;
@@ -199,6 +220,8 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
     return {
       concepts: request.concepts.map((concept) => ({ id: concept.id, label: concept.label })),
       difficulty: request.difficulty,
+      change: next.change,
+      stuck: next.stuck ? { notes: stuckNotes(course, next.conceptId) } : null,
       calls: 2 + 2 * VERIFY_ROUNDS.low,
       maxCalls: 2 + 2 * labVerify.MAX_ROUNDS + (labVerify.MAX_ROUNDS - 1),
       tokens: usage('high'),
@@ -274,7 +297,7 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
   // requirement shows its progress and the run is cancelled with
   // requirements:cancel (or by a repository switch).
   const start = async (id: string, conceptId: string | null = null) => {
-    const request = await requestFor(id, conceptId);
+    const { request } = await requestFor(id, conceptId);
     if (requireRequirements().get(id).course?.lab?.status === 'running' || backgroundRuns.has('requirement', id))
       return failWith('A lab is already being generated', 'invalid_state');
     const startedAt = new Date().toISOString();
