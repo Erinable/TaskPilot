@@ -106,13 +106,13 @@ const submit = () => execution.answerExplanation(drafts.value.map((draft) => dra
   gap: var(--space-2);
   margin: 0 0 var(--space-2);
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .grade-explanation-answer {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .grade-explanation-answer textarea {
   font: inherit;

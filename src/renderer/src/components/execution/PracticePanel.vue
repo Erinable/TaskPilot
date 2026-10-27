@@ -16,6 +16,9 @@ import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
+import { useMasteryStore } from '@/stores/mastery.ts';
+import { formatTime } from '@/lib/release_model.ts';
+import { DEFAULT_COURSE_ID } from '@shared/course_pack.ts';
 import { useNotesStore } from '@/stores/notes.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
@@ -99,6 +102,13 @@ watch(
 // Read once at startup (App.vue); asked again here in case that failed.
 onMounted(() => courses.loadDefault().catch((error) => console.error(error)));
 
+// A done grade of a practised package with concepts is one attempt per
+// concept in the mastery records (written by the main process).
+const mastery = useMasteryStore();
+const recorded = computed(() => (grade.value?.status === 'done' && props.task.mode === 'practice' ? (props.task.concepts ?? []) : []));
+const openMastery = () =>
+  mastery.openCourse(grade.value?.course?.id ?? props.task.course?.id ?? DEFAULT_COURSE_ID, recorded.value[0] ?? null).catch((error) => console.error(error));
+
 const regrade = (skipReference: boolean) => execution.regrade(skipReference).catch((error) => console.error(error));
 </script>
 
@@ -120,6 +130,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
       <p class="practice-grade-status">
         <AppIcon v-if="grade.status === 'running'" name="spinner" class="spin" />
         {{ gradeText }}
+        <time v-if="grade.status === 'done' && grade.finishedAt" :datetime="grade.finishedAt" data-field="graded-at">{{ formatTime(grade.finishedAt) }}</time>
       </p>
       <div class="practice-actions">
         <button v-if="grade.status === 'waiting'" class="secondary-button small" type="button" data-action="grade-now" @click="regrade(true)">
@@ -135,6 +146,14 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
         <p class="practice-summary">{{ grade.report.summary }}</p>
         <!-- Grades from before scores have none; nothing is shown for them. -->
         <GradeScores v-if="grade.scores" :scores="grade.scores" :report="grade.report" :rubric="rubric" />
+        <p v-if="recorded.length" class="practice-mastery" data-field="mastery">
+          <span>这次判卷记进了掌握度：</span>
+          <code v-for="conceptId in recorded" :key="conceptId">{{ conceptId }}</code>
+          <button class="link-button" type="button" data-action="open-mastery" @click="openMastery">
+            <AppIcon name="target" />
+            看掌握度
+          </button>
+        </p>
         <div v-if="grade.report.strengths.length" class="practice-group">
           <h3>做得好的地方</h3>
           <ul>
@@ -204,9 +223,17 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 .practice-summary {
   margin: 0;
 }
+.practice-mastery {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-secondary);
+}
 .practice-group h3 {
   margin: 0 0 var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .practice-group ul {
   margin: 0;
@@ -225,7 +252,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 .practice-location {
   align-self: flex-start;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .practice-better {
   color: var(--text-secondary);
@@ -237,7 +264,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 }
 .practice-save {
   align-self: flex-start;
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .practice-reference {
   margin-top: var(--space-3);

@@ -60,10 +60,12 @@ onMounted(() => {
   run(courses.load());
   run(notes.load());
 });
-// Another pack clears the picked concept.
+// Picking another pack on the page clears the picked concept.
 watch(
   () => course.value?.course.id,
-  () => mastery.select(null),
+  (next, previous) => {
+    if (previous) mastery.select(null);
+  },
 );
 </script>
 

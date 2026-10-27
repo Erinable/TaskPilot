@@ -58,7 +58,7 @@ const independence = computed(() => independenceLines(props.scores));
   align-items: baseline;
   justify-content: space-between;
   margin: 0 0 var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .grade-score-value {
   font-size: 1.5em;
@@ -69,7 +69,7 @@ const independence = computed(() => independenceLines(props.scores));
   grid-template-columns: 1fr auto;
   gap: 2px var(--space-2);
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 .grade-score dt {
   color: var(--text-secondary);
@@ -84,6 +84,6 @@ const independence = computed(() => independenceLines(props.scores));
 .grade-score-note {
   margin: var(--space-2) 0 0;
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-lg);
 }
 </style>

@@ -49,10 +49,10 @@ export const useMasteryStore = defineStore('mastery', () => {
     }
   };
 
-  // Opens the mastery page on a pack.
-  const openCourse = async (id: string) => {
+  // Opens the mastery page on a pack, with one of its concepts picked.
+  const openCourse = async (id: string, conceptId: string | null = null) => {
     courseId.value = id;
-    selected.value = null;
+    selected.value = conceptId;
     await useAppStore().navigate('mastery');
   };
 
