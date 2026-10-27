@@ -86,10 +86,12 @@ const confirmedCourse = async (h) => {
   return data.id as string;
 };
 
+// Settled once the lab is no longer running and its run has left the
+// registry, so the next generation is not refused as still running.
 const settleLab = async (call, id: string): Promise<any> => {
   for (let index = 0; index < 500; index += 1) {
     const item = (await call(CHANNELS.requirementsGet, id)).data;
-    if (item.course.lab && item.course.lab.status !== 'running') return item;
+    if (item.course.lab && item.course.lab.status !== 'running' && !(await call(CHANNELS.repositoriesBusy)).data.length) return item;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('the lab never settled');

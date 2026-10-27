@@ -334,8 +334,9 @@ export const createLabGenerationService = (
   const start = async (id: string, conceptId: string | null = null) => {
     const { request, root } = await requestFor(id, conceptId);
     const lab = requireRequirements().get(id).course?.lab;
-    if (lab?.status === 'running' || backgroundRuns.has('requirement', id)) return failWith('A lab is already being generated', 'invalid_state');
+    // Checked first: a run that just finished may still be leaving the registry.
     if (lab?.status === 'ready' && !lab.placed) return failWith('Write the lab that is ready into the lab repository first', 'lab_not_placed');
+    if (lab?.status === 'running' || backgroundRuns.has('requirement', id)) return failWith('A lab is already being generated', 'invalid_state');
     // The next stage builds on the last one's code, so it waits until that
     // stage is done.
     const last = (await labRepository(requireRequirements().get(id)))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
