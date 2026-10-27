@@ -226,6 +226,8 @@ export const harness = async ({
     agentCalls,
     // The lab service main-process callers use (src/main/lab_service.ts).
     labs: ipc.labs,
+    // The first lab's generation (src/main/lab_generation_service.ts).
+    labGeneration: ipc.labGeneration,
     shellReads: () => shellReads,
     shutdown: () => ipc?.shutdown(),
   };

@@ -13,7 +13,7 @@
 // sent to the renderer, never in a Coding Agent run directory (those are a
 // `git archive` of the baseline, and this directory is outside the
 // repository):
-//   userData/repos/<repoId>/labs/<labId>/reference.patch, hidden/, hints.json, verify.json
+//   userData/repos/<repoId>/labs/<labId>/reference.patch, hidden/, hints.json, rubric.json, verify.json
 //
 // [人工决策-2026-10-27 00:36:21] lab 只做"仓库 + 测试"：题面、初始代码、公开测试在仓库里，参考解、隐藏测试、提示梯度留在仓库外。
 import fs from 'node:fs/promises';
@@ -29,6 +29,7 @@ import * as projectConfig from './project_config.ts';
 import type { TaskDefinition } from './tasks.ts';
 import type { AcceptanceCriterion } from '../shared/ipc/workspace.ts';
 import type { PackageDifficulty } from '../shared/ipc/packages.ts';
+import { isCourseId } from '../shared/course_pack.ts';
 import type { Concept, CourseRef } from '../shared/course_pack.ts';
 import type { LabEntry } from './project_config.ts';
 
@@ -37,6 +38,7 @@ export const REFERENCE_FILENAME = 'reference.patch';
 export const HIDDEN_DIRNAME = 'hidden';
 const HINTS_FILENAME = 'hints.json';
 const VERIFY_FILENAME = 'verify.json';
+const RUBRIC_FILENAME = 'rubric.json';
 export const COURSE_PLAN_PATH = '.taskpilot/course_plan.toml';
 const PUBLIC_TESTS_DIR = 'tests/public';
 export const BUILD_RULES_PATH = 'tests/build.mk';
@@ -50,8 +52,9 @@ const MAX_HINTS = 5;
 type LabHint = { level: number; text: string; code: string | null };
 
 // The parts of a lab only TaskPilot keeps. `verify` is the self-check
-// report, null until one has run.
-export type LabPrivate = { reference: string; hidden: Record<string, string>; hints: LabHint[]; verify: unknown };
+// report, null until one has run; `rubric` is what grading looks for in this
+// lab under the pack's rubric ids (absent on hand-written labs).
+export type LabPrivate = { reference: string; hidden: Record<string, string>; hints: LabHint[]; verify: unknown; rubric?: { id: string; note: string }[] };
 
 // One lab as the generator (or a fixture) hands it over.
 export type LabArtifact = {
@@ -169,6 +172,14 @@ export const checkLab = (lab: LabArtifact, stage: number): LabArtifact => {
       hidden,
       hints: hints(lab.private.hints),
       verify: lab.private.verify ?? null,
+      ...(lab.private.rubric
+        ? {
+            rubric: lab.private.rubric.map((item, index) => ({
+              id: isCourseId(item.id) ? item.id : fail('must be a rubric id', `private.rubric[${index}].id`),
+              note: text(item.note, `private.rubric[${index}].note`, 1000),
+            })),
+          }
+        : {}),
     },
   };
   if (Buffer.byteLength(JSON.stringify(checked)) > MAX_LAB_BYTES) fail('is larger than 512 KB', 'lab');
@@ -252,6 +263,7 @@ export const writePrivate = async (dataDir: string, labId: string, secret: LabPr
   for (const [name, content] of Object.entries(secret.hidden)) await fs.writeFile(path.join(dir, HIDDEN_DIRNAME, name), content, { mode: 0o600 });
   await fs.writeFile(path.join(dir, HINTS_FILENAME), `${JSON.stringify(secret.hints, null, 2)}\n`, { mode: 0o600 });
   await fs.writeFile(path.join(dir, VERIFY_FILENAME), `${JSON.stringify(secret.verify, null, 2)}\n`, { mode: 0o600 });
+  if (secret.rubric) await fs.writeFile(path.join(dir, RUBRIC_FILENAME), `${JSON.stringify(secret.rubric, null, 2)}\n`, { mode: 0o600 });
 };
 
 // ========== work packages ==========

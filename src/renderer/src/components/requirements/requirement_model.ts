@@ -58,6 +58,11 @@ export const stepClasses = (item: Pick<requirementTypes.Requirement, 'status' | 
 
 export const RUNNING = new Set<requirementTypes.RequirementStatus>(['clarifying', 'planning']);
 export const isRunning = (item: Pick<requirementTypes.Requirement, 'status'>) => RUNNING.has(item.status);
+// A confirmed course path whose first lab is being generated: the list
+// keeps polling, but the requirement itself is not running a step.
+export const labRunning = (item: Pick<requirementTypes.Requirement, 'course'>) => item.course?.lab?.status === 'running';
+const isPolled = (item: Pick<requirementTypes.Requirement, 'status' | 'course'>) => isRunning(item) || labRunning(item);
+export const anyPolled = (items: Pick<requirementTypes.Requirement, 'status' | 'course'>[]) => items.some(isPolled);
 export const needsAttention = (item: Pick<requirementTypes.Requirement, 'status'>) =>
   item.status === 'answering' || item.status === 'reviewing' || item.status === 'failed';
 
@@ -91,8 +96,10 @@ export const rowTitle = (item: Pick<requirementTypes.Requirement, 'title' | 'tex
 
 export const rowDate = (updatedAt: string) => new Date(updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 
-// Status plus phase, so the Architect -> Product Lead handoff re-renders too.
-export const pollKey = (item: Pick<requirementTypes.Requirement, 'status' | 'phase'>) => `${item.status}:${item.phase ?? ''}`;
+// Status plus phase, so the Architect -> Product Lead handoff re-renders
+// too, and the first lab's progress on a confirmed course path.
+export const pollKey = (item: Pick<requirementTypes.Requirement, 'status' | 'phase' | 'course'>) =>
+  `${item.status}:${item.phase ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
 
 // ========== Course interview ==========
 // The form's options: every field is picked; the environment also takes a
@@ -117,6 +124,18 @@ export const COURSE_STEPS: { step: StepName; label: string }[] = [
 ];
 
 export const PATH_STATUS_LABELS: Record<PathStatus, string> = { planned: '要学', known: '已会', skipped: '跳过' };
+
+export const DIFFICULTY_LABELS: Record<packageTypes.Difficulty, string> = { easy: '简单', medium: '中等', hard: '较难' };
+export const LAB_PHASE_LABELS: Record<NonNullable<requirementTypes.LabGeneration['phase']>, string> = {
+  spec: '正在写题面和测试…',
+  code: '正在写初始代码、参考解和提示…',
+};
+
+// "$0.40–$1.20", or what is known when no price is.
+export const estimateText = (estimate: requirementTypes.LabEstimate) =>
+  estimate.usd
+    ? `约 $${estimate.usd.low.toFixed(2)}–$${estimate.usd.high.toFixed(2)}`
+    : `价格未知（${estimate.model ?? '默认模型'}，约 ${Math.round(estimate.tokens.input / 1000)}k 输入 + ${Math.round(estimate.tokens.output / 1000)}k 输出 token）`;
 
 export const isCourse = (item: Pick<requirementTypes.Requirement, 'kind'>) => item.kind === 'course';
 

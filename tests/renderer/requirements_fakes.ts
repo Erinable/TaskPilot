@@ -80,6 +80,37 @@ export const coursePathInterview = (
   });
 
 // Installs window.taskpilot; `list` is what requirements.list() returns now.
+// ========== First lab ==========
+const LAB_ESTIMATE: requirementTypes.LabEstimate = {
+  concepts: [{ id: 'round-robin', label: '时间片轮转' }],
+  difficulty: 'easy',
+  calls: 2,
+  tokens: { input: 30000, output: 26000 },
+  model: 'claude-opus-5-5',
+  usd: { low: 0.42, high: 1.35 },
+};
+
+export const labGeneration = (overrides: Partial<requirementTypes.LabGeneration> = {}): requirementTypes.LabGeneration => ({
+  status: 'ready',
+  phase: null,
+  concepts: ['round-robin'],
+  difficulty: 'easy',
+  startedAt: '2026-01-02T00:00:00.000Z',
+  finishedAt: '2026-01-02T00:02:00.000Z',
+  costUsd: 1.2,
+  lab: {
+    id: 'round-robin',
+    title: '时间片轮转调度',
+    summary: '用就绪队列按时间片轮流运行作业。',
+    estimateHours: 2,
+    starterFiles: 1,
+    publicTests: 3,
+    hiddenTests: 5,
+  },
+  error: null,
+  ...overrides,
+});
+
 export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
   const api = {
     requirements: {
@@ -104,6 +135,17 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
       ),
       courseConfirmDraft: vi.fn((id: string) =>
         ok(requirement({ id, kind: 'course', status: 'reviewing', course: { ...courseInterview(), choice: { course: 'lexing' } } })),
+      ),
+      labEstimate: vi.fn(() => ok(LAB_ESTIMATE)),
+      labGenerate: vi.fn((id: string) =>
+        ok(
+          requirement({
+            id,
+            kind: 'course',
+            status: 'published',
+            course: { ...coursePathInterview(), lab: labGeneration({ status: 'running', phase: 'spec' }) },
+          }),
+        ),
       ),
     },
     // MilestonePicker loads the release state when a requirement detail mounts.

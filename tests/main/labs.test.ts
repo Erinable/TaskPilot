@@ -31,6 +31,8 @@ test('public tests carry their stage number, and only the first lab must bring b
   refused({ ...FCFS_LAB, concepts: ['Not An Id'] }, 'concepts');
   refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, hints: [{ level: 6, text: 'x', code: null }] } }, 'private.hints[0].level');
   refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, reference: 'x'.repeat(600 * 1024) } }, 'private.reference');
+  refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, rubric: [{ id: 'Not An Id', note: 'x' }] } }, 'private.rubric[0].id');
+  refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, rubric: [{ id: 'mechanism', note: '' }] } }, 'private.rubric[0].note');
 });
 
 test("a lab's repository files are what the student sees, never the private parts", () => {

@@ -17,6 +17,7 @@ import type { IpcMainLike } from './handler.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 import type { CourseInterviewService } from '../course_interview_service.ts';
+import type { LabGenerationService } from '../lab_generation_service.ts';
 import { goalFormProblem } from '../../shared/course_plan.ts';
 import type { GoalForm } from '../../shared/course_plan.ts';
 
@@ -42,7 +43,11 @@ const repositoryFiles = async (root: string | null): Promise<string[]> => {
   }
 };
 
-export const register = (ipcMain: IpcMainLike, ctx: AppContext, { courseInterview }: { courseInterview: CourseInterviewService }) => {
+export const register = (
+  ipcMain: IpcMainLike,
+  ctx: AppContext,
+  { courseInterview, labGeneration }: { courseInterview: CourseInterviewService; labGeneration: LabGenerationService },
+) => {
   const { backgroundRuns, record } = ctx;
 
   const requireRequirements = () => {
@@ -267,5 +272,16 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { courseIntervie
     wrap(async (_event, id, contentHash): Promise<requirementTypes.Requirement> =>
       toWireRequirement(await courseInterview.confirmDraft(requireString(id, 'id'), requireString(contentHash, 'contentHash'))),
     ),
+  );
+
+  // ========== First lab ==========
+  ipcMain.handle(
+    CHANNELS.requirementsLabEstimate,
+    wrap((_event, id): Promise<requirementTypes.LabEstimate> => labGeneration.estimate(requireString(id, 'id'))),
+  );
+
+  ipcMain.handle(
+    CHANNELS.requirementsLabGenerate,
+    wrap(async (_event, id): Promise<requirementTypes.Requirement> => toWireRequirement(await labGeneration.start(requireString(id, 'id')))),
   );
 };

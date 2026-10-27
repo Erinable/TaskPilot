@@ -312,7 +312,7 @@ const fail: (path: string, problem: string) => never = (path, problem) => {
   throw new AgentOutputError(`${path} ${problem}`);
 };
 
-const text = (value: unknown, path: string, maxLength: number): string => {
+export const text = (value: unknown, path: string, maxLength: number): string => {
   if (typeof value !== 'string') fail(path, 'must be text');
   const trimmed = value.trim();
   if (!trimmed) fail(path, 'is empty');
@@ -323,7 +323,7 @@ const text = (value: unknown, path: string, maxLength: number): string => {
 
 const optionalText = (value: unknown, path: string, maxLength: number): string | undefined => (value === undefined ? undefined : text(value, path, maxLength));
 
-const list = (value: unknown, path: string, { min = 0, max }: { min?: number; max: number }): unknown[] => {
+export const list = (value: unknown, path: string, { min = 0, max }: { min?: number; max: number }): unknown[] => {
   if (!Array.isArray(value)) fail(path, 'must be a list');
   if (value.length < min) fail(path, `needs at least ${min} item(s)`);
   if (value.length > max) fail(path, `has more than ${max} items`);

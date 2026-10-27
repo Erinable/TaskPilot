@@ -38,6 +38,8 @@ export const CHANNELS = {
   requirementsCoursePath: 'requirements:course-path',
   requirementsCourseSaveDraft: 'requirements:course-save-draft',
   requirementsCourseConfirmDraft: 'requirements:course-confirm-draft',
+  requirementsLabEstimate: 'requirements:lab-estimate',
+  requirementsLabGenerate: 'requirements:lab-generate',
   agentStatus: 'agent:status',
   agentRuntimes: 'agent:runtimes',
   agentModels: 'agent:models',

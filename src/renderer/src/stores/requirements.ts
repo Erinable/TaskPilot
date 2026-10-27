@@ -271,6 +271,29 @@ export const useRequirementsStore = defineStore('requirements', () => {
     if (next) showToast('学习路径已确认。');
   };
 
+  // ========== First lab ==========
+  // The estimate shown before generating; nothing runs until the learner confirms.
+  const labEstimate = ref<{ requirementId: string; estimate: requirementTypes.LabEstimate } | null>(null);
+
+  const loadLabEstimate = async (item: requirementTypes.Requirement) => {
+    courseBusy.value = true;
+    try {
+      labEstimate.value = { requirementId: item.id, estimate: await call(window.taskpilot.requirements.labEstimate(item.id)) };
+    } catch (error) {
+      console.error(error);
+      showToast(`预估费用失败：${describeError(error)}`);
+    } finally {
+      courseBusy.value = false;
+    }
+  };
+
+  const generateLab = async (item: requirementTypes.Requirement) => {
+    const next = await courseAction(() => call(window.taskpilot.requirements.labGenerate(item.id)), '生成 lab 失败');
+    if (!next) return;
+    labEstimate.value = null;
+    startPolling();
+  };
+
   // Saves the edited draft into the global folder. A refusal naming a field
   // is returned for the editor to show there.
   const saveDraft = async (item: requirementTypes.Requirement, pack: CoursePack) => {
@@ -313,8 +336,14 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pollTimer = null;
   };
 
+  const announceLab = (lab: requirementTypes.LabGeneration) => {
+    if (lab.status === 'ready') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」生成好了。`, 'info');
+    else if (lab.status === 'failed' && lab.error?.code !== 'agent_cancelled') announceAgent(`生成 lab 失败：${describeErrorInfo(lab.error)}`);
+  };
+
   const announce = (item: requirementTypes.Requirement) => {
     if (model.isCourse(item)) {
+      if (item.course?.lab && item.status === 'published') return announceLab(item.course.lab);
       if (item.status === 'answering') announceAgent('Tutor 看完了你的目标，等你选课程包。', 'info');
       else if (item.status === 'reviewing')
         announceAgent(item.course?.draft ? 'Tutor 起草了一个课程包，等你预览和确认。' : '学习路径规划好了，请确认。', 'info');
@@ -334,9 +363,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     const open = items.value.find((item) => item.id === selectedId.value);
     if (open && !composing.value && useAppStore().view === 'requirements' && before.get(open.id) !== model.pollKey(open)) {
       renderDetail(open);
-      if (!model.isRunning(open)) announce(open);
+      if (!model.isRunning(open) && !model.labRunning(open)) announce(open);
     }
-    if (items.value.some(model.isRunning))
+    if (model.anyPolled(items.value))
       pollTimer = setTimeout(() => {
         tick().catch((error) => console.error(error));
       }, model.POLL_MS);
@@ -363,13 +392,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (target) select(target);
     else if (items.value.length) select(items.value[0].id);
     else pane.value = 'empty';
-    if (items.value.some(model.isRunning)) startPolling();
+    if (model.anyPolled(items.value)) startPolling();
   };
 
   // Loads counts for the sidebar badge on startup, without opening the view.
   const init = async () => {
     await refreshList();
-    if (items.value.some(model.isRunning)) startPolling();
+    if (model.anyPolled(items.value)) startPolling();
   };
 
   return {
@@ -412,6 +441,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
     saveDraft,
     draftSaved,
     confirmDraft,
+    // First lab
+    labEstimate,
+    loadLabEstimate,
+    generateLab,
     // Polling
     startPolling,
     stopPolling,

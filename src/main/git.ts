@@ -202,6 +202,20 @@ export const diffFile = async (cwd: string, baseline: string, filePath: string):
   }
 };
 
+// A patch from folder `from` to folder `to`, both directly inside `cwd`
+// and outside any repository, with paths relative to each folder
+// (`a/src/x.c`, `b/src/x.c` when they are named a and b). Empty when they
+// match. Like diffFile, `--no-index` exits non-zero when they differ.
+export const diffFolders = async (cwd: string, from: string, to: string): Promise<string> => {
+  try {
+    return await git(cwd, ['diff', '--no-index', '--no-color', '--no-ext-diff', '--src-prefix=', '--dst-prefix=', '--', from, to]);
+  } catch (error) {
+    const stdout = (error as GitError).stdout;
+    if (stdout === undefined) throw error;
+    return stdout;
+  }
+};
+
 // Summary used by the workspace header and as a work package baseline.
 export const describe = async (cwd: string): Promise<RepoDescription> => {
   const [commit, branch, entries] = await Promise.all([head(cwd), currentBranch(cwd), status(cwd)]);
