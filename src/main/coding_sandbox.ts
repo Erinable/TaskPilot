@@ -166,6 +166,8 @@ export interface ProfileSpec {
   runDir: string;
   writable: string[];
   readable: string[];
+  // No network at all: for code a model wrote and TaskPilot runs (the lab self-check).
+  offline?: boolean;
 }
 
 // The Seatbelt profile text. Later rules win, so each deny is followed by
@@ -184,6 +186,7 @@ export const buildProfile = (spec: ProfileSpec): string => {
     // Names and sizes only; Node and git lstat every parent folder.
     `(allow file-read-metadata (subpath ${quote(home)}) (literal "/Users"))`,
     `(allow file-read* ${paths([spec.runDir, ...spec.writable, ...spec.readable])})`,
+    ...(spec.offline ? ['(deny network*)'] : []),
   ].join('\n');
 };
 

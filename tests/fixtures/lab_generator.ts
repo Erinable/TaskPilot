@@ -55,16 +55,71 @@ export const RR_SPEC = {
   ],
 };
 
-const STARTER = '#include <stdio.h>\n\n// TODO: run the jobs round robin.\nstatic void rr(void) {}\n\nint main(void) {\n  rr();\n  return 0;\n}\n';
+// Real C: the self-check (src/main/lab_verify.ts) builds and runs it.
+const STARTER = [
+  '#include <stdio.h>',
+  '',
+  '#define MAX_JOBS 64',
+  '',
+  'struct job {',
+  '  char name[16];',
+  '  int arrival;',
+  '  int left;',
+  '};',
+  '',
+  'static int read_jobs(struct job *jobs) {',
+  '  int count = 0;',
+  '  while (count < MAX_JOBS && scanf("%15s %d %d", jobs[count].name, &jobs[count].arrival, &jobs[count].left) == 3) count++;',
+  '  return count;',
+  '}',
+  '',
+  '// TODO: run the jobs round robin.',
+  'static void rr(struct job *jobs, int count, int slice) {',
+  '  (void)jobs;',
+  '  (void)count;',
+  '  (void)slice;',
+  '}',
+  '',
+  'int main(void) {',
+  '  int slice;',
+  '  if (scanf("%d", &slice) != 1 || slice < 1) return 1;',
+  '  struct job jobs[MAX_JOBS];',
+  '  rr(jobs, read_jobs(jobs), slice);',
+  '  return 0;',
+  '}',
+  '',
+].join('\n');
+
+const RR_BODY = [
+  `// ${SOLUTION_MARKER}: arrivals join the queue before the job that ran goes back.`,
+  'static void rr(struct job *jobs, int count, int slice) {',
+  '  int queue[MAX_JOBS * 64];',
+  '  int head = 0, tail = 0, next = 0, time = 0, done = 0;',
+  '  while (done < count) {',
+  '    while (next < count && jobs[next].arrival <= time) queue[tail++] = next++;',
+  '    if (head == tail) {',
+  '      time = jobs[next].arrival;',
+  '      continue;',
+  '    }',
+  '    int current = queue[head++];',
+  '    int run = jobs[current].left < slice ? jobs[current].left : slice;',
+  '    time += run;',
+  '    jobs[current].left -= run;',
+  '    while (next < count && jobs[next].arrival <= time) queue[tail++] = next++;',
+  '    if (jobs[current].left > 0) queue[tail++] = current;',
+  '    else {',
+  '      printf("%s %d\\n", jobs[current].name, time);',
+  '      done++;',
+  '    }',
+  '  }',
+  '}',
+].join('\n');
+
+export const RR_SOLUTION = STARTER.replace(/\/\/ TODO: run the jobs round robin\.\n[^}]*\}/, RR_BODY);
 
 export const RR_CODE = {
   starter: [{ path: 'src/rr.c', content: STARTER }],
-  solution: [
-    {
-      path: 'src/rr.c',
-      content: STARTER.replace('// TODO: run the jobs round robin.\nstatic void rr(void) {}', `// ${SOLUTION_MARKER}\nstatic void rr(void) { puts("done"); }`),
-    },
-  ],
+  solution: [{ path: 'src/rr.c', content: RR_SOLUTION }],
   hints: [
     { level: 1, text: '这一步是时间片轮转：就绪队列先进先出。', code: null },
     { level: 2, text: '一个作业用完时间片时，谁先进队？', code: null },

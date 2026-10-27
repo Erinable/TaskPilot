@@ -84,7 +84,8 @@ export const coursePathInterview = (
 const LAB_ESTIMATE: requirementTypes.LabEstimate = {
   concepts: [{ id: 'round-robin', label: '时间片轮转' }],
   difficulty: 'easy',
-  calls: 2,
+  calls: 4,
+  maxCalls: 10,
   tokens: { input: 30000, output: 26000 },
   model: 'claude-opus-5-5',
   usd: { low: 0.42, high: 1.35 },

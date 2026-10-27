@@ -24,6 +24,8 @@ import * as courses from './courses.ts';
 import * as git from './git.ts';
 import * as labs from './labs.ts';
 import * as generator from './agents/lab_generator.ts';
+import * as verifier from './agents/lab_verifier.ts';
+import * as labVerify from './lab_verify.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import { estimateMicros, loadPrices, priceFor } from './model_prices.ts';
 import type { AppContext } from './app_context.ts';
@@ -35,6 +37,7 @@ import type * as requirementTypes from '../shared/ipc/requirements.ts';
 
 const DRAFTS_DIRNAME = 'lab_drafts';
 const DRAFT_FILENAME = 'lab.json';
+const VERIFY_FILENAME = 'verify.json';
 
 // Rough token counts for the estimate: prompts are measured, output is the
 // range the lab-gen eval saw per call (evals/lab-gen/README.md), thinking
@@ -45,20 +48,35 @@ const CLI_OVERHEAD_TOKENS = 3000;
 const SPEC_JSON_TOKENS = 8000;
 const SPEC_OUTPUT_TOKENS = { low: 50_000, high: 120_000 };
 const CODE_OUTPUT_TOKENS = { low: 45_000, high: 100_000 };
+// The self-check's two calls read the whole lab back. Not yet measured by an
+// eval: a guess from the generator's calls, to be calibrated with T12.
+const LAB_JSON_TOKENS = 16_000;
+const VERIFY_OUTPUT_TOKENS = { low: 15_000, high: 40_000 };
+// low: one round that passes; high: a failed round, one repair (priced as a
+// code call) and a second round, the path the CARM-33 example takes.
+const VERIFY_ROUNDS = { low: 1, high: 2 };
+const REPAIRS = { low: 0, high: 1 };
 
 // The first lab's difficulty from the form's level; T9 adjusts later labs
 // from mastery. Not yet confirmed by the user (see the CARM-40 hand-off).
 const FIRST_DIFFICULTY: Record<requirementTypes.CourseInterview['form']['level'], Difficulty> = { new: 'easy', basic: 'easy', solid: 'medium' };
 
-// What the generator writes, private: the request it was written for and the lab.
+// What the generator writes, private: the request it was written for and the
+// lab; `costUsd` is the generation's, the self-check's is on its report.
 export type LabDraft = { requirementId: string; request: generator.LabRequest; lab: generator.GeneratedLab; costUsd: number };
 
-export const draftPath = (configDir: string, requirementId: string) => path.join(configDir, DRAFTS_DIRNAME, encodeURIComponent(requirementId), DRAFT_FILENAME);
+const draftDir = (configDir: string, requirementId: string) => path.join(configDir, DRAFTS_DIRNAME, encodeURIComponent(requirementId));
+export const draftPath = (configDir: string, requirementId: string) => path.join(draftDir(configDir, requirementId), DRAFT_FILENAME);
+export const verifyPath = (configDir: string, requirementId: string) => path.join(draftDir(configDir, requirementId), VERIFY_FILENAME);
 
 // The generated lab as a lab artifact (./labs.ts), checked for its stage.
 // The reference is the patch from the starter code to the solution, made by
 // git in a scratch folder, so the model never writes a patch by hand.
-export const toLabArtifact = async (lab: generator.GeneratedLab, request: generator.LabRequest): Promise<labs.LabArtifact> => {
+export const toLabArtifact = async (
+  lab: generator.GeneratedLab,
+  request: generator.LabRequest,
+  verify: labVerify.LabVerifyReport | null = null,
+): Promise<labs.LabArtifact> => {
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-diff-'));
   try {
     const write = async (side: string, files: generator.SourceFile[]) => {
@@ -89,7 +107,7 @@ export const toLabArtifact = async (lab: generator.GeneratedLab, request: genera
         reference,
         hidden: Object.fromEntries(lab.hiddenTests.map((file) => [file.file, file.script])),
         hints: lab.hints,
-        verify: null,
+        verify,
         rubric: lab.rubricNotes,
       },
     };
@@ -100,10 +118,16 @@ export const toLabArtifact = async (lab: generator.GeneratedLab, request: genera
 };
 
 // The concepts the first lab covers: the first concept on the path still to
+// learn, or the one the learner picked instead (a self-check that ended in
+// needs_review offers another), which must be on the path and still to
 // learn. Choosing later labs is T9's.
-const firstConcepts = (item: Requirement): Concept[] => {
+const firstConcepts = (item: Requirement, conceptId: string | null): Concept[] => {
   const plan = item.course?.plan ?? failWith('There is no confirmed path', 'invalid_state');
-  const entry = plan.path.find((candidate) => candidate.status === 'planned') ?? failWith('Every concept on the path is known or skipped', 'nothing_to_learn');
+  const planned = plan.path.filter((candidate) => candidate.status === 'planned');
+  const entry = conceptId
+    ? (planned.find((candidate) => candidate.conceptId === conceptId) ??
+      failWith(`${conceptId} is not a concept still to learn on the path`, 'invalid_argument', 'conceptId'))
+    : (planned[0] ?? failWith('Every concept on the path is known or skipped', 'nothing_to_learn'));
   const concept = [...item.course!.pathConcepts, ...plan.extraConcepts].find((candidate) => candidate.id === entry.conceptId);
   return [concept ?? failWith(`The path names an unknown concept ${entry.conceptId}`, 'invalid_state')];
 };
@@ -118,7 +142,9 @@ const wireLab = (lab: generator.GeneratedLab): NonNullable<requirementTypes.LabG
   hiddenTests: lab.hiddenTests.reduce((sum, file) => sum + file.names.length, 0),
 });
 
-export const createLabGenerationService = (ctx: AppContext) => {
+// `grader` runs `make grade` for the self-check; tests replace it, the app
+// uses the offline Seatbelt one.
+export const createLabGenerationService = (ctx: AppContext, { grader = labVerify.sandboxGrader() }: { grader?: labVerify.Grader } = {}) => {
   const { backgroundRuns } = ctx;
   const requireRequirements = () => ctx.requirements ?? failWith('Requirements are unavailable', 'unsupported');
 
@@ -138,12 +164,12 @@ export const createLabGenerationService = (ctx: AppContext) => {
     return { item, pack };
   };
 
-  const requestFor = async (id: string): Promise<generator.LabRequest> => {
+  const requestFor = async (id: string, conceptId: string | null): Promise<generator.LabRequest> => {
     const { item, pack } = await courseOf(id);
     return {
       course: pack,
       goal: item.course!.plan!.goal,
-      concepts: firstConcepts(item),
+      concepts: firstConcepts(item, conceptId),
       difficulty: FIRST_DIFFICULTY[item.course!.form.level],
       stage: 1,
       existing: { labIds: [], files: [], build: null },
@@ -153,11 +179,18 @@ export const createLabGenerationService = (ctx: AppContext) => {
   // ========== Estimate ==========
   // Prompts are measured; the code call's input adds the spec it is given.
   // Priced with the synced price table for the model Tutor's CLI would use.
-  const estimate = async (id: string): Promise<requirementTypes.LabEstimate> => {
-    const request = await requestFor(id);
+  // The self-check's calls (mutants and the review each round, a repair
+  // between rounds) are counted in, since the run makes them unasked.
+  const estimate = async (id: string, conceptId: string | null = null): Promise<requirementTypes.LabEstimate> => {
+    const request = await requestFor(id, conceptId);
     const promptTokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN) + CLI_OVERHEAD_TOKENS;
     const specInput = promptTokens(generator.systemPrompt() + generator.specPrompt(request));
-    const usage = (bound: 'low' | 'high') => ({ input: 2 * specInput + SPEC_JSON_TOKENS, output: SPEC_OUTPUT_TOKENS[bound] + CODE_OUTPUT_TOKENS[bound] });
+    const verifyInput = promptTokens(verifier.mutantSystemPrompt() + verifier.consistencySystemPrompt()) + 2 * LAB_JSON_TOKENS;
+    const usage = (bound: 'low' | 'high') => ({
+      input: 2 * specInput + SPEC_JSON_TOKENS + VERIFY_ROUNDS[bound] * verifyInput + REPAIRS[bound] * (specInput + LAB_JSON_TOKENS),
+      output:
+        SPEC_OUTPUT_TOKENS[bound] + CODE_OUTPUT_TOKENS[bound] + VERIFY_ROUNDS[bound] * VERIFY_OUTPUT_TOKENS[bound] + REPAIRS[bound] * CODE_OUTPUT_TOKENS[bound],
+    });
     const config = ctx.getPreferences().agents.tutor;
     const model = config.model || (await ctx.modelCatalog(config.cli, 'analysis').catch(() => null))?.defaultModel || null;
     const price = priceFor(await loadPrices(ctx.configDir), config.cli === 'claude' ? 'anthropic' : null, model);
@@ -166,7 +199,8 @@ export const createLabGenerationService = (ctx: AppContext) => {
     return {
       concepts: request.concepts.map((concept) => ({ id: concept.id, label: concept.label })),
       difficulty: request.difficulty,
-      calls: 2,
+      calls: 2 + 2 * VERIFY_ROUNDS.low,
+      maxCalls: 2 + 2 * labVerify.MAX_ROUNDS + (labVerify.MAX_ROUNDS - 1),
       tokens: usage('high'),
       model,
       usd: price ? { low: usd('low'), high: usd('high') } : null,
@@ -182,10 +216,65 @@ export const createLabGenerationService = (ctx: AppContext) => {
     await writeFileAtomic(file, `${JSON.stringify(draft, null, 2)}\n`, { mode: 0o600 });
   };
 
-  // Generates the first lab in the background; the requirement shows its
-  // progress and the run is cancelled with requirements:cancel.
-  const start = async (id: string) => {
-    const request = await requestFor(id);
+  const saveReport = async (requirementId: string, report: labVerify.LabVerifyReport) =>
+    writeFileAtomic(verifyPath(ctx.configDir, requirementId), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+
+  // The self-check's progress as the learner sees it: verdicts and counts.
+  const verifyState = (round: number, rounds: labVerify.RoundReport[], costUsd: number): requirementTypes.LabVerify => ({
+    round,
+    maxRounds: labVerify.MAX_ROUNDS,
+    rounds: rounds.map(labVerify.wireRound),
+    costUsd,
+  });
+
+  // Checks the lab and repairs it between rounds; every call is billed to
+  // the requirement through `runAgent`. Each repaired version is kept, so a
+  // cancel or a failure leaves the latest draft.
+  const verify = async (
+    draft: LabDraft,
+    {
+      runAgent,
+      envPath,
+      signal,
+      onProgress,
+    }: {
+      runAgent: RunAgent;
+      envPath: string | null;
+      signal: AbortSignal;
+      onProgress: (state: Parameters<labVerify.VerifyProgress>[0], lab: generator.GeneratedLab) => Promise<void>;
+    },
+  ) => {
+    const call = { runAgent, envPath, signal };
+    let saved = draft;
+    const result = await labVerify.verifyLab(
+      draft.lab,
+      { stage: draft.request.stage, base: labVerify.FIRST_STAGE_BASE },
+      {
+        grade: grader,
+        envPath,
+        signal,
+        onProgress: (state) => onProgress(state, saved.lab),
+        writeMutants: (lab) => verifier.writeMutants(draft.request, lab, call),
+        judge: (lab) => verifier.judgeConsistency(draft.request, lab, call),
+        repair: async (lab, failure) => {
+          const repaired = await generator.repair(draft.request, lab, failure, call);
+          await toLabArtifact(repaired.lab, draft.request);
+          saved = { ...saved, lab: repaired.lab, costUsd: saved.costUsd + repaired.costUsd };
+          await saveDraft(saved);
+          console.debug(`[lab-gen] repaired requirement=${draft.requirementId} parts=${failure.parts.join(',')} costUsd=${repaired.costUsd.toFixed(3)}`);
+          return repaired;
+        },
+      },
+    );
+    await saveReport(draft.requirementId, result.report);
+    return { draft: saved, report: result.report };
+  };
+
+  // Generates the first lab and checks it in the background; the
+  // requirement shows its progress and the run is cancelled with
+  // requirements:cancel (or by a repository switch).
+  const start = async (id: string, conceptId: string | null = null) => {
+    const request = await requestFor(id, conceptId);
     if (requireRequirements().get(id).course?.lab?.status === 'running' || backgroundRuns.has('requirement', id))
       return failWith('A lab is already being generated', 'invalid_state');
     const startedAt = new Date().toISOString();
@@ -198,12 +287,18 @@ export const createLabGenerationService = (ctx: AppContext) => {
       finishedAt: null,
       costUsd: 0,
       lab: null,
+      verify: null,
       error: null,
     };
     const started = await update(id, base);
     const controller = backgroundRuns.start({ kind: 'requirement', key: id, busy: 'requirement', agent: () => 'tutor', label: () => started.title || id });
     console.debug(`[lab-gen] start requirement=${id} concepts=${base.concepts.join(',')} difficulty=${base.difficulty}`);
     let spent = 0;
+    let current = base;
+    const progress = async (next: requirementTypes.LabGeneration) => {
+      current = next;
+      await update(id, { ...next, costUsd: spent });
+    };
     // Each call's spend is added as it is reported, so a failure keeps it.
     const runner = ctx.runnerFor('tutor', { kind: 'requirement', id });
     const runAgent: RunAgent = async (options) => {
@@ -218,15 +313,30 @@ export const createLabGenerationService = (ctx: AppContext) => {
           runAgent,
           envPath,
           signal: controller.signal,
-          onPhase: async (phase) => void (await update(id, { ...base, phase, costUsd: spent })),
+          onPhase: (phase) => progress({ ...current, phase }),
         });
         // A lab that does not make an artifact is a bad output like any other.
         await toLabArtifact(lab, request).catch((error) => {
           throw Object.assign(new Error(`The generated lab does not check: ${(error as Error).message}`), { code: 'agent_bad_output' });
         });
-        await saveDraft({ requirementId: id, request, lab, costUsd });
-        await update(id, { ...base, status: 'ready', phase: null, finishedAt: new Date().toISOString(), costUsd: spent, lab: wireLab(lab) }, spent);
-        console.debug(`[lab-gen] ready requirement=${id} lab=${lab.id} costUsd=${spent.toFixed(3)}`);
+        const draft = { requirementId: id, request, lab, costUsd };
+        await saveDraft(draft);
+        const generatedCost = spent;
+        const checked = await verify(draft, {
+          runAgent,
+          envPath,
+          signal: controller.signal,
+          onProgress: ({ round, phase, rounds }, latest) =>
+            progress({ ...current, phase, lab: wireLab(latest), verify: verifyState(round, rounds, spent - generatedCost) }),
+        });
+        const status = checked.report.status === 'passed' ? 'ready' : 'needs_review';
+        const finished = { ...current, status, phase: null, finishedAt: new Date().toISOString(), lab: wireLab(checked.draft.lab) } as const;
+        await update(
+          id,
+          { ...finished, costUsd: spent, verify: verifyState(checked.report.rounds.length, checked.report.rounds, checked.report.costUsd) },
+          spent,
+        );
+        console.debug(`[lab-gen] ${status} requirement=${id} lab=${lab.id} rounds=${checked.report.rounds.length} costUsd=${spent.toFixed(3)}`);
       } catch (error) {
         const agentError = asAgentError(error);
         if (agentError.code !== 'agent_cancelled') console.error(error);
@@ -234,7 +344,7 @@ export const createLabGenerationService = (ctx: AppContext) => {
         await update(
           id,
           {
-            ...base,
+            ...current,
             status: 'failed',
             phase: null,
             finishedAt: new Date().toISOString(),
@@ -252,17 +362,20 @@ export const createLabGenerationService = (ctx: AppContext) => {
   };
 
   // ========== Main process only ==========
-  const readDraft = async (id: string): Promise<LabDraft> => {
+  const readJson = async <T>(file: string, missing: () => T): Promise<T> => {
     try {
-      return JSON.parse(await fs.readFile(draftPath(ctx.configDir, id), 'utf8')) as LabDraft;
+      return JSON.parse(await fs.readFile(file, 'utf8')) as T;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return failWith('No lab has been generated for this requirement', 'no_lab_draft');
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return missing();
       throw error;
     }
   };
+  const readDraft = (id: string) =>
+    readJson<LabDraft>(draftPath(ctx.configDir, id), () => failWith('No lab has been generated for this requirement', 'no_lab_draft'));
+  const readReport = (id: string) => readJson<labVerify.LabVerifyReport | null>(verifyPath(ctx.configDir, id), () => null);
 
-  // Rewrites the parts of the draft a failed self-check names (T5), and
-  // keeps the new version. Awaited by the caller, which owns the run.
+  // Rewrites the parts of the draft a failed self-check names, and keeps
+  // the new version. Awaited by the caller, which owns the run.
   const repair = async (id: string, failure: { report: string; parts: generator.LabPart[] }, signal?: AbortSignal) => {
     const draft = await readDraft(id);
     const { path: envPath } = await ctx.commandPath();
@@ -275,13 +388,14 @@ export const createLabGenerationService = (ctx: AppContext) => {
     return { draft: next, costUsd };
   };
 
-  // The draft as a lab artifact, for the self-check and the repository.
+  // The draft as a lab artifact, for the repository, with its self-check
+  // report as the private verify.json.
   const artifact = async (id: string) => {
     const draft = await readDraft(id);
-    return toLabArtifact(draft.lab, draft.request);
+    return toLabArtifact(draft.lab, draft.request, await readReport(id));
   };
 
-  return { estimate, start, repair, artifact };
+  return { estimate, start, repair, artifact, report: readReport };
 };
 
 export type LabGenerationService = ReturnType<typeof createLabGenerationService>;

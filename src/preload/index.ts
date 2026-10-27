@@ -110,9 +110,10 @@ const api = {
     courseSaveDraft: (id: string, pack: CoursePack) => invoke<requirementTypes.CourseDraftSaved>(CHANNELS.requirementsCourseSaveDraft, id, pack),
     courseConfirmDraft: (id: string, contentHash: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsCourseConfirmDraft, id, contentHash),
     // What generating the first lab covers and roughly costs; nothing runs.
-    labEstimate: (id: string) => invoke<requirementTypes.LabEstimate>(CHANNELS.requirementsLabEstimate, id),
-    // Starts generating the first lab after the learner saw the estimate.
-    labGenerate: (id: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabGenerate, id),
+    // `conceptId` picks another concept still to learn, after a needs_review self-check.
+    labEstimate: (id: string, conceptId?: string) => invoke<requirementTypes.LabEstimate>(CHANNELS.requirementsLabEstimate, id, conceptId),
+    // Starts generating and self-checking the first lab after the learner saw the estimate.
+    labGenerate: (id: string, conceptId?: string) => invoke<requirementTypes.Requirement>(CHANNELS.requirementsLabGenerate, id, conceptId),
   },
 
   agent: {

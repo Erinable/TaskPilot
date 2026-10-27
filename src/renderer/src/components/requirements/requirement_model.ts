@@ -129,10 +129,37 @@ export const DIFFICULTY_LABELS: Record<packageTypes.Difficulty, string> = { easy
 export const LAB_PHASE_LABELS: Record<NonNullable<requirementTypes.LabGeneration['phase']>, string> = {
   spec: '正在写题面和测试…',
   code: '正在写初始代码、参考解和提示…',
+  verify: '正在自验证…',
+  repair: '自验证没通过，正在按报告修改…',
 };
 
+export const VERIFY_CHECK_LABELS: Record<requirementTypes.LabVerifyCheck, string> = {
+  reference: '参考解',
+  starter: '初始代码',
+  mutants: '变异检测',
+  consistency: '一致性',
+};
+
+// One check of a self-check round in words: its verdict, with the mutant counts.
+export const verifyCheckText = (round: requirementTypes.LabVerifyRound, check: requirementTypes.LabVerifyCheck) => {
+  const verdict = round.checks[check];
+  const label = VERIFY_CHECK_LABELS[check];
+  if (verdict === null) return `${label}：跳过`;
+  if (check === 'mutants' && round.mutants)
+    return `${label}：抓住 ${round.mutants.killed}/${round.mutants.total}，公开测试 ${round.mutants.publicKilled}/${round.mutants.total}`;
+  if (check === 'consistency' && !verdict) return `${label}：${round.issues} 处问题`;
+  return `${label}：${verdict ? '通过' : '未通过'}`;
+};
+
+// The concepts still to learn on the path besides the one this lab covered,
+// for "换一个知识点" after a self-check that ended in needs_review.
+export const otherPlannedConcepts = (course: requirementTypes.CourseInterview) =>
+  (course.plan?.path ?? [])
+    .filter((entry) => entry.status === 'planned' && !(course.lab?.concepts ?? []).includes(entry.conceptId))
+    .map((entry) => pathConcept(course, entry.conceptId));
+
 // "$0.40–$1.20", or what is known when no price is.
-export const estimateText = (estimate: requirementTypes.LabEstimate) =>
+export const estimateText = (estimate: Pick<requirementTypes.LabEstimate, 'usd' | 'model' | 'tokens'>) =>
   estimate.usd
     ? `约 $${estimate.usd.low.toFixed(2)}–$${estimate.usd.high.toFixed(2)}`
     : `价格未知（${estimate.model ?? '默认模型'}，约 ${Math.round(estimate.tokens.input / 1000)}k 输入 + ${Math.round(estimate.tokens.output / 1000)}k 输出 token）`;

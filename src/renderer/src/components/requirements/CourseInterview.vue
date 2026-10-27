@@ -7,8 +7,11 @@
 // [人工决策-2026-10-27 00:55:52] 学生可以把节点标为"已会"或"跳过"、调整顺序；骨架本身不能改。
 // 起草的课程包在编辑器里预览和编辑，保存后在本机确认才会用来规划路径。
 // Once the path is confirmed, the first lab is generated after the learner
-// saw what it covers and roughly what it costs; only its title and counts
-// are ever shown here, never its code, tests or hints.
+// saw what it covers and roughly what it costs, then self-checked; only its
+// title, counts and each check's verdict are ever shown here, never its
+// code, tests, hints or what a check found.
+//
+// [人工决策-2026-10-27 00:36:21] 自验证重试 2 次仍不过，lab 标为 needs_review，给出"换一个知识点"或"先用课程包示例"。
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
@@ -98,6 +101,22 @@ const onGenerate = () => {
   cancellingLab.value = false;
   report(store.generateLab(props.item));
 };
+const verify = computed(() => lab.value?.verify ?? null);
+const lastRound = computed(() => verify.value?.rounds.at(-1) ?? null);
+const otherConcepts = computed(() => model.otherPlannedConcepts(props.course));
+const otherConcept = ref<string>('');
+const onOtherConcept = () => {
+  if (otherConcept.value) report(store.loadLabEstimate(props.item, otherConcept.value));
+};
+const VERIFY_CHECKS = Object.keys(model.VERIFY_CHECK_LABELS) as requirementTypes.LabVerifyCheck[];
+// While running: the round, and while repairing what the round found.
+const verifyProgress = computed(() => {
+  const state = verify.value;
+  if (!state) return null;
+  const round = lastRound.value;
+  const found = round && lab.value?.phase === 'repair' ? `：${VERIFY_CHECKS.map((check) => model.verifyCheckText(round, check)).join('，')}` : '';
+  return `自验证第 ${state.round} / ${state.maxRounds} 轮${found}`;
+});
 </script>
 
 <template>
@@ -212,7 +231,8 @@ const onGenerate = () => {
             <AppIcon name="spinner" class="spin" />
             <span>{{ lab.phase ? model.LAB_PHASE_LABELS[lab.phase] : '正在生成 lab…' }}</span>
           </div>
-          <small>已用 {{ labElapsed ?? '0 秒' }}，花费 {{ formatCost(lab.costUsd) }}。通常 2 到 4 分钟，可以先去做别的事。</small>
+          <small v-if="verifyProgress" data-field="verify-progress">{{ verifyProgress }}</small>
+          <small>已用 {{ labElapsed ?? '0 秒' }}，花费 {{ formatCost(lab.costUsd) }}。生成加自验证通常要几分钟，可以先去做别的事。</small>
           <button class="secondary-button small" type="button" data-action="cancel-lab" :disabled="cancellingLab" @click="onCancelLab">
             <AppIcon name="x" />
             取消
@@ -229,7 +249,34 @@ const onGenerate = () => {
               `预计 ${lab.lab.estimateHours} 小时 · ${lab.lab.starterFiles} 个初始文件 · ${lab.lab.publicTests} 个公开测试 · ${lab.lab.hiddenTests} 个隐藏测试 · 花费 ${formatCost(lab.costUsd)}`
             }}
           </p>
-          <p class="course-path-note">接下来 TaskPilot 会先自己跑一遍检查，确认参考解能通过、初始代码不能通过，再建实验仓库。</p>
+          <p v-if="verify" class="course-path-note" data-field="verify-result">
+            {{ `自验证第 ${verify.rounds.length} 轮通过（参考解、初始代码、变异检测、一致性），自验证花费 ${formatCost(verify.costUsd)}。` }}
+          </p>
+        </template>
+        <template v-else-if="lab?.status === 'needs_review' && lab.lab && !estimate">
+          <p class="course-warning" role="alert">
+            <AppIcon name="alert" />
+            <span>{{ `「${lab.lab.title}」自验证 ${verify?.rounds.length ?? 0} 轮都没通过，先不用它建实验仓库。` }}</span>
+          </p>
+          <ul v-if="lastRound" class="course-path-note" data-field="verify-result">
+            <li v-for="check in VERIFY_CHECKS" :key="check">{{ model.verifyCheckText(lastRound, check) }}</li>
+          </ul>
+          <small>{{ `共花费 ${formatCost(lab.costUsd)}。` }}</small>
+          <div class="req-actions">
+            <el-select v-model="otherConcept" placeholder="换一个知识点" :disabled="!otherConcepts.length" aria-label="换一个知识点" data-field="other-concept">
+              <el-option v-for="entry in otherConcepts" :key="entry.id" :label="entry.label" :value="entry.id" />
+            </el-select>
+            <button class="primary-button" type="button" data-action="other-concept" :disabled="!otherConcept || store.courseBusy" @click="onOtherConcept">
+              <AppIcon name="flask" />
+              换这个知识点
+            </button>
+            <button class="secondary-button" type="button" data-action="pack-example" disabled title="当前课程包还没有示例 lab">
+              <AppIcon name="file" />
+              先用课程包示例
+            </button>
+          </div>
+          <small v-if="!otherConcepts.length">路径上没有别的「要学」知识点了。</small>
+          <small>当前课程包还没有示例 lab，「先用课程包示例」暂时不能用。</small>
         </template>
         <template v-else>
           <p v-if="lab?.status === 'failed'" class="course-warning" role="alert">
@@ -244,7 +291,8 @@ const onGenerate = () => {
               · 难度 {{ model.DIFFICULTY_LABELS[estimate.difficulty] }}
             </p>
             <p data-field="estimate">
-              预计费用 {{ model.estimateText(estimate) }}，调用 {{ estimate.calls }} 次模型。费用只做统计，以实际为准；之后的自验证还会再花一些。
+              预计费用 {{ model.estimateText(estimate) }}，含生成后的自验证。自验证一次通过调用 {{ estimate.calls }} 次模型，要修改时最多
+              {{ estimate.maxCalls }} 次。费用只做统计，以实际为准。
             </p>
             <div class="req-actions">
               <button class="primary-button" type="button" data-action="generate-lab" :disabled="store.courseBusy" @click="onGenerate">

@@ -1,7 +1,8 @@
 // Generating a course's first lab after its path is confirmed
 // (src/main/lab_generation_service.ts): the estimate comes first and runs no
-// model; generating writes a private draft the renderer never sees, and the
-// draft becomes a lab artifact with a reference patch made by git.
+// model; generating writes a private draft the renderer never sees, checks
+// it (src/main/lab_verify.ts, with a faked `make grade` here) and the draft
+// becomes a lab artifact with a reference patch made by git.
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -9,17 +10,40 @@ import os from 'node:os';
 import path from 'node:path';
 
 import * as labs from '../../../src/main/labs.ts';
-import { draftPath } from '../../../src/main/lab_generation_service.ts';
+import { draftPath, verifyPath } from '../../../src/main/lab_generation_service.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as goals from '../../fixtures/course_interview.ts';
 import { HIDDEN_MARKER, RR_CODE, RR_SPEC, SOLUTION_MARKER } from '../../fixtures/lab_generator.ts';
+import { RR_MUTANT_EDITS, graded } from '../../fixtures/lab_verify.ts';
+import type { Grader } from '../../../src/main/lab_verify.ts';
 
 vi.setConfig({ testTimeout: 20_000 });
 
-type Step = 'interview' | 'path' | 'spec' | 'code';
-const stepOf = (schema): Step =>
-  schema.properties.hiddenTests ? 'spec' : schema.properties.starter ? 'code' : schema.properties.course ? 'interview' : 'path';
+type Step = 'interview' | 'path' | 'spec' | 'code' | 'mutants' | 'consistency' | 'repair';
+const LAB_PARTS = ['readme', 'build', 'publicTests', 'hiddenTests', 'starter', 'solution', 'hints'];
+const stepOf = (schema): Step => {
+  const keys: string[] = schema.required ?? [];
+  if (keys.includes('mutants')) return 'mutants';
+  if (keys.includes('issues')) return 'consistency';
+  if (keys.includes('id') && keys.includes('hiddenTests')) return 'spec';
+  if (keys.includes('starter') && keys.includes('solution') && keys.includes('hints') && keys.length === 3) return 'code';
+  // A repair's schema holds only the parts it rewrites.
+  if (keys.some((key) => LAB_PARTS.includes(key))) return 'repair';
+  return schema.properties.course ? 'interview' : 'path';
+};
+
+// `make grade` as the self-check would see it for this lab: the solution
+// passes every test it is given, the starter and every mutant fail them.
+const passingGrader: Grader = async (files) => {
+  const names = Object.entries(files)
+    .filter(([file]) => file.startsWith('tests/public/'))
+    .flatMap(([, script]) => [...script.matchAll(/^check "([^"]+)"/gm)].map((match) => match[1]));
+  const solved = files['src/rr.c'] === RR_CODE.solution[0].content;
+  return graded(Object.fromEntries(names.map((name) => [name, solved])));
+};
+
+const MUTANTS = { mutants: RR_MUTANT_EDITS };
 
 // The scheduling path starts with sched-metrics once process-state is known;
 // this one starts at round-robin, as in the example.
@@ -30,15 +54,27 @@ const RR_PATH = {
 
 // A fake Tutor for the interview and the generator's two calls. `gate` holds
 // the code call until it resolves, for cancelling mid-run.
+// `issues` are the review's answers, one per round (empty when it runs out).
 const team =
-  ({ spec = RR_SPEC, code = RR_CODE, gate = null }: { spec?: unknown; code?: unknown; gate?: Promise<void> | null } = {}) =>
+  ({
+    spec = RR_SPEC,
+    code = RR_CODE,
+    gate = null,
+    issues = [],
+    repair = {},
+    path = RR_PATH,
+  }: { spec?: unknown; code?: unknown; gate?: Promise<void> | null; issues?: unknown[][]; repair?: unknown; path?: unknown } = {}) =>
   async ({ schema, signal }: { schema: any; signal?: AbortSignal }) => {
     const step = stepOf(schema);
     if (step === 'code' && gate) await gate;
     if (signal?.aborted) throw Object.assign(new Error('cancelled'), { code: 'agent_cancelled' });
-    const output = { interview: goals.SCHEDULING_CLARIFY, path: RR_PATH, spec, code }[step];
-    return { output, costUsd: step === 'spec' || step === 'code' ? 0.4 : 0.01 };
+    const output =
+      step === 'consistency' ? { issues: issues.shift() ?? [] } : { interview: goals.SCHEDULING_CLARIFY, path, spec, code, mutants: MUTANTS, repair }[step];
+    const costUsd = { spec: 0.4, code: 0.4, mutants: 0.1, consistency: 0.05, repair: 0.3 }[step] ?? 0.01;
+    return { output, costUsd };
   };
+
+const harness = (options: Parameters<typeof fixtures.harness>[0] = {}) => fixtures.harness({ labGrader: passingGrader, ...options });
 
 // A confirmed course path, ready for its first lab.
 const confirmedCourse = async (h) => {
@@ -59,22 +95,23 @@ const settleLab = async (call, id: string): Promise<any> => {
   throw new Error('the lab never settled');
 };
 
-test('the estimate names the first concept to learn and runs no model', async () => {
-  const h = await fixtures.harness({ agent: team() });
+test('the estimate names the first concept to learn, counts the self-check in and runs no model', async () => {
+  const h = await harness({ agent: team() });
   const id = await confirmedCourse(h);
   const calls = h.agentCalls.length;
   const { data, error } = await h.call(CHANNELS.requirementsLabEstimate, id);
   assert.equal(error, undefined);
   assert.deepEqual(data.concepts, [{ id: 'round-robin', label: '时间片轮转（RR）' }]);
   assert.equal(data.difficulty, 'easy', 'a learner who knows the basics starts easy');
-  assert.equal(data.calls, 2);
-  assert.ok(data.tokens.input > 10_000 && data.tokens.output >= 200_000, JSON.stringify(data.tokens));
+  assert.equal(data.calls, 4, 'two to generate, mutants and the review once');
+  assert.equal(data.maxCalls, 10, 'three rounds of two reviews and two repairs');
+  assert.ok(data.tokens.input > 10_000 && data.tokens.output >= 300_000, JSON.stringify(data.tokens));
   assert.equal(data.usd, null, 'no price table has been synced');
   assert.equal(h.agentCalls.length, calls);
 });
 
 test('the estimate prices the tokens with the synced price table', async () => {
-  const h = await fixtures.harness({ agent: team() });
+  const h = await harness({ agent: team() });
   const id = await confirmedCourse(h);
   const prefs = fixtures.validPrefs();
   const saved = await h.call(CHANNELS.preferencesSet, {
@@ -86,12 +123,13 @@ test('the estimate prices the tokens with the synced price table', async () => {
   await fs.writeFile(path.join(h.configDir, 'model_prices.json'), JSON.stringify(table));
   const { data } = await h.call(CHANNELS.requirementsLabEstimate, id);
   assert.equal(data.model, 'claude-opus-5-5');
-  // The lab-gen eval spent $2.3 to $3.9 a lab on this model.
-  assert.ok(data.usd.low > 2 && data.usd.high > data.usd.low && data.usd.high < 7, JSON.stringify(data.usd));
+  // The lab-gen eval spent $2.3 to $3.9 a lab on this model to generate; the
+  // self-check adds one round at the low end, a repair and a second round at the high.
+  assert.ok(data.usd.low > 2.5 && data.usd.low < 4 && data.usd.high > 7 && data.usd.high < 13, JSON.stringify(data.usd));
 });
 
 test('a lab is only generated for a confirmed course path', async () => {
-  const h = await fixtures.harness({ agent: team() });
+  const h = await harness({ agent: team() });
   const { data } = await h.call(CHANNELS.requirementsCreate, { text: '想学操作系统的进程调度', course: goals.GOAL_FORM });
   await fixtures.settle(h.call, data.id);
   assert.equal((await h.call(CHANNELS.requirementsLabEstimate, data.id)).error.code, 'invalid_state');
@@ -100,8 +138,8 @@ test('a lab is only generated for a confirmed course path', async () => {
   assert.equal((await h.call(CHANNELS.requirementsLabGenerate, project.id)).error.code, 'invalid_state');
 });
 
-test('generating writes a private draft; the renderer sees only the title and counts', async () => {
-  const h = await fixtures.harness({ agent: team() });
+test('generating writes a private draft and checks it; the renderer sees only the title, counts and verdicts', async () => {
+  const h = await harness({ agent: team() });
   const id = await confirmedCourse(h);
   const started = (await h.call(CHANNELS.requirementsLabGenerate, id)).data;
   assert.equal(started.course.lab.status, 'running');
@@ -117,27 +155,61 @@ test('generating writes a private draft; the renderer sees only the title and co
     publicTests: 2,
     hiddenTests: 1,
   });
-  assert.equal(item.course.lab.costUsd, 0.8);
-  assert.ok(item.costUsd >= 0.8, 'the requirement adds the spend');
+  // Generating (0.8) and one self-check round: mutants (0.1) and the review (0.05).
+  assert.ok(Math.abs(item.course.lab.costUsd - 0.95) < 1e-9, String(item.course.lab.costUsd));
+  assert.ok(item.costUsd >= 0.95, 'the requirement adds the spend');
+  assert.deepEqual(item.course.lab.verify, {
+    round: 1,
+    maxRounds: 3,
+    rounds: [
+      {
+        round: 1,
+        checks: { reference: true, starter: true, mutants: true, consistency: true },
+        mutants: { killed: 5, publicKilled: 5, total: 5 },
+        issues: 0,
+        repaired: false,
+      },
+    ],
+    costUsd: item.course.lab.verify.costUsd,
+  });
+  assert.ok(Math.abs(item.course.lab.verify.costUsd - 0.15) < 1e-9);
   // The prompts carried the pack's labGuide and the confirmed path's goal.
   const specCall = h.agentCalls.find((call) => stepOf(call.schema) === 'spec')!;
   assert.match(specCall.prompt, /user-space C simulator/);
   assert.match(specCall.prompt, /- round-robin: /);
   // Nothing private reaches a channel the renderer reads.
   const visible = JSON.stringify([await h.call(CHANNELS.requirementsList), await h.call(CHANNELS.requirementsGet, id), await h.call(CHANNELS.listTasks)]);
-  for (const marker of [SOLUTION_MARKER, HIDDEN_MARKER, '一个用完时间片时', 'enqueue(arrived)']) assert.ok(!visible.includes(marker), marker);
+  for (const marker of [
+    SOLUTION_MARKER,
+    HIDDEN_MARKER,
+    '一个用完时间片时',
+    'enqueue(arrived)',
+    RR_MUTANT_EDITS[0].description,
+    ...RR_SPEC.hiddenTests[0].names,
+  ])
+    assert.ok(!visible.includes(marker), marker);
   // The draft is kept outside any repository, readable by this user only.
   const file = draftPath(h.configDir, id);
   assert.ok(!file.startsWith(h.root));
   assert.equal((await fs.stat(file)).mode & 0o077, 0);
   assert.ok((await fs.readFile(file, 'utf8')).includes(SOLUTION_MARKER));
-  // The spend is on the cost page, under Tutor and the requirement.
+  // So is the self-check's report, with what each check found.
+  const verify = JSON.parse(await fs.readFile(verifyPath(h.configDir, id), 'utf8'));
+  assert.equal((await fs.stat(verifyPath(h.configDir, id))).mode & 0o077, 0);
+  assert.equal(verify.status, 'passed');
+  assert.deepEqual(
+    verify.rounds[0].mutantResults.map((result) => result.description),
+    RR_MUTANT_EDITS.map((entry) => entry.description),
+  );
+  // Every call's spend is on the cost page, under Tutor and the requirement.
   const report = (await h.call(CHANNELS.costsReport, 7)).data;
-  assert.ok(report.bySubject.some((row) => row.kind === 'requirement' && row.id === id));
+  const row = report.bySubject.find((entry) => entry.kind === 'requirement' && entry.id === id);
+  assert.ok(row, JSON.stringify(report.bySubject));
+  assert.equal(row.calls, 4 + 2, 'the interview and the path, generation, mutants and the review');
 });
 
 test('the draft becomes a lab artifact with a git-made reference patch that applies to the starter', async () => {
-  const h = await fixtures.harness({ agent: team() });
+  const h = await harness({ agent: team() });
   const id = await confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
   await settleLab(h.call, id);
@@ -165,7 +237,7 @@ test('the draft becomes a lab artifact with a git-made reference patch that appl
 
 test('a lab that does not validate fails the run with its error, keeping what it cost', async () => {
   const leaking = { ...RR_SPEC, hiddenTests: [{ ...RR_SPEC.hiddenTests[0], names: ['输出 b=3'], script: 'echo "ok - 输出 b=3"' }] };
-  const h = await fixtures.harness({ agent: team({ spec: leaking }) });
+  const h = await harness({ agent: team({ spec: leaking }) });
   const id = await confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
   const item = await settleLab(h.call, id);
@@ -181,7 +253,7 @@ test('cancelling stops the run before the code call lands, and a retry starts ov
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const h = await fixtures.harness({ agent: team({ gate }) });
+  const h = await harness({ agent: team({ gate }) });
   const id = await confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
   for (let index = 0; index < 200 && (await h.call(CHANNELS.requirementsGet, id)).data.course.lab.phase !== 'code'; index += 1)
@@ -199,7 +271,7 @@ test('cancelling stops the run before the code call lands, and a retry starts ov
 test('repair() rewrites the named parts of the draft and keeps the new version', async () => {
   const hiddenTests = [{ file: '01_rr_more.sh', names: ['空闲之后到达的作业'], script: 'echo "ok - 空闲之后到达的作业"\n' }];
   const base = team();
-  const h = await fixtures.harness({
+  const h = await harness({
     agent: async (options) => {
       const schema = options.schema as { required: string[]; properties: Record<string, unknown> };
       return schema.required.length === 1 && schema.properties.hiddenTests ? { output: { hiddenTests }, costUsd: 0.1 } : base(options);
@@ -216,7 +288,7 @@ test('repair() rewrites the named parts of the draft and keeps the new version',
 });
 
 test('a lab interrupted by a quit is failed on the next load', async () => {
-  const h = await fixtures.harness({ agent: team() });
+  const h = await harness({ agent: team() });
   const id = await confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
   await settleLab(h.call, id);
@@ -228,4 +300,118 @@ test('a lab interrupted by a quit is failed on the next load', async () => {
   const lab: any = h.requirements.get(id).course!.lab;
   assert.equal(lab.status, 'failed');
   assert.equal(lab.error.code, 'agent_interrupted');
+});
+
+// ========== Self-check ==========
+
+// The CARM-33 example's second round: the repair added the hidden test the
+// surviving mutant needed, and the review is satisfied.
+const ORDER_TEST = { file: '01_rr_order.sh', names: ['作业运行中到达时的入队顺序'], script: `#!/bin/sh\ncheck "作业运行中到达时的入队顺序" "x" "x"\n` };
+// The first round's grader: the queue-order mutant passes every test until
+// the repaired lab carries ORDER_TEST.
+const exampleGrader: Grader = async (files, options) => {
+  const result = await passingGrader(files, options);
+  const orderMutant = files['src/rr.c'] === RR_CODE.solution[0].content.replace(RR_MUTANT_EDITS[0].edits[0].find, () => RR_MUTANT_EDITS[0].edits[0].replace);
+  if (!orderMutant || `tests/public/${ORDER_TEST.file}` in files) return result;
+  return graded(Object.fromEntries(Object.keys(result.results).map((name) => [name, true])));
+};
+
+test('the example’s retry path: round 1 misses a mutant and finds an issue, the repair fixes both, round 2 passes', async () => {
+  const issue = { kind: 'untested_requirement', detail: '题面没有说清作业运行时新到的作业和被抢占的作业谁先入队' };
+  const h = await harness({
+    agent: team({ issues: [[issue], []], repair: { publicTests: RR_SPEC.publicTests, hiddenTests: [...RR_SPEC.hiddenTests, ORDER_TEST] } }),
+    labGrader: exampleGrader,
+  });
+  const id = await confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  const item = await settleLab(h.call, id);
+  assert.equal(item.course.lab.status, 'ready', JSON.stringify(item.course.lab.error));
+  const rounds = item.course.lab.verify.rounds;
+  assert.equal(rounds.length, 2);
+  assert.deepEqual(rounds[0], {
+    round: 1,
+    checks: { reference: true, starter: true, mutants: true, consistency: false },
+    mutants: { killed: 4, publicKilled: 4, total: 5 },
+    issues: 1,
+    repaired: true,
+  });
+  assert.deepEqual(rounds[1].checks, { reference: true, starter: true, mutants: true, consistency: true });
+  assert.equal(rounds[1].mutants.killed, 5);
+  assert.equal(item.course.lab.lab.hiddenTests, 2, 'the learner sees the repaired lab’s counts');
+  // The repair was told what failed, in the checks' own words, and asked only for the parts involved.
+  const repairCall = h.agentCalls.find((call) => stepOf(call.schema) === 'repair')!;
+  assert.match(repairCall.prompt, /Not caught: 被抢占的作业排在新到作业之前入队/);
+  assert.match(repairCall.prompt, /untested_requirement: 题面没有说清/);
+  assert.deepEqual([...(repairCall.schema.required as string[])].sort(), ['hiddenTests', 'publicTests']);
+  // 0.8 generating, two rounds of 0.15, one repair of 0.3; all on the requirement and the cost page.
+  assert.ok(Math.abs(item.course.lab.costUsd - 1.4) < 1e-9, String(item.course.lab.costUsd));
+  const row = (await h.call(CHANNELS.costsReport, 7)).data.bySubject.find((entry) => entry.kind === 'requirement' && entry.id === id);
+  assert.equal(row.calls, 2 + 2 + 2 * 2 + 1);
+  // The repaired draft and its report become the lab's private parts.
+  const artifact = await h.labGeneration.artifact(id);
+  assert.deepEqual(Object.keys(artifact.private.hidden), ['01_rr_hidden.sh', '01_rr_order.sh']);
+  const verify = artifact.private.verify as { status: string; rounds: { mutantResults: { killed: boolean; description: string }[] }[] };
+  assert.equal(verify.status, 'passed');
+  assert.deepEqual(
+    verify.rounds[0].mutantResults.filter((result) => !result.killed).map((result) => result.description),
+    ['被抢占的作业排在新到作业之前入队'],
+  );
+});
+
+test('a lab still failing after two repairs needs review, and another concept on the path can be generated instead', async () => {
+  const issue = { kind: 'outside_interface', detail: '参考解用了题面没给的 qsort' };
+  // Two concepts still to learn: round-robin, then priority-sched.
+  const path = { ...RR_PATH, path: RR_PATH.path.map((entry) => (entry.conceptId === 'priority-sched' ? { ...entry, status: 'planned' } : entry)) };
+  const h = await harness({ agent: team({ issues: [[issue], [issue], [issue]], repair: { solution: RR_CODE.solution }, path }) });
+  const id = await confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  const item = await settleLab(h.call, id);
+  assert.equal(item.course.lab.status, 'needs_review');
+  assert.equal(item.course.lab.verify.rounds.length, 3);
+  assert.deepEqual(
+    item.course.lab.verify.rounds.map((round) => round.repaired),
+    [true, true, false],
+  );
+  const repairs = h.agentCalls.filter((call) => stepOf(call.schema) === 'repair');
+  assert.equal(repairs.length, 2, 'two retries, never a third');
+  assert.deepEqual(repairs[0].schema.required, ['solution'], 'an interface outside the statement is the solution’s to fix');
+  assert.ok(Math.abs(item.course.lab.costUsd - (0.8 + 3 * 0.15 + 2 * 0.3)) < 1e-9, String(item.course.lab.costUsd));
+  // 换一个知识点: only a concept still to learn on the path.
+  assert.equal((await h.call(CHANNELS.requirementsLabEstimate, id, 'fcfs')).error.code, 'invalid_argument');
+  const estimated = await h.call(CHANNELS.requirementsLabEstimate, id, 'priority-sched');
+  assert.equal(estimated.error, undefined, JSON.stringify(estimated.error));
+  const estimate = estimated.data;
+  assert.deepEqual(
+    estimate.concepts.map((entry) => entry.id),
+    ['priority-sched'],
+  );
+  await h.call(CHANNELS.requirementsLabGenerate, id, 'priority-sched');
+  assert.deepEqual((await settleLab(h.call, id)).course.lab.concepts, ['priority-sched']);
+  const specCall = h.agentCalls.filter((call) => stepOf(call.schema) === 'spec').at(-1)!;
+  assert.match(specCall.prompt, /- priority-sched: /);
+});
+
+test('cancelling during the self-check stops it and keeps what was spent', async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const gated: Grader = async (files, options) => {
+    await gate;
+    return passingGrader(files, options);
+  };
+  const h = await harness({ agent: team(), labGrader: gated });
+  const id = await confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  for (let index = 0; index < 200 && (await h.call(CHANNELS.requirementsGet, id)).data.course.lab.phase !== 'verify'; index += 1)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  const running = (await h.call(CHANNELS.requirementsGet, id)).data.course.lab;
+  assert.equal(running.phase, 'verify');
+  assert.deepEqual(running.verify, { round: 1, maxRounds: 3, rounds: [], costUsd: 0 });
+  assert.equal((await h.call(CHANNELS.requirementsCancel, id)).data, true);
+  release();
+  const item = await settleLab(h.call, id);
+  assert.equal(item.course.lab.status, 'failed');
+  assert.equal(item.course.lab.error.code, 'agent_cancelled');
+  assert.equal(item.course.lab.costUsd, 0.8, 'the generation was spent');
 });

@@ -272,13 +272,16 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   // ========== First lab ==========
-  // The estimate shown before generating; nothing runs until the learner confirms.
-  const labEstimate = ref<{ requirementId: string; estimate: requirementTypes.LabEstimate } | null>(null);
+  // The estimate shown before generating; nothing runs until the learner
+  // confirms. `conceptId` is another concept the learner picked after a
+  // self-check that ended in needs_review; null is the path's next one.
+  const labEstimate = ref<{ requirementId: string; conceptId: string | null; estimate: requirementTypes.LabEstimate } | null>(null);
 
-  const loadLabEstimate = async (item: requirementTypes.Requirement) => {
+  const loadLabEstimate = async (item: requirementTypes.Requirement, conceptId: string | null = null) => {
     courseBusy.value = true;
     try {
-      labEstimate.value = { requirementId: item.id, estimate: await call(window.taskpilot.requirements.labEstimate(item.id)) };
+      const estimate = await call(window.taskpilot.requirements.labEstimate(item.id, conceptId ?? undefined));
+      labEstimate.value = { requirementId: item.id, conceptId, estimate };
     } catch (error) {
       console.error(error);
       showToast(`预估费用失败：${describeError(error)}`);
@@ -288,7 +291,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const generateLab = async (item: requirementTypes.Requirement) => {
-    const next = await courseAction(() => call(window.taskpilot.requirements.labGenerate(item.id)), '生成 lab 失败');
+    const conceptId = labEstimate.value?.requirementId === item.id ? labEstimate.value.conceptId : null;
+    const next = await courseAction(() => call(window.taskpilot.requirements.labGenerate(item.id, conceptId ?? undefined)), '生成 lab 失败');
     if (!next) return;
     labEstimate.value = null;
     startPolling();
@@ -337,7 +341,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const announceLab = (lab: requirementTypes.LabGeneration) => {
-    if (lab.status === 'ready') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」生成好了。`, 'info');
+    if (lab.status === 'ready') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」生成好了，自验证已通过。`, 'info');
+    else if (lab.status === 'needs_review') announceAgent(`第一个 lab「${lab.lab?.title ?? ''}」自验证没有通过，等你决定怎么办。`);
     else if (lab.status === 'failed' && lab.error?.code !== 'agent_cancelled') announceAgent(`生成 lab 失败：${describeErrorInfo(lab.error)}`);
   };
 

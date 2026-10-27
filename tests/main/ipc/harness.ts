@@ -11,6 +11,7 @@ import { registerIpcHandlers } from '../../../src/main/ipc.ts';
 import type { IpcHandle } from '../../../src/main/ipc.ts';
 import type { AgentDeps, ShellDeps } from '../../../src/main/app_context.ts';
 import type { CodingDeps } from '../../../src/main/coding_runtime.ts';
+import type { Grader } from '../../../src/main/lab_verify.ts';
 import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../../src/shared/coding_types.ts';
@@ -78,12 +79,15 @@ export const harness = async ({
   seedState = null,
   coding = {},
   modelCatalog,
+  labGrader = undefined,
 }: {
   withRepo?: boolean;
   agent?: FakeAgent | null;
   seedState?: Record<string, unknown> | null;
   coding?: CodingOverrides;
   modelCatalog?: AgentDeps['modelCatalog'];
+  // The lab self-check's `make grade`; the real one runs only under Seatbelt.
+  labGrader?: Grader;
 } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directory goes.
@@ -190,6 +194,7 @@ export const harness = async ({
         clean: coding.codingClean,
         snapshot: coding.codingSnapshot,
       },
+      labGrader,
     },
   );
 
