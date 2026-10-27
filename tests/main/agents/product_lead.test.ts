@@ -190,3 +190,53 @@ test('validatePlan() requires a practice-or-ai mode with a reason, and toTaskDef
   const [old] = productLead.toTaskDefinitions({ id: 'req-1', title: '登录' }, [{ ...plan.packages[0], recommendedMode: undefined }]);
   assert.equal('recommendedMode' in old, false);
 });
+
+// [人工决策-2026-10-27 00:36:21] 项目任务的知识点只从课程包骨架白名单里选 0–3 个，校验不过就丢掉。
+test('with a concept skeleton the plan offers its ids, and validatePlan() keeps only those', () => {
+  const pack = {
+    ...PROGRAMMING_COURSE,
+    id: 'os',
+    concepts: [
+      { id: 'round-robin', label: '时间片轮转', summary: 's', prerequisites: [] },
+      { id: 'priority-sched', label: '优先级调度', summary: 's', prerequisites: [] },
+      { id: 'aging', label: '老化', summary: 's', prerequisites: [] },
+      { id: 'mlfq', label: '多级反馈队列', summary: 's', prerequisites: [] },
+    ],
+  };
+  const prompt = productLead.planPrompt({ text: '调度器', linkTests: true, course: pack });
+  assert.ok(prompt.includes('by id from this list only.'));
+  assert.ok(prompt.includes('\n- round-robin: 时间片轮转\n- priority-sched: 优先级调度\n'));
+  const schema = productLead.planSchema(pack);
+  const concepts = (schema.properties.packages.items.properties as Record<string, { maxItems?: number; items?: { enum?: string[] } }>).concepts;
+  assert.deepEqual(concepts.items!.enum, ['round-robin', 'priority-sched', 'aging', 'mlfq']);
+  assert.equal(concepts.maxItems, 3);
+  assert.ok(!schema.properties.packages.items.required.includes('concepts'), 'an untagged package is fine');
+
+  const allowed = { ...LINKED, concepts: pack.concepts.map((concept) => concept.id) };
+  const plan = productLead.validatePlan(
+    validPlan([
+      validPackage({ concepts: ['round-robin', 'invented', 'round-robin', 7] }),
+      validPackage({ concepts: ['round-robin', 'priority-sched', 'aging', 'mlfq'] }),
+      validPackage({ concepts: 'round-robin' }),
+      validPackage(),
+    ]),
+    allowed,
+  );
+  assert.deepEqual(
+    plan.packages.map((pkg) => pkg.concepts),
+    [['round-robin'], undefined, undefined, undefined],
+    'unknown ids dropped, more than three read as guessing',
+  );
+  const definitions = productLead.toTaskDefinitions({ id: 'req-1', title: '调度' }, plan.packages);
+  assert.deepEqual(definitions[0].concepts, ['round-robin']);
+  assert.equal('concepts' in definitions[1], false);
+  // Without a whitelist nothing is kept.
+  assert.equal(productLead.validatePlan(validPlan([validPackage({ concepts: ['round-robin'] })]), LINKED).packages[0].concepts, undefined);
+});
+
+test('a pack without a skeleton plans with the same prompt and schema as before concepts', () => {
+  assert.equal(productLead.planSchema(PROGRAMMING_COURSE), productLead.PLAN_SCHEMA);
+  assert.equal('concepts' in productLead.PLAN_SCHEMA.properties.packages.items.properties, false);
+  assert.doesNotMatch(productLead.planPrompt({ text: '登录', linkTests: true, course: PROGRAMMING_COURSE }), /Concepts:/);
+  assert.doesNotMatch(productLead.planPrompt({ text: '登录', linkTests: true, course: { ...PROGRAMMING_COURSE, concepts: [] } }), /Concepts:/);
+});

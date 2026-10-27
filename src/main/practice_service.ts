@@ -144,6 +144,8 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
     const diffDigest = practice.submissionDigest(submission);
     if (!force && practice.alreadyGraded(state.grade, diffDigest)) return ctx.viewOf(task, state);
     const reference = state.referenceRun;
+    const wireReview = toWireState(state).review;
+    const repoId = ctx.repositories.current?.id ?? null;
     const gradeId = codingExec.codingRunId();
     // The pack in use now; a repository pack not yet confirmed is never it (./courses.ts).
     const { pack: course, ref: courseRef } = await ctx.course(config);
@@ -213,8 +215,27 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       } finally {
         backgroundRuns.finish('grade', id, controller);
       }
-      await store.setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt: new Date().toISOString() }, gradeId);
-      console.debug(`[grade] done package=${id} status=${finished.status}`);
+      const finishedAt = new Date().toISOString();
+      const written = await store.setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt }, gradeId);
+      console.debug(`[grade] done package=${id} status=${finished.status} kept=${Boolean(written)}`);
+      // [人工决策-2026-10-27 00:36:21] 判卷 done 时按知识点写一次掌握度；同一包同一次提交（diffDigest）只写一次，ai 模式不写。
+      // Mastery is a side record: a failed write is logged and the grade stands.
+      if (written && finished.report && ctx.mastery && repoId) {
+        await ctx.mastery
+          .record({
+            mode: state.mode,
+            // The concepts are ids of the pack the package was planned with.
+            course: task.course?.id ?? courseRef.id,
+            concepts: task.concepts ?? [],
+            packageId: id,
+            repoId,
+            diffDigest,
+            review: wireReview,
+            report: finished.report,
+            at: finishedAt,
+          })
+          .catch((error) => console.error('[mastery] record failed', error));
+      }
     })();
     backgroundRuns.track(settled);
     return ctx.viewOf(task, store.get(id));

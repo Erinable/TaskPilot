@@ -37,6 +37,7 @@ import type { Requirement, RequirementStore } from './requirement_store.ts';
 import type { ReleaseStore } from './release_store.ts';
 import type { TutorStore } from './tutor_store.ts';
 import type { NoteStore } from './note_store.ts';
+import type { MasteryStore } from './mastery_store.ts';
 import type { RepositoryRegistry } from './repositories.ts';
 import type { TaskDefinition } from './tasks.ts';
 
@@ -99,6 +100,8 @@ export type AppDeps = {
   tutor?: TutorStore | null;
   // Learning notes; global, not per repository.
   notes?: NoteStore | null;
+  // Mastery per course concept; global, written when a grade is done.
+  mastery?: MasteryStore | null;
   shell?: ShellDeps;
   agents?: AgentDeps;
 };
@@ -172,6 +175,7 @@ export const createAppContext = (deps: AppDeps) => {
     releases = null,
     tutor = null,
     notes = null,
+    mastery = null,
     shell = {},
   } = deps;
   const { runAgent, probeAgent = cliRunner.probeCli, checkSignIn = cliSignIn.checkSignIn, modelCatalog = readModelCatalog } = deps.agents ?? {};
@@ -393,7 +397,8 @@ export const createAppContext = (deps: AppDeps) => {
 
   // Waits for every queued store write, including the activity appends
   // that are not awaited where they are recorded.
-  const flushStores = () => Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush(), notes?.flush()]);
+  const flushStores = () =>
+    Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush(), notes?.flush(), mastery?.flush()]);
 
   // [人工决策-2026-10-07 14:31:37] 切换仓库时有后台任务：渲染层先弹窗列出、用户确认后，这里取消全部任务再切；内存里同时只有一个仓库的数据。
   // Order matters: requirements must be open (their published packages are
@@ -433,6 +438,7 @@ export const createAppContext = (deps: AppDeps) => {
     releases,
     tutor,
     notes,
+    mastery,
     shell,
     probeAgent,
     checkSignIn,

@@ -350,7 +350,8 @@ export const useNotesStore = defineStore('notes', () => {
   // back at the package and the line it was about.
   // The comment's category is a rubric item of the pack the grade was made
   // with; grades from before packs have no snapshot and were programming.
-  const saveComment = async (task: Pick<packageTypes.TaskView, 'id' | 'title' | 'grade'>, comment: packageTypes.GradeComment) => {
+  // The package's concepts come along, for reviewing the note later.
+  const saveComment = async (task: Pick<packageTypes.TaskView, 'id' | 'title' | 'grade' | 'concepts'>, comment: packageTypes.GradeComment) => {
     const repository = useRepositoriesStore().current;
     const note = await create(
       {
@@ -358,6 +359,7 @@ export const useNotesStore = defineStore('notes', () => {
         body: `${comment.observation}\n\n## 下次可以\n\n${comment.betterWay}\n`,
         category: comment.category,
         course: task.grade?.course?.id ?? DEFAULT_COURSE_ID,
+        concepts: task.concepts ?? [],
         tags: [],
         source: {
           repositoryId: repository?.id ?? null,

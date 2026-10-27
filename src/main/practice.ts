@@ -55,7 +55,7 @@ export const referenceForPrompt = (patch: string): string => {
 // hidden tests) passed, and every acceptance criterion with a linked test
 // was verified. QA's own verdict does not count; with nothing to run there
 // is nothing that passed.
-const testsPassed = (review: Review | null): boolean => {
+export const testsPassed = (review: Review | null): boolean => {
   if (!review || (review.status !== 'passed' && review.status !== 'rejected')) return false;
   const checks = review.checks.filter((check) => check.blocking);
   const linked = review.acceptance.filter((criterion) => criterion.test);
