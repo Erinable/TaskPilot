@@ -87,6 +87,7 @@ declare const api: {
     labEstimate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.LabEstimate>>;
     labGenerate: (id: string, conceptId?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
     courseSkip: (id: string, conceptId: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
+    labPlace: (id: string, root?: string) => Promise<envelopeTypes.IpcResult<requirementTypes.Requirement>>;
   };
   agent: {
     status: () => Promise<envelopeTypes.IpcResult<settingsTypes.AgentStatus>>;

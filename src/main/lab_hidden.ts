@@ -26,10 +26,12 @@ const MAX_FILE_BYTES = 1024 * 1024;
 
 // The working tree as `make grade` needs it: git's files (tracked or new,
 // never ignored ones such as build/), without secret-looking or large ones.
-const workingTree = async (root: string): Promise<Record<string, string>> => {
+// The public tests are left out unless `publicTests` (the next stage's
+// self-check runs them as the earlier stages' regression tests).
+export const workingTree = async (root: string, { publicTests = false }: { publicTests?: boolean } = {}): Promise<Record<string, string>> => {
   const files: Record<string, string> = {};
   for (const file of await git.workingFiles(root)) {
-    if (looksSecret(file) || file.startsWith(`${labs.PUBLIC_TESTS_DIR}/`)) continue;
+    if (looksSecret(file) || (!publicTests && file.startsWith(`${labs.PUBLIC_TESTS_DIR}/`))) continue;
     const stat = await fs.lstat(path.join(root, file)).catch(() => null);
     if (!stat?.isFile() || stat.size > MAX_FILE_BYTES) continue;
     files[file] = await fs.readFile(path.join(root, file), 'utf8');

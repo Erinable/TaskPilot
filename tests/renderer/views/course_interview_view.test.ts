@@ -255,4 +255,38 @@ describe('course interview', () => {
     store.stopPolling();
     wrapper.unmount();
   });
+
+  test('a lab that passed is written into a new lab repository in a picked folder, which then opens', async () => {
+    state.list = withLab(labGeneration({ stage: 1, placed: false }));
+    const { wrapper, store } = await render();
+    const button = wrapper.get('[data-action="place-lab"]');
+    expect(button.text()).toBe('选一个空文件夹，建实验仓库');
+    await button.trigger('click');
+    await flushPromises();
+    expect(api.workspace.pickRoot).toHaveBeenCalled();
+    expect(api.requirements.labPlace).toHaveBeenCalledWith('r1', '/Users/me/sched-lab');
+    // The switch reloads the queue and the list for the lab repository.
+    expect(api.repositories.list).toHaveBeenCalled();
+    expect(api.listTasks).toHaveBeenCalled();
+    store.stopPolling();
+    wrapper.unmount();
+  });
+
+  test('once in the lab repository a later stage says which stage it is and is added there', async () => {
+    state.list = [
+      requirement({
+        kind: 'course',
+        status: 'published',
+        course: { ...coursePathInterview(), repositoryId: 'lab-repo', lab: labGeneration({ stage: 2, placed: false }) },
+      }),
+    ];
+    const { wrapper, store } = await render();
+    expect(wrapper.get('[data-section="first-lab"] h3').text()).toContain('第 2 阶段 lab：时间片轮转调度');
+    await wrapper.get('[data-action="place-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.workspace.pickRoot).not.toHaveBeenCalled();
+    expect(api.requirements.labPlace).toHaveBeenCalledWith('r1');
+    store.stopPolling();
+    wrapper.unmount();
+  });
 });

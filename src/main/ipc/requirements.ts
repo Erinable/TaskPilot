@@ -296,6 +296,15 @@ export const register = (
     ),
   );
 
+  // The learner writes the lab whose self-check passed into the lab
+  // repository: the first one into a new one in the folder they picked.
+  ipcMain.handle(
+    CHANNELS.requirementsLabPlace,
+    wrap(async (_event, id, root): Promise<requirementTypes.Requirement> =>
+      toWireRequirement(await labGeneration.place(requireString(id, 'id'), root === undefined || root === null ? null : requireString(root, 'root'))),
+    ),
+  );
+
   // The learner gives up on a concept still to learn after its labs kept
   // failing at easy; the next lab skips it.
   ipcMain.handle(

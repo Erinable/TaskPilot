@@ -33,8 +33,10 @@ export type CourseInterview = {
   pathConcepts: Concept[];
   // A drafted pack, validated, until the learner saves and confirms it.
   draft: { pack: CoursePack; contentHash: string } | null;
-  // The first lab's generation, once the path is confirmed; absent before.
+  // The latest lab's generation, once the path is confirmed; absent before.
   lab?: LabGeneration | null;
+  // The lab repository the labs are written into, once created.
+  repositoryId?: string | null;
 };
 
 // What the learner sees of a lab being generated: never its code, solution,
@@ -54,6 +56,10 @@ export type LabGeneration = {
   // The self-check so far; absent on labs generated before it existed.
   verify?: LabVerify | null;
   error: ErrorInfo | null;
+  // The lab repository stage it was generated for, and whether it has been
+  // written there; absent on labs from before lab repositories (stage 1).
+  stage?: number;
+  placed?: boolean;
 };
 
 export type LabVerifyCheck = 'reference' | 'starter' | 'mutants' | 'consistency';

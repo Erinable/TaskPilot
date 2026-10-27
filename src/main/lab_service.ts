@@ -67,16 +67,20 @@ export const createLabService = (ctx: AppContext) => {
 
   // A new lab repository in `root` with `items` as stages 1, 2, …: written,
   // committed, added to the registry and opened, then its labs published.
+  // `beforeOpen` runs once it is registered, while the repository the
+  // learner came from is still the open one.
   const createRepository = async ({
     root,
     course,
     plan,
     labs: items,
+    beforeOpen,
   }: {
     root: string;
     course: string;
     plan: labs.CoursePlan;
     labs: labs.LabArtifact[];
+    beforeOpen?: (entry: RepositoryEntry) => Promise<void>;
   }): Promise<RepositoryEntry> => {
     await checkFolder(root);
     const places = { ...ctx.coursePlaces(), root: null };
@@ -108,6 +112,7 @@ export const createLabService = (ctx: AppContext) => {
     const entry = await ctx.repositories.add((await ctx.validateRoot(root)).root);
     for (const { lab } of checked) await labs.writePrivate(ctx.repositories.dataDir(entry.id), lab.id, lab.private);
     console.debug(`[labs] created repository=${entry.id} course=${course} labs=${checked.length}`);
+    await beforeOpen?.(entry);
     await ctx.openRepository(entry.id);
     await publish(checked, null);
     return entry;

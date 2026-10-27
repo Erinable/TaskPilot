@@ -27,9 +27,13 @@ import * as generator from './agents/lab_generator.ts';
 import * as verifier from './agents/lab_verifier.ts';
 import * as labVerify from './lab_verify.ts';
 import * as progress from './lab_progress.ts';
+import * as labHidden from './lab_hidden.ts';
+import * as projectConfig from './project_config.ts';
+import { PRESET_IDS } from './presets/index.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
 import { estimateMicros, loadPrices, priceFor } from './model_prices.ts';
 import type { AppContext } from './app_context.ts';
+import type { LabService } from './lab_service.ts';
 import type { Requirement } from './requirement_store.ts';
 import type { RunAgent } from './agents/claude_cli.ts';
 import { DEFAULT_COURSE_ID } from '../shared/course_pack.ts';
@@ -154,7 +158,10 @@ const wireLab = (lab: generator.GeneratedLab): NonNullable<requirementTypes.LabG
 
 // `grader` runs `make grade` for the self-check; tests replace it, the app
 // uses the offline Seatbelt one.
-export const createLabGenerationService = (ctx: AppContext, { grader = labVerify.sandboxGrader() }: { grader?: labVerify.Grader } = {}) => {
+export const createLabGenerationService = (
+  ctx: AppContext,
+  { grader = labVerify.sandboxGrader(), labService }: { grader?: labVerify.Grader; labService: LabService },
+) => {
   const { backgroundRuns } = ctx;
   const requireRequirements = () => ctx.requirements ?? failWith('Requirements are unavailable', 'unsupported');
 
@@ -174,19 +181,45 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
     return { item, pack };
   };
 
+  // The open lab repository this path's labs go into, or null before it
+  // exists (the next lab is stage 1). A path whose repository is elsewhere
+  // is refused: its labs are generated with that repository open.
+  const labRepository = async (item: Requirement) => {
+    const repositoryId = item.course?.repositoryId ?? null;
+    if (!repositoryId) return null;
+    if (ctx.repositories.current?.id !== repositoryId) return failWith('Open the lab repository of this course first', 'not_lab_repository');
+    const root = ctx.requireRoot();
+    const text = await projectConfig.readProjectText(root);
+    const project = text === null ? null : projectConfig.parseProject(text, PRESET_IDS);
+    if (!project?.labs.length) return failWith('This repository is not a course lab repository', 'not_lab_repository');
+    return { root, labs: project.labs };
+  };
+
+  // What the next stage is generated against: the stage number, the labs
+  // and files so far, and the current build rules.
+  const existingOf = async (repository: Awaited<ReturnType<typeof labRepository>>) => {
+    if (!repository) return { stage: 1, existing: { labIds: [], files: [], build: null } };
+    const files = await git.workingFiles(repository.root);
+    const build = files.includes(labs.BUILD_RULES_PATH) ? await fs.readFile(path.join(repository.root, labs.BUILD_RULES_PATH), 'utf8') : null;
+    return {
+      stage: Math.max(...repository.labs.map((lab) => lab.stage)) + 1,
+      existing: { labIds: repository.labs.map((lab) => lab.id), files: files.filter((file) => file.startsWith('src/')), build },
+    };
+  };
+
   const requestFor = async (id: string, conceptId: string | null) => {
     const { item, pack } = await courseOf(id);
     const next = nextLab(item, ctx.mastery?.ofCourse(pack.id) ?? new Map(), conceptId);
     console.debug(`[lab-gen] next requirement=${id} concept=${next.conceptId} difficulty=${next.difficulty} change=${next.change} stuck=${next.stuck}`);
+    const repository = await labRepository(item);
     const request: generator.LabRequest = {
       course: pack,
       goal: item.course!.plan!.goal,
       concepts: [next.concept],
       difficulty: next.difficulty,
-      stage: 1,
-      existing: { labIds: [], files: [], build: null },
+      ...(await existingOf(repository)),
     };
-    return { request, next, course: pack.id };
+    return { request, next, course: pack.id, root: repository?.root ?? null };
   };
 
   // [人工决策-2026-10-27 00:36:21] 不能卡住：同一知识点连续 2 次 fail 自动降一级；降到 easy 还 fail，
@@ -260,10 +293,12 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
       envPath,
       signal,
       onProgress,
+      base,
     }: {
       runAgent: RunAgent;
       envPath: string | null;
       signal: AbortSignal;
+      base: Record<string, string>;
       onProgress: (state: Parameters<labVerify.VerifyProgress>[0], lab: generator.GeneratedLab) => Promise<void>;
     },
   ) => {
@@ -271,7 +306,7 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
     let saved = draft;
     const result = await labVerify.verifyLab(
       draft.lab,
-      { stage: draft.request.stage, base: labVerify.FIRST_STAGE_BASE },
+      { stage: draft.request.stage, base },
       {
         grade: grader,
         envPath,
@@ -297,9 +332,18 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
   // requirement shows its progress and the run is cancelled with
   // requirements:cancel (or by a repository switch).
   const start = async (id: string, conceptId: string | null = null) => {
-    const { request } = await requestFor(id, conceptId);
-    if (requireRequirements().get(id).course?.lab?.status === 'running' || backgroundRuns.has('requirement', id))
-      return failWith('A lab is already being generated', 'invalid_state');
+    const { request, root } = await requestFor(id, conceptId);
+    const lab = requireRequirements().get(id).course?.lab;
+    // Checked first: a run that just finished may still be leaving the registry.
+    if (lab?.status === 'ready' && !lab.placed) return failWith('Write the lab that is ready into the lab repository first', 'lab_not_placed');
+    if (lab?.status === 'running' || backgroundRuns.has('requirement', id)) return failWith('A lab is already being generated', 'invalid_state');
+    // The next stage builds on the last one's code, so it waits until that
+    // stage is done.
+    const last = (await labRepository(requireRequirements().get(id)))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
+    if (last && ctx.store.get(labs.packageId(last.id)).status !== 'done') return failWith(`Finish lab ${last.id} first`, 'previous_lab_open');
+    // A later stage is checked on top of the repository as it stands, so
+    // the earlier stages' tests run as regression tests.
+    const verifyBase = root ? { ...(await labHidden.workingTree(root, { publicTests: true })), ...labVerify.FIRST_STAGE_BASE } : labVerify.FIRST_STAGE_BASE;
     const startedAt = new Date().toISOString();
     const base: requirementTypes.LabGeneration = {
       status: 'running',
@@ -312,6 +356,8 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
       lab: null,
       verify: null,
       error: null,
+      stage: request.stage,
+      placed: false,
     };
     const started = await update(id, base);
     const controller = backgroundRuns.start({ kind: 'requirement', key: id, busy: 'requirement', agent: () => 'tutor', label: () => started.title || id });
@@ -349,6 +395,7 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
           runAgent,
           envPath,
           signal: controller.signal,
+          base: verifyBase,
           onProgress: ({ round, phase, rounds }, latest) =>
             progress({ ...current, phase, lab: wireLab(latest), verify: verifyState(round, rounds, spent - generatedCost) }),
         });
@@ -418,7 +465,45 @@ export const createLabGenerationService = (ctx: AppContext, { grader = labVerify
     return toLabArtifact(draft.lab, draft.request, await readReport(id));
   };
 
-  return { estimate, start, repair, artifact, report: readReport };
+  // ========== Placing ==========
+  // Writes the lab whose self-check passed into the lab repository: the
+  // first one creates the repository in `root` (an empty folder the learner
+  // picked) and opens it, copying the course requirement there; a later one
+  // is the open repository's next stage. Returns the requirement as the lab
+  // repository now has it.
+  const place = async (id: string, root: string | null) => {
+    const { item } = await courseOf(id);
+    const lab = item.course!.lab;
+    if (lab?.status !== 'ready') return failWith('There is no lab whose self-check passed', 'invalid_state');
+    if (lab.placed) return failWith('This lab is already in the lab repository', 'invalid_state');
+    const built = await artifact(id);
+    const placed = { ...lab, placed: true };
+    if (!item.course!.repositoryId) {
+      if (root === null) return failWith('Pick an empty folder for the lab repository', 'required', 'root');
+      const plan = item.course!.plan!;
+      const coursePlan = { course: plan.course.id, path: plan.path, goal: plan.goal, extraConcepts: plan.extraConcepts };
+      let moved: Requirement | null = null;
+      await labService.createRepository({
+        root,
+        course: plan.course.id,
+        plan: coursePlan,
+        labs: [built],
+        // The repository the interview ran in keeps a pointer to the new one.
+        beforeOpen: async (entry) => {
+          moved = { ...item, course: { ...item.course!, lab: placed, repositoryId: entry.id } };
+          await requireRequirements().putCourse(moved);
+        },
+      });
+      console.debug(`[lab-gen] placed requirement=${id} lab=${built.id} stage=1 repository=${ctx.repositories.current?.id}`);
+      return requireRequirements().putCourse(moved!);
+    }
+    await labRepository(item);
+    await labService.addLab(built);
+    console.debug(`[lab-gen] placed requirement=${id} lab=${built.id} stage=${lab.stage ?? 1}`);
+    return update(id, placed);
+  };
+
+  return { estimate, start, repair, artifact, place, report: readReport };
 };
 
 export type LabGenerationService = ReturnType<typeof createLabGenerationService>;

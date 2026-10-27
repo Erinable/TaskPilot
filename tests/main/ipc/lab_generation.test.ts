@@ -3,7 +3,7 @@
 // model; generating writes a private draft the renderer never sees, checks
 // it (src/main/lab_verify.ts, with a faked `make grade` here) and the draft
 // becomes a lab artifact with a reference patch made by git.
-import { test, vi } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -86,10 +86,12 @@ const confirmedCourse = async (h) => {
   return data.id as string;
 };
 
+// Settled once the lab is no longer running and its run has left the
+// registry, so the next generation is not refused as still running.
 const settleLab = async (call, id: string): Promise<any> => {
   for (let index = 0; index < 500; index += 1) {
     const item = (await call(CHANNELS.requirementsGet, id)).data;
-    if (item.course.lab && item.course.lab.status !== 'running') return item;
+    if (item.course.lab && item.course.lab.status !== 'running' && !(await call(CHANNELS.repositoriesBusy)).data.length) return item;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('the lab never settled');
@@ -539,4 +541,128 @@ test('two fails at medium lower the next lab to easy', async () => {
   await gradeOnce(h, 'round-robin', 0, { difficulty: 'medium', digest: 'd2' });
   const estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
   assert.deepEqual([estimate.difficulty, estimate.change, estimate.stuck], ['easy', 'lowered', null]);
+});
+
+// ========== Placing labs into the lab repository ==========
+
+// An empty folder for the lab repository, and a commit identity for it.
+const labFolder = async () => {
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-place-')));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-home-'));
+  await fs.writeFile(path.join(home, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n');
+  vi.stubEnv('GIT_CONFIG_GLOBAL', path.join(home, 'gitconfig'));
+  onTestFinished(async () => {
+    vi.unstubAllEnvs();
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(home, { recursive: true, force: true });
+  });
+  return dir;
+};
+
+// The second stage: priority scheduling, a new starter file and tests 02_*.
+const PRIORITY_SPEC = {
+  ...RR_SPEC,
+  id: 'priority-sched',
+  title: '优先级调度',
+  acceptance: [{ text: '高优先级先运行', test: '高优先级的作业先运行' }],
+  build: null,
+  starterFiles: ['src/prio.c'],
+  fileScope: ['src/prio.c'],
+  publicTests: [{ file: '02_prio.sh', names: ['高优先级的作业先运行'], script: '#!/bin/sh\necho "ok - 高优先级的作业先运行"\n' }],
+  hiddenTests: [{ file: '02_prio_hidden.sh', names: ['同优先级按到达先后'], script: '#!/bin/sh\necho "ok - 同优先级按到达先后"\n' }],
+};
+const PRIORITY_CODE = { ...RR_CODE, starter: [{ path: 'src/prio.c', content: '// TODO\n' }], solution: [{ path: 'src/prio.c', content: '// done\n' }] };
+const PRIORITY_MUTANTS = {
+  mutants: ['反了', '漏了', '错了', '少了', '多了'].map((word) => ({ description: word, edits: [{ path: 'src/prio.c', find: 'done', replace: word }] })),
+};
+
+test('a lab whose self-check passed creates the lab repository, which opens with the course and its first stage', async () => {
+  const h = await harness({ agent: team() });
+  const id = await confirmedCourse(h);
+  const before = h.repositories.current!.id;
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  const generated = await settleLab(h.call, id);
+  assert.deepEqual([generated.course.lab.status, generated.course.lab.stage, generated.course.lab.placed], ['ready', 1, false]);
+  // Another lab waits until this one is in the repository.
+  assert.equal((await h.call(CHANNELS.requirementsLabGenerate, id)).error.code, 'lab_not_placed');
+  assert.equal((await h.call(CHANNELS.requirementsLabPlace, id)).error.field, 'root');
+
+  const root = await labFolder();
+  const { data, error } = await h.call(CHANNELS.requirementsLabPlace, id, root);
+  assert.equal(error, undefined, JSON.stringify(error));
+  const labRepository = h.repositories.current!.id;
+  assert.notEqual(labRepository, before, 'the new lab repository is open');
+  assert.equal(data.course.repositoryId, labRepository);
+  assert.equal(data.course.lab.placed, true);
+  const queue = (await h.call(CHANNELS.listTasks)).data;
+  assert.deepEqual(
+    queue.map((task) => [task.id, task.lab.stage, task.concepts]),
+    [['lab-round-robin', 1, ['round-robin']]],
+  );
+  // The requirement the interview made moved along; where it ran it points at the lab repository.
+  assert.equal((await h.call(CHANNELS.requirementsGet, id)).data.course.repositoryId, labRepository);
+  const left = JSON.parse(await fs.readFile(path.join(h.repositories.dataDir(before), 'requirements.json'), 'utf8'));
+  assert.equal(left.find((item) => item.id === id).course.repositoryId, labRepository);
+  // Placing twice is refused.
+  assert.equal((await h.call(CHANNELS.requirementsLabPlace, id, root)).error.code, 'invalid_state');
+});
+
+test('the next stage waits for the last lab to be done, then is generated against the repository and added as stage 2', async () => {
+  // Each stage's tests pass on that stage's solution: round-robin's as the
+  // learner left it in the repository, priority's as the run hands it over.
+  const seen: Record<string, string>[] = [];
+  const stages: Grader = async (files) => {
+    seen.push(files);
+    const results: Record<string, boolean> = {};
+    for (const [file, script] of Object.entries(files)) {
+      if (!file.startsWith('tests/public/')) continue;
+      const solved = file.startsWith('tests/public/01_') ? files['src/rr.c'] === RR_CODE.solution[0].content : files['src/prio.c'] === '// done\n';
+      for (const match of script.matchAll(/^(?:check "|echo "ok - )([^"]+)"/gm)) results[match[1]] = solved;
+    }
+    return graded(results);
+  };
+  const specs = [RR_SPEC, PRIORITY_SPEC];
+  const codes = [RR_CODE, PRIORITY_CODE];
+  const coursePath = { ...RR_PATH, path: RR_PATH.path.map((entry) => (entry.conceptId === 'priority-sched' ? { ...entry, status: 'planned' } : entry)) };
+  const base = team({ path: coursePath });
+  const agent = async (options) => {
+    const keys: string[] = options.schema.required ?? [];
+    if (keys.includes('id') && keys.includes('hiddenTests')) return { output: specs.shift(), costUsd: 0.4 };
+    if (keys.includes('starter') && keys.includes('solution') && keys.length === 3) return { output: codes.shift(), costUsd: 0.4 };
+    if (keys.includes('mutants') && !specs.length && !codes.length && options.prompt.includes('src/prio.c')) return { output: PRIORITY_MUTANTS, costUsd: 0.1 };
+    return base(options);
+  };
+  const h = await harness({ agent, labGrader: stages });
+  const id = await confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  await settleLab(h.call, id);
+  await h.call(CHANNELS.requirementsLabPlace, id, await labFolder());
+
+  // Round-robin is still to do, so the next stage waits.
+  assert.equal((await h.call(CHANNELS.requirementsLabGenerate, id)).error.code, 'previous_lab_open');
+  await gradeOnce(h, 'round-robin', 3, { hintLevel: 3, digest: 'd1' });
+  // The learner's finished round-robin, committed like any other work.
+  await fs.writeFile(path.join(h.getConfig().root!, 'src/rr.c'), RR_CODE.solution[0].content);
+  await h.store.transition('lab-round-robin', 'claim', 'human', { baseline: 'abc', mode: 'practice' });
+  await h.store.transition('lab-round-robin', 'submit_for_review', 'human');
+  await h.store.transition('lab-round-robin', 'review_accepted', 'agent');
+  assert.equal(h.store.get('lab-round-robin').status, 'done');
+
+  seen.length = 0;
+  const started = await h.call(CHANNELS.requirementsLabGenerate, id);
+  assert.equal(started.error, undefined, JSON.stringify(started.error));
+  const second = await settleLab(h.call, id);
+  assert.deepEqual([second.course.lab.status, second.course.lab.stage, second.course.lab.concepts], ['ready', 2, ['priority-sched']]);
+  // The self-check ran on top of the repository: stage 1's files and public tests are there.
+  assert.ok('tests/public/01_rr.sh' in seen[0] && 'src/rr.c' in seen[0] && 'tests/public/02_prio.sh' in seen[0], Object.keys(seen[0]).join(','));
+  const placed = await h.call(CHANNELS.requirementsLabPlace, id);
+  assert.equal(placed.error, undefined, JSON.stringify(placed.error));
+  const queue = (await h.call(CHANNELS.listTasks)).data;
+  assert.deepEqual(
+    queue.map((task) => [task.id, task.lab.stage, task.dependsOn]),
+    [
+      ['lab-round-robin', 1, []],
+      ['lab-priority-sched', 2, ['lab-round-robin']],
+    ],
+  );
 });
