@@ -140,3 +140,22 @@ test('course names a course pack id; left out it is null', () => {
     .find((entry) => entry.startsWith('# course ='));
   assert.equal(parse((line as string).replace(/^# /, '')).course, 'programming');
 });
+
+test("labs lists a lab repository's labs; files without it read as before", () => {
+  assert.deepEqual(parse('preset = "none"\ncourse = "os"').labs, []);
+  const text = '[[labs]]\nid = "fcfs"\nstage = 1\ndir = "labs/01-fcfs/"\nconcepts = ["fcfs", "ai:queue-order", "fcfs"]\n';
+  assert.deepEqual(parse(text).labs, [{ id: 'fcfs', stage: 1, dir: 'labs/01-fcfs', concepts: ['fcfs', 'ai:queue-order'] }]);
+  assert.deepEqual(parse('[[labs]]\nid = "fcfs"\nstage = 1\ndir = "labs/01-fcfs"').labs[0].concepts, []);
+  fails('labs = "fcfs"', 'labs');
+  fails('[[labs]]\nid = "FCFS"\nstage = 1\ndir = "labs/x"', 'labs[0].id');
+  fails('[[labs]]\nid = "fcfs"\nstage = 0\ndir = "labs/x"', 'labs[0].stage');
+  fails('[[labs]]\nid = "fcfs"\nstage = 1\ndir = "../x"', 'labs[0].dir');
+  fails('[[labs]]\nid = "fcfs"\nstage = 1\ndir = "labs/x"\nconcepts = ["Bad Id"]', 'labs[0].concepts');
+  fails('[[labs]]\nid = "fcfs"\nstage = 1\ndir = "labs/x"\nhidden = "x"', 'labs[0].hidden');
+  fails('[[labs]]\nid = "a"\nstage = 1\ndir = "labs/a"\n[[labs]]\nid = "a"\nstage = 2\ndir = "labs/b"', 'labs[1].id');
+  fails('[[labs]]\nid = "a"\nstage = 1\ndir = "labs/a"\n[[labs]]\nid = "b"\nstage = 1\ndir = "labs/b"', 'labs[1].stage');
+  // The template's commented example parses once uncommented.
+  const template = projectConfig.projectTemplate('none', { lint: null, custom: null }).split('\n');
+  const example = template.slice(template.indexOf('# [[labs]]'), template.indexOf('# [[labs]]') + 5).map((line) => line.replace(/^# /, ''));
+  assert.deepEqual(parse(example.join('\n')).labs, [{ id: 'round-robin', stage: 1, dir: 'labs/01-round-robin', concepts: ['round-robin'] }]);
+});

@@ -408,6 +408,39 @@ export class RequirementStore implements TaskCatalog {
     return published;
   }
 
+  // Publishes packages Product Lead did not plan (a course lab repository's
+  // labs, ../lab_service.ts) under requirement `id`, created on first use
+  // with no plan; later calls append. An id already in the catalog is refused.
+  async publishPackages(id: string, { title, text }: { title: string; text: string }, definitions: TaskDefinition[]): Promise<Requirement> {
+    const known = this.#items.get(id);
+    if (known) this.#expect(known, ['published']);
+    if (definitions.some((definition) => this.#publishedById.has(definition.id))) fail('A package with this id is already published', 'invalid_state');
+    const now = this.#now().toISOString();
+    const item: Requirement = known
+      ? { ...known, packages: [...known.packages, ...definitions], updatedAt: now }
+      : {
+          id,
+          status: 'published',
+          title: userText(title, 'title', MAX_TITLE),
+          text: userText(text, 'text', MAX_TEXT),
+          summary: null,
+          questions: [],
+          plan: null,
+          packages: definitions,
+          interfaces: null,
+          phase: null,
+          error: null,
+          failedStep: null,
+          costUsd: 0,
+          createdAt: now,
+          updatedAt: now,
+        };
+    this.#items.set(id, item);
+    this.#rebuildCatalog();
+    await this.#persist();
+    return structuredClone(item);
+  }
+
   async remove(id: string): Promise<void> {
     const item = this.#mustGet(id);
     if (item.status === 'clarifying' || item.status === 'planning') fail('Wait for Product Lead to finish', 'invalid_state');

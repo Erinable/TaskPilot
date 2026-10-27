@@ -22,6 +22,7 @@ export const ERROR_HINTS: Record<string, string> = {
   not_a_repo: '该目录不在 git 仓库中。',
   root_not_absolute: '请填写绝对路径。',
   root_not_found: '目录不存在。',
+  no_reference: '没有找到参考答案。',
   shell_syntax: '不支持 shell 语法，请改用 package.json 脚本。',
   unterminated_quote: '引号没有闭合。',
   invalid_command: '命令格式不正确。',

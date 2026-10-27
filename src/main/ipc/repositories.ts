@@ -14,7 +14,7 @@ import type { RepositoryEntry } from '../repositories.ts';
 import type { IpcMainLike } from './handler.ts';
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
-  const { repositories, store, catalog } = ctx;
+  const { repositories, store, catalog, openRepository } = ctx;
 
   const repositoryList = async (): Promise<repositoryTypes.RepositoryList> => {
     const current = repositories.current?.id ?? null;
@@ -38,26 +38,6 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         counts: counts[index],
       })),
     };
-  };
-
-  // [人工决策-2026-10-07 14:31:37] 切换仓库时有后台任务：渲染层先弹窗列出、用户确认后，这里取消全部任务再切；内存里同时只有一个仓库的数据。
-  // Order matters: requirements must be open (their published packages are
-  // the catalog) before the work package store loads, or saved progress is
-  // dropped as unknown ids.
-  const openRepository = async (id: string) => {
-    await ctx.cancelAll();
-    await ctx.flushStores();
-    await repositories.open(id);
-    const dir = repositories.dataDir();
-    ctx.setConfig(await repositories.loadConfig());
-    await ctx.requirements?.open(dir);
-    await store.open(dir, catalog.listTasks());
-    await ctx.releases?.open(dir);
-    await ctx.activity?.open(dir);
-    await ctx.tutor?.open(dir);
-    ctx.activity?.prune().catch((error) => console.error('[activity] prune failed', error));
-    ctx.repositoryOpened();
-    console.debug(`[repositories] switched id=${id} packages=${catalog.listTasks().length}`);
   };
 
   ipcMain.handle(

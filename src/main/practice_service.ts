@@ -1,13 +1,15 @@
 // Practice: a reference solution and Tutor's grade. See ./practice.ts for the
 // rules. Both runs belong to one claim: release, replan and a repository
 // switch abort them, and a late write from a replaced run is dropped by the
-// store (setReferenceRun/setGrade `expect`).
+// store (setReferenceRun/setGrade `expect`). A course lab brings its own
+// reference (./labs.ts), so claiming one starts no run.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { asAgentError, failWith } from './coded_error.ts';
 import * as codingExec from './coding_exec.ts';
 import * as practice from './practice.ts';
+import * as labs from './labs.ts';
 import * as courses from './courses.ts';
 import * as tutorAgent from './agents/tutor.ts';
 import { billableCodingUsage, codingCancelled, codingFailure } from './coding_runtime.ts';
@@ -16,6 +18,7 @@ import { collectChanges } from './review_diff.ts';
 import { codingCall } from './agents/model_usage.ts';
 import { throwIfCancelled } from './agents/pipeline.ts';
 import { toWireState } from './app_context.ts';
+import { parsePatchPreview } from './coding_workspace.ts';
 import type * as codingWorkspace from './coding_workspace.ts';
 import type * as packageTypes from '../shared/ipc/packages.ts';
 import type { AppContext } from './app_context.ts';
@@ -24,12 +27,45 @@ import type { CodingRuntime } from './coding_runtime.ts';
 export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) => {
   const { store, backgroundRuns, getPreferences, requireTask, requireRoot, requireBaseline, recordCall } = ctx;
 
-  const referenceFile = (id: string) => practice.referencePath(ctx.repositories.dataDir(), id);
+  // A lab's reference is kept with its private files; a run's per package.
+  const referenceFile = (id: string) => {
+    const lab = requireTask(id).lab;
+    return lab ? labs.referencePath(ctx.repositories.dataDir(), lab.id) : practice.referencePath(ctx.repositories.dataDir(), id);
+  };
+
+  // A lab's reference passed its self-check when the lab was written: it is
+  // ready at the claim, and only its file list leaves the main process.
+  const readyLabReference = async (id: string) => {
+    const task = requireTask(id);
+    const at = new Date().toISOString();
+    const patch = await fs.readFile(referenceFile(id), 'utf8').catch((error) => {
+      console.error('[reference] lab reference unreadable', error);
+      return null;
+    });
+    const files =
+      patch === null ? [] : parsePatchPreview(patch, task.fileScope).files.map((file) => ({ path: file.path, added: file.added, removed: file.removed }));
+    await store.setReferenceRun(id, {
+      id: codingExec.codingRunId(),
+      status: patch === null ? 'failed' : 'ready',
+      startedAt: at,
+      finishedAt: at,
+      error: patch === null ? { code: 'no_reference', message: 'The lab has no reference solution' } : null,
+      files,
+      costUsd: 0,
+      revealedAt: null,
+      source: 'lab',
+    });
+    console.debug(`[reference] lab package=${id} files=${files.length}`);
+  };
 
   // Coding Agent writes the reference in its own run directory, from the
   // claimed commit, in the background. Never applied; never auto-retried.
   const startReference = (id: string) => {
     const task = requireTask(id);
+    if (task.lab) {
+      backgroundRuns.track(readyLabReference(id).catch((error) => console.error('[reference] lab reference failed', error)));
+      return;
+    }
     const root = requireRoot();
     const config = ctx.getConfig();
     const baseline = requireBaseline(id);
@@ -46,6 +82,7 @@ export const createPracticeService = (ctx: AppContext, runtime: CodingRuntime) =
       files: [],
       costUsd: null,
       revealedAt: null,
+      source: 'run',
     };
     console.debug(`[reference] start package=${id} run=${runId}`);
     const settled = (async () => {

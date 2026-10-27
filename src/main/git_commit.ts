@@ -71,6 +71,21 @@ export const commitPaths = async (root: string, fileScope: string[], reviewed: s
   if (paths.length !== reviewed.length || paths.some((file) => !reviewed.includes(file))) {
     return fail('The changed files are not the ones reviewed', 'changes_changed');
   }
+  return commitExactly(root, paths, message);
+};
+
+// A course lab repository (./lab_service.ts): TaskPilot writes the files a
+// lab adds and commits them itself, since tests/, Makefile and
+// taskpilot.toml are paths a Coding Agent patch may not touch. `initRepository`
+// starts the repository in the empty folder the student picked.
+export const initRepository = async (root: string) => {
+  await run('git', ['init', '-q'], { cwd: root });
+};
+
+export const commitFiles = (root: string, paths: string[], message: string): Promise<string> => commitExactly(root, paths, validateMessage(message));
+
+// Stages `paths` (additions, edits and deletions) and commits them alone.
+const commitExactly = async (root: string, paths: string[], message: string): Promise<string> => {
   try {
     // `add -A -- paths` records deletions of listed paths too.
     await run('git', ['add', '-A', '--', ...paths], { cwd: root });

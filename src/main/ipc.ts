@@ -6,6 +6,7 @@
 import { createAppContext } from './app_context.ts';
 import { createCodingRuntime } from './coding_runtime.ts';
 import { createCodingService } from './coding_service.ts';
+import { createLabService } from './lab_service.ts';
 import { createCourseInterviewService } from './course_interview_service.ts';
 import { createPracticeService } from './practice_service.ts';
 import { createReviewService } from './review_service.ts';
@@ -25,10 +26,13 @@ import * as workspaceIpc from './ipc/workspace.ts';
 import type { AppDeps } from './app_context.ts';
 import type { CodingDeps } from './coding_runtime.ts';
 import type { IpcMainLike } from './ipc/handler.ts';
+import type { LabService } from './lab_service.ts';
 
 export type IpcDeps = AppDeps & { coding?: CodingDeps };
 
-export type IpcHandle = { shutdown: () => Promise<void> };
+// `labs` is for main-process callers (the lab generator); the renderer never
+// hands TaskPilot a lab, which carries the private parts.
+export type IpcHandle = { shutdown: () => Promise<void>; labs: LabService };
 
 export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHandle => {
   const ctx = createAppContext(deps);
@@ -59,6 +63,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   repositoriesIpc.register(ipcMain, ctx);
 
   return {
+    labs: createLabService(ctx),
     // Cancels running agents and waits for their final writes.
     // On quit: nothing may still be writing once this resolves.
     shutdown: async () => {

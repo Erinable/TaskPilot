@@ -390,6 +390,26 @@ export const createAppContext = (deps: AppDeps) => {
   // that are not awaited where they are recorded.
   const flushStores = () => Promise.all([store.flush(), requirements?.flush(), releases?.flush(), activity?.flush(), tutor?.flush(), notes?.flush()]);
 
+  // [人工决策-2026-10-07 14:31:37] 切换仓库时有后台任务：渲染层先弹窗列出、用户确认后，这里取消全部任务再切；内存里同时只有一个仓库的数据。
+  // Order matters: requirements must be open (their published packages are
+  // the catalog) before the work package store loads, or saved progress is
+  // dropped as unknown ids.
+  const openRepository = async (id: string) => {
+    await cancelAll();
+    await flushStores();
+    await repositories.open(id);
+    const dir = repositories.dataDir();
+    setConfig(await repositories.loadConfig());
+    await requirements?.open(dir);
+    await store.open(dir, catalog.listTasks());
+    await releases?.open(dir);
+    await activity?.open(dir);
+    await tutor?.open(dir);
+    activity?.prune().catch((error) => console.error('[activity] prune failed', error));
+    repositoryOpened();
+    console.debug(`[repositories] switched id=${id} packages=${catalog.listTasks().length}`);
+  };
+
   return {
     store,
     configDir,
@@ -438,6 +458,7 @@ export const createAppContext = (deps: AppDeps) => {
     onRepositoryOpened,
     repositoryOpened,
     flushStores,
+    openRepository,
   };
 };
 
