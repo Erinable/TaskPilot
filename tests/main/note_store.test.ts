@@ -265,3 +265,27 @@ test('search matches title, tags and body in any case', async () => {
   assert.deepEqual(store.search('STYLE'), ['Naming.md']);
   assert.deepEqual(store.search(' '), []);
 });
+
+test('concepts are kept in the frontmatter, checked on save and read loosely', async () => {
+  const configDir = await dir();
+  const store = await open(configDir, { now: () => new Date('2026-10-24T00:00:00Z') });
+  const { note } = await store.create(
+    input({ title: '轮转', category: 'concept', course: 'os', concepts: ['round-robin', 'ai:quantum', 'round-robin'], tags: [] }),
+  );
+  assert.deepEqual(note.concepts, ['round-robin', 'ai:quantum']);
+  const raw = await fs.readFile(path.join(notesDir(configDir), note.id), 'utf8');
+  assert.match(raw, /\nconcepts:\n {2}- round-robin\n {2}- ai:quantum\n/);
+  await assert.rejects(() => store.create(input({ title: '坏', concepts: ['Round Robin'] })), { code: 'invalid_note' });
+  // An edit that leaves concepts out keeps them.
+  const { note: edited } = await store.update(note.id, edit(note, { title: '轮转', category: 'concept' }));
+  assert.deepEqual(edited.concepts, ['round-robin', 'ai:quantum']);
+  const { note: cleared } = await store.update(note.id, edit(edited, { title: '轮转', concepts: [] }));
+  assert.deepEqual(cleared.concepts, []);
+  assert.doesNotMatch(await fs.readFile(path.join(notesDir(configDir), note.id), 'utf8'), /concepts/);
+  // Written by hand: what is not a concept id is left out of the note's fields.
+  await fs.writeFile(path.join(notesDir(configDir), '手写.md'), '---\nconcepts: [paging, Not Valid, 3]\n---\nbody\n');
+  await fs.writeFile(path.join(notesDir(configDir), '没有.md'), 'body\n');
+  const reopened = await open(configDir);
+  assert.deepEqual(reopened.get('手写.md').concepts, ['paging']);
+  assert.deepEqual(reopened.get('没有.md').concepts, []);
+});

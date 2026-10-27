@@ -19,16 +19,28 @@ export type NoteSource = {
 // has it.
 // course: the pack the category belongs to; absent means programming (notes
 // written before packs existed have none).
+// concepts: concept ids of the course pack the note is about, carried over
+// from the package when saved from a grade; empty on other notes.
 // tags: the frontmatter list; #tags written in the body are inlineTags.
 // summary: what Tutor reads when grading instead of the body, written on
 // request (by Tutor or by hand); stale once the body changed after it.
-export type NoteInput = { title: string; body: string; category: GradeCategory | null; course?: string | null; tags: string[]; source: NoteSource | null };
+export type NoteInput = {
+  title: string;
+  body: string;
+  category: GradeCategory | null;
+  course?: string | null;
+  concepts?: string[];
+  tags: string[];
+  source: NoteSource | null;
+};
 export type NoteEdit = {
   title: string;
   body: string;
   category: GradeCategory | null;
   // Left out to keep the saved one.
   course?: string | null;
+  // Left out to keep the saved ones.
+  concepts?: string[];
   tags: string[];
   // Left out to keep the saved one; null removes it.
   summary?: string | null;
@@ -45,6 +57,7 @@ export type NoteMeta = {
   title: string;
   category: GradeCategory | null;
   course: string | null;
+  concepts: string[];
   tags: string[];
   inlineTags: string[];
   source: NoteSource | null;

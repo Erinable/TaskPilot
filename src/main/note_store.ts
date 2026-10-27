@@ -15,6 +15,7 @@
 // [人工决策-2026-10-24 16:12:00] 笔记改为 .md 文件目录（默认 userData/notes，可改），监听外部修改、冲突时让用户选覆盖或放弃；正文不限长度，判卷只读标题 + AI 总结（手动生成）。
 // [人工决策-2026-10-26 15:38:21] 笔记新增可选 course 字段，没有的视为 programming，旧文件不迁移；category 是课程包
 // rubric 项的 id，任意合法 id 都原样保留（不认识的包或维度也不读成 null）。
+// [人工决策-2026-10-27 00:36:21] 笔记 frontmatter 新增 concepts（课程包知识点 id），从判卷存的笔记自动带上工作包的 concepts，供复习排期用。
 import { createHash, randomUUID } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
@@ -25,6 +26,7 @@ import * as markdown from '../shared/note_markdown.ts';
 import { DEFAULT_COURSE_ID, isCourseId } from '../shared/course_pack.ts';
 import { CONTROL_CHARS } from '../shared/text_rules.ts';
 import { writeFileAtomic } from './atomic_json_file.ts';
+import { isLabConcept } from './project_config.ts';
 import type * as noteTypes from '../shared/ipc/notes.ts';
 import type { GradeCategory } from '../shared/ipc/packages.ts';
 
@@ -35,6 +37,7 @@ export const MAX_NOTES = 5000;
 export const MAX_SUMMARY = 300;
 const EXCERPT_LENGTH = 300;
 const MAX_TAGS = 8;
+const MAX_CONCEPTS = 8;
 const MAX_TAG = 20;
 const WATCH_DEBOUNCE_MS = 200;
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
@@ -90,6 +93,14 @@ const course = (value: unknown): string | null => {
   return (value ?? null) as string | null;
 };
 
+// Concept ids of a pack's skeleton, or `ai:` ones of a course plan.
+const concepts = (value: unknown): string[] => {
+  const list = value ?? [];
+  if (!Array.isArray(list) || list.length > MAX_CONCEPTS || !list.every(isLabConcept))
+    fail(`concepts must be a list of at most ${MAX_CONCEPTS} concept ids`, 'concepts');
+  return [...new Set(list as string[])];
+};
+
 const tags = (value: unknown): string[] => {
   const list = value ?? [];
   if (!Array.isArray(list) || list.length > MAX_TAGS) fail(`tags must be a list of at most ${MAX_TAGS}`, 'tags');
@@ -124,6 +135,7 @@ export const validateNote = (raw: unknown): noteTypes.NoteInput => {
     body: body(input.body ?? ''),
     category: category(input.category),
     course: course(input.course),
+    concepts: concepts(input.concepts),
     tags: tags(input.tags),
     source: source(input.source),
   };
@@ -186,6 +198,7 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
       title: id.slice(0, -'.md'.length),
       category: isCourseId(fields.category) ? fields.category : null,
       course: isCourseId(fields.course) ? fields.course : null,
+      concepts: Array.isArray(fields.concepts) ? [...new Set(fields.concepts.filter(isLabConcept))] : [],
       tags: loose.tags(fields.tags),
       inlineTags: scan.tags,
       source: loose.source(fields.source),
@@ -209,6 +222,7 @@ const toEntry = (id: string, raw: string, stat: { birthtime: Date; mtime: Date }
 type Fields = {
   category?: GradeCategory | null;
   course?: string | null;
+  concepts?: string[];
   tags?: string[];
   source?: noteTypes.NoteSource | null;
   summary?: string | null;
@@ -224,6 +238,7 @@ const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): st
   };
   if (fields.category !== undefined) put('category', fields.category);
   if (fields.course !== undefined) put('course', fields.course);
+  if (fields.concepts !== undefined) put('concepts', fields.concepts);
   if (fields.tags !== undefined) put('tags', fields.tags);
   if (fields.source !== undefined) put('source', fields.source && Object.fromEntries(Object.entries(fields.source).filter(([, value]) => value !== null)));
   if (fields.summary !== undefined) {
@@ -239,6 +254,7 @@ const render = (doc: YAML.Document | null, noteBody: string, fields: Fields): st
 const editedFields = (input: Record<string, unknown>): Fields => {
   const fields: Fields = { category: category(input.category), tags: tags(input.tags) };
   if (input.course !== undefined) fields.course = course(input.course);
+  if (input.concepts !== undefined) fields.concepts = concepts(input.concepts);
   if (input.summary !== undefined) fields.summary = summary(input.summary);
   return fields;
 };
@@ -261,6 +277,7 @@ export type NoteEditInput = {
   body: string;
   category: GradeCategory | null;
   course?: string | null;
+  concepts?: string[];
   tags: string[];
   summary?: string | null;
   baseVersion: string;

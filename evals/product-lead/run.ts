@@ -130,8 +130,8 @@ const runCase = async (
   const answers = clarify.questions.map((question) => answerFor(testCase, question));
 
   const questions = clarify.questions.map((text, i) => ({ text, answer: answers[i] }));
-  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true, course }), productLead.PLAN_SCHEMA);
-  const plan = productLead.validatePlan(p.output, { linkTests: true });
+  const p = await call(productLead.planPrompt({ ...base, questions, linkTests: true, course }), productLead.planSchema(course));
+  const plan = productLead.validatePlan(p.output, { linkTests: true, concepts: (course.concepts ?? []).map((concept) => concept.id) });
 
   const run: CaseRun = {
     course: course.id,

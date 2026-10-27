@@ -4,7 +4,8 @@
   "required": [
     "summary",
     "strengths",
-    "comments"
+    "comments",
+    "errorTags"
   ],
   "properties": {
     "summary": {
@@ -68,6 +69,14 @@
             "description": "One of the developer notes already describes this mistake"
           }
         }
+      }
+    },
+    "errorTags": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "string",
+        "description": "A kind of mistake, short lowercase kebab-case, e.g. off-by-one"
       }
     }
   }

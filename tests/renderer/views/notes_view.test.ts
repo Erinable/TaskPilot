@@ -29,6 +29,7 @@ const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta =
   title: '用例要有断言',
   category: 'writing',
   course: null,
+  concepts: [],
   tags: ['测试'],
   inlineTags: [],
   source: { repositoryId: 'r1', repositoryName: 'app', packageId: 'p1', packageTitle: '登录', file: 'src/a.ts', line: 4 },

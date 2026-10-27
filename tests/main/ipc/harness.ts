@@ -31,6 +31,7 @@ import { createPathResolver } from '../../../src/main/shell_env.ts';
 import { RepositoryRegistry } from '../../../src/main/repositories.ts';
 import { TutorStore } from '../../../src/main/tutor_store.ts';
 import { NoteStore } from '../../../src/main/note_store.ts';
+import { MasteryStore } from '../../../src/main/mastery_store.ts';
 import { BUILTIN } from '../../fixtures/builtin_courses.ts';
 
 // A stand-in agent; tests answer with plain objects or reject.
@@ -128,6 +129,7 @@ export const harness = async ({
   const releases = await new ReleaseStore(repoDir).load();
   const tutor = await new TutorStore(repoDir).load();
   const notes = await new NoteStore(configDir, { watch: false }).load();
+  const mastery = await new MasteryStore(configDir).load();
   const agentCalls: RunStructuredOptions[] = [];
   // A fake login shell so tests never launch the user's real one.
   // What the fake login shell reports; tests can prepend a folder of fake CLIs.
@@ -162,6 +164,7 @@ export const harness = async ({
       releases,
       tutor,
       notes,
+      mastery,
       shell: {
         revealPath: async (dir) => {
           revealed.push(dir);
@@ -228,6 +231,7 @@ export const harness = async ({
     launched,
     requirements,
     notes,
+    mastery,
     agentCalls,
     // The lab service main-process callers use (src/main/lab_service.ts).
     labs: ipc.labs,

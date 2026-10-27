@@ -340,3 +340,64 @@ test('practice: an unconfirmed repository pack is graded with programming', asyn
   assert.equal(graded.grade!.course!.id, 'programming');
   assert.deepEqual(fixtures.callFor(h.agentCalls, 'grade').schema.properties.comments.items.properties.category.enum, ['thinking', 'writing', 'style']);
 });
+
+// [人工决策-2026-10-27 00:36:21] 用 os 包规划的项目任务带上骨架里的知识点，判卷后按知识点写掌握度。
+test('practice: a project package planned with the os pack carries its concepts, and its grade writes mastery once', async () => {
+  const plan = {
+    ...fixtures.PLAN_OUTPUT,
+    packages: [{ ...fixtures.PLAN_OUTPUT.packages[0], concepts: ['round-robin', 'made-up', 'priority-sched'] }],
+  };
+  const grade = {
+    summary: '能跑。',
+    strengths: [],
+    comments: [{ category: 'mechanism', file: null, line: null, observation: '时间片没重置。', betterWay: '切换时重置。', repeated: false }],
+    errorTags: ['off-by-one', 'Bad Tag'],
+  };
+  const h = await practiceHarness({ agent: fixtures.fakeAgent({ plan, grade }) });
+  await fs.writeFile(path.join(h.root, 'taskpilot.toml'), 'course = "os"\n');
+  const created = await h.call(CHANNELS.requirementsCreate, { text: '给调度器加时间片轮转' });
+  await fixtures.settle(h.call, created.data.id);
+  await h.call(CHANNELS.requirementsPlan, created.data.id, ['5 次']);
+  const planned = await fixtures.settle(h.call, created.data.id);
+  const planCall = fixtures.callFor(h.agentCalls, 'plan');
+  assert.ok(planCall.prompt.includes('\n- round-robin: '), 'the skeleton is offered');
+  assert.ok(planCall.schema.properties.packages.items.properties.concepts.items.enum.includes('round-robin'));
+  assert.deepEqual(planned.plan.packages[0].concepts, ['round-robin', 'priority-sched'], 'ids outside the skeleton are dropped');
+  await h.call(CHANNELS.requirementsPublish, created.data.id);
+  const id = `${created.data.id}-wp1`;
+  assert.deepEqual((await h.call(CHANNELS.getTask, id)).data.concepts, ['round-robin', 'priority-sched']);
+
+  h.setCommands({ test: { command: process.execPath, args: ['-e', "console.log('ok 1 - login succeeds')"] } });
+  await h.call(CHANNELS.transition, id, 'claim', { mode: 'practice' });
+  await settleTask(h.call, id, (task) => task.referenceRun?.status === 'ready');
+  await fs.writeFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'export const login = () => true;\n');
+  await h.call(CHANNELS.transition, id, 'submit_for_review');
+  const graded = await settleTask(h.call, id, (task) => task.grade?.status === 'done');
+  assert.deepEqual(graded.grade!.report!.errorTags, ['off-by-one']);
+  // Mastery is written right after the grade is stored.
+  for (let i = 0; i < 400 && !h.mastery.get('os', 'round-robin'); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  const record = h.mastery.get('os', 'round-robin')!;
+  assert.deepEqual(
+    record.attempts.map((attempt) => [attempt.packageId, attempt.repoId, attempt.result, attempt.errorTypes]),
+    [[id, h.repositories.current!.id, 'pass', ['mechanism', 'off-by-one']]],
+  );
+  assert.equal(h.mastery.get('os', 'priority-sched')!.totals.attempts, 1);
+
+  // Regrading the same submission writes nothing more.
+  await h.call(CHANNELS.gradeStart, id, false);
+  await h.call(CHANNELS.gradeStart, id, true);
+  await settleTask(h.call, id, (task) => task.grade?.status === 'done' && task.grade.id !== graded.grade!.id);
+  await h.shutdown();
+  assert.equal(h.mastery.get('os', 'round-robin')!.totals.attempts, 1);
+});
+
+test('practice: a package without concepts writes no mastery', async () => {
+  const h = await practiceHarness();
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  await writeSubmission(h.root);
+  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  await h.shutdown();
+  assert.deepEqual(h.mastery.list(), []);
+});

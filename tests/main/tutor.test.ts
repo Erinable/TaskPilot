@@ -93,3 +93,17 @@ test('grading with another course pack marks, offers and accepts only its rubric
       message: /comments\[0\]\.category.*concept, mechanism/,
     });
 });
+
+// errorTags feed mastery (src/main/mastery_store.ts); a bad tag is dropped, never fails the grade.
+test('validateGrade keeps up to three well-formed error tags and drops the rest', async () => {
+  const { gradeSchema, validateGrade, MAX_ERROR_TAGS } = await import('../../src/main/agents/tutor.ts');
+  const schema = gradeSchema(PROGRAMMING_COURSE);
+  assert.ok(schema.required.includes('errorTags'));
+  assert.equal(schema.properties.errorTags.maxItems, MAX_ERROR_TAGS);
+  const grade = (errorTags: unknown) =>
+    validateGrade({ summary: 's', strengths: [], comments: [], errorTags }, { changedPaths: [], course: PROGRAMMING_COURSE }).errorTags;
+  assert.deepEqual(grade(['off-by-one', ' missing-error-path ', 'off-by-one']), ['off-by-one', 'missing-error-path']);
+  assert.deepEqual(grade(['Off By One', '边界', 'a'.repeat(33), 3, 'x-1', 'y-2', 'z-3', 'w-4']), ['x-1', 'y-2', 'z-3']);
+  assert.deepEqual(grade(undefined), [], 'a CLI that drops the field');
+  assert.deepEqual(grade('off-by-one'), []);
+});

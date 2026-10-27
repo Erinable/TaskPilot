@@ -16,6 +16,7 @@ import { ActivityLog } from './activity_log.ts';
 import { RepositoryRegistry } from './repositories.ts';
 import { TutorStore } from './tutor_store.ts';
 import { NoteStore } from './note_store.ts';
+import { MasteryStore } from './mastery_store.ts';
 import * as courses from './courses.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 
@@ -128,6 +129,8 @@ app.whenReady().then(async () => {
     const tutor = await new TutorStore(repoDir).load();
     // Notes follow the developer, not the repository.
     const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
+    // So does mastery.
+    const mastery = await new MasteryStore(configDir).load();
     // Expired day files go at startup; a failure only leaves old files behind.
     activity.prune().catch((error) => console.error('[activity] prune failed', error));
 
@@ -151,6 +154,7 @@ app.whenReady().then(async () => {
       releases,
       tutor,
       notes,
+      mastery,
       onPreferencesChanged: (next) => {
         nativeTheme.themeSource = next.appearance.theme;
         for (const window of BrowserWindow.getAllWindows()) {

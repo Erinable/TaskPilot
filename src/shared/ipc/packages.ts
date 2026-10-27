@@ -78,7 +78,8 @@ export type ReferenceLock = { unlocked: boolean; reason: 'not_submitted' | 'test
 export type GradeCategory = string;
 // repeated: one of the developer's notes already describes this mistake.
 export type GradeComment = { category: GradeCategory; file: string | null; line: number | null; observation: string; betterWay: string; repeated: boolean };
-export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[] };
+// errorTags: the kinds of mistake Tutor named; absent on grades made before tags.
+export type GradeReport = { summary: string; strengths: string[]; comments: GradeComment[]; errorTags?: string[] };
 // The course pack a grade was made with, and its rubric as it was then.
 export type GradeCourse = Pick<CourseRef, 'id' | 'version' | 'contentHash'> & { rubric: RubricItem[] };
 // waiting: QA has finished but the reference is still being written.
