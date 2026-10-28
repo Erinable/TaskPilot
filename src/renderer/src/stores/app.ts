@@ -8,6 +8,7 @@ import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
 export type ViewName =
   'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes' | 'mastery' | 'courses';
@@ -123,49 +124,38 @@ export const useAppStore = defineStore('app', () => {
   // Activity is pushed by the main process; keep one serialized read so a
   // notification arriving during a read is handled immediately afterwards.
   const activity = ref<activityTypes.ActivityOverview | null>(null);
-  let activityUnsubscribe: (() => void) | null = null;
-  let activityGeneration = 0;
-  let activityReading = false;
-  let activityQueued = false;
-
-  const refreshActivity = async () => {
-    if (activityReading) {
-      activityQueued = true;
-      return;
-    }
-    const token = activityGeneration;
-    const repositoryId = repository.currentId;
-    activityReading = true;
-    try {
-      const next = await call(window.taskpilot.activity.overview());
-      if (token === activityGeneration && repositoryId === repository.currentId) activity.value = next;
-    } catch (error) {
-      console.error('[activity] overview failed', error);
-    } finally {
-      activityReading = false;
-      if (activityQueued) {
-        activityQueued = false;
-        await refreshActivity();
+  const activityWatcher = createStateWatcher({
+    name: 'activity',
+    domains: ['activity', 'coding', 'packages', 'requirements'],
+    read: async (isCurrent) => {
+      const repositoryId = repository.currentId;
+      try {
+        const next = await call(window.taskpilot.activity.overview());
+        if (isCurrent() && repositoryId === repository.currentId) activity.value = next;
+      } catch (error) {
+        console.error('[activity] overview failed', error);
       }
-    }
-  };
+    },
+  });
+  // Workspace status shares the activity lifetime but has its own read.
+  const workspaceWatcher = createStateWatcher({
+    name: 'workspace',
+    domains: ['workspace'],
+    initialRead: false,
+    read: async () => {
+      await refreshWorkspaceStatus();
+    },
+  });
+  const refreshActivity = () => activityWatcher.refresh();
 
   const startActivity = () => {
-    if (activityUnsubscribe) return;
-    activityUnsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repository.currentId) return;
-      if (change.domains.includes('workspace')) refreshWorkspaceStatus().catch((error) => console.error(error));
-      if (change.domains.some((domain) => domain === 'activity' || domain === 'coding' || domain === 'packages' || domain === 'requirements'))
-        refreshActivity().catch((error) => console.error(error));
-    });
-    refreshActivity().catch((error) => console.error(error));
+    workspaceWatcher.start().catch((error) => console.error(error));
+    activityWatcher.start().catch((error) => console.error(error));
   };
 
   const stopActivity = () => {
-    activityGeneration += 1;
-    activityQueued = false;
-    activityUnsubscribe?.();
-    activityUnsubscribe = null;
+    workspaceWatcher.stop();
+    activityWatcher.stop();
   };
 
   return {

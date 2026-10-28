@@ -16,6 +16,7 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useCoursesStore } from './courses.ts';
 import { useRepositoriesStore } from './repositories.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
 // Drafts are reactive proxies, which IPC cannot clone; they are plain JSON.
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -53,12 +54,21 @@ export const useNotesStore = defineStore('notes', () => {
     loaded.value = true;
   };
 
-  let session = 0;
+  // Notes are global: every repository's events apply.
+  const watcher = createStateWatcher({
+    name: 'notes',
+    domains: ['notes'],
+    global: true,
+    read: async () => {
+      if (await load()) await syncOpen();
+    },
+  });
+
   // Resolves whether anything changed since the last load.
   const load = async () => {
-    const token = session;
+    const token = watcher.session();
     const list = await call(window.taskpilot.notes.list(revision.value));
-    if (!list || token !== session) return false;
+    if (!list || token !== watcher.session()) return false;
     applyList(list);
     return true;
   };
@@ -171,9 +181,9 @@ export const useNotesStore = defineStore('notes', () => {
   let noteGeneration = 0;
   const openNote = async (id: string) => {
     const token = ++noteGeneration;
-    const fromSession = session;
+    const fromSession = watcher.session();
     const note = await call(window.taskpilot.notes.get(id));
-    if (token !== noteGeneration || fromSession !== session) return;
+    if (token !== noteGeneration || fromSession !== watcher.session()) return;
     current.value = note;
     draft.value = toDraft(note);
     conflict.value = false;
@@ -205,24 +215,7 @@ export const useNotesStore = defineStore('notes', () => {
     await openNote(note.id);
   };
 
-  let reading = false;
-  let queued = false;
-  const refresh = async () => {
-    if (reading) {
-      queued = true;
-      return;
-    }
-    reading = true;
-    try {
-      if (await load()) await syncOpen();
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        refresh().catch((error) => console.error('[notes] refresh failed', error));
-      }
-    }
-  };
+  const refresh = () => watcher.refresh();
 
   // Drops the developer's edits for what is on disk now.
   const discard = async () => {
@@ -360,20 +353,10 @@ export const useNotesStore = defineStore('notes', () => {
   // A link in a note opens in the system browser or mail app.
   const openUrl = (url: string) => call(window.taskpilot.notes.openUrl(url));
 
-  let unsubscribe: (() => void) | null = null;
   const startWatching = () => {
-    if (unsubscribe) return;
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.domains.includes('notes')) refresh().catch((error) => console.error('[notes] refresh failed', error));
-    });
-    refresh().catch((error) => console.error('[notes] refresh failed', error));
+    watcher.start().catch((error) => console.error(error));
   };
-  const stopWatching = () => {
-    session += 1;
-    queued = false;
-    unsubscribe?.();
-    unsubscribe = null;
-  };
+  const stopWatching = () => watcher.stop();
 
   // ========== From grading ==========
   // One click under a grade comment: the comment becomes a note that points

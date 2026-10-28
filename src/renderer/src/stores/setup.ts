@@ -13,6 +13,7 @@ import type { IconName } from '@/lib/icons.ts';
 import { useAppStore } from './app.ts';
 import { useSettingsStore } from './settings.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as envTypes from '@shared/ipc/environment.ts';
 
@@ -60,10 +61,6 @@ export const useSetupStore = defineStore('setup', () => {
   const acting = ref(false);
   // Kinds ticked in the apply list; reset whenever a new view arrives.
   const selectedKinds = ref<envTypes.ScriptKind[]>([]);
-  let unsubscribe: (() => void) | null = null;
-  let session = 0;
-  let reading = false;
-  let queued = false;
 
   const busy = computed(() => acting.value || view.value?.status === 'planning' || Boolean(view.value?.running));
   const ready = computed(() => view.value?.status === 'ready');
@@ -172,50 +169,30 @@ export const useSetupStore = defineStore('setup', () => {
 
   const visible = () => app.view === 'settings' && settings.activePage === 'setup';
 
-  const render = async () => {
-    if (!visible()) return;
-    if (reading) {
-      queued = true;
-      return;
-    }
-    const token = session;
-    reading = true;
-    try {
-      const next = await call(window.taskpilot.env.get());
-      if (token === session) {
-        setView(next);
-        loadError.value = null;
+  const watcher = createStateWatcher({
+    name: 'setup',
+    domains: ['environment', 'workspace'],
+    read: async (isCurrent) => {
+      if (!visible()) return;
+      try {
+        const next = await call(window.taskpilot.env.get());
+        if (isCurrent()) {
+          setView(next);
+          loadError.value = null;
+        }
+      } catch (error) {
+        if (isCurrent()) {
+          console.error(error);
+          loadError.value = describeError(error);
+        }
       }
-    } catch (error) {
-      if (token === session) {
-        console.error(error);
-        loadError.value = describeError(error);
-      }
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        render().catch((error) => console.error(error));
-      }
-    }
-  };
-
+    },
+  });
+  const render = () => watcher.refresh();
   const startWatching = () => {
-    if (unsubscribe) return;
-    const repositories = useRepositoryIdentityStore();
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (change.domains.includes('environment') || change.domains.includes('workspace')) render().catch((error) => console.error(error));
-    });
-    render().catch((error) => console.error(error));
+    watcher.start().catch((error) => console.error(error));
   };
-
-  const stopWatching = () => {
-    session += 1;
-    queued = false;
-    unsubscribe?.();
-    unsubscribe = null;
-  };
+  const stopWatching = () => watcher.stop();
 
   const act = async <T extends envTypes.EnvState>(promise: Promise<envelopeTypes.IpcResult<T>>, failure = '操作失败') => {
     acting.value = true;
