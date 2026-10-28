@@ -12,6 +12,7 @@ import type { IpcError } from '@/lib/ipc.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as releaseTypes from '@shared/ipc/release.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
 export type NotesStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -43,57 +44,30 @@ export const useReleaseStore = defineStore('release', () => {
     if (next.startPoint?.kind === 'none' && commits.value === null) loadCommits().catch((error) => console.error(error));
   };
 
-  let session = 0;
-  const load = async () => {
-    if (reading) {
-      queued = true;
-      return;
-    }
-    const token = session;
-    reading = true;
-    try {
-      const next = await call(window.taskpilot.release.get());
-      if (token === session) {
-        apply(next);
-        loadError.value = null;
+  const watcher = createStateWatcher({
+    name: 'release',
+    domains: ['release'],
+    read: async (isCurrent) => {
+      try {
+        const next = await call(window.taskpilot.release.get());
+        if (isCurrent()) {
+          apply(next);
+          loadError.value = null;
+        }
+      } catch (error) {
+        if (isCurrent()) {
+          console.error('[release] get failed', error);
+          loadError.value = describeError(error);
+        }
       }
-    } catch (error) {
-      if (token === session) {
-        console.error('[release] get failed', error);
-        loadError.value = describeError(error);
-      }
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        load().catch((error) => console.error(error));
-      }
-    }
-  };
+    },
+  });
+  const load = () => watcher.refresh();
 
-  let unsubscribe: (() => void) | null = null;
-  let reading = false;
-  let queued = false;
-
-  const startWatching = () => {
-    if (unsubscribe) return;
-    const repositories = useRepositoryIdentityStore();
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (change.domains.includes('release')) load().catch((error) => console.error(error));
-    });
-  };
-
-  const enter = async () => {
-    startWatching();
-    await load();
-  };
+  const enter = () => watcher.start();
 
   const leave = () => {
-    session += 1;
-    queued = false;
-    unsubscribe?.();
-    unsubscribe = null;
+    watcher.stop();
     flushNotes().catch((error) => console.error(error));
   };
 
@@ -104,12 +78,12 @@ export const useReleaseStore = defineStore('release', () => {
   const startError = ref<string | null>(null);
 
   const loadCommits = async () => {
-    const token = session;
+    const token = watcher.session();
     try {
       const next = await call(window.taskpilot.release.recentCommits());
-      if (token === session) commits.value = next;
+      if (token === watcher.session()) commits.value = next;
     } catch (error) {
-      if (token !== session) return;
+      if (token !== watcher.session()) return;
       console.error('[release] recent commits failed', error);
       commits.value = [];
       startError.value = `读取最近提交失败：${describeError(error)}`;
@@ -307,8 +281,7 @@ export const useReleaseStore = defineStore('release', () => {
   watch(
     () => repository.currentId,
     () => {
-      session += 1;
-      queued = false;
+      watcher.invalidate();
       state.value = null;
       loadError.value = null;
       commits.value = null;
@@ -317,7 +290,7 @@ export const useReleaseStore = defineStore('release', () => {
       notesText.value = '';
       notesSource = null;
       notesStatus.value = 'idle';
-      if (unsubscribe) load().catch((error) => console.error(error));
+      if (watcher.active()) load().catch((error) => console.error(error));
     },
     { flush: 'sync' },
   );

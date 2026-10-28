@@ -14,7 +14,7 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
-import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
 export type ActionSpec = { name: packageTypes.HumanTransition; label: string; icon: IconName; primary?: boolean; danger?: boolean };
 
@@ -44,9 +44,6 @@ export const useExecutionStore = defineStore('execution', () => {
   // Acceptance evidence from the last verification run; falls back to the review's.
   const acceptanceOverride = ref<workspaceTypes.CriterionEvidence[] | null>(null);
   let generation = 0;
-  let unsubscribe: (() => void) | null = null;
-  let reading = false;
-  let queued = false;
   // Re-reads the open package and the queue after a state change.
   const reloadCurrent = async () => {
     const before = current.value;
@@ -71,7 +68,7 @@ export const useExecutionStore = defineStore('execution', () => {
       return;
     }
     if (generation !== token || !(await useAppStore().navigate('execution'))) return;
-    unsubscribe?.();
+    watcher.stop();
     current.value = task;
     acceptanceOverride.value = null;
     diff.value = null;
@@ -87,8 +84,7 @@ export const useExecutionStore = defineStore('execution', () => {
 
   const close = () => {
     generation += 1;
-    unsubscribe?.();
-    unsubscribe = null;
+    watcher.stop();
     current.value = null;
     actions.deviationOpen.value = false;
   };
@@ -163,16 +159,15 @@ export const useExecutionStore = defineStore('execution', () => {
     else if (decision === 'replan') announceAgent('Architect 已重新规划，工作包回到队列。');
   };
 
-  const refreshBackground = async () => {
-    const before = current.value;
-    const token = generation;
-    if (!before) return;
-    if (reading) {
-      queued = true;
-      return;
-    }
-    reading = true;
-    try {
+  // Reads are dropped by the open package's generation, not the watcher's.
+  const watcher = createStateWatcher({
+    name: 'execution',
+    domains: ['packages', 'workspace'],
+    initialRead: false,
+    read: async () => {
+      const before = current.value;
+      const token = generation;
+      if (!before) return;
       const task = await call(window.taskpilot.tasks.get(before.id));
       if (generation !== token || current.value?.id !== before.id) return;
       current.value = task;
@@ -182,24 +177,12 @@ export const useExecutionStore = defineStore('execution', () => {
       if (before.review?.status === 'running' && task.review?.status !== 'running') announceReview(task);
       if (before.grade && before.grade.status !== 'done' && task.grade?.status === 'done') announceAgent('导师判完卷了，参考答案也可以看了。');
       if (before.adjudication?.status === 'running' && task.adjudication?.status !== 'running') announceAdjudication(task);
-    } catch (error) {
-      console.error('[execution] state refresh failed', error);
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        refreshBackground().catch((error) => console.error(error));
-      }
-    }
-  };
+    },
+  });
 
   const startWatching = () => {
-    unsubscribe?.();
-    const repositories = useRepositoryIdentityStore();
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (change.domains.some((domain) => domain === 'packages' || domain === 'workspace')) refreshBackground().catch((error) => console.error(error));
-    });
+    watcher.stop();
+    watcher.start().catch((error) => console.error(error));
   };
 
   // ========== Diff ==========

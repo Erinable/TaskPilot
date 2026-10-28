@@ -8,8 +8,8 @@ import * as notifications from '@/lib/notifications.ts';
 import { useExecutionStore } from './execution.ts';
 import { useRequirementsStore } from './requirements.ts';
 import { useTasksStore } from './tasks.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
-import { useRepositoryIdentityStore } from './repository_identity.ts';
 export const READ_STORAGE_KEY = 'taskpilot.notifications.read';
 // Package and requirement ids are only unique within a repository.
 export const readStorageKey = (repositoryId: string | null) => (repositoryId ? `${READ_STORAGE_KEY}.${repositoryId}` : READ_STORAGE_KEY);
@@ -71,48 +71,20 @@ export const useNotificationsStore = defineStore('notifications', () => {
   // ========== Refresh ==========
   // A failed queue reload skips pruning. requirements.refreshList() logs its
   // ========== Refresh ==========
-  const repositories = useRepositoryIdentityStore();
-  let unsubscribe: (() => void) | null = null;
-  let session = 0;
-  let reading = false;
-  let queued = false;
-
-  const refresh = async () => {
-    if (reading) {
-      queued = true;
-      return;
-    }
-    const token = session;
-    reading = true;
-    try {
+  const watcher = createStateWatcher({
+    name: 'notifications',
+    domains: ['packages', 'requirements'],
+    read: async (isCurrent) => {
       await Promise.all([tasks.reloadQueue(), requirements.refreshList()]);
-      if (token === session) pruneRead();
-    } catch (error) {
-      console.error('[notifications] refresh failed', error);
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        await refresh();
-      }
-    }
-  };
+      if (isCurrent()) pruneRead();
+    },
+  });
 
+  const refresh = () => watcher.refresh().catch((error) => console.error('[notifications] refresh failed', error));
   const start = () => {
-    if (unsubscribe) return;
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (change.domains.some((domain) => domain === 'packages' || domain === 'requirements')) refresh().catch((error) => console.error(error));
-    });
-    refresh().catch((error) => console.error(error));
+    watcher.start().catch((error) => console.error(error));
   };
-
-  const stop = () => {
-    session += 1;
-    queued = false;
-    unsubscribe?.();
-    unsubscribe = null;
-  };
+  const stop = () => watcher.stop();
 
   return {
     // Items

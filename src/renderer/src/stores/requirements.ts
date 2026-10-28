@@ -14,6 +14,7 @@ import { createRequirementsCourseActions } from './requirements_course.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { GoalForm } from '@shared/course_plan.ts';
@@ -26,15 +27,14 @@ export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAva
 export const useRequirementsStore = defineStore('requirements', () => {
   // ========== List ==========
   const items = ref<requirementTypes.Requirement[]>([]);
-  let readGeneration = 0;
   // Requirements waiting on the human, for the sidebar badge.
   const attentionCount = computed(() => items.value.filter(model.needsAttention).length);
 
   const refreshList = async () => {
-    const token = readGeneration;
+    const token = watcher.session();
     try {
       const next = await call(window.taskpilot.requirements.list());
-      if (token === readGeneration) items.value = next;
+      if (token === watcher.session()) items.value = next;
     } catch (error) {
       console.error('Failed to load requirements', error);
     }
@@ -167,12 +167,12 @@ export const useRequirementsStore = defineStore('requirements', () => {
   ) => {
     if (acting.value) return;
     acting.value = step;
-    const token = readGeneration;
+    const token = watcher.session();
     try {
       // A project's plan request carries no choice argument at all.
       const planned = () => (choice ? window.taskpilot.requirements.plan(item.id, answers, choice) : window.taskpilot.requirements.plan(item.id, answers));
       const next = await call(step === 'plan' ? planned() : window.taskpilot.requirements.clarify(item.id));
-      if (token !== readGeneration) return;
+      if (token !== watcher.session()) return;
       upsert(next);
       renderDetail(next);
       startWatching();
@@ -188,7 +188,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const editAnswers = async (item: requirementTypes.Requirement) => {
     if (acting.value) return;
     acting.value = 'edit';
-    const token = readGeneration;
+    const token = watcher.session();
     try {
       const next = await call(
         window.taskpilot.requirements.answer(
@@ -196,7 +196,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
           item.questions.map((question) => question.answer ?? ''),
         ),
       );
-      if (token !== readGeneration) return;
+      if (token !== watcher.session()) return;
       upsert(next);
       renderDetail(next);
     } catch (error) {
@@ -209,10 +209,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   // Resolves false when publishing failed, so the button can be used again.
   const publishPlan = async (item: requirementTypes.Requirement) => {
-    const token = readGeneration;
+    const token = watcher.session();
     try {
       const next = await call(window.taskpilot.requirements.publish(item.id));
-      if (token !== readGeneration) return false;
+      if (token !== watcher.session()) return false;
       upsert(next);
       renderDetail(next);
       await useTasksStore().reloadQueue();
@@ -242,10 +242,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
       danger: true,
     });
     if (!confirmed) return;
-    const token = readGeneration;
+    const token = watcher.session();
     try {
       await call(window.taskpilot.requirements.remove(item.id));
-      if (token !== readGeneration) return;
+      if (token !== watcher.session()) return;
       await refreshList();
       if (selectedId.value === item.id) {
         selectedId.value = null;
@@ -262,10 +262,6 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const showQueue = () => useAppStore().navigate('queue');
 
   // ========== State events ==========
-  let unsubscribe: (() => void) | null = null;
-  let reading = false;
-  let queued = false;
-
   const announceLab = (lab: requirementTypes.LabGeneration) => {
     if (lab.status === 'ready') announceAgent(`lab「${lab.lab?.title ?? ''}」生成好了，自验证已通过。`, 'info');
     else if (lab.status === 'needs_review') announceAgent(`lab「${lab.lab?.title ?? ''}」自验证没有通过，等你决定怎么办。`);
@@ -288,51 +284,27 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   const stateKey = (item: requirementTypes.Requirement) =>
     `${item.status}:${item.phase ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
-  const readState = async () => {
-    if (reading) {
-      queued = true;
-      return;
-    }
-    const token = readGeneration;
-    reading = true;
-    try {
+  const watcher = createStateWatcher({
+    name: 'requirements',
+    domains: ['requirements'],
+    read: async (isCurrent) => {
       const before = new Map(items.value.map((item) => [item.id, stateKey(item)]));
       await refreshList();
-      if (token !== readGeneration) return;
+      if (!isCurrent()) return;
       const open = items.value.find((item) => item.id === selectedId.value);
       if (open && !composing.value && useAppStore().view === 'requirements' && before.get(open.id) !== stateKey(open)) {
         renderDetail(open);
         if (!model.isRunning(open) && open.course?.lab?.status !== 'running') announce(open);
       }
-    } finally {
-      reading = false;
-      if (queued) {
-        queued = false;
-        readState().catch((error) => console.error(error));
-      }
-    }
-  };
+    },
+  });
 
   const startWatching = () => {
     if (useAppStore().view !== 'requirements') return;
-    if (unsubscribe) {
-      readState().catch((error) => console.error(error));
-      return;
-    }
-    const repositories = useRepositoryIdentityStore();
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (change.domains.includes('requirements')) readState().catch((error) => console.error(error));
-    });
-    readState().catch((error) => console.error(error));
+    watcher.start().catch((error) => console.error(error));
   };
 
-  const stopWatching = () => {
-    readGeneration += 1;
-    queued = false;
-    unsubscribe?.();
-    unsubscribe = null;
-  };
+  const stopWatching = () => watcher.stop();
 
   // ========== Navigation ==========
   // `compose: 'course'` opens the "我想学…" form.
@@ -354,7 +326,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     // Startup only loads the badge; the view subscribes through open().
   };
 
-  const courseActions = createRequirementsCourseActions({ upsert, renderDetail, open, startWatching, runStep, revision: () => readGeneration });
+  const courseActions = createRequirementsCourseActions({ upsert, renderDetail, open, startWatching, runStep, revision: () => watcher.session() });
 
   return {
     // List

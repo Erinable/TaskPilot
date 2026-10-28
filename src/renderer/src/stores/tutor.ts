@@ -7,7 +7,7 @@ import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import type * as tutorTypes from '@shared/ipc/tutor.ts';
-import { useRepositoryIdentityStore } from './repository_identity.ts';
+import { createStateWatcher } from './state_watcher.ts';
 
 const stepKey = (taskId: string, stepIndex: number) => `${taskId}:${stepIndex}`;
 
@@ -15,20 +15,15 @@ export const useTutorStore = defineStore('tutor', () => {
   const states = ref<Record<string, tutorTypes.TutorState>>({});
   const watching = new Set<string>();
   const pending = new Set<string>();
-  let unsubscribe: (() => void) | null = null;
-  let reading = false;
-  let queued = false;
-  let session = 0;
 
   const stateOf = (taskId: string, stepIndex: number) => states.value[stepKey(taskId, stepIndex)] ?? null;
 
-  const read = async () => {
-    if (reading) {
-      queued = true;
-      return;
-    }
-    reading = true;
-    try {
+  const watcher = createStateWatcher({
+    name: 'tutor',
+    domains: ['tutor'],
+    initialRead: false,
+    onChange: () => watching.forEach((key) => pending.add(key)),
+    read: async () => {
       while (pending.size) {
         const key = pending.values().next().value as string;
         pending.delete(key);
@@ -36,39 +31,22 @@ export const useTutorStore = defineStore('tutor', () => {
         const next = await call(window.taskpilot.tutor.get(taskId, Number(rawStep)));
         if (watching.has(key)) states.value = { ...states.value, [key]: next };
       }
-    } finally {
-      reading = false;
-      if (queued || pending.size) {
-        queued = false;
-        read().catch((error) => console.error('[tutor] refresh failed', error));
-      }
-    }
-  };
-
-  const startWatching = () => {
-    if (unsubscribe) return;
-    const repositories = useRepositoryIdentityStore();
-    unsubscribe = window.taskpilot.state.onChanged((change) => {
-      if (change.repositoryId !== repositories.currentId) return;
-      if (!change.domains.includes('tutor')) return;
-      for (const key of watching) pending.add(key);
-      read().catch((error) => console.error('[tutor] refresh failed', error));
-    });
-  };
+    },
+  });
 
   const refresh = async (taskId: string, stepIndex: number) => {
     const key = stepKey(taskId, stepIndex);
     watching.add(key);
-    startWatching();
+    await watcher.start();
     pending.add(key);
-    await read();
+    await watcher.refresh();
   };
 
   const ask = async (taskId: string, stepIndex: number, level: number) => {
-    const opened = session;
+    const opened = watcher.session();
     try {
       const next = await call(window.taskpilot.tutor.ask(taskId, stepIndex, level));
-      if (opened === session && watching.has(stepKey(taskId, stepIndex))) states.value = { ...states.value, [stepKey(taskId, stepIndex)]: next };
+      if (opened === watcher.session() && watching.has(stepKey(taskId, stepIndex))) states.value = { ...states.value, [stepKey(taskId, stepIndex)]: next };
     } catch (error) {
       console.error('[tutor] ask failed', error);
       showToast(`导师暂时无法回答：${describeError(error)}`);
@@ -86,19 +64,13 @@ export const useTutorStore = defineStore('tutor', () => {
     const key = stepKey(taskId, stepIndex);
     watching.delete(key);
     pending.delete(key);
-    if (!watching.size) {
-      unsubscribe?.();
-      unsubscribe = null;
-    }
+    if (!watching.size) watcher.stop();
   };
 
   const reset = () => {
-    session += 1;
-    queued = false;
+    watcher.stop();
     watching.clear();
     pending.clear();
-    unsubscribe?.();
-    unsubscribe = null;
     states.value = {};
   };
 
