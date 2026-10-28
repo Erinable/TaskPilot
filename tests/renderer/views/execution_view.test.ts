@@ -306,6 +306,7 @@ describe('ExecutionView', () => {
         durationMs: 20,
         output: "Error: Cannot find module './session'",
         results: [],
+        diagnostics: [],
         summary: { total: 0, passed: 0, failed: 0, skipped: 0, ok: false },
         report: { format: 'stdout', trusted: true, problem: null },
         check: { stage: 'step', blocking: true },

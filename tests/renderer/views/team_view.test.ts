@@ -58,7 +58,6 @@ describe('TeamView', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     installApi({ list: [] });
-    Object.assign(window.taskpilot, { businessTimeZone: 'Asia/Shanghai' });
   });
 
   test('working members lead with a full card; the rest stay in TEAM order', () => {

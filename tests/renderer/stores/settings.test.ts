@@ -183,7 +183,7 @@ test('a failed check shows the error on its field and writes nothing', async () 
 test('an error without a known field becomes a toast', async () => {
   const settings = await loaded();
   settings.preferencesDraft!.profile.displayName = 'Grace';
-  api.preferences.set.mockReturnValueOnce(fail('weird', 'boom'));
+  api.preferences.set.mockReturnValueOnce(fail('unknown', 'boom'));
   expect(await settings.saveAll()).toBe(false);
   expect(feedback.showToast).toHaveBeenCalledWith('设置无效：boom');
 });

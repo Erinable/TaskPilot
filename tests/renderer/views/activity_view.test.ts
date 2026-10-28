@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import ElementPlus from 'element-plus';
@@ -7,10 +8,12 @@ import ElementPlus from 'element-plus';
 import ActivityView from '../../../src/renderer/src/views/ActivityView.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
+import { installFakeApi, ok } from '../ipc_fakes.ts';
+import { taskView } from '../execution_fakes.ts';
 import type * as activityTypes from '../../../src/shared/ipc/activity.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
+import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 
-const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 const at = (iso: string) => iso;
 
 const pages: Record<string, activityTypes.ActivityPage> = {
@@ -46,15 +49,12 @@ const pages: Record<string, activityTypes.ActivityPage> = {
 };
 
 describe('ActivityView', () => {
-  let page: ReturnType<typeof vi.fn>;
+  let page: Mock<(before: string | null) => Promise<IpcResult<activityTypes.ActivityPage>>>;
 
   beforeEach(() => {
     setActivePinia(createPinia());
     page = vi.fn((before: string | null) => ok(before ? pages.second : pages.first));
-    (window as unknown as { taskpilot: unknown }).taskpilot = {
-      activity: { page },
-      tasks: { get: vi.fn(() => ok({ id: 'p1' })) },
-    };
+    installFakeApi({ activity: { page }, tasks: { get: () => ok(taskView({ id: 'p1' })) } });
     useTasksStore().tasks = [{ id: 'p1', title: '登录接口' } as packageTypes.TaskView];
   });
 

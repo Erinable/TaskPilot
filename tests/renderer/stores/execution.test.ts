@@ -205,6 +205,7 @@ describe('execution store', () => {
         durationMs: 1200,
         output: '',
         results: [],
+        diagnostics: [],
         summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true },
         report: { format: 'stdout', trusted: true, problem: null },
         check: { stage: 'submit', blocking: true },

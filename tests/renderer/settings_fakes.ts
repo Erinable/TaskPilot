@@ -1,23 +1,20 @@
-// Fake window.taskpilot for the settings and setup tests: every call resolves
-// {ok: true, data} unless a test overrides it.
-import { vi } from 'vitest';
+// Shared fakes for the settings and setup tests: builders and their
+// installFakeApi() defaults: every other call rejects as not faked.
 import { AGENT_IDS, defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type * as masteryTypes from '@shared/ipc/mastery.ts';
 import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
+import type * as envTypes from '@shared/ipc/environment.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 import { BUILTIN_COURSES, OS_COURSE } from '../fixtures/builtin_courses.ts';
 import { STEP_KINDS } from '@shared/check_steps.ts';
-import { stateEvents } from './ipc_fakes.ts';
+import { installFakeApi, ok } from './ipc_fakes.ts';
+import type { Overrides } from './ipc_fakes.ts';
 
-type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
-
-export const ok = <T>(data: T): Promise<Result<T>> => Promise.resolve({ ok: true, data });
-
-// Typed failure result, so it can replace a success in mockReturnValueOnce.
-export const fail = (code: string, message: string, field?: string): Promise<Result<never>> => Promise.resolve({ ok: false, error: { code, message, field } });
+// Tests import the envelope helpers beside the fixtures.
+export { fail, ok } from './ipc_fakes.ts';
 
 export const preferences = (): settingsTypes.Preferences => ({
   profile: { displayName: 'Ada', avatarColor: 'ocean', initials: 'A' },
@@ -111,7 +108,7 @@ const workspaceCheck = (): workspaceTypes.WorkspaceCheck => ({
   tools: [],
 });
 
-export const envState = (overrides: Record<string, unknown> = {}) => ({
+export const envState = (overrides: Partial<envTypes.EnvState> = {}): envTypes.EnvState => ({
   root: '/repo',
   status: 'ready',
   stale: false,
@@ -148,14 +145,14 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-export const installApi = () => {
-  const events = stateEvents();
+// `overrides` replace whole namespaces of the defaults below.
+export const installApi = (overrides: Overrides = {}) => {
   let savedPreferences = preferences();
-  const api = {
-    tasks: { list: vi.fn(() => ok([])) },
+  return installFakeApi({
+    tasks: { list: () => ok([]) },
     workspace: {
-      get: vi.fn(() => ok(workspaceView())),
-      set: vi.fn((form: workspaceTypes.WorkspaceForm) =>
+      get: () => ok(workspaceView()),
+      set: (form: workspaceTypes.WorkspaceForm) =>
         ok(
           workspaceView({
             root: form.root,
@@ -165,35 +162,33 @@ export const installApi = () => {
             }),
           }),
         ),
-      ),
-      check: vi.fn(() => ok(workspaceCheck())),
-      createProject: vi.fn((preset: string) => ok(workspaceView({ project: { status: 'ok', preset } }))),
-      confirmCourse: vi.fn(() => ok(workspaceView())),
-      pickRoot: vi.fn(() => ok(null)),
-      info: vi.fn(() => ok({ configured: false })),
+      check: () => ok(workspaceCheck()),
+      createProject: (preset: string) => ok(workspaceView({ project: { status: 'ok', preset } })),
+      confirmCourse: () => ok(workspaceView()),
+      pickRoot: () => ok(null),
+      info: () => ok({ configured: false }),
     },
     courses: {
-      list: vi.fn(() => ok(courseList())),
-      preview: vi.fn((id: string) => ok(coursePreview(id))),
-      select: vi.fn(() => ok(courseList())),
-      pickImport: vi.fn(() => ok<courseTypes.CourseImport | null>(null)),
-      import: vi.fn(() => ok(courseList())),
-      default: vi.fn(() => ok(BUILTIN_COURSES[0])),
-      copy: vi.fn((_sourceId: string, id: string) => ok(courseSaved(id))),
-      save: vi.fn((id: string) => ok(courseSaved(id))),
+      list: () => ok(courseList()),
+      preview: (id: string) => ok(coursePreview(id)),
+      select: () => ok(courseList()),
+      pickImport: () => ok<courseTypes.CourseImport | null>(null),
+      import: () => ok(courseList()),
+      default: () => ok(BUILTIN_COURSES[0]),
+      copy: (_sourceId: string, id: string) => ok(courseSaved(id)),
+      save: (id: string) => ok(courseSaved(id)),
     },
     preferences: {
-      get: vi.fn(() => ok(savedPreferences)),
-      set: vi.fn((input: settingsTypes.PreferencesInput) => {
+      get: () => ok(savedPreferences),
+      set: (input: settingsTypes.PreferencesInput) => {
         savedPreferences = { ...input, profile: { ...input.profile, initials: 'X' } };
         return ok(savedPreferences);
-      }),
+      },
     },
     agent: {
-      runtimes: vi.fn(() =>
+      runtimes: () =>
         ok(AGENT_IDS.map((agent) => ({ agent, config: defaultAgentSettings()[agent], command: 'claude', available: true, version: '1.0', reason: null }))),
-      ),
-      models: vi.fn((request: agentRuntimeTypes.CliModelsRequest) =>
+      models: (request: agentRuntimeTypes.CliModelsRequest) =>
         ok<agentRuntimeTypes.CliModelCatalog>({
           cli: request.cli,
           scope: request.scope,
@@ -207,10 +202,9 @@ export const installApi = () => {
           defaultThinking: null,
           issues: [],
         }),
-      ),
     },
     environment: {
-      info: vi.fn(() =>
+      info: () =>
         ok({
           requested: 'inherit',
           source: 'inherit',
@@ -221,28 +215,24 @@ export const installApi = () => {
           platform: 'darwin',
           versions: { app: '0.1.0', electron: '40', node: '22' },
         }),
-      ),
     },
     data: {
-      info: vi.fn(() => ok({ configDir: '/config', files: ['workspace.json'], packages: { total: 3, claimed: 1, deviations: 0 } })),
-      resetProgress: vi.fn(() => ok({ total: 3, claimed: 0, deviations: 0 })),
-      reveal: vi.fn(() => ok(true)),
+      info: () => ok({ configDir: '/config', files: ['workspace.json'], packages: { total: 3, claimed: 1, deviations: 0 } }),
+      resetProgress: () => ok({ total: 3, claimed: 0, deviations: 0 }),
+      reveal: () => ok(true),
     },
     // The 课程 view's mastery summary; no lab repository and nothing attempted.
     mastery: {
-      course: vi.fn((id: string) => ok<masteryTypes.CourseMastery>({ course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [], repositories: [] })),
+      course: (id = 'programming') => ok<masteryTypes.CourseMastery>({ course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [], repositories: [] }),
     },
     env: {
-      get: vi.fn(() => ok(envState())),
-      plan: vi.fn(() => ok(envState())),
-      setAllowScripts: vi.fn((allow: boolean) => ok(envState({ allowScripts: allow }))),
-      runStep: vi.fn(() => ok(envState())),
-      apply: vi.fn(() => ok(envState())),
-      cancel: vi.fn(() => ok(true)),
+      get: () => ok(envState()),
+      plan: () => ok(envState()),
+      setAllowScripts: (allow: boolean) => ok(envState({ allowScripts: allow })),
+      runStep: () => ok(envState()),
+      apply: () => ok(envState()),
+      cancel: () => ok(true),
     },
-    state: { onChanged: vi.fn(events.onChanged) },
-    emitState: events.emit,
-  };
-  Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
-  return api;
+    ...overrides,
+  });
 };

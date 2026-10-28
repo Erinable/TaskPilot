@@ -6,6 +6,7 @@ import type { Mock } from 'vitest';
 import { CONTRACTS } from '../../src/shared/ipc/contracts.ts';
 import type { ContractApi } from '../../src/shared/ipc/contracts.ts';
 import type { IpcResult } from '../../src/shared/ipc/envelope.ts';
+import type { ErrorCode } from '../../src/shared/error_codes.ts';
 import type { StateChange } from '../../src/shared/ipc/state.ts';
 
 export type StateEvents = {
@@ -23,9 +24,12 @@ export const stateEvents = (): StateEvents => {
 };
 
 export const ok = <T>(data: T): Promise<IpcResult<T>> => Promise.resolve({ ok: true, data });
+// Typed as never, so it can stand in for any channel's result.
+export const fail = (code: ErrorCode, message: string, field?: string): Promise<IpcResult<never>> =>
+  Promise.resolve({ ok: false, error: { code, message, field } });
 
 type FakeApi = { [N in keyof ContractApi]: { [K in keyof ContractApi[N]]: Mock<ContractApi[N][K]> } };
-type Overrides = { [N in keyof ContractApi]?: Partial<ContractApi[N]> };
+export type Overrides = { [N in keyof ContractApi]?: Partial<ContractApi[N]> };
 
 export const fakeApi = (overrides: Overrides = {}) => {
   const events = stateEvents();
@@ -45,4 +49,12 @@ export const fakeApi = (overrides: Overrides = {}) => {
     }),
   ) as unknown as FakeApi;
   return Object.assign(api, { emitState: events.emit });
+};
+
+// The one way a test puts a fake on window.taskpilot; tests/setup adds the
+// preload's businessTimeZone.
+export const installFakeApi = (overrides: Overrides = {}) => {
+  const api = fakeApi(overrides);
+  Object.assign(window, { taskpilot: api });
+  return api;
 };

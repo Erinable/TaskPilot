@@ -1,6 +1,5 @@
-// Shared fakes for the requirement center tests: a requirement builder and a
-// window.taskpilot stub whose calls resolve {ok: true, data}.
-import { vi } from 'vitest';
+// Shared fakes for the requirement center tests: a requirement builder and its
+// installFakeApi() defaults: every other call rejects as not faked.
 
 import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as releaseTypes from '../../src/shared/ipc/release.ts';
@@ -9,7 +8,7 @@ import type * as settingsTypes from '../../src/shared/ipc/settings.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
 import type { PathEntry } from '../../src/shared/course_plan.ts';
-import { stateEvents } from './ipc_fakes.ts';
+import { installFakeApi, ok } from './ipc_fakes.ts';
 
 export const requirement = (overrides: Partial<requirementTypes.Requirement> = {}): requirementTypes.Requirement => ({
   id: 'r1',
@@ -44,8 +43,6 @@ export const planPackage = (overrides: Partial<requirementTypes.PlanPackage> = {
   difficulty: { level: 'easy', reason: '照着现有代码改一个文件。' },
   ...overrides,
 });
-
-const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 // ========== Course interview ==========
 const concept = (id: string, label: string, prerequisites: string[] = []) => ({ id, label, summary: `${label}。`, prerequisites });
@@ -115,34 +112,28 @@ export const labGeneration = (overrides: Partial<requirementTypes.LabGeneration>
   ...overrides,
 });
 
-export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
-  const events = stateEvents();
-  const api = {
+export const installApi = (state: { list: requirementTypes.Requirement[] }) =>
+  installFakeApi({
     requirements: {
-      list: vi.fn(() => ok(state.list)),
-      create: vi.fn((input: requirementTypes.RequirementInput) =>
-        ok(requirement({ id: 'new', status: 'clarifying', title: input.title ?? '', text: input.text })),
-      ),
-      clarify: vi.fn((id: string) => ok(requirement({ id, status: 'clarifying' }))),
-      answer: vi.fn((id: string) => ok(requirement({ id, status: 'answering' }))),
-      plan: vi.fn((id: string) => ok(requirement({ id, status: 'planning' }))),
-      publish: vi.fn((id: string) =>
+      list: () => ok(state.list),
+      create: (input: requirementTypes.RequirementInput) => ok(requirement({ id: 'new', status: 'clarifying', title: input.title ?? '', text: input.text })),
+      clarify: (id: string) => ok(requirement({ id, status: 'clarifying' })),
+      answer: (id: string) => ok(requirement({ id, status: 'answering' })),
+      plan: (id: string) => ok(requirement({ id, status: 'planning' })),
+      publish: (id: string) =>
         ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as packageTypes.TaskDefinition] })),
-      ),
-      remove: vi.fn(() => ok(true as const)),
-      cancel: vi.fn(() => ok(true)),
-      coursePath: vi.fn((id: string, path: PathEntry[]) => ok(requirement({ id, kind: 'course', status: 'reviewing', course: coursePathInterview(path) }))),
-      courseSaveDraft: vi.fn((id: string) =>
+      remove: () => ok(true as const),
+      cancel: () => ok(true),
+      coursePath: (id: string, path: PathEntry[]) => ok(requirement({ id, kind: 'course', status: 'reviewing', course: coursePathInterview(path) })),
+      courseSaveDraft: (id: string) =>
         ok<requirementTypes.CourseDraftSaved>({
           requirement: requirement({ id, kind: 'course', status: 'reviewing', course: { ...courseInterview(), choice: { course: 'lexing' } } }),
           ref: { id: 'lexing', version: '0.1.0', contentHash: 'saved-hash', source: 'user' },
         }),
-      ),
-      courseConfirmDraft: vi.fn((id: string) =>
+      courseConfirmDraft: (id: string) =>
         ok(requirement({ id, kind: 'course', status: 'reviewing', course: { ...courseInterview(), choice: { course: 'lexing' } } })),
-      ),
-      labEstimate: vi.fn(() => ok(LAB_ESTIMATE)),
-      labGenerate: vi.fn((id: string) =>
+      labEstimate: () => ok(LAB_ESTIMATE),
+      labGenerate: (id: string) =>
         ok(
           requirement({
             id,
@@ -151,8 +142,7 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
             course: { ...coursePathInterview(), lab: labGeneration({ status: 'running', phase: 'spec' }) },
           }),
         ),
-      ),
-      labPlace: vi.fn((id: string) =>
+      labPlace: (id: string) =>
         ok(
           requirement({
             id,
@@ -161,32 +151,24 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
             course: { ...coursePathInterview(), lab: labGeneration({ stage: 1, placed: true }), repositoryId: 'lab-repo' },
           }),
         ),
-      ),
     },
     repositories: {
-      list: vi.fn(() => ok({ current: 'lab-repo', repositories: [] })),
-      busy: vi.fn(() => ok([])),
+      list: () => ok({ current: 'lab-repo', repositories: [] }),
+      busy: () => ok([]),
     },
     // MilestonePicker loads the release state when a requirement detail mounts.
     release: {
-      get: vi.fn(() => ok<releaseTypes.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false })),
+      get: () => ok<releaseTypes.ReleaseState>({ configured: false, draft: null, milestones: [], history: [], startPoint: null, running: false }),
     },
-    agent: { status: vi.fn(() => ok<settingsTypes.AgentStatus>(agentStatus())) },
+    agent: { status: () => ok<settingsTypes.AgentStatus>(agentStatus()) },
     workspace: {
-      pickRoot: vi.fn(() => ok<string | null>('/Users/me/sched-lab')),
-      info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
-      get: vi.fn(() =>
+      pickRoot: () => ok<string | null>('/Users/me/sched-lab'),
+      info: () => ok({ configured: false } as workspaceTypes.WorkspaceInfo),
+      get: () =>
         ok({ root: null, steps: [], project: { status: 'missing' }, course: defaultCourse(), detected: [], presets: [] } as workspaceTypes.WorkspaceView),
-      ),
     },
-    tasks: { list: vi.fn(() => ok([])) },
-    state: { onChanged: vi.fn(events.onChanged) },
-    emitState: events.emit,
-  };
-  (globalThis as unknown as { window: unknown }).window ??= globalThis;
-  Object.assign(window, { taskpilot: api });
-  return api;
-};
+    tasks: { list: () => ok([]) },
+  });
 
 // agent:status for a ready machine: analysis CLI signed in, coding CLI installed and signed in.
 export const agentStatus = (overrides: Partial<settingsTypes.AgentStatus> = {}): settingsTypes.AgentStatus => ({
