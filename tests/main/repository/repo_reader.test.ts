@@ -3,29 +3,16 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 import { readTracked, looksSecret } from '../../../src/main/repository/repo_reader.ts';
 import { listFiles } from '../../../src/main/repository/git.ts';
 
-const run = promisify(execFile);
-
 const repo = async (files: Record<string, string | Buffer>, { untracked = {} as Record<string, string>, symlinks = {} as Record<string, string> } = {}) => {
-  const root = await fs.realpath(await tempDir('taskpilot-reader-'));
-  const g = (args) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  for (const [file, content] of Object.entries(files)) {
-    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
-    await fs.writeFile(path.join(root, file), content);
-  }
-  for (const [link, target] of Object.entries(symlinks)) await fs.symlink(target, path.join(root, link));
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  for (const [file, content] of Object.entries(untracked)) await fs.writeFile(path.join(root, file), content);
-  return root;
+  const prepare = async (root: string) => {
+    for (const [link, target] of Object.entries(symlinks)) await fs.symlink(target, path.join(root, link));
+  };
+  return (await gitRepo(files, { prefix: 'taskpilot-reader-', untracked, prepare })).root;
 };
 
 const reasons = (result) => Object.fromEntries(result.skipped.map((s) => [s.path, s.reason]));

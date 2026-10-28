@@ -2,12 +2,12 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
-import ElementPlus from 'element-plus';
+import { flushPromises } from '@vue/test-utils';
 
 import MapView from '@/views/MapView.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
+import { mountView } from '../mount_view.ts';
 import { installFakeApi } from '../ipc_fakes.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
@@ -61,8 +61,7 @@ beforeEach(() => {
 });
 
 const render = async () => {
-  const wrapper = mount(MapView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  await flushPromises();
+  const wrapper = await mountView(MapView);
   return wrapper;
 };
 

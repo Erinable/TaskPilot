@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { gitRepo as sharedGitRepo } from '../../fixtures/git_repo.ts';
 import { registerIpcHandlers } from '../../../src/main/ipc.ts';
 import type { IpcHandle } from '../../../src/main/ipc.ts';
 import type { AgentDeps, ShellDeps } from '../../../src/main/app/app_context.ts';
@@ -58,24 +59,7 @@ export type CodingOverrides = {
 export const run = promisify(execFile);
 
 // A one-commit repository with src/auth/application/login-user.ts.
-const createGitRepo = async () => {
-  const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-repo-'));
-  const g = (args: string[]) => run('git', args, { cwd: repo });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 'test@example.com']);
-  await g(['config', 'user.name', 'Test']);
-  await fs.mkdir(path.join(repo, 'src/auth/application'), { recursive: true });
-  await fs.writeFile(path.join(repo, 'src/auth/application/login-user.ts'), 'export {};\n');
-  await g(['add', '.']);
-  await g(['commit', '-qm', 'init']);
-  return repo;
-};
-
-export const gitRepo = async () => {
-  const repo = await createGitRepo();
-  onTestFinished(() => fs.rm(repo, { recursive: true, force: true }));
-  return repo;
-};
+export const gitRepo = async () => (await sharedGitRepo({ 'src/auth/application/login-user.ts': 'export {};\n' }, { prefix: 'taskpilot-ipc-repo-' })).root;
 
 export const harness = async ({
   withRepo = true,
@@ -94,17 +78,15 @@ export const harness = async ({
   labGrader?: Grader;
 } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
-  // Background agent runs must finish writing before the directory goes.
-  // onTestFinished hooks run last-registered-first, so the repository is
-  // removed here, after shutdown, not by a hook of its own.
+  // Background agent runs must finish writing before the directories go.
+  // onTestFinished hooks run last-registered-first, so the repository is made
+  // first: its own removal then runs after this shutdown.
+  const root = withRepo ? await gitRepo() : null;
   let ipc: IpcHandle | null = null;
-  let root: string | null = null;
   onTestFinished(async () => {
     await ipc?.shutdown();
     await fs.rm(configDir, { recursive: true, force: true, maxRetries: 5 });
-    if (root) await fs.rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
-  root = withRepo ? await createGitRepo() : null;
 
   // As at startup: the test repository is added and open, and its data lives
   // in its own directory under configDir.

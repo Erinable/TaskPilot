@@ -3,10 +3,8 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
-import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 import { buildProfile } from '../../../src/main/repository/project_profile.ts';
 import { createAppContext } from '../../../src/main/app/app_context.ts';
 import { createPathResolver } from '../../../src/main/infrastructure/shell_env.ts';
@@ -18,19 +16,7 @@ import { VITEST_REPORT, typescriptPreset } from '../../../src/main/checking/pres
 import { WorkPackageStore } from '../../../src/main/work_packages/work_package_store.ts';
 import { RepositoryRegistry } from '../../../src/main/repository/repositories.ts';
 
-const run = promisify(execFile);
-
-const repo = async (files: Record<string, string>) => {
-  const root = await fs.realpath(await tempDir('taskpilot-profile-'));
-  const g = (args: string[]) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  for (const [file, content] of Object.entries(files)) await fs.writeFile(path.join(root, file), content);
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  return root;
-};
+const repo = async (files: Record<string, string>) => (await gitRepo(files, { prefix: 'taskpilot-profile-' })).root;
 
 const PACKAGE = JSON.stringify({ name: 'app', scripts: { test: 'vitest run', lint: 'eslint .', typecheck: 'tsc --noEmit' } });
 const resolveIn = (root: string) => effectiveSteps.resolve(workspace.normalize({ root }), { envPath: '/usr/bin:/bin' });

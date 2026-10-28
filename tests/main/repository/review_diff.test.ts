@@ -3,23 +3,11 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 import { collectChanges } from '../../../src/main/repository/review_diff.ts';
 
-const run = promisify(execFile);
-
 const repo = async () => {
-  const root = await tempDir('taskpilot-review-');
-  const g = (args) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 'test@example.com']);
-  await g(['config', 'user.name', 'Test']);
-  await fs.writeFile(path.join(root, 'a.js'), 'one\n');
-  await g(['add', '.']);
-  await g(['commit', '-qm', 'init']);
-  const baseline = (await g(['rev-parse', 'HEAD'])).stdout.trim();
+  const { root, head: baseline } = await gitRepo({ 'a.js': 'one\n' }, { prefix: 'taskpilot-review-' });
   const write = async (file, content) => {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), content);

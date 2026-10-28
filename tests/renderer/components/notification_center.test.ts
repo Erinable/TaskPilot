@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
-import ElementPlus from 'element-plus';
+import { flushPromises } from '@vue/test-utils';
 
+import { mountView } from '../mount_view.ts';
 import NotificationCenter from '../../../src/renderer/src/components/NotificationCenter.vue';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
@@ -41,8 +41,7 @@ describe('NotificationCenter', () => {
   const render = async () => {
     await useTasksStore().reloadQueue();
     await useRequirementsStore().refreshList();
-    const wrapper = mount(NotificationCenter, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-    await flushPromises();
+    const wrapper = await mountView(NotificationCenter);
     return wrapper;
   };
 

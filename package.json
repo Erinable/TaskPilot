@@ -19,7 +19,7 @@
     "eval:product-lead": "node evals/product-lead/run.ts",
     "analyze:cycles": "knip --include cycles,unresolved",
     "analyze:unused": "knip --include files,dependencies,unlisted,exports,types",
-    "analyze:duplicates": "jscpd src --config .jscpd.json",
+    "analyze:duplicates": "jscpd src tests --config .jscpd.json",
     "analyze:complexity": "node scripts/analyze_complexity.ts",
     "check:complexity": "node scripts/analyze_complexity.ts --check",
     "summarize:analysis": "node scripts/summarize_analysis.ts",

@@ -3,10 +3,9 @@
 // notes due today with the learner's verdict, the top error types, and one
 // concept's attempts, notes, labs and project tasks. Walks the CARM-33
 // example after its first lab: round-robin passed once, its note due.
-import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
 
 import MasteryView from '@/views/MasteryView.vue';
 import { conceptGraph, conceptLinks, stateCounts } from '@/lib/mastery_model.ts';
@@ -16,6 +15,7 @@ import { useMasteryStore } from '@/stores/mastery.ts';
 import { useNotesStore } from '@/stores/notes.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import * as feedback from '@/lib/feedback.ts';
+import { mountView } from '../mount_view.ts';
 import { courseList, installApi, ok } from '../settings_fakes.ts';
 import { taskView } from '../execution_fakes.ts';
 import type * as masteryTypes from '@shared/ipc/mastery.ts';
@@ -111,7 +111,7 @@ beforeEach(() => {
   api.courses.list.mockReturnValue(ok(courseList()));
 });
 
-const mountView = async () => {
+const openView = async () => {
   const pinia = createPinia();
   setActivePinia(pinia);
   useTasksStore().tasks = [
@@ -127,14 +127,12 @@ const mountView = async () => {
     taskView({ id: 'r1-wp1', title: '实现 RR 调度器', concepts: ['round-robin'], course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' } }),
     taskView({ id: 'r1-wp2', title: '无关任务', concepts: [] }),
   ];
-  const wrapper = mount(MasteryView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  onTestFinished(() => wrapper.unmount());
-  await flushPromises();
+  const wrapper = await mountView(MasteryView);
   return wrapper;
 };
 
 test('the graph colours each concept by its state, prerequisites pointing at what needs them', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   expect(api.mastery.course).toHaveBeenCalledWith(undefined);
   const source = wrapper.get('[data-chart]').text();
   expect(wrapper.get('[data-chart]').attributes('data-lang')).toBe('mermaid');
@@ -151,7 +149,7 @@ test('the graph colours each concept by its state, prerequisites pointing at wha
 });
 
 test('today’s reviews: the note due with its box and concepts, remembered or forgotten', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   const due = wrapper.get(`[data-review="${RR_NOTE.id}"]`);
   expect(due.text()).toContain('RR 入队顺序');
   expect(due.text()).toContain('第 1 档 · 时间片轮转（RR）');
@@ -165,12 +163,12 @@ test('today’s reviews: the note due with its box and concepts, remembered or f
 });
 
 test('the top error types of the course are listed', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   expect(wrapper.get('[data-error="missed-edge-case"]').text()).toContain('2 次');
 });
 
 test('a concept lists its attempts with times, its notes in this course, and the labs and tasks that practise it', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-concept="round-robin"]').trigger('click');
   const detail = wrapper.get('[data-section="concept"]');
   expect(detail.get('[data-field="totals"]').text()).toBe('通过过 · 共 2 次：通过 1，部分通过 0，未通过 1');
@@ -193,7 +191,7 @@ test('a pack without a skeleton says so; another pack can be picked', async () =
   api.mastery.course.mockImplementation((id?: string) =>
     ok({ ...OS_MASTERY, course: { id: id ?? 'programming', title: '编程' }, concepts: [], errorTypes: [] }),
   );
-  const wrapper = await mountView();
+  const wrapper = await openView();
   expect(wrapper.find('[data-empty="concepts"]').exists()).toBe(true);
   expect(wrapper.find('[data-chart]').exists()).toBe(false);
   expect(wrapper.find('[data-empty="errors"]').exists()).toBe(true);
@@ -215,9 +213,7 @@ test('opened from a grade, the page shows that pack with its concept picked', as
   const pinia = createPinia();
   setActivePinia(pinia);
   await useMasteryStore().openCourse('os', 'round-robin');
-  const wrapper = mount(MasteryView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  onTestFinished(() => wrapper.unmount());
-  await flushPromises();
+  const wrapper = await mountView(MasteryView);
   expect(api.mastery.course).toHaveBeenCalledWith('os');
   expect(wrapper.get('[data-section="concept"] h3').text()).toBe('时间片轮转（RR）');
 });

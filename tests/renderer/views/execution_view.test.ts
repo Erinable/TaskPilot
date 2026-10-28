@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import type { mount } from '@vue/test-utils';
+import { flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
 
+import { mountView } from '../mount_view.ts';
 import ExecutionView from '../../../src/renderer/src/views/ExecutionView.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
@@ -24,8 +25,7 @@ const mountOpen = async () => {
   setActivePinia(pinia);
   const execution = useExecutionStore();
   await execution.open(current.task.id);
-  const wrapper = mount(ExecutionView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  await flushPromises();
+  const wrapper = await mountView(ExecutionView);
   return { wrapper, execution };
 };
 

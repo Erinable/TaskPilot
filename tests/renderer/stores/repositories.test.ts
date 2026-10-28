@@ -18,7 +18,7 @@ import type * as repositoryTypes from '../../../src/shared/ipc/repositories.ts';
 import type * as settingsTypes from '../../../src/shared/ipc/settings.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
-import { defaultCourse } from '../settings_fakes.ts';
+import { testStepWorkspace } from '../execution_fakes.ts';
 import { installFakeApi, ok } from '../ipc_fakes.ts';
 import { activityOverview } from '../activity_fakes.ts';
 
@@ -94,26 +94,7 @@ describe('repositories store', () => {
     api.commit.preview.mockImplementation(() => ok(preview));
     api.engineeringMap.get.mockImplementation(() => ok(map));
     api.agent.status.mockImplementation(() => ok({ available: true } as settingsTypes.AgentStatus));
-    api.workspace.get.mockImplementation(() =>
-      ok<workspaceTypes.WorkspaceView>({
-        root: '/r',
-        steps: [
-          {
-            id: 'test',
-            label: null,
-            effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
-            source: 'local',
-            skipped: null,
-            local: null,
-            suggestions: [],
-          },
-        ],
-        project: { status: 'missing' },
-        course: defaultCourse(),
-        detected: [],
-        presets: [],
-      }),
-    );
+    api.workspace.get.mockImplementation(() => ok(testStepWorkspace('/r')));
     api.tutor.get.mockImplementation(() => ok(tutorState));
     const feed = useActivityFeedStore();
     const commit = useCommitStore();

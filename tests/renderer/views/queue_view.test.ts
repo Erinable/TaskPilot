@@ -9,7 +9,8 @@ import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
-import { taskView } from '../execution_fakes.ts';
+import { taskView, testStepWorkspace } from '../execution_fakes.ts';
+import { ok } from '../ipc_fakes.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -149,32 +150,8 @@ describe('QueueView', () => {
 
   test('a fully set-up user never sees the checklist', async () => {
     const api = installApi({ list: [requirement()] });
-    api.workspace.info.mockImplementation(
-      () => Promise.resolve({ ok: true, data: { configured: true, root: '/r', commit: 'a', branch: 'main', dirty: false, changedFiles: 0 } }) as never,
-    );
-    api.workspace.get.mockImplementation(
-      () =>
-        Promise.resolve({
-          ok: true,
-          data: {
-            root: '/r',
-            steps: [
-              {
-                id: 'test',
-                label: null,
-                effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
-                source: 'local',
-                skipped: null,
-                local: null,
-                suggestions: [],
-              },
-            ],
-            project: { status: 'missing' },
-            detected: [],
-            presets: [],
-          },
-        }) as never,
-    );
+    api.workspace.info.mockImplementation(() => ok({ configured: true, root: '/r', commit: 'a', branch: 'main', dirty: false, changedFiles: 0 }));
+    api.workspace.get.mockImplementation(() => ok(testStepWorkspace('/r')));
     await useAppStore().refreshWorkspaceStatus();
     await useRequirementsStore().refreshList();
     const wrapper = render();

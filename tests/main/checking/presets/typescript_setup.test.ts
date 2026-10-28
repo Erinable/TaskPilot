@@ -1,14 +1,9 @@
 /** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { tempDir } from '../../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../../fixtures/git_repo.ts';
 
 import * as envSetup from '../../../../src/main/checking/presets/typescript_setup.ts';
-const run = promisify(execFile);
 // Setup facts with a valid manifest defining only `scripts`, and nothing else detected.
 const factsWith = (scripts: Record<string, string>, installScripts: string[] = []): envSetup.EnvFacts => ({
   manifest: { valid: true, name: null, scripts, engines: {}, packageManager: null },
@@ -21,24 +16,8 @@ const factsWith = (scripts: Record<string, string>, installScripts: string[] = [
   installScripts,
 });
 
-const repo = async (files: Record<string, string>, { untracked = {} as Record<string, string> } = {}) => {
-  const root = await fs.realpath(await tempDir('taskpilot-env-'));
-  const g = (args) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  for (const [file, content] of Object.entries(files)) {
-    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
-    await fs.writeFile(path.join(root, file), content);
-  }
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  for (const [file, content] of Object.entries(untracked)) {
-    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
-    await fs.writeFile(path.join(root, file), content);
-  }
-  return root;
-};
+const repo = async (files: Record<string, string>, { untracked = {} as Record<string, string> } = {}) =>
+  (await gitRepo(files, { prefix: 'taskpilot-env-', untracked })).root;
 
 const fakeVersions =
   (node: string | null = 'v22.1.0', npm: string | null = '10.7.0') =>

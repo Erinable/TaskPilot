@@ -3,8 +3,6 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import * as checkOutput from '../../../../src/main/checking/check_output.ts';
 import * as effectiveSteps from '../../../../src/main/checking/effective_steps.ts';
@@ -15,8 +13,7 @@ import { parseCargoManifest, rustPreset } from '../../../../src/main/checking/pr
 import { env } from '../../../../src/main/infrastructure/env.ts';
 import * as requiredTools from '../../../fixtures/required_tools.ts';
 import type { CheckStep } from '../../../../src/main/checking/step_config.ts';
-import { tempDir } from '../../../fixtures/temp_dir.ts';
-const run = promisify(execFile);
+import { gitRepo } from '../../../fixtures/git_repo.ts';
 const FIXTURES = path.join(import.meta.dirname, '../../fixtures');
 // Real output of cargo 1.97 / clippy 0.1.97 / rustfmt 1.9 / nextest 0.9.82
 // on the sample with an unused variable, a `len() == 0`, unformatted code
@@ -159,16 +156,11 @@ test('parseCargoManifest() reads a package, a virtual workspace and broken TOML'
 // End to end on tests/main/fixtures/rust_sample, a Cargo workspace: every
 // preset step runs through TaskPilot's own runner. Needs the Rust toolchain.
 const fixtureRepo = async () => {
-  const root = await fs.realpath(await tempDir('taskpilot-rust-'));
-  await fs.cp(path.join(FIXTURES, 'rust_sample'), root, { recursive: true, filter: (source) => !source.includes(`${path.sep}target`) });
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "rust"\n');
-  const g = (args: string[]) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  return root;
+  const prepare = async (root: string) => {
+    await fs.cp(path.join(FIXTURES, 'rust_sample'), root, { recursive: true, filter: (source) => !source.includes(`${path.sep}target`) });
+    await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "rust"\n');
+  };
+  return (await gitRepo({}, { prefix: 'taskpilot-rust-', prepare })).root;
 };
 
 const hasCargo = await requiredTools.hasTools('cargo');
