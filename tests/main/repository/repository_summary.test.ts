@@ -1,8 +1,9 @@
-import { onTestFinished, test } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import { readCounts } from '../../../src/main/repository/repository_summary.ts';
 import { countStatuses } from '../../../src/shared/repository_counts.ts';
@@ -43,7 +44,6 @@ test('a closed repository counts its published packages, with saved status over 
 
 test('a repository with no saved data counts nothing, and unreadable data counts as unknown', async () => {
   assert.deepEqual(await readCounts(await dataDir({})), { pending: 0, active: 0, accepting: 0 });
-  const errors = (await import('vitest')).vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
+  captureExpectedErrors((error) => error instanceof SyntaxError && error.message.includes('JSON'));
   assert.equal(await readCounts(await dataDir({ 'requirements.json': '{not json' })), null);
 });

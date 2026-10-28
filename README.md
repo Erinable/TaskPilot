@@ -293,6 +293,8 @@ CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、
 
 应用自有 JSON 数据带格式版本：无版本的旧文件按 v1 读取；遇到比当前应用更新的版本会拒绝读取、覆盖或清空。工作区仍是 v3，课程信任记录仍是 v2；并发写入统一串行提交。提示词整篇快照和只检查实现文本的测试已移除，保留行为、安全边界及状态转换测试。
 
+负向测试通过 `tests/fixtures/expected_errors.ts` 在单个场景内捕获明确预期的主进程错误，不再 mock `console.error`；未匹配的错误仍输出并使该测试失败，测试结束时恢复 logger。课程相关 IPC 测试的默认评分 fixture 按请求 schema 生成 rubric 分类；提交审查的场景也要检查评分完成，避免审查通过却漏掉评分失败。
+
 改应用图标：源文件是 `assets/icon/icon.svg`（128 px 及以上）和 `icon_small.svg`（64 px 及以下）。改完先 `brew install librsvg`，再运行 `scripts/build_icon.sh` 重新生成 `icon.icns`。
 
 ### 代码分析

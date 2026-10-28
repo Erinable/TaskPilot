@@ -8,6 +8,7 @@ import * as labs from '../../../src/main/courses/labs.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as lab from './lab_generation_fixtures.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -93,6 +94,9 @@ test('the draft becomes a lab artifact with a git-made reference patch that appl
 });
 
 test('a lab that does not validate fails the run with its error, keeping what it cost', async () => {
+  captureExpectedErrors(
+    (error) => 'code' in error && error.code === 'agent_bad_output' && error.message.includes('hiddenTests[0].names[0]') && error.message.includes('输出 b=3'),
+  );
   const leaking = { ...lab.RR_SPEC, hiddenTests: [{ ...lab.RR_SPEC.hiddenTests[0], names: ['输出 b=3'], script: 'echo "ok - 输出 b=3"' }] };
   const h = await lab.harness({ agent: lab.team({ spec: leaking }) });
   const id = await lab.confirmedCourse(h);

@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { readFile, stat, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -43,6 +43,8 @@ test('serializes errors and circular values safely', async () => {
 });
 
 test('an unwritable log path cannot fail business callers or overwrite the blocking file', async () => {
+  const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  onTestFinished(() => stderr.mockRestore());
   const dir = await tempDir('taskpilot-log-');
   const blocked = path.join(dir, 'blocked');
   const logger = createLogger({ sink: () => {} });
@@ -55,4 +57,14 @@ test('an unwritable log path cannot fail business callers or overwrite the block
   logger.warn('still safe');
   await logger.flush();
   assert.equal(await readFile(blocked, 'utf8'), 'keep');
+  const errors = stderr.mock.calls.map(([line]) => {
+    assert.match(String(line), /^\[error\] log write failed /);
+    return JSON.parse(String(line).slice('[error] log write failed '.length)) as { code: string; message: string };
+  });
+  assert.deepEqual(
+    errors.map((error) => error.code),
+    ['ENOTDIR', 'ENOTDIR'],
+  );
+  assert.ok(errors[0].message.includes(path.join(blocked, 'taskpilot.log')));
+  assert.ok(errors[1].message.includes(path.join(blocked, 'nested')));
 });

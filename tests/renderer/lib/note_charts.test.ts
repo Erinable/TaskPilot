@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, test } from 'vitest';
+import { describe, expect, onTestFinished, test, vi } from 'vitest';
 
 import { isChartLanguage, mountSvg, renderVega, sanitizeSvg } from '../../../src/renderer/src/lib/note_charts.ts';
 
@@ -56,6 +56,9 @@ describe('note charts', () => {
   });
 
   test('range sliders become play controls, labelled by the slider caption', async () => {
+    // Vega renders SVG and supports absent Canvas; jsdom reports that probe as an error.
+    const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    onTestFinished(() => canvas.mockRestore());
     const spec = {
       data: { values: [{ x: 1 }] },
       params: [
@@ -73,6 +76,20 @@ describe('note charts', () => {
   });
 
   test('Vega specs must be JSON objects, and never load a URL', async () => {
+    const original = console.warn.bind(console);
+    const warnings = vi.spyOn(console, 'warn').mockImplementation((...values) => {
+      const [level, message, url, error] = values;
+      if (
+        level === 'WARN' &&
+        message === 'Loading failed' &&
+        url === 'https://evil.example/data.json' &&
+        error instanceof Error &&
+        error.message.includes('外部数据')
+      )
+        return;
+      original(...values);
+    });
+    onTestFinished(() => warnings.mockRestore());
     const host = document.createElement('div');
     await expect(renderVega(host, '{oops', 'vega-lite')).rejects.toThrow('JSON');
     await expect(renderVega(host, '[1]', 'vega-lite')).rejects.toThrow('JSON 对象');

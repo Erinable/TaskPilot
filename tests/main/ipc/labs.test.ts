@@ -16,6 +16,7 @@ import * as fixtures from './harness.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { LabArtifact } from '../../../src/main/courses/labs.ts';
 import type { Grader } from '../../../src/main/courses/lab_verify.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 // Runs real git and make per test.
 vi.setConfig({ testTimeout: 60_000 });
@@ -138,6 +139,7 @@ test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, an
   await solve(root, FCFS);
   await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
   const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  assert.equal(reviewed.grade?.status, 'done', JSON.stringify(reviewed.grade));
   const review = reviewed.review!;
   assert.ok(review.status === 'passed', JSON.stringify(review));
   const grade = review.checks.find((check) => check.kind === 'custom:grade');
@@ -181,6 +183,7 @@ test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its n
   await unsorted(root);
   await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
   const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  assert.equal(reviewed.grade?.status, 'done', JSON.stringify(reviewed.grade));
   const review = reviewed.review!;
   assert.ok(review.status === 'rejected', JSON.stringify(review));
   assert.ok(review.reasons.includes('tests_failed'));
@@ -203,8 +206,7 @@ test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its n
 
 test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiable and the reference locked', async () => {
   // The refusal is logged by runHiddenTests; it is expected here.
-  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => error.mockRestore());
+  captureExpectedErrors((error) => 'code' in error && error.code === 'sandbox_unavailable' && error.message === 'no sandbox');
   const h = await labHarness({
     grader: async () => {
       throw Object.assign(new Error('no sandbox'), { code: 'sandbox_unavailable' });
@@ -216,6 +218,7 @@ test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiabl
   await solve(root, FCFS);
   await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
   const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  assert.equal(reviewed.grade?.status, 'done', JSON.stringify(reviewed.grade));
   const review = reviewed.review!;
   assert.ok(review.status === 'passed', JSON.stringify(review));
   const hidden = review.checks.find((check) => check.kind === 'custom:hidden-tests')!;
@@ -246,7 +249,9 @@ test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by 
   await solve(root, RR_LAB);
   await fs.writeFile(path.join(root, 'src/fcfs.c'), FCFS.files['src/fcfs.c']);
   await h.call(CHANNELS.packagesTransition, 'lab-round-robin', 'submit_for_review');
-  const review = (await settleTask(h, 'lab-round-robin', (task) => task.review?.status !== 'running')).review!;
+  const reviewed = await settleTask(h, 'lab-round-robin', (task) => task.review?.status !== 'running');
+  assert.equal(reviewed.grade?.status, 'done', JSON.stringify(reviewed.grade));
+  const review = reviewed.review!;
   assert.ok(review.status === 'rejected', JSON.stringify(review));
   assert.ok(review.reasons.includes('tests_failed'));
   assert.equal(review.acceptance[0].status, 'verified', 'its own test passes');
@@ -309,8 +314,7 @@ test("Tutor falls back on the lab's own hint ladder and never sees the hidden te
   for (const marker of PRIVATE_MARKERS) assert.ok(!prompt.includes(marker), marker);
 
   // Tutor fails at step 2: the lab's L1 hint stands in and counts as opened.
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
+  captureExpectedErrors((error) => 'code' in error && error.code === 'agent_failed' && error.message === 'CLI crashed');
   tutorFails = true;
   await h.call(CHANNELS.tutorAsk, 'lab-fcfs', 1, 1);
   const fallback = await fixtures.settleTutor(h.call, 'lab-fcfs', 1);

@@ -8,6 +8,7 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { SAMPLE_REQUIREMENT, SAMPLE_TASKS } from '../fixtures/sample_tasks.ts';
 import * as git from '../../../src/main/repository/git.ts';
 import * as fixtures from './harness.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
@@ -135,9 +136,8 @@ test('repositories: switching cancels a running tutor answer so it cannot land i
 
 test('repositories: a switch drops the coding events and tutor failures of the repository it leaves', async () => {
   const events = [{ sequence: 0, at: new Date().toISOString(), type: 'text' as const, text: 'done' }];
+  captureExpectedErrors((error) => 'code' in error && error.code === 'agent_bad_output' && error.message === 'explanation is empty');
   const agent: fixtures.FakeAgent = async () => ({ output: { explanation: '', hints: [], snippet: null, terms: [] }, costUsd: 0 });
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
   const { call } = await fixtures.harness({
     agent,
     seedState: {

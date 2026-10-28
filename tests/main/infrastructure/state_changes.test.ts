@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { createStateChangeEmitter } from '../../../src/main/infrastructure/state_changes.ts';
 import type { StateChange } from '../../../src/shared/ipc/state.ts';
 
@@ -33,10 +34,12 @@ test('a burst merges domains without assigning old-repository changes to the nex
 
 test('a failed observer does not prevent later committed changes from being delivered', async () => {
   const received: StateChange[] = [];
+  const observerError = new Error('observer failed');
+  captureExpectedErrors((error) => error === observerError);
   const changed = createStateChangeEmitter(
     (change) => {
       received.push(change);
-      if (received.length === 1) throw new Error('observer failed');
+      if (received.length === 1) throw observerError;
     },
     () => 'repo',
   );

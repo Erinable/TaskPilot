@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { tempDir } from '../../fixtures/temp_dir.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import type { Review, ReviewCheck } from '../../../src/shared/ipc/packages.ts';
 import * as mastery from '../../../src/main/courses/mastery_store.ts';
 
@@ -194,6 +195,7 @@ test('a package done by Coding Agent, or one without concepts, writes nothing', 
 });
 
 test('a broken mastery.json starts empty instead of failing startup', async () => {
+  captureExpectedErrors((error) => error instanceof SyntaxError);
   const configDir = await dir();
   await fs.writeFile(path.join(configDir, mastery.MASTERY_FILENAME), '{not json');
   assert.deepEqual((await new mastery.MasteryStore(configDir).load()).list(), []);

@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { createStartupGate } from '../../../src/main/app/startup_gate.ts';
-
 test('callers share the attempt in flight, and a success is never repeated', async () => {
   const initialize = vi.fn(async () => {});
   const gate = createStartupGate(initialize);
@@ -11,8 +11,9 @@ test('callers share the attempt in flight, and a success is never repeated', asy
 });
 
 test('a failure reaches every caller until a retry starts over', async () => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-  const initialize = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValueOnce(undefined);
+  const diskError = new Error('disk full');
+  captureExpectedErrors((error) => error === diskError);
+  const initialize = vi.fn().mockRejectedValueOnce(diskError).mockResolvedValueOnce(undefined);
   const gate = createStartupGate(initialize);
   await expect(gate.ready(false)).rejects.toThrow('disk full');
   await expect(gate.ready(false)).rejects.toThrow('disk full');

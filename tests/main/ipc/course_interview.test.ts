@@ -9,6 +9,7 @@ import path from 'node:path';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as goals from '../../fixtures/course_interview.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 vi.setConfig({ testTimeout: 20_000 });
 
@@ -118,6 +119,7 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
   assert.equal(list.entries.find((entry) => entry.id === 'lexing').trust, 'pending');
 
   // Unconfirmed, it is not planned from.
+  captureExpectedErrors((error) => 'code' in error && error.code === 'course_not_confirmed' && error.message.includes('lexing'));
   await h.call(CHANNELS.requirementsPlan, item.id);
   await h.idle();
   item = (await h.call(CHANNELS.requirementsGet, item.id)).data;

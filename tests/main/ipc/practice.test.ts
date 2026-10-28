@@ -1,11 +1,12 @@
 // IPC channels for packages and practice service (src/main/ipc/packages.ts, src/main/work_packages/practice_service.ts).
-import { test, onTestFinished, vi } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as practice from './practice_fixtures.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
@@ -121,8 +122,7 @@ test('practice: releasing cancels the reference run and clears what it would hav
 });
 
 test('practice: a failed reference run still lets the submission be graded on its own', async () => {
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
+  captureExpectedErrors((error) => 'code' in error && error.code === 'coding_failed' && error.message === 'boom');
   const h = await practice.practiceHarness({ failWith: Object.assign(new Error('boom'), { code: 'coding_failed' }) });
   await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'practice' });
   await practice.settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'failed');
@@ -171,8 +171,13 @@ test('practice: grading reads the developer notes and keeps repeated only when t
 });
 
 test('practice: a grade whose category is not in the pack in use fails instead of being kept', async () => {
-  // The default fake answers with programming categories (writing, style).
-  const h = await practice.practiceHarness();
+  captureExpectedErrors((error) => 'code' in error && error.code === 'agent_bad_output' && error.message.startsWith('comments[0].category '));
+  const malformed = {
+    summary: '不合规。',
+    strengths: [],
+    comments: [{ category: 'writing', file: null, line: null, observation: '错误类别。', betterWay: '改正。', repeated: false }],
+  };
+  const h = await practice.practiceHarness({ agent: fixtures.fakeAgent({ grade: malformed }) });
   await fixtures.useOsPack(h);
   await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'practice' });
   await practice.settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');

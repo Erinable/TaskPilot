@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import * as labVerify from '../../../src/main/courses/lab_verify.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { SANDBOX_EXEC_PATH } from '../../../src/main/coding/coding_sandbox.ts';
 import { HIDDEN_NAMES, IDLE_LAB, PUBLIC_NAMES, RR_LAB, RR_MUTANT_EDITS, allTests, graded, mutated } from '../../fixtures/lab_verify.ts';
 import { RR_SPEC } from '../../fixtures/lab_generator.ts';
@@ -179,6 +180,7 @@ test('mutants are skipped while the solution fails its own tests, and the report
 
 test('a repair the generator refuses ends the check as needs_review with the refusal kept', async () => {
   const refusal = Object.assign(new Error('hiddenTests[0].names[0] must not give away an input'), { code: 'agent_bad_output' });
+  captureExpectedErrors((error) => error === refusal);
   const { report } = await labVerify.verifyLab(
     RR_LAB,
     { stage: 1, base: labVerify.FIRST_STAGE_BASE },

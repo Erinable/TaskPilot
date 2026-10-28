@@ -8,6 +8,7 @@ import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as practice from './practice_fixtures.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
@@ -140,6 +141,7 @@ test('practice: skipping every difference ends the explanation without a reply a
 });
 
 test('practice: a failed reply keeps the answers and can be asked again', async () => {
+  captureExpectedErrors((error) => error.message === 'model down');
   const h = await practice.gradedWithReference(fixtures.fakeAgent({ feedback: new Error('model down') }));
   await h.call(CHANNELS.practiceExplain, 'auth-edge-tests');
   await practice.settleExplanation(h, 'answering');

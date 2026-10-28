@@ -419,7 +419,14 @@ export const fakeAgent =
       tutor: () => overrides.tutor ?? TUTOR_ANSWER,
       // A grade without levels gets level 3 on every rubric item the schema asks for.
       grade: () => {
-        const report = overrides.grade ?? GRADE_REPORT;
+        const categories = schema.properties.comments.items.properties.category.enum;
+        const report = overrides.grade ?? {
+          ...GRADE_REPORT,
+          comments: GRADE_REPORT.comments.map((comment, index) => ({
+            ...comment,
+            category: categories.includes(comment.category) ? comment.category : categories[index % categories.length],
+          })),
+        };
         if (report instanceof Error || 'levels' in (report as object)) return report;
         return { ...report, levels: Object.fromEntries(schema.properties.levels.required.map((id) => [id, 3])) };
       },

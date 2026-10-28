@@ -1,6 +1,6 @@
 // IPC channels of the tutor domain (src/main/ipc/tutor.ts, src/main/work_packages/tutor_service.ts):
 // the hint ladder, its output filter, and what it records.
-import { test, onTestFinished, vi } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import * as practice from '../../../src/main/work_packages/practice.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { HIDDEN_CHECK_KIND } from '../../../src/main/courses/lab_hidden.ts';
 import * as fixtures from './harness.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
@@ -171,9 +172,8 @@ test('tutor: L4 sees the failing public tests, never the hidden ones', async () 
 test('tutor: bad output fails the level, which can be retried', async () => {
   let output: unknown = { explanation: '', hints: [], snippet: null, terms: [] };
   const agent: fixtures.FakeAgent = async () => ({ output, costUsd: 0 });
+  captureExpectedErrors((error) => 'code' in error && error.code === 'agent_bad_output' && error.message === 'explanation is empty');
   const { call, store } = await fixtures.harness({ agent, seedState: { [ID]: fixtures.claimedState } });
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
   await call(CHANNELS.tutorAsk, ID, 1, 1);
   const failed = await fixtures.settleTutor(call, ID, 1);
   assert.deepEqual([failed.status, failed.pending, failed.error.code, failed.opened], ['failed', 1, 'agent_bad_output', 0]);

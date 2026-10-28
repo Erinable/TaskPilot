@@ -1,9 +1,10 @@
-import { test, onTestFinished, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { codeInText } from '../../../src/main/work_packages/hint_leak.ts';
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import * as tutor from '../../../src/main/agents/tutor.ts';
 import { TUTOR_FILENAME, TutorStore } from '../../../src/main/work_packages/tutor_store.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
@@ -102,8 +103,7 @@ test('an answer saved before the ladder loads as L1 without its code', async () 
   };
   const broken = { ...old, stepIndex: 1, answer: { explanation: '' } };
   await fs.writeFile(path.join(dir, TUTOR_FILENAME), JSON.stringify([old, broken]));
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
+  captureExpectedErrors((error) => 'code' in error && error.code === 'agent_bad_output' && error.message.includes('explanation'));
   const tutor = await new TutorStore(dir).load();
   const loaded = tutor.get('p', 0, '旧说法', 1);
   assert.deepEqual(

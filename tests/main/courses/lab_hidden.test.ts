@@ -1,12 +1,13 @@
 // A course lab's hidden tests at review (src/main/courses/lab_hidden.ts), with a fake
 // grader: what it is handed and what the review gets back.
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import * as labs from '../../../src/main/courses/labs.ts';
 import { HIDDEN_CHECK_KIND, runHiddenTests } from '../../../src/main/courses/lab_hidden.ts';
@@ -72,16 +73,11 @@ test('a failing hidden test fails the check by name; a broken build fails it too
 test('a lab without hidden tests has no check, and a grader that cannot run leaves it unverifiable', async () => {
   const { root, dataDir } = await setup();
   assert.equal(await runHiddenTests({ root, dataDir, labId: 'none', grader: fake({ built: true, results: {}, output: '' }) }), null);
+  const refusal = Object.assign(new Error('no sandbox'), { code: 'sandbox_unavailable' });
   const refused: Grader = async () => {
-    throw Object.assign(new Error('no sandbox'), { code: 'sandbox_unavailable' });
+    throw refusal;
   };
-  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
-  try {
-    const outcome = await runHiddenTests({ root, dataDir, labId: 'a', grader: refused });
-    assert.deepEqual([outcome!.evidence.status, outcome!.evidence.reason], ['unverifiable', 'sandbox_unavailable']);
-  } finally {
-    error.mockRestore();
-    debug.mockRestore();
-  }
+  captureExpectedErrors((error) => error === refusal);
+  const outcome = await runHiddenTests({ root, dataDir, labId: 'a', grader: refused });
+  assert.deepEqual([outcome!.evidence.status, outcome!.evidence.reason], ['unverifiable', 'sandbox_unavailable']);
 });

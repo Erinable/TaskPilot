@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import { DEFAULT_DIRNAME, LOCATION_FILENAME, MAX_NOTES, NoteStore } from '../../../src/main/notes/note_store.ts';
 import { validateNote } from '../../../src/main/notes/note_file.ts';
@@ -226,8 +227,7 @@ test('a chosen folder is remembered; a missing one falls back to the default and
   await assert.rejects(() => store.setDirectory(path.join(vault, 'nope')), { code: 'notes_directory_invalid' });
 
   await fs.rm(vault, { recursive: true });
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-  onTestFinished(() => errors.mockRestore());
+  captureExpectedErrors((error) => 'code' in error && error.code === 'notes_directory_invalid');
   const fallback = await open(configDir);
   assert.equal(fallback.directory, notesDir(configDir));
   assert.equal(fallback.list().unavailable, vault);
