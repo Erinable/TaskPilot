@@ -5,29 +5,17 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import { typescriptPreset } from '../../../../src/main/checking/presets/typescript.ts';
 import { rustPreset } from '../../../../src/main/checking/presets/rust.ts';
 import { pythonPreset } from '../../../../src/main/checking/presets/python.ts';
 import { versionReaderOf } from '../../../../src/main/checking/presets/index.ts';
 import type { Preset } from '../../../../src/main/checking/presets/preset.ts';
-import { tempDir } from '../../../fixtures/temp_dir.ts';
-const run = promisify(execFile);
+import { gitRepo } from '../../../fixtures/git_repo.ts';
 
 // A repository whose only commit holds `files`; returns a reader of that commit.
 const committed = async (files: Record<string, string>) => {
-  const dir = await tempDir('taskpilot-version-');
-  const g = async (args: string[]) => (await run('git', args, { cwd: dir })).stdout.trim();
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 'test@example.com']);
-  await g(['config', 'user.name', 'Test']);
-  for (const [name, content] of Object.entries(files)) await fs.writeFile(path.join(dir, name), content);
-  await fs.writeFile(path.join(dir, 'README.md'), 'demo\n');
-  await g(['add', '.']);
-  await g(['commit', '-qm', 'init']);
-  const head = await g(['rev-parse', 'HEAD']);
+  const { root: dir, head } = await gitRepo({ ...files, 'README.md': 'demo\n' }, { prefix: 'taskpilot-version-' });
   return { dir, head, read: (preset: Pick<Preset, 'version'>) => preset.version(dir, head) };
 };
 

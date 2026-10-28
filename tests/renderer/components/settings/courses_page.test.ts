@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 /** @module-tag integration */
-import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
 
 import SettingsView from '@/views/SettingsView.vue';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
+import { mountView } from '../../mount_view.ts';
 import { courseList, coursePreview, defaultCourse, installApi, ok } from '../../settings_fakes.ts';
 import { OS_COURSE } from '../../../fixtures/builtin_courses.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -25,8 +25,7 @@ beforeEach(() => {
 const mountPage = async () => {
   const pinia = createPinia();
   setActivePinia(pinia);
-  const wrapper = mount(SettingsView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  onTestFinished(() => wrapper.unmount());
+  const wrapper = await mountView(SettingsView);
   await useSettingsStore().open('courses');
   await flushPromises();
   return wrapper;

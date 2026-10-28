@@ -63,6 +63,26 @@ const state = (task: packageTypes.TaskView): packageTypes.WorkPackageState => ({
   snippetCopies: 0,
 });
 
+// A repository whose only check is a local `npm test` submit step.
+export const testStepWorkspace = (root: string): workspaceTypes.WorkspaceView => ({
+  root,
+  steps: [
+    {
+      id: 'test',
+      label: null,
+      effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
+      source: 'local',
+      skipped: null,
+      local: null,
+      suggestions: [],
+    },
+  ],
+  project: { status: 'missing' },
+  course: defaultCourse(),
+  detected: [],
+  presets: [],
+});
+
 // Installs window.taskpilot; `task` is what getTask() returns now.
 export const installApi = (current: { task: packageTypes.TaskView }) => {
   return installFakeApi({
@@ -110,25 +130,7 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
     workspace: {
       info: () => ok<workspaceTypes.WorkspaceInfo>({ configured: false }),
       openFile: () => ok<workspaceTypes.OpenedWith>('vscode'),
-      get: () =>
-        ok<workspaceTypes.WorkspaceView>({
-          root: '/repo',
-          steps: [
-            {
-              id: 'test',
-              label: null,
-              effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
-              source: 'local',
-              skipped: null,
-              local: null,
-              suggestions: [],
-            },
-          ],
-          project: { status: 'missing' },
-          course: defaultCourse(),
-          detected: [],
-          presets: [],
-        }),
+      get: () => ok(testStepWorkspace('/repo')),
     },
     notes: {
       list: () => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] }),

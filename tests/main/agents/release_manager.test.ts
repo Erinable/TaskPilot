@@ -3,17 +3,14 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import * as release from '../../../src/main/agents/release_manager.ts';
 import { planRelease } from '../../../src/main/agents/pipeline.ts';
 import { parseVersion } from '../../../src/shared/semver.ts';
 import { typescriptPreset } from '../../../src/main/checking/presets/typescript.ts';
 import type { RunStructuredOptions } from '../../../src/main/runtimes/claude_cli.ts';
-import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 
-const run = promisify(execFile);
 const SHA_A = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 const SHA_B = 'a1b2c3d9999999999999999999999999999999ff';
 
@@ -111,21 +108,10 @@ test('formatNotes renders non-empty groups as Markdown', () => {
 
 // A real repository: history, numstat and `git show` must match what git emits.
 const makeRepo = async () => {
-  const dir = await tempDir('taskpilot-release-');
-  const g = async (args: string[]) => (await run('git', args, { cwd: dir })).stdout.trim();
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 'test@example.com']);
-  await g(['config', 'user.name', 'Test']);
-  await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
-  await g(['add', '.']);
-  await g(['commit', '-qm', 'init']);
-  const start = await g(['rev-parse', 'HEAD']);
-  await fs.writeFile(path.join(dir, 'feature.ts'), 'export const SECRET_MARKER_CONTENT = 1;\n');
-  await fs.writeFile(path.join(dir, '.env'), 'TOKEN=abc\n');
-  await g(['add', '.']);
-  await g(['commit', '-qm', 'feat: add feature']);
-  const end = await g(['rev-parse', 'HEAD']);
-  return { dir, g, start, end };
+  const repo = await gitRepo({ 'package.json': JSON.stringify({ name: 'demo', version: '1.0.0' }) }, { prefix: 'taskpilot-release-' });
+  await repo.write({ 'feature.ts': 'export const SECRET_MARKER_CONTENT = 1;\n', '.env': 'TOKEN=abc\n' });
+  const end = await repo.commit('feat: add feature');
+  return { dir: repo.root, start: repo.head, end };
 };
 
 test('planRelease sends names and counts, never file contents or secret paths', async () => {

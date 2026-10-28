@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expect, test } from 'vitest';
 
-import { tempDir } from '../fixtures/temp_dir.ts';
+import { gitRepo } from '../fixtures/git_repo.ts';
 import * as analysis from '../../scripts/complexity_analysis.ts';
 
 const execute = promisify(execFile);
@@ -72,17 +72,7 @@ test('cannot hide complexity through inline disables and fails on parse errors',
   await expect(analysis.analyzeSources([source('export const = ;')], cwd)).rejects.toThrow(/Parsing error/);
 });
 
-const temporaryRepository = async () => {
-  const directory = await tempDir('taskpilot-complexity-test-');
-  await execute('git', ['init', '-q'], { cwd: directory });
-  await execute('git', ['config', 'user.name', 'Complexity Test'], { cwd: directory });
-  await execute('git', ['config', 'user.email', 'complexity@example.invalid'], { cwd: directory });
-  await fs.mkdir(path.join(directory, 'src'));
-  await fs.writeFile(path.join(directory, 'src/original.ts'), functionSource('existing', 20));
-  await execute('git', ['add', '.'], { cwd: directory });
-  await execute('git', ['commit', '-qm', 'test fixture'], { cwd: directory });
-  return directory;
-};
+const temporaryRepository = async () => (await gitRepo({ 'src/original.ts': functionSource('existing', 20) }, { prefix: 'taskpilot-complexity-test-' })).root;
 
 test('reads renamed baselines and includes untracked source without reading missing or declaration files', async () => {
   const directory = await temporaryRepository();

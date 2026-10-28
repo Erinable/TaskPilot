@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
-import ElementPlus from 'element-plus';
+import type { mount } from '@vue/test-utils';
+import { flushPromises } from '@vue/test-utils';
 
+import { mountView } from '../mount_view.ts';
 import CommandPalette from '../../../src/renderer/src/components/CommandPalette.vue';
 import { usePaletteStore } from '../../../src/renderer/src/stores/palette.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
@@ -49,7 +50,7 @@ describe('CommandPalette', () => {
   });
 
   const render = async () => {
-    wrapper = mount(CommandPalette, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+    wrapper = await mountView(CommandPalette);
     trigger.focus();
     usePaletteStore().openPalette();
     await flushPromises();
@@ -149,7 +150,7 @@ describe('CommandPalette', () => {
   });
 
   test('⌘K and Ctrl+K toggle the palette; the listener goes away on unmount', async () => {
-    wrapper = mount(CommandPalette, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+    wrapper = await mountView(CommandPalette);
     const palette = usePaletteStore();
     await key(document, 'k', { metaKey: true });
     expect(palette.visible).toBe(true);
@@ -162,7 +163,7 @@ describe('CommandPalette', () => {
   });
 
   test('⌘K leaves an open confirm box alone', async () => {
-    wrapper = mount(CommandPalette, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
+    wrapper = await mountView(CommandPalette);
     openDialogs.value = 1;
     await key(document, 'k', { metaKey: true });
     expect(usePaletteStore().visible).toBe(false);

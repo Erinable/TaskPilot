@@ -2,8 +2,8 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
 
+import { mountView } from '../mount_view.ts';
 import NotesView from '../../../src/renderer/src/views/NotesView.vue';
 import NoteMarkdown from '../../../src/renderer/src/components/notes/NoteMarkdown.vue';
 import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
@@ -74,13 +74,12 @@ const list = (notes: noteTypes.NoteMeta[]): noteTypes.NoteList => ({
   notes,
 });
 
-const mountView = async (notes: noteTypes.NoteMeta[]) => {
+const openView = async (notes: noteTypes.NoteMeta[]) => {
   api.notes.list.mockImplementation(() => ok(list(notes)));
   const pinia = createPinia();
   setActivePinia(pinia);
   useRepositoriesStore().currentId = 'r1';
-  const wrapper = mount(NotesView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  await flushPromises();
+  const wrapper = await mountView(NotesView);
   useNotesStore().stopWatching();
   return wrapper;
 };
@@ -107,19 +106,19 @@ beforeEach(() => {
   });
 });
 
-const openFirst = async (wrapper: Awaited<ReturnType<typeof mountView>>) => {
+const openFirst = async (wrapper: Awaited<ReturnType<typeof openView>>) => {
   await wrapper.get('[data-note="用例要有断言.md"] .post-title').trigger('click');
   await flushPromises();
 };
 
 describe('NotesView', () => {
   test('with no notes it says how to get one', async () => {
-    const wrapper = await mountView([]);
+    const wrapper = await openView([]);
     expect(wrapper.get('[data-notes-empty]').text()).toContain('存为笔记');
   });
 
   test('the index lists notes by month with their date, category and tags', async () => {
-    const wrapper = await mountView([meta({ createdAt: '2026-10-24T02:00:00Z' }), { ...LINKING, createdAt: '2026-09-30T20:00:00Z' }]);
+    const wrapper = await openView([meta({ createdAt: '2026-10-24T02:00:00Z' }), { ...LINKING, createdAt: '2026-09-30T20:00:00Z' }]);
     // 2026-09-30T20:00Z is already October in Shanghai.
     expect(wrapper.findAll('.post-group h3').map((heading) => heading.text())).toEqual(['2026 年 10 月']);
     const item = wrapper.get('[data-note="用例要有断言.md"]');
@@ -134,7 +133,7 @@ describe('NotesView', () => {
 
   test("with an OS repository the side lists OS's rubric and the shared dimensions; an unknown category shows its id", async () => {
     api.notes.courses.mockImplementation(() => ok<noteTypes.NoteCourses>({ current: 'os', packs: [PROGRAMMING, OS] }));
-    const wrapper = await mountView([
+    const wrapper = await openView([
       meta({ id: 'os.md', title: 'os', category: 'concurrency', course: 'os' }),
       meta({ id: 'old.md', title: 'old', category: 'thinking' }),
       meta({ id: 'odd.md', title: 'odd', category: 'knife', course: 'cooking' }),
@@ -158,7 +157,7 @@ describe('NotesView', () => {
   });
 
   test('a note opens as its own page, rendering Markdown as nodes, never as markup, with its backlinks', async () => {
-    const wrapper = await mountView([meta(), LINKING]);
+    const wrapper = await openView([meta(), LINKING]);
     await openFirst(wrapper);
     expect(wrapper.find('.blog-index').exists()).toBe(false);
     expect(wrapper.get('.article-head h1').text()).toBe('用例要有断言');
@@ -175,7 +174,7 @@ describe('NotesView', () => {
   });
 
   test('a [[link]] goes to that note’s page, and back returns', async () => {
-    const wrapper = await mountView([meta(), LINKING]);
+    const wrapper = await openView([meta(), LINKING]);
     await openFirst(wrapper);
     await wrapper.get('a.wiki-link:not(.missing)').trigger('click');
     await flushPromises();
@@ -189,7 +188,7 @@ describe('NotesView', () => {
   });
 
   test('a missing [[link]] is created after asking and opens in the editor', async () => {
-    const wrapper = await mountView([meta(), LINKING]);
+    const wrapper = await openView([meta(), LINKING]);
     await openFirst(wrapper);
     await wrapper.get('a.wiki-link.missing').trigger('click');
     await flushPromises();
@@ -199,7 +198,7 @@ describe('NotesView', () => {
   });
 
   test('ticking a task saves it at once', async () => {
-    const wrapper = await mountView([meta(), LINKING]);
+    const wrapper = await openView([meta(), LINKING]);
     await openFirst(wrapper);
     await wrapper.get('.note-task input').trigger('change');
     await flushPromises();
@@ -210,7 +209,7 @@ describe('NotesView', () => {
   });
 
   test('editing a rename asks to update links, then returns to reading', async () => {
-    const wrapper = await mountView([meta(), LINKING]);
+    const wrapper = await openView([meta(), LINKING]);
     await openFirst(wrapper);
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
@@ -228,7 +227,7 @@ describe('NotesView', () => {
 
   test('the editor switches between source, split and preview, and remembers the choice', async () => {
     localStorage.removeItem('taskpilot.noteEditorMode');
-    const wrapper = await mountView([meta()]);
+    const wrapper = await openView([meta()]);
     await openFirst(wrapper);
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
@@ -251,7 +250,7 @@ describe('NotesView', () => {
   });
 
   test('leaving unsaved edits asks first', async () => {
-    const wrapper = await mountView([meta()]);
+    const wrapper = await openView([meta()]);
     await openFirst(wrapper);
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
@@ -263,7 +262,7 @@ describe('NotesView', () => {
   });
 
   test('a file changed elsewhere while editing offers to keep or drop the edits', async () => {
-    const wrapper = await mountView([meta()]);
+    const wrapper = await openView([meta()]);
     await openFirst(wrapper);
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
@@ -281,7 +280,7 @@ describe('NotesView', () => {
   });
 
   test('Tutor writes the summary on request', async () => {
-    const wrapper = await mountView([meta()]);
+    const wrapper = await openView([meta()]);
     await openFirst(wrapper);
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
@@ -292,7 +291,7 @@ describe('NotesView', () => {
   });
 
   test('deleting asks first and goes back', async () => {
-    const wrapper = await mountView([meta()]);
+    const wrapper = await openView([meta()]);
     await openFirst(wrapper);
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     await wrapper.get('[data-action="delete-note"]').trigger('click');

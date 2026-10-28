@@ -1,12 +1,8 @@
 /** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
-import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 import * as effectiveSteps from '../../../src/main/checking/effective_steps.ts';
 import * as workspace from '../../../src/main/repository/workspace.ts';
 import { detectLanguages } from '../../../src/main/checking/presets/index.ts';
@@ -14,20 +10,9 @@ import { VITEST_REPORT, typescriptPreset } from '../../../src/main/checking/pres
 import { parseManifest } from '../../../src/main/checking/presets/typescript_setup.ts';
 import type { StepPatch } from '../../../src/main/checking/step_config.ts';
 
-const run = promisify(execFile);
 const npm = (...args: string[]) => ({ command: 'npm', args });
 
-const repo = async (files: Record<string, string>) => {
-  const root = await fs.realpath(await tempDir('taskpilot-steps-'));
-  const g = (args: string[]) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  for (const [file, content] of Object.entries(files)) await fs.writeFile(path.join(root, file), content);
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  return root;
-};
+const repo = async (files: Record<string, string>) => (await gitRepo(files, { prefix: 'taskpilot-steps-' })).root;
 
 const PACKAGE = JSON.stringify({
   name: 'app',

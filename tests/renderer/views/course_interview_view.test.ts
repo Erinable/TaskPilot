@@ -3,9 +3,9 @@
 // a pack, adjusting the path and the drafted pack.
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
-import ElementPlus from 'element-plus';
+import { flushPromises } from '@vue/test-utils';
 
+import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { courseInterview, coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
@@ -34,8 +34,7 @@ describe('course interview', () => {
   const render = async (options: { compose?: boolean | 'course'; id?: string } = {}) => {
     const store = useRequirementsStore();
     await store.open(options);
-    const wrapper = mount(RequirementsView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-    await flushPromises();
+    const wrapper = await mountView(RequirementsView);
     return { wrapper, store };
   };
 

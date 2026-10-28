@@ -3,24 +3,14 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { tempDir } from '../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../fixtures/git_repo.ts';
 import * as git from '../../../src/main/repository/git.ts';
-
-const run = promisify(execFile);
 
 // A real repository is used rather than a mock: the point of these tests is
 // that the porcelain parsing matches what git actually emits.
 const makeRepo = async () => {
-  const dir = await tempDir('taskpilot-git-');
-  const g = (args) => run('git', args, { cwd: dir });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 'test@example.com']);
-  await g(['config', 'user.name', 'Test']);
-  await fs.writeFile(path.join(dir, 'a.txt'), 'one\ntwo\n');
-  await g(['add', 'a.txt']);
-  await g(['commit', '-qm', 'init']);
+  const { root: dir, git: g } = await gitRepo({ 'a.txt': 'one\ntwo\n' }, { prefix: 'taskpilot-git-' });
   return { dir, g };
 };
 
@@ -52,7 +42,7 @@ test('status() reports staged, unstaged, and untracked files', async () => {
   await fs.writeFile(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
   await fs.writeFile(path.join(dir, 'b.txt'), 'new\n');
   await fs.writeFile(path.join(dir, 'c.txt'), 'staged\n');
-  await g(['add', 'c.txt']);
+  await g('add', 'c.txt');
 
   const byPath = Object.fromEntries((await git.status(dir)).map((e) => [e.path, e]));
   assert.equal(byPath['a.txt'].staged, false);
@@ -133,7 +123,7 @@ test('changesSince() does not double-count a staged new file', async () => {
   const { dir, g } = await makeRepo();
   const baseline = await git.head(dir);
   await fs.writeFile(path.join(dir, 'staged.txt'), 'x\n');
-  await g(['add', 'staged.txt']);
+  await g('add', 'staged.txt');
   const paths = (await git.changesSince(dir, baseline)).map((c) => c.path);
   assert.deepEqual(paths, ['staged.txt']);
 });

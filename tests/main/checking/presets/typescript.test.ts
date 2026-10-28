@@ -14,7 +14,7 @@ import * as workspace from '../../../../src/main/repository/workspace.ts';
 import { VITEST_REPORT, runsVitestAlone, typescriptPreset } from '../../../../src/main/checking/presets/typescript.ts';
 import { parseManifest } from '../../../../src/main/checking/presets/typescript_setup.ts';
 import type { CheckStep } from '../../../../src/main/checking/step_config.ts';
-import { tempDir } from '../../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../../fixtures/git_repo.ts';
 const run = promisify(execFile);
 const REPO = path.join(import.meta.dirname, '../../../..');
 const FIXTURES = path.join(import.meta.dirname, '../../fixtures');
@@ -58,17 +58,12 @@ test('any other test script keeps the step it had before', () => {
 // End to end on tests/main/fixtures/typescript_sample through TaskPilot's own
 // runner, with this repository's node_modules linked in for vitest.
 const fixtureRepo = async () => {
-  const root = await fs.realpath(await tempDir('taskpilot-typescript-'));
-  await fs.cp(path.join(FIXTURES, 'typescript_sample'), root, { recursive: true });
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "typescript"\n');
-  await fs.symlink(path.join(REPO, 'node_modules'), path.join(root, 'node_modules'), 'dir');
-  const g = (args: string[]) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  return root;
+  const prepare = async (root: string) => {
+    await fs.cp(path.join(FIXTURES, 'typescript_sample'), root, { recursive: true });
+    await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "typescript"\n');
+    await fs.symlink(path.join(REPO, 'node_modules'), path.join(root, 'node_modules'), 'dir');
+  };
+  return (await gitRepo({}, { prefix: 'taskpilot-typescript-', prepare })).root;
 };
 
 const criteria = (result: verification.CheckRun, names: string[]) =>

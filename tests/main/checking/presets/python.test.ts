@@ -15,7 +15,7 @@ import * as workspace from '../../../../src/main/repository/workspace.ts';
 import { detectLanguages } from '../../../../src/main/checking/presets/index.ts';
 import { PYTEST_REPORT, parsePyproject, pythonPreset } from '../../../../src/main/checking/presets/python.ts';
 import { env } from '../../../../src/main/infrastructure/env.ts';
-import { tempDir } from '../../../fixtures/temp_dir.ts';
+import { gitRepo } from '../../../fixtures/git_repo.ts';
 import * as requiredTools from '../../../fixtures/required_tools.ts';
 import type { PythonFacts } from '../../../../src/main/checking/presets/python.ts';
 import type { CheckStep } from '../../../../src/main/checking/step_config.ts';
@@ -192,16 +192,11 @@ test('parsePyproject() reads the project table, a dev extra or group, and broken
 // runner, once with uv and once with venv + pip. Needs uv and python3 on
 // PATH and fetches pytest, mypy and ruff from PyPI.
 const fixtureRepo = async () => {
-  const root = await fs.realpath(await tempDir('taskpilot-python-'));
-  await fs.cp(path.join(FIXTURES, 'python_sample'), root, { recursive: true, filter: (source) => !/[\\/](\.venv|__pycache__|\.taskpilot)$/.test(source) });
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "python"\n');
-  const g = (args: string[]) => run('git', args, { cwd: root });
-  await g(['init', '-b', 'main', '-q']);
-  await g(['config', 'user.email', 't@e.com']);
-  await g(['config', 'user.name', 'T']);
-  await g(['add', '-A']);
-  await g(['commit', '-qm', 'init']);
-  return root;
+  const prepare = async (root: string) => {
+    await fs.cp(path.join(FIXTURES, 'python_sample'), root, { recursive: true, filter: (source) => !/[\\/](\.venv|__pycache__|\.taskpilot)$/.test(source) });
+    await fs.writeFile(path.join(root, 'taskpilot.toml'), 'preset = "python"\n');
+  };
+  return (await gitRepo({}, { prefix: 'taskpilot-python-', prepare })).root;
 };
 
 const hasUv = await requiredTools.hasTools('uv');

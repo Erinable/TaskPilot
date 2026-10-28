@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { flushPromises, mount } from '@vue/test-utils';
-import ElementPlus from 'element-plus';
+import { flushPromises } from '@vue/test-utils';
 
+import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { agentStatus, installApi, planPackage, requirement } from '../requirements_fakes.ts';
@@ -31,8 +31,7 @@ describe('RequirementsView', () => {
   const render = async (options: { compose?: boolean; id?: string } = {}) => {
     const store = useRequirementsStore();
     await store.open(options);
-    const wrapper = mount(RequirementsView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-    await flushPromises();
+    const wrapper = await mountView(RequirementsView);
     return { wrapper, store };
   };
 

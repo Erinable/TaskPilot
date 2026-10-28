@@ -1,15 +1,16 @@
 // @vitest-environment happy-dom
 /** @module-tag integration */
-import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
-import { flushPromises, mount } from '@vue/test-utils';
+import { beforeEach, expect, test, vi } from 'vitest';
+import type { mount } from '@vue/test-utils';
+import { flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import ElementPlus from 'element-plus';
 
 import CourseView from '@/views/CourseView.vue';
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
+import { mountView } from '../mount_view.ts';
 import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -25,12 +26,10 @@ beforeEach(() => {
   api = installApi();
 });
 
-const mountView = async () => {
+const openView = async () => {
   const pinia = createPinia();
   setActivePinia(pinia);
-  const wrapper = mount(CourseView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  onTestFinished(() => wrapper.unmount());
-  await flushPromises();
+  const wrapper = await mountView(CourseView);
   return wrapper;
 };
 
@@ -59,7 +58,7 @@ const withMine = (current = defaultCourse()) =>
 const openMine = async () => {
   api.courses.list.mockReturnValue(ok(withMine()));
   api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview() : coursePreview(id)));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="mine"]').trigger('click');
   await flushPromises();
   await wrapper.get('[data-action="edit"]').trigger('click');
@@ -73,7 +72,7 @@ const save = async (wrapper: ReturnType<typeof mount>) => {
 
 test('the list groups every pack by source and marks the one in use, which is shown first', async () => {
   api.courses.list.mockReturnValue(ok(courseList({ entries: [...courseList().entries, entry('oslab', 'repository'), entry('net', 'user')] })));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   expect(wrapper.findAll('[data-group]').map((group) => group.attributes('data-group'))).toEqual(['builtin', 'repository', 'user']);
   expect(wrapper.findAll('[data-course]').map((item) => item.attributes('data-course'))).toEqual(['programming', 'os', 'oslab', 'net']);
   expect(api.courses.preview).toHaveBeenCalledWith('programming');
@@ -81,7 +80,7 @@ test('the list groups every pack by source and marks the one in use, which is sh
 });
 
 test('在这个仓库使用 goes through courses:select, as the settings page does', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="os"]').trigger('click');
   await flushPromises();
   await wrapper.get('[data-action="select"]').trigger('click');
@@ -91,7 +90,7 @@ test('在这个仓库使用 goes through courses:select, as the settings page do
 
 test('复制再改 copies under a default id the user can change, then opens the editor', async () => {
   api.courses.list.mockReturnValue(ok(courseList({ entries: [...courseList().entries, entry('os-copy', 'user')] })));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="os"]').trigger('click');
   await flushPromises();
   await wrapper.get('[data-action="copy"]').trigger('click');
@@ -117,7 +116,7 @@ test('复制再改 copies under a default id the user can change, then opens the
 
 test('a copy the main process refuses shows the reason under the id', async () => {
   api.courses.copy.mockReturnValueOnce(fail('course_exists', 'id: "net" is already a course pack', 'id'));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-action="copy"]').trigger('click');
   await wrapper.get('#courseCopyId').setValue('net');
   await wrapper.get('form.course-copy').trigger('submit');
@@ -131,7 +130,7 @@ test('labGuide and concepts are part of the form; concepts open on demand and ar
   const few = { ...MINE, concepts: MINE.concepts!.slice(0, 3).map((item) => ({ ...item, prerequisites: [] })) };
   api.courses.list.mockReturnValue(ok(withMine()));
   api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ pack: few }) : coursePreview(id)));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="mine"]').trigger('click');
   await flushPromises();
   await wrapper.get('[data-action="edit"]').trigger('click');
@@ -196,7 +195,7 @@ test('a saved pack picked here waits for confirmation, and confirming it puts it
   const pendingMine = withMine({ ...defaultCourse(), selected: { id: 'mine', from: 'local' }, state: { status: 'pending', pack: MINE, ref } });
   api.courses.list.mockReturnValue(ok(pendingMine));
   api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ ref, trust: 'pending' }) : coursePreview(id)));
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="mine"]').trigger('click');
   await flushPromises();
   expect(wrapper.get('[data-course="mine"]').text()).toContain('已选，待确认');
@@ -239,7 +238,7 @@ test('a pack shows its lab repositories and how its concepts stand, and opens th
       ],
     }),
   );
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-course="os"]').trigger('click');
   await flushPromises();
   expect(api.mastery.course).toHaveBeenLastCalledWith('os');
@@ -258,21 +257,21 @@ test('a pack shows its lab repositories and how its concepts stand, and opens th
 });
 
 test('a pack without lab repositories says how to get one; one without a skeleton shows no counts', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   const section = wrapper.get('[data-section="course-mastery"]');
   expect(section.text()).toContain('还没有用它建的实验仓库');
   expect(section.find('[data-field="mastery-counts"]').exists()).toBe(false);
 });
 
 test('the settings button opens the course page of settings', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   await wrapper.get('[data-action="settings"]').trigger('click');
   await flushPromises();
   expect(useAppStore().view).toBe('settings');
 });
 
 test('我想学… opens the requirement center on the course form', async () => {
-  const wrapper = await mountView();
+  const wrapper = await openView();
   const requirements = useRequirementsStore();
   const open = vi.spyOn(requirements, 'open').mockResolvedValue(undefined);
   await wrapper.get('[data-action="learn"]').trigger('click');
