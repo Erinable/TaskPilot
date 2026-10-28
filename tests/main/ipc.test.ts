@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // The IPC boundary as a whole: every channel is registered and every handler answers with a result.
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
@@ -5,9 +6,6 @@ import assert from 'node:assert/strict';
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
 import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
 import * as fixtures from './ipc/harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test('handlers return {ok:true,data} instead of throwing', async () => {
   const { call } = await fixtures.harness();

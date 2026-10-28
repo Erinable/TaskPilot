@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // A course lab's hidden tests at review (src/main/courses/lab_hidden.ts), with a fake
 // grader: what it is handed and what the review gets back.
 import { test } from 'vitest';

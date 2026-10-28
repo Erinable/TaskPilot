@@ -1,13 +1,13 @@
-import { test, vi } from 'vitest';
+/** @module-tag integration */
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { until } from '../../fixtures/until.ts';
 import * as lab from './lab_generation_fixtures.ts';
 import * as goals from '../../fixtures/course_interview.ts';
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const confirmedCourse = lab.confirmedCourse;
 const settleLab = lab.settleLab;
@@ -64,7 +64,7 @@ test('cancelling stops the run before the code call lands, and a retry starts ov
   const h = await lab.harness({ agent: lab.team({ gate }) });
   const id = await confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
-  await fixtures.until(
+  await until(
     async () => (await h.call(CHANNELS.requirementsGet, id)).data.course.lab.phase,
     (phase) => phase === 'code',
     'lab generation code phase',

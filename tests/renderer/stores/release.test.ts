@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
@@ -36,7 +37,8 @@ describe('release store', () => {
     state.current = fakes.releaseState({ draft: fakes.draft() });
     api.get.mockClear();
     api.emitState({ repositoryId: null, domains: ['release'] });
-    await vi.waitFor(() => expect(store.notesText).toBe('## 新增\n- 发布页'));
+    await flushPromises();
+    expect(store.notesText).toBe('## 新增\n- 发布页');
     api.get.mockClear();
     store.leave();
     api.emitState({ repositoryId: null, domains: ['release'] });
@@ -54,7 +56,8 @@ describe('release store', () => {
     state.current = fakes.releaseState({ draft: fakes.draft({ notesText: 'Latest committed notes' }) });
     api.emitState({ repositoryId: null, domains: ['release'] });
     held.resolve({ ok: true, data: fakes.releaseState() });
-    await vi.waitFor(() => expect(store.notesText).toBe('Latest committed notes'));
+    await flushPromises();
+    expect(store.notesText).toBe('Latest committed notes');
     expect(api.get).toHaveBeenCalledTimes(2);
     store.leave();
   });
@@ -63,7 +66,8 @@ describe('release store', () => {
     state.current = fakes.releaseState({ startPoint: { kind: 'none', commit: null, label: null } });
     const store = useReleaseStore();
     await store.enter();
-    await vi.waitFor(() => expect(store.commits).toHaveLength(2));
+    await flushPromises();
+    expect(store.commits).toHaveLength(2);
 
     await store.generate();
     expect(api.generate).not.toHaveBeenCalled();

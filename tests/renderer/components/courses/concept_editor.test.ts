@@ -1,9 +1,8 @@
 // @vitest-environment happy-dom
-import { expect, onTestFinished, test, vi } from 'vitest';
+/** @module-tag integration */
+import { expect, onTestFinished, test } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ElementPlus from 'element-plus';
-
-vi.setConfig({ testTimeout: 20_000 });
 
 import ConceptEditor from '@/components/courses/ConceptEditor.vue';
 import { conceptErrors } from '@/lib/course_model.ts';

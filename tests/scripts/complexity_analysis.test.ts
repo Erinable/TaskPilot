@@ -1,14 +1,13 @@
+/** @module-tag integration */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 
 import { tempDir } from '../fixtures/temp_dir.ts';
 import * as analysis from '../../scripts/complexity_analysis.ts';
 
-// Loads real ESLint/TypeScript/Vue parsers, including their cold startup.
-vi.setConfig({ testTimeout: 60_000 });
 const execute = promisify(execFile);
 const cwd = process.cwd();
 const functionSource = (name: string, branches: number) =>

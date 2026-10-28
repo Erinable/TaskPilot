@@ -1,4 +1,5 @@
-import { test, vi } from 'vitest';
+/** @module-tag integration */
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -9,8 +10,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as lab from './lab_generation_fixtures.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-vi.setConfig({ testTimeout: 20_000 });
 
 const settleLab = lab.settleLab;
 

@@ -47,10 +47,16 @@ describe('NotificationCenter', () => {
   };
 
   const openPopover = async (wrapper: Awaited<ReturnType<typeof render>>) => {
-    await wrapper.find('button.icon-button').trigger('click');
     // The popover opens on a timer.
-    await vi.waitFor(() => expect(wrapper.find('button.icon-button').attributes('aria-expanded')).toBe('true'));
+    vi.useFakeTimers();
+    try {
+      await wrapper.find('button.icon-button').trigger('click');
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
     await flushPromises();
+    expect(wrapper.find('button.icon-button').attributes('aria-expanded')).toBe('true');
   };
 
   test('the bell shows the unread count and the dot only when something is unread', async () => {

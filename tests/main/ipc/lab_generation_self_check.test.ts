@@ -1,6 +1,7 @@
+/** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import * as fixtures from './harness.ts';
+import { until } from '../../fixtures/until.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as lab from './lab_generation_fixtures.ts';
 
@@ -96,7 +97,7 @@ test('cancelling during the self-check stops it and keeps what was spent', async
   });
   const id = await lab.confirmedCourse(h);
   await h.call(CHANNELS.requirementsLabGenerate, id);
-  await fixtures.until(
+  await until(
     async () => (await h.call(CHANNELS.requirementsGet, id)).data.course.lab.phase,
     (phase) => phase === 'verify',
     'lab generation verify phase',

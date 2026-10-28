@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // The review channels (src/main/ipc/mastery.ts): notes that carry concepts
 // are due by the business day (Asia/Shanghai here), and the learner's
 // verdict moves them through the Leitner boxes, saved in mastery.json.

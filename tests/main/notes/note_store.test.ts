@@ -1,10 +1,11 @@
-import { onTestFinished, test, vi } from 'vitest';
+import { onTestFinished, test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
+import { until } from '../../fixtures/until.ts';
 import { DEFAULT_DIRNAME, LOCATION_FILENAME, MAX_NOTES, NoteStore } from '../../../src/main/notes/note_store.ts';
 import { validateNote } from '../../../src/main/notes/note_file.ts';
 
@@ -188,7 +189,8 @@ test('bad input is refused field by field', () => {
   assert.equal(validateNote(input({ body: 'x'.repeat(100_000) })).body.length, 100_000, 'bodies have no length limit');
 });
 
-test('a full notebook refuses new notes and deletes nothing', async () => {
+// Writes and reads 5002 files.
+test('a full notebook refuses new notes and deletes nothing', { tags: ['integration'] }, async () => {
   const configDir = await dir();
   await fs.mkdir(notesDir(configDir), { recursive: true });
   await Promise.all(Array.from({ length: MAX_NOTES + 2 }, (_unused, index) => fs.writeFile(path.join(notesDir(configDir), `n${index}.md`), `${index}`)));
@@ -197,8 +199,7 @@ test('a full notebook refuses new notes and deletes nothing', async () => {
   assert.equal(store.list().truncated, true);
   await assert.rejects(() => store.create(input()), { code: 'notes_full' });
   assert.equal((await fs.readdir(notesDir(configDir))).length, MAX_NOTES + 2);
-  // Writes and reads 5002 files.
-}, 30_000);
+});
 
 test('deleting hands the file to the trash', async () => {
   const configDir = await dir();
@@ -239,11 +240,28 @@ test('the watcher picks up files changed by other programs', async () => {
   const configDir = await dir();
   const store = await open(configDir, { watch: true });
   const before = store.revision;
-  await fs.writeFile(path.join(notesDir(configDir), '外部.md'), '来自 Obsidian\n');
-  await vi.waitFor(() => assert.equal(store.get('外部.md').body, '来自 Obsidian\n'), { timeout: 3000 });
+  const file = path.join(notesDir(configDir), '外部.md');
+  // macOS FSEvents can drop events from just after a watch starts, so the
+  // outside program saves again each second (past the store's 200ms
+  // debounce) until the store has seen it.
+  let savedAt = 0;
+  const seen = async () => {
+    const note = store.list().notes.find((entry) => entry.id === '外部.md');
+    if (!note && Date.now() - savedAt > 1000) {
+      savedAt = Date.now();
+      await fs.writeFile(file, '来自 Obsidian\n');
+    }
+    return note;
+  };
+  await until(seen, (note) => !!note, 'external note appears');
+  assert.equal(store.get('外部.md').body, '来自 Obsidian\n');
   assert.ok(store.revision > before);
-  await fs.unlink(path.join(notesDir(configDir), '外部.md'));
-  await vi.waitFor(() => assert.deepEqual(store.list().notes, []), { timeout: 3000 });
+  await fs.unlink(file);
+  await until(
+    () => store.list().notes,
+    (notes) => notes.length === 0,
+    'external note removed',
+  );
 });
 
 test('search matches title, tags and body in any case', async () => {

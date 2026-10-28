@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
@@ -137,7 +138,8 @@ describe('execution store', () => {
 
     current.task = taskView({ status: 'done', review: { ...running, status: 'failed', error: { code: 'agent_timeout', message: 'x' } } });
     api.emitState({ repositoryId: null, domains: ['packages'] });
-    await vi.waitFor(() => expect(execution.current?.status).toBe('done'));
+    await flushPromises();
+    expect(execution.current?.status).toBe('done');
     expect(feedback.showToast).toHaveBeenCalledWith('QA 审查失败：智能体超过 3 分钟没有完成，已停止。');
 
     api.tasks.get.mockClear();
@@ -168,7 +170,8 @@ describe('execution store', () => {
 
     current.task = taskView({ baselineChecks: { ...measuring, status: 'measured' } });
     api.emitState({ repositoryId: null, domains: ['workspace'] });
-    await vi.waitFor(() => expect(execution.current?.baselineChecks?.status).toBe('measured'));
+    await flushPromises();
+    expect(execution.current?.baselineChecks?.status).toBe('measured');
     api.tasks.get.mockClear();
     api.emitState({ repositoryId: null, domains: ['requirements'] });
     await Promise.resolve();

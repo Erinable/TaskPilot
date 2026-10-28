@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import { READ_STORAGE_KEY, useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
@@ -111,10 +112,12 @@ describe('notifications store', () => {
   test('refreshes on relevant events and unsubscribes on stop', async () => {
     const store = useNotificationsStore();
     store.start();
-    await vi.waitFor(() => expect(api.tasks.list).toHaveBeenCalled());
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalled();
     api.tasks.list.mockClear();
     api.emitState({ repositoryId: null, domains: ['packages'] });
-    await vi.waitFor(() => expect(api.tasks.list).toHaveBeenCalledTimes(1));
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalledTimes(1);
     store.stop();
     api.tasks.list.mockClear();
     api.emitState({ repositoryId: null, domains: ['packages'] });

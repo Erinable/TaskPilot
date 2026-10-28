@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the repositories domain (src/main/ipc/repositories.ts).
-import { test, onTestFinished, vi } from 'vitest';
+import { test, onTestFinished } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,10 +9,8 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { SAMPLE_REQUIREMENT, SAMPLE_TASKS } from '../fixtures/sample_tasks.ts';
 import * as git from '../../../src/main/repository/git.ts';
 import * as fixtures from './harness.ts';
+import { until } from '../../fixtures/until.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test.each([
   ['/definitely/not/here', 'root_not_found'],
@@ -123,7 +122,7 @@ test('repositories: switching cancels a running tutor answer so it cannot land i
   await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0, 1);
   // Adding a repository switches to it; the switch must stop the tutor first.
   const switching = call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), true);
-  await fixtures.until(
+  await until(
     async () => cancelled,
     (value) => value,
     'tutor cancellation',

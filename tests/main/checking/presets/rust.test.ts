@@ -1,3 +1,4 @@
+/** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -172,33 +173,29 @@ const fixtureRepo = async () => {
 
 const hasCargo = await requiredTools.hasTools('cargo');
 
-test.skipIf(!hasCargo)(
-  'every Rust preset step runs green on the sample workspace',
-  async () => {
-    const root = await fixtureRepo();
-    const resolution = await effectiveSteps.resolve(workspace.normalize({ version: 3, root, steps: {} }), { envPath: env.path });
-    assert.deepEqual(resolution.project, { status: 'ok', preset: 'rust' });
-    const runnable = effectiveSteps.runnable(resolution);
-    assert.deepEqual(
-      runnable.map((step) => step.id),
-      ['setup', 'build', 'format', 'lint', 'test'],
-    );
-    // With nextest installed the preset picks it; cargo test runs as well.
-    const cargoTest = { ...(runnable.at(-1) as CheckStep), commands: [{ command: 'cargo', args: ['test', '--workspace', '--no-fail-fast'] }], env: {} };
-    for (const step of [...runnable, cargoTest]) {
-      const result = await verification.runStep(root, step, { envPath: env.path });
-      const line = step.commands.map((entry) => [entry.command, ...entry.args].join(' ')).join(' && ');
-      assert.equal(result.exitCode, 0, `${line}: ${result.output.slice(-2000)}`);
-      assert.equal(result.report.trusted, true, line);
-      assert.deepEqual(result.diagnostics, [], line);
-      // nextest's experimental JSON does not always report ignored tests.
-      if (step.id === 'test')
-        assert.deepEqual(
-          result.results.filter((entry) => !entry.skipped).map((entry) => [entry.fullName, entry.passed]),
-          [['demo › tests::adds_two_numbers', true]],
-          line,
-        );
-    }
-  },
-  240_000,
-);
+test.skipIf(!hasCargo)('every Rust preset step runs green on the sample workspace', { tags: ['e2e'] }, async () => {
+  const root = await fixtureRepo();
+  const resolution = await effectiveSteps.resolve(workspace.normalize({ version: 3, root, steps: {} }), { envPath: env.path });
+  assert.deepEqual(resolution.project, { status: 'ok', preset: 'rust' });
+  const runnable = effectiveSteps.runnable(resolution);
+  assert.deepEqual(
+    runnable.map((step) => step.id),
+    ['setup', 'build', 'format', 'lint', 'test'],
+  );
+  // With nextest installed the preset picks it; cargo test runs as well.
+  const cargoTest = { ...(runnable.at(-1) as CheckStep), commands: [{ command: 'cargo', args: ['test', '--workspace', '--no-fail-fast'] }], env: {} };
+  for (const step of [...runnable, cargoTest]) {
+    const result = await verification.runStep(root, step, { envPath: env.path });
+    const line = step.commands.map((entry) => [entry.command, ...entry.args].join(' ')).join(' && ');
+    assert.equal(result.exitCode, 0, `${line}: ${result.output.slice(-2000)}`);
+    assert.equal(result.report.trusted, true, line);
+    assert.deepEqual(result.diagnostics, [], line);
+    // nextest's experimental JSON does not always report ignored tests.
+    if (step.id === 'test')
+      assert.deepEqual(
+        result.results.filter((entry) => !entry.skipped).map((entry) => [entry.fullName, entry.passed]),
+        [['demo › tests::adds_two_numbers', true]],
+        line,
+      );
+  }
+});

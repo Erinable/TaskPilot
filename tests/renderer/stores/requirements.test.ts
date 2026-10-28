@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
@@ -163,12 +164,14 @@ describe('requirements store', () => {
 
     state.list = [requirement({ status: 'clarifying', phase: 'product-lead' })];
     api.emitState({ repositoryId: null, domains: ['requirements'] });
-    await vi.waitFor(() => expect(store.detailRevision).toBe(revision + 1));
+    await flushPromises();
+    expect(store.detailRevision).toBe(revision + 1);
     expect(feedback.showToast).not.toHaveBeenCalled();
 
     state.list = [requirement({ status: 'answering' })];
     api.emitState({ repositoryId: null, domains: ['requirements'] });
-    await vi.waitFor(() => expect(store.current?.status).toBe('answering'));
+    await flushPromises();
+    expect(store.current?.status).toBe('answering');
     expect(feedback.showToast).toHaveBeenCalledWith('Product Lead 提出了澄清问题，等你回答。', 'info');
   });
 

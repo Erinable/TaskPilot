@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels for packages and practice service (src/main/ipc/packages.ts, src/main/work_packages/practice_service.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
@@ -7,9 +8,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as practice from './practice_fixtures.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 // ========== practice ==========
 

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -24,7 +25,8 @@ afterEach(() => vi.useRealTimers());
 const onSetupPage = async () => {
   await useSettingsStore().open('setup');
   const setup = useSetupStore();
-  await vi.waitFor(() => expect(setup.view).not.toBeNull());
+  await flushPromises();
+  expect(setup.view).not.toBeNull();
   return setup;
 };
 
@@ -39,7 +41,8 @@ test('an existing setup store loads on page entry and reloads when returning fro
   const setup = useSetupStore();
   const settings = useSettingsStore();
   await settings.open('setup');
-  await vi.waitFor(() => expect(setup.view).not.toBeNull());
+  await flushPromises();
+  expect(setup.view).not.toBeNull();
 
   settings.openPage('data');
   await settings.open('setup');
@@ -51,7 +54,8 @@ test('returning to settings reloads setup even when its selected page is unchang
   await onSetupPage();
   await useAppStore().navigate('queue');
   await useSettingsStore().open('setup');
-  await vi.waitFor(() => expect(api.env.get).toHaveBeenCalledTimes(2));
+  await flushPromises();
+  expect(api.env.get).toHaveBeenCalledTimes(2);
   expect(api.env.plan).not.toHaveBeenCalled();
   expect(api.env.runStep).not.toHaveBeenCalled();
 });
@@ -132,7 +136,8 @@ test('planning refreshes on environment events and stops after leaving the page'
   await useSettingsStore().open('setup');
   const calls = api.env.get.mock.calls.length;
   api.emitState({ repositoryId: null, domains: ['environment'] });
-  await vi.waitFor(() => expect(api.env.get.mock.calls.length).toBe(calls + 1));
+  await flushPromises();
+  expect(api.env.get.mock.calls.length).toBe(calls + 1);
   expect(setup.statusText).toBe('环境管家正在读取仓库并制定步骤…');
   useSettingsStore().openPage('data');
   api.emitState({ repositoryId: null, domains: ['environment'] });

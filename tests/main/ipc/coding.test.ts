@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the coding domain (src/main/ipc/coding.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,9 +11,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { SAMPLE_TASKS } from '../fixtures/sample_tasks.ts';
 import * as fixtures from './harness.ts';
 import * as coding from './coding_fixtures.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test('coding shutdown aborts an active run and waits for its settled write', async () => {
   let aborted = false;

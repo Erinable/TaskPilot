@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
+/** @module-tag integration */
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
-
-vi.setConfig({ testTimeout: 20_000 });
 
 import SettingsView from '@/views/SettingsView.vue';
 import { useAppStore } from '@/stores/app.ts';

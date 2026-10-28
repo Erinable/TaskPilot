@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // Each preset's committed version, read through `git show` from a real
 // repository: the working tree never counts.
 import { test } from 'vitest';

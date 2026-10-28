@@ -1,7 +1,8 @@
+/** @module-tag integration */
 // Course requirements over the requirement channels: Tutor's goal
 // interview, the learning path and the drafted pack
 // (src/main/requirements/course_interview_service.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,8 +11,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as goals from '../../fixtures/course_interview.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-vi.setConfig({ testTimeout: 20_000 });
 
 type Step = 'interview' | 'path' | 'draft';
 const interviewStep = (schema): Step => (schema.properties.course ? 'interview' : schema.properties.path ? 'path' : 'draft');

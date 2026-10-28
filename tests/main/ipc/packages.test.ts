@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the packages domain (src/main/ipc/packages.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,9 +8,7 @@ import path from 'node:path';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
+import { until } from '../../fixtures/until.ts';
 
 test('claiming reads the baseline from git, not from the renderer', async () => {
   const { call, root } = await fixtures.harness();
@@ -126,7 +125,7 @@ test('review: cancelling stops QA and leaves the package in review', async () =>
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
   await fixtures.submitEdgeTests(h);
   // Wait until QA is actually waiting on the model.
-  await fixtures.until(
+  await until(
     async () => h.agentCalls.length,
     (count) => count > 0,
     'QA start',
@@ -149,14 +148,14 @@ test('review: failing tests reject without calling the model', async () => {
 });
 
 const settleBaseline = async (call, id) =>
-  fixtures.until(
+  until(
     async () => (await call(CHANNELS.tasksGet, id)).data.baselineChecks,
     (baseline) => Boolean(baseline && baseline.status !== 'measuring'),
     'baseline',
   );
 
 const settleAdjudication = async (call, id) => {
-  await fixtures.until(
+  await until(
     async () => (await call(CHANNELS.tasksGet, id)).data,
     (task) => task.adjudication?.status !== 'running',
     'adjudication',

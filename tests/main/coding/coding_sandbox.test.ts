@@ -1,3 +1,4 @@
+/** @module-tag integration */
 import { onTestFinished, test } from 'vitest';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';

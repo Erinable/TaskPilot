@@ -1,7 +1,8 @@
+/** @module-tag integration */
 // The lab self-check (src/main/courses/lab_verify.ts): each of the four checks on
 // faked `make grade` results, the rounds and repairs, and the whole check on
 // a real lab under the offline Seatbelt profile.
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,8 +15,6 @@ import { HIDDEN_NAMES, IDLE_LAB, PUBLIC_NAMES, RR_LAB, RR_MUTANT_EDITS, allTests
 import { RR_SPEC } from '../../fixtures/lab_generator.ts';
 import type { GeneratedLab } from '../../../src/main/agents/lab_generator.ts';
 import type { Grader, VerifyDeps } from '../../../src/main/courses/lab_verify.ts';
-
-vi.setConfig({ testTimeout: 60_000 });
 
 const sandboxed = process.platform === 'darwin' && fs.existsSync(SANDBOX_EXEC_PATH);
 const unbuilt = { built: false, results: {}, output: 'cc: error' };
@@ -233,7 +232,7 @@ const realMutants = async () => ({
 // never has a job arrive while another runs) and the review finds the
 // statement silent on the queue order; the repair adds the hidden test and
 // the rule, and round 2 passes.
-test.skipIf(!sandboxed)('the example’s retry path: a surviving mutant and a consistency issue in round 1, a pass in round 2', async () => {
+test.skipIf(!sandboxed)('the example’s retry path: a surviving mutant and a consistency issue in round 1, a pass in round 2', { tags: ['e2e'] }, async () => {
   const judgements = [[{ kind: 'untested_requirement' as const, detail: '题面没有说清作业运行时新到的作业和被抢占的作业谁先入队，也没有测试' }], []];
   const repairs: { report: string; parts: string[] }[] = [];
   const { lab, report } = await labVerify.verifyLab(
