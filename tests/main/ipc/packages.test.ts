@@ -175,9 +175,12 @@ test('baseline: a dirty tree is unavailable until it is cleaned and re-measured'
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
   await fs.writeFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'export const dirty = 1;\n');
   await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
-  assert.equal((await settleBaseline(h.call, 'auth-edge-tests')).reason, 'dirty_tree');
+  // The status is readable before the first run has left the registry, so
+  // wait for the run itself before measuring again.
+  await h.idle();
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.baselineChecks.reason, 'dirty_tree');
   await fixtures.run('git', ['checkout', '--', '.'], { cwd: h.root });
-  await h.call(CHANNELS.packagesMeasureBaseline, 'auth-edge-tests');
+  assert.equal((await h.call(CHANNELS.packagesMeasureBaseline, 'auth-edge-tests')).ok, true);
   await h.idle();
   assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.baselineChecks.status, 'measured');
 });
