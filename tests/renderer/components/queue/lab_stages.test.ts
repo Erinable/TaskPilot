@@ -23,7 +23,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi({ list: [] });
 });
 

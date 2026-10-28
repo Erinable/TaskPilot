@@ -10,6 +10,7 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
 import * as fakes from '../release_fakes.ts';
 import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -154,10 +155,9 @@ describe('ReleaseView', () => {
     expect(dialog()).not.toBeNull();
 
     api.writeNotes.mockReturnValueOnce(fakes.fail('path_outside_workspace', 'Path is outside the workspace', 'path'));
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[release\] write notes failed/);
     (dialog().querySelector('.write-confirm') as HTMLElement).click();
     await flushPromises();
-    log.mockRestore();
     expect(api.writeNotes).toHaveBeenLastCalledWith({ path: 'CHANGELOG.md' });
     expect(dialog().querySelector('#release-notes-path-error')!.textContent).toBe('路径不在工作区内。');
 

@@ -21,6 +21,7 @@ import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { testStepWorkspace } from '../execution_fakes.ts';
 import { installFakeApi, ok } from '../ipc_fakes.ts';
 import { activityOverview } from '../activity_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -173,11 +174,10 @@ describe('repositories store', () => {
 
   test('a refused switch is reported and keeps the current repository', async () => {
     api.repositories.switch.mockResolvedValueOnce({ ok: false, error: { code: 'unknown_repository', message: 'x' } } as never);
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[repositories\] switch failed/);
     const store = useRepositoriesStore();
     await store.refresh();
     expect(await store.switchTo('b')).toBe(false);
-    spy.mockRestore();
     expect(feedback.showToast).toHaveBeenCalledWith('切换仓库失败：找不到这个仓库，它可能已被移除。');
     expect(store.current?.id).toBe('a');
   });

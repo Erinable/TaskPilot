@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useSetupStore } from '@/stores/setup.ts';
 import { fail, installApi, ok } from '../settings_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import { defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type { CliModelCatalog } from '@shared/agent_runtime.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
@@ -18,7 +19,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi();
   setActivePinia(createPinia());
 });
@@ -170,6 +170,7 @@ test('a clean save writes nothing', async () => {
 });
 
 test('a failed check shows the error on its field and writes nothing', async () => {
+  expectConsole('error', /shell syntax/);
   const settings = await loaded();
   settings.workspaceDraft!.steps.build = { ...settings.workspaceDraft!.steps.build!, mode: 'override', lines: ['make | tee'] };
   api.workspace.check.mockReturnValueOnce(fail('shell_syntax', 'steps.build.commands[0]: command uses shell syntax "|"', 'steps.build.commands[0]'));
@@ -181,6 +182,7 @@ test('a failed check shows the error on its field and writes nothing', async () 
 });
 
 test('an error without a known field becomes a toast', async () => {
+  expectConsole('error', /IpcError: boom/);
   const settings = await loaded();
   settings.preferencesDraft!.profile.displayName = 'Grace';
   api.preferences.set.mockReturnValueOnce(fail('unknown', 'boom'));

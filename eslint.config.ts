@@ -121,6 +121,10 @@ export default tseslint.config(
             "CallExpression[callee.object.name='Object'][callee.property.name=/^(assign|defineProperty)$/][arguments.0.name='window'], CallExpression[callee.object.name='Object'][callee.property.name='assign'][arguments.0.object.name='window'][arguments.0.property.name='taskpilot'], AssignmentExpression[left.property.name='taskpilot']",
           message: 'Install fakes with installFakeApi() (tests/renderer/ipc_fakes.ts), typed from the contract tables.',
         },
+        {
+          selector: "CallExpression[callee.object.name='vi'][callee.property.name='spyOn'][arguments.0.name='console'][arguments.1.value=/^(error|warn)$/]",
+          message: 'Declare expected output with expectConsole() (tests/fixtures/expected_console.ts); the console guard fails anything else.',
+        },
       ],
     },
   },

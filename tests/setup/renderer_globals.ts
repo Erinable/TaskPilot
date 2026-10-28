@@ -4,6 +4,12 @@ import { beforeEach } from 'vitest';
 
 const BUSINESS_TIME_ZONE = 'Asia/Shanghai';
 
+// src/renderer/index.html starts with <!doctype html>; happy-dom has no
+// compatMode, which KaTeX reads on import to refuse quirks mode.
+if (typeof document !== 'undefined' && document.compatMode === undefined) {
+  Object.defineProperty(document, 'compatMode', { configurable: true, value: 'CSS1Compat' });
+}
+
 beforeEach(() => {
   if (typeof window === 'undefined') return;
   let api: Record<string, unknown> = {};

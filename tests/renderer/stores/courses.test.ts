@@ -6,6 +6,7 @@ import * as feedback from '@/lib/feedback.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
 import { courseList, coursePreview, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
@@ -14,7 +15,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi();
   setActivePinia(createPinia());
 });
@@ -59,6 +59,7 @@ test('confirm() sends the hash of the content shown, and only in confirm mode', 
 });
 
 test('a refused confirmation reloads and shows the pack as it is now', async () => {
+  expectConsole('error', /changed since it was shown/);
   api.courses.list.mockReturnValue(ok(courseList({ current: pendingCourse() })));
   api.workspace.confirmCourse.mockReturnValueOnce(fail('course_changed', 'Course pack oslab changed since it was shown'));
   const courses = useCoursesStore();

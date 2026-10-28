@@ -9,6 +9,7 @@ import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
 import type { PathEntry } from '../../src/shared/course_plan.ts';
 import { installFakeApi, ok } from './ipc_fakes.ts';
+import { activityOverview } from './activity_fakes.ts';
 
 export const requirement = (overrides: Partial<requirementTypes.Requirement> = {}): requirementTypes.Requirement => ({
   id: 'r1',
@@ -168,6 +169,8 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) =>
         ok({ root: null, steps: [], project: { status: 'missing' }, course: defaultCourse(), detected: [], presets: [] } as workspaceTypes.WorkspaceView),
     },
     tasks: { list: () => ok([]) },
+    // Placing a lab switches repositories, which reloads the activity overview.
+    activity: { overview: () => ok(activityOverview()) },
   });
 
 // agent:status for a ready machine: analysis CLI signed in, coding CLI installed and signed in.

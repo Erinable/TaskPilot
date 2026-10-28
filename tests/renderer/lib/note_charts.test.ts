@@ -2,6 +2,7 @@
 import { describe, expect, onTestFinished, test, vi } from 'vitest';
 
 import { isChartLanguage, mountSvg, renderVega, sanitizeSvg } from '../../../src/renderer/src/lib/note_charts.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 const HOSTILE = [
   '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">',
@@ -76,23 +77,12 @@ describe('note charts', () => {
   });
 
   test('Vega specs must be JSON objects, and never load a URL', async () => {
-    const original = console.warn.bind(console);
-    const warnings = vi.spyOn(console, 'warn').mockImplementation((...values) => {
-      const [level, message, url, error] = values;
-      if (
-        level === 'WARN' &&
-        message === 'Loading failed' &&
-        url === 'https://evil.example/data.json' &&
-        error instanceof Error &&
-        error.message.includes('外部数据')
-      )
-        return;
-      original(...values);
-    });
-    onTestFinished(() => warnings.mockRestore());
+    // Vega reports the refused load as a warning: level, message, url, error.
+    const warnings = expectConsole('warn', /^WARN Loading failed https:\/\/evil\.example\/data\.json Error: .*外部数据/);
     const host = document.createElement('div');
     await expect(renderVega(host, '{oops', 'vega-lite')).rejects.toThrow('JSON');
     await expect(renderVega(host, '[1]', 'vega-lite')).rejects.toThrow('JSON 对象');
     await expect(renderVega(host, JSON.stringify({ data: { url: 'https://evil.example/data.json' }, mark: 'point' }), 'vega-lite')).rejects.toThrow(/外部数据/);
+    expect(warnings).toHaveLength(1);
   });
 });

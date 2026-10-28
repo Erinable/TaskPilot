@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.{js,ts}'],
     environment: 'node',
-    setupFiles: ['tests/setup/renderer_globals.ts'],
+    setupFiles: ['tests/setup/renderer_globals.ts', 'tests/setup/console_guard.ts'],
     // Each worker can start git, npm and compiler children; cap fan-out as well
     // as using half the CPUs so integration deadlines are not CPU-starved.
     maxWorkers: Math.min(2, Math.max(1, Math.floor(availableParallelism() / 2))),
