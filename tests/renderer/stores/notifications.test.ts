@@ -10,7 +10,9 @@ import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts
 import { MAX_NOTIFICATIONS } from '../../../src/renderer/src/lib/notifications.ts';
 import { taskView } from '../execution_fakes.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
+import { fail } from '../ipc_fakes.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -62,7 +64,7 @@ describe('notifications store', () => {
 
   test('a corrupt stored value reads as nothing read', () => {
     localStorage.setItem(READ_STORAGE_KEY, '{not json');
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[notifications\] read state unreadable/);
     useTasksStore().tasks = [taskView({ status: 'blocked' })];
     expect(useNotificationsStore().unreadCount).toBe(1);
     localStorage.setItem(READ_STORAGE_KEY, JSON.stringify({ a: 1 }));
@@ -83,8 +85,10 @@ describe('notifications store', () => {
 
   test('a failed queue reload logs and keeps the read state', async () => {
     localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(['t1:blocked']));
-    api.tasks.list.mockImplementation(() => Promise.resolve({ ok: false, error: { code: 'boom', message: 'x' } } as never));
+    api.tasks.list.mockImplementation(() => fail('unknown', 'x'));
+    const logged = expectConsole('error', /\[notifications\] refresh failed/);
     await useNotificationsStore().refresh();
+    expect(logged).toHaveLength(1);
     expect(stored()).toEqual(['t1:blocked']);
   });
 

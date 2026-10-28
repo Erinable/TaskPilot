@@ -11,6 +11,7 @@ import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../../src/renderer/src/lib/inline_code.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
   // announceAgent adds a system notification only in the background; tests see the toast.
@@ -137,10 +138,9 @@ describe('requirements store', () => {
     const store = useRequirementsStore();
     await store.refreshList();
     api.requirements.list.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /Failed to load requirements/);
     await store.refreshList();
     expect(store.items.map((item) => item.id)).toEqual(['r1']);
-    spy.mockRestore();
   });
 
   test('init loads the list without subscribing to state events', async () => {
@@ -242,11 +242,10 @@ describe('requirements store', () => {
     api.requirements.create.mockResolvedValueOnce({ ok: false, error: { code: 'too_long', message: 'x', field: 'text' } } as never);
     await store.submitNew();
     expect(store.composeStatus).toEqual({ text: '内容太长了。', error: true });
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /IpcError: x/);
     api.requirements.create.mockResolvedValueOnce({ ok: false, error: { code: 'agent_failed', message: 'x' } } as never);
     await store.submitNew();
     expect(feedback.showToast).toHaveBeenCalledWith('提交失败：智能体运行失败。');
-    spy.mockRestore();
   });
 
   test('publishing reloads the work queue', async () => {

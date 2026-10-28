@@ -13,6 +13,7 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { mountView } from '../mount_view.ts';
 import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -22,7 +23,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi();
 });
 
@@ -115,6 +115,7 @@ test('复制再改 copies under a default id the user can change, then opens the
 });
 
 test('a copy the main process refuses shows the reason under the id', async () => {
+  expectConsole('error', /is already a course pack/);
   api.courses.copy.mockReturnValueOnce(fail('course_exists', 'id: "net" is already a course pack', 'id'));
   const wrapper = await openView();
   await wrapper.get('[data-action="copy"]').trigger('click');
@@ -182,6 +183,7 @@ test('the rubric keeps 2 to 6 items', async () => {
 });
 
 test('a field the main process refuses is shown on that field', async () => {
+  expectConsole('error', /control characters/);
   const wrapper = await openMine();
   api.courses.save.mockReturnValueOnce(fail('invalid_course', 'rubric[0].label: must not contain control characters', 'rubric[0].label'));
   await save(wrapper);

@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { resultText, useSetupStore } from '@/stores/setup.ts';
 import { envState, fail, installApi, ok } from '../settings_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as envTypes from '@shared/ipc/environment.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
@@ -16,7 +17,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi();
   setActivePinia(createPinia());
 });
@@ -125,6 +125,7 @@ test('apply with nothing ticked only hints', async () => {
 });
 
 test('a failed action toasts, but a cancelled one stays quiet', async () => {
+  expectConsole('error', /IpcError: x/);
   const setup = await onSetupPage();
   api.env.plan.mockReturnValueOnce(fail('agent_failed', 'x'));
   expect(await setup.plan()).toBe(false);

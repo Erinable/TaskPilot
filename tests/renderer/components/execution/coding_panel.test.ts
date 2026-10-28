@@ -2,6 +2,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 
 import CodingPanel from '../../../../src/renderer/src/components/execution/CodingPanel.vue';
 import { useExecutionStore } from '../../../../src/renderer/src/stores/execution.ts';
@@ -36,7 +37,7 @@ beforeEach(() => {
 });
 
 const render = async () => {
-  const wrapper = mount(CodingPanel, { props: { task: useExecutionStore().current as packageTypes.TaskView } });
+  const wrapper = mount(CodingPanel, { props: { task: useExecutionStore().current as packageTypes.TaskView }, global: { plugins: [ElementPlus] } });
   await flushPromises();
   return wrapper;
 };

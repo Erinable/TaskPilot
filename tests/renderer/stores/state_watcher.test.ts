@@ -6,6 +6,7 @@ import { flushPromises } from '@vue/test-utils';
 import { createStateWatcher } from '../../../src/renderer/src/stores/state_watcher.ts';
 import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/repository_identity.ts';
 import { installFakeApi } from '../ipc_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 let api: ReturnType<typeof installFakeApi>;
 
@@ -98,14 +99,13 @@ test('stop removes the listener and drops a queued read', async () => {
 });
 
 test('a failed read is logged and the next event still reads', async () => {
-  const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const errors = expectConsole('error', /\[test\] refresh failed/);
   const read = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);
   const watcher = createStateWatcher({ name: 'test', domains: ['release'], read });
   await watcher.start();
-  expect(errors).toHaveBeenCalledWith('[test] refresh failed', expect.any(Error));
+  expect(errors).toEqual([['[test] refresh failed', expect.any(Error)]]);
   api.emitState({ repositoryId: 'repo-a', domains: ['release'] });
   await flushPromises();
   expect(read).toHaveBeenCalledTimes(2);
   watcher.stop();
-  errors.mockRestore();
 });

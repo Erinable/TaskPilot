@@ -7,6 +7,7 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
 import * as fakes from '../release_fakes.ts';
 import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -80,9 +81,8 @@ describe('release store', () => {
 
     // A start commit the main process refuses shows under the picker, not as a toast.
     api.generate.mockReturnValueOnce(fakes.fail('invalid_argument', '请选择最近的提交', 'startCommit') as never);
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[release\] generate failed/);
     await store.generate();
-    log.mockRestore();
     expect(store.startError).toBe('请选择最近的提交');
     expect(feedback.showToast).not.toHaveBeenCalled();
     store.leave();
@@ -139,9 +139,8 @@ describe('release store', () => {
     expect(api.writeNotes).not.toHaveBeenCalled();
 
     api.writeNotes.mockReturnValueOnce(fakes.fail('path_outside_workspace', 'Path is outside the workspace', 'path'));
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[release\] write notes failed/);
     expect(await store.writeNotes('../x.md')).toBe(false);
-    log.mockRestore();
     expect(store.writeError).toBe('路径不在工作区内。');
     expect(feedback.showToast).not.toHaveBeenCalled();
 
@@ -163,9 +162,8 @@ describe('release store', () => {
     expect(feedback.showToast).toHaveBeenLastCalledWith('已复制更新说明');
 
     writeText.mockRejectedValueOnce(new Error('denied'));
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /\[release\] clipboard failed/);
     await store.copyNotes();
-    log.mockRestore();
     expect(feedback.showToast).toHaveBeenLastCalledWith('复制失败：系统剪贴板不可用', 'error');
     store.leave();
   });

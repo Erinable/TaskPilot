@@ -9,6 +9,7 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../mount_view.ts';
 import { installFakeApi } from '../ipc_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 
@@ -52,7 +53,6 @@ let get: Mock<() => Promise<envelopeTypes.IpcResult<activityTypes.EngineeringMap
 let pinia: ReturnType<typeof createPinia>;
 
 beforeEach(() => {
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   state = { result: { ok: true, data: engineeringMap() } };
   get = vi.fn(() => Promise.resolve(state.result));
   installFakeApi({ engineeringMap: { get } });
@@ -156,6 +156,7 @@ describe('MapView', () => {
   });
 
   test('errors show the described message, and refresh reloads', async () => {
+    expectConsole('error', /IpcError: x/);
     state.result = { ok: false, error: { code: 'no_workspace', message: 'x' } };
     const wrapper = await render();
     expect(wrapper.get('[data-error]').text()).toBe('还没有仓库，请先在顶栏的仓库菜单里添加。 重试');

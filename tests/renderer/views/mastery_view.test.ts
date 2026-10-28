@@ -84,7 +84,6 @@ const RR_NOTE = note('RR 入队顺序.md', { concepts: ['round-robin'] });
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi({
     mastery: {
       course: (id?: string) => ok(id && id !== 'os' ? { ...OS_MASTERY, course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [] } : OS_MASTERY),

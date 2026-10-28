@@ -10,6 +10,8 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
+import { fail } from '../ipc_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -40,9 +42,11 @@ describe('execution store', () => {
   });
 
   test('open() reports a failed load and stays put', async () => {
-    api.tasks.get.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: '没有这个工作包' } } as never);
+    api.tasks.get.mockReturnValueOnce(fail('unknown_package', '没有这个工作包'));
+    const logged = expectConsole('error', /没有这个工作包/);
     const execution = useExecutionStore();
     await execution.open('missing');
+    expect(logged).toHaveLength(1);
     expect(useAppStore().view).toBe('queue');
     expect(feedback.showToast).toHaveBeenCalledWith('打开工作包失败：没有这个工作包');
   });
@@ -75,9 +79,8 @@ describe('execution store', () => {
     const execution = useExecutionStore();
     await execution.open('t1');
     api.packages.transition.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /IpcError: x/);
     await execution.runTransition('submit_for_review');
-    spy.mockRestore();
     expect(execution.transitioning).toBe(null);
   });
 
@@ -182,9 +185,8 @@ describe('execution store', () => {
     const execution = useExecutionStore();
     await execution.open('t1');
     api.packages.setStepDone.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_state', message: 'x' } } as never);
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expectConsole('error', /IpcError: x/);
     expect(await execution.setStepDone(0, true)).toBe(false);
-    log.mockRestore();
     expect(execution.current?.completedSteps).toEqual([]);
     expect(feedback.showToast).toHaveBeenCalledWith('保存进度失败：当前状态下不能执行这个操作。');
     expect(await execution.setStepDone(1, true)).toBe(true);

@@ -11,6 +11,7 @@ import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositor
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as noteTypes from '../../../src/shared/ipc/notes.ts';
 import { installFakeApi, ok } from '../ipc_fakes.ts';
+import { noteMeta as meta } from '../notes_fakes.ts';
 
 // KaTeX checks once, when it loads, that the page is not in quirks mode;
 // happy-dom reports no compatMode at all, while the app page has a doctype.
@@ -24,25 +25,6 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta => ({
-  id: '用例要有断言.md',
-  title: '用例要有断言',
-  category: 'writing',
-  course: null,
-  concepts: [],
-  tags: ['测试'],
-  inlineTags: [],
-  source: { repositoryId: 'r1', repositoryName: 'app', packageId: 'p1', packageTitle: '登录', file: 'src/a.ts', line: 4 },
-  summary: null,
-  summaryStale: false,
-  links: [],
-  excerpt: '没有 expect',
-  createdAt: '2026-10-20T02:00:00Z',
-  updatedAt: '2026-10-24T02:00:00Z',
-  version: 'v1',
-  frontmatterError: false,
-  ...overrides,
-});
 const NOTE: noteTypes.Note = { ...meta(), body: '# 断言\n\n<b>没有 expect</b> 见 [[命名]] 和 [[不存在]]\n\n- [ ] 补上\n\n```ts\nconst a = 1\n```\n' };
 const LINKING = meta({ id: '命名.md', title: '命名', category: null, tags: [], links: ['用例要有断言'], excerpt: '链接到断言', source: null, version: 'v9' });
 

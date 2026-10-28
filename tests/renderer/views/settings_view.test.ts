@@ -9,6 +9,7 @@ import SettingsView from '@/views/SettingsView.vue';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../mount_view.ts';
 import { envState, fail, installApi, ok } from '../settings_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -16,7 +17,6 @@ let api: ReturnType<typeof installApi>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.spyOn(console, 'error').mockImplementation(() => {});
   api = installApi();
 });
 
@@ -71,6 +71,7 @@ test('restoring one role keeps another role pending', async () => {
 });
 
 test('an invalid hidden role becomes visible and focuses its model field', async () => {
+  expectConsole('error', /Invalid model identifier/);
   const wrapper = await openView('agents');
   await chooseModel(wrapper, 'product-lead', '--bad');
   await wrapper.get('#agentSearch').setValue('Tutor');
@@ -101,6 +102,7 @@ test('the save bar appears with an edit and names the dirty store', async () => 
 });
 
 test('a save error lands beside its step and focuses its command input', async () => {
+  expectConsole('error', /shell syntax/);
   const wrapper = await openView('commands');
   await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
   await wrapper.get('[data-step="lint"] [data-mode="override"]').trigger('click');
