@@ -1,3 +1,4 @@
+/** @module-tag integration */
 import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';

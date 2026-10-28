@@ -1,3 +1,4 @@
+/** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -251,10 +252,8 @@ const runAll = async (envPath: string, setup: string) => {
   );
 };
 
-test.skipIf(!hasUv)('every Python preset step runs green on the sample with uv', () => runAll(env.path, 'uv'), 300_000);
+test.skipIf(!hasUv)('every Python preset step runs green on the sample with uv', { tags: ['e2e'] }, () => runAll(env.path, 'uv'));
 
-test.skipIf(!hasPython || process.platform === 'win32')(
-  'every Python preset step runs green on the sample with venv + pip',
-  () => runAll(withoutUv, 'python3'),
-  600_000,
+test.skipIf(!hasPython || process.platform === 'win32')('every Python preset step runs green on the sample with venv + pip', { tags: ['e2e'] }, () =>
+  runAll(withoutUv, 'python3'),
 );

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -254,7 +255,8 @@ test('opening the environment page previews the draft PATH source', async () => 
   const settings = await loaded();
   settings.preferencesDraft!.environment.pathSource = 'login-shell';
   settings.openPage('environment');
-  await vi.waitFor(() => expect(settings.environment).not.toBeNull());
+  await flushPromises();
+  expect(settings.environment).not.toBeNull();
   expect(api.environment.info).toHaveBeenCalledWith({ source: 'login-shell', refresh: false });
   expect(api.environment.info).toHaveBeenCalledWith({ source: 'inherit' });
 });
@@ -263,7 +265,8 @@ test('setup cannot apply commands over unsaved settings edits', async () => {
   const settings = await loaded();
   const setup = useSetupStore();
   settings.openPage('setup');
-  await vi.waitFor(() => expect(setup.view).not.toBeNull());
+  await flushPromises();
+  expect(setup.view).not.toBeNull();
   setup.selectedKinds = ['test'];
   settings.workspaceDraft!.steps.test!.lines = ['npm run unit'];
   expect(await setup.apply()).toBe(false);

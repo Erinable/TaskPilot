@@ -1,11 +1,9 @@
 // @vitest-environment happy-dom
+/** @module-tag integration */
 import { beforeEach, expect, onTestFinished, test, vi } from 'vitest';
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
-
-// Mounts the whole settings UI with Element Plus per test.
-vi.setConfig({ testTimeout: 60_000 });
 
 import * as feedback from '@/lib/feedback.ts';
 import SettingsView from '@/views/SettingsView.vue';

@@ -14,6 +14,19 @@ const AGENT_IMPORT_BANS = [
   { group: ['smol-toml'], message: 'Agents receive data; parse TOML in the caller.' },
 ];
 
+// Export inline where a symbol is defined; agent text never becomes markup.
+const restrictedSyntax = [
+  { selector: 'ExportNamedDeclaration[declaration=null][source=null]', message: 'Export inline where the symbol is defined.' },
+  {
+    selector: 'AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]',
+    message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
+  },
+  {
+    selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
+    message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
+  },
+];
+
 export default tseslint.config(
   { ignores: ['out/**', 'node_modules/**', 'evals/*/reports/**', '**/*.d.ts'] },
   js.configs.recommended,
@@ -34,18 +47,7 @@ export default tseslint.config(
       // Comments use // only.
       'multiline-comment-style': ['error', 'separate-lines'],
       // Export inline where a symbol is defined.
-      'no-restricted-syntax': [
-        'error',
-        { selector: 'ExportNamedDeclaration[declaration=null][source=null]', message: 'Export inline where the symbol is defined.' },
-        {
-          selector: 'AssignmentExpression > MemberExpression.left[property.name=/^(innerHTML|outerHTML)$/]',
-          message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
-        },
-        {
-          selector: "CallExpression[callee.property.name='insertAdjacentHTML']",
-          message: 'Build DOM with textContent / DOM APIs; agent text must never become markup.',
-        },
-      ],
+      'no-restricted-syntax': ['error', ...restrictedSyntax],
       // process.env is read in one config module only.
       'no-restricted-properties': ['error', { object: 'process', property: 'env', message: 'Read configuration from src/main/infrastructure/env.ts.' }],
       'vue/no-v-html': 'error',
@@ -94,7 +96,28 @@ export default tseslint.config(
   {
     // Tests feed malformed input on purpose and stub loosely typed globals.
     files: ['tests/**'],
-    rules: { '@typescript-eslint/no-explicit-any': 'off' },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      // Timeouts come from the tag tiers in vitest.config.ts, and waits from
+      // promises or until(), never from milliseconds a test picks.
+      'no-restricted-syntax': [
+        'error',
+        ...restrictedSyntax,
+        {
+          selector: "CallExpression[callee.object.name='vi'][callee.property.name='setConfig']",
+          message: 'Tag the file or test instead (vitest.config.ts tags).',
+        },
+        {
+          selector:
+            "CallExpression[callee.name=/^(test|it)$/][arguments.length=3][arguments.2.type='Literal'], CallExpression[callee.object.name=/^(test|it)$/][arguments.length=3][arguments.2.type='Literal'], CallExpression[callee.callee.object.name=/^(test|it)$/][arguments.length=3][arguments.2.type='Literal']",
+          message: 'Tag the test instead of passing a timeout (vitest.config.ts tags).',
+        },
+        {
+          selector: "CallExpression[callee.object.name='vi'][callee.property.name=/^(waitFor|waitUntil)$/]",
+          message: 'Await the promise and flushPromises(), or poll real processes with until() (tests/fixtures/until.ts).',
+        },
+      ],
+    },
   },
   prettier,
 );

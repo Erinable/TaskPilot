@@ -1,6 +1,7 @@
+/** @module-tag integration */
 // IPC channels of the tutor domain (src/main/ipc/tutor.ts, src/main/work_packages/tutor_service.ts):
 // the hint ladder, its output filter, and what it records.
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,9 +11,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { HIDDEN_CHECK_KIND } from '../../../src/main/courses/lab_hidden.ts';
 import * as fixtures from './harness.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 const ID = 'auth-edge-tests';
 

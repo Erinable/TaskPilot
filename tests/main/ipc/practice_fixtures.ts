@@ -6,6 +6,7 @@ import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { parsePatchPreview } from '../../../src/main/coding/coding_workspace.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { until } from '../../fixtures/until.ts';
 
 export const REFERENCE_PATCH = fixtures.filePatch('tests/auth/login-user.test.ts', 'test("reference", () => {});').patch;
 
@@ -47,7 +48,7 @@ export const practiceHarness = async ({
 };
 
 export const settleTask = async (call, id, done: (task: TaskView) => boolean) =>
-  fixtures.until(async () => (await call(CHANNELS.tasksGet, id)).data as TaskView, done, 'practice task');
+  until(async () => (await call(CHANNELS.tasksGet, id)).data as TaskView, done, 'practice task');
 
 export const writeSubmission = async (root: string) => {
   await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });

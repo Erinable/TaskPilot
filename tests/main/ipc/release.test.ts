@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the release domain (src/main/ipc/release.ts).
-import { test, onTestFinished, vi } from 'vitest';
+import { test, onTestFinished } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,9 +8,7 @@ import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
+import { until } from '../../fixtures/until.ts';
 
 // ========== Release Manager ==========
 
@@ -27,7 +26,7 @@ const releaseRepo = async (root: string) => {
 };
 
 const settleRelease = async (call) =>
-  fixtures.until(
+  until(
     async () => (await call(CHANNELS.releaseGet)).data,
     (data) => Boolean(data.draft && data.draft.status !== 'generating' && !data.running),
     'release draft',

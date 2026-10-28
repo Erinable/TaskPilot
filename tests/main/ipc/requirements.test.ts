@@ -1,12 +1,10 @@
+/** @module-tag integration */
 // IPC channels of the requirements domain (src/main/ipc/requirements.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test.each(['', '  '])('requirements:create rejects empty text %j before the agent runs', async (text) => {
   const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });

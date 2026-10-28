@@ -81,7 +81,7 @@ test('structure reports unused rubric items and one item taking almost every com
   assert.match(lopsided.checks.balance.detail, /^mechanism has 89%/);
 });
 
-test('every case is graded through the real prompt, schema and validation (stub model)', async () => {
+test('every case is graded through the real prompt, schema and validation (stub model)', { tags: ['integration'] }, async () => {
   for (const testCase of cases) {
     const course = BUILTIN_COURSES.find((pack) => pack.id === testCase.course)!;
     let seen = { prompt: '', systemPrompt: '', enum: [] as string[] };
@@ -110,4 +110,4 @@ test('every case is graded through the real prompt, schema and validation (stub 
     assert.equal(graded.report.comments[0].file, Object.keys(testCase.submission)[0], testCase.id);
     assert.equal(graded.report.comments[0].repeated, Boolean(testCase.notes?.length), testCase.id);
   }
-}, 60_000);
+});

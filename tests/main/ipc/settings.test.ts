@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the settings domain (src/main/ipc/settings.ts).
-import { test, onTestFinished, vi } from 'vitest';
+import { test, onTestFinished } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -11,9 +12,6 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as workspace from '../../../src/main/repository/workspace.ts';
 import * as preferences from '../../../src/main/app/preferences.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test('agent model IPC isolates scopes, caches local catalogs, and refreshes only the requested catalog', async () => {
   const reads: string[] = [];

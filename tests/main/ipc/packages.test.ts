@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the packages domain (src/main/ipc/packages.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -7,9 +8,7 @@ import path from 'node:path';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
+import { until } from '../../fixtures/until.ts';
 
 test('claiming reads the baseline from git, not from the renderer', async () => {
   const { call, root } = await fixtures.harness();
@@ -126,7 +125,7 @@ test('review: cancelling stops QA and leaves the package in review', async () =>
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
   await fixtures.submitEdgeTests(h);
   // Wait until QA is actually waiting on the model.
-  await fixtures.until(
+  await until(
     async () => h.agentCalls.length,
     (count) => count > 0,
     'QA start',
@@ -149,14 +148,14 @@ test('review: failing tests reject without calling the model', async () => {
 });
 
 const settleBaseline = async (call, id) =>
-  fixtures.until(
+  until(
     async () => (await call(CHANNELS.tasksGet, id)).data.baselineChecks,
     (baseline) => Boolean(baseline && baseline.status !== 'measuring'),
     'baseline',
   );
 
 const settleAdjudication = async (call, id) => {
-  await fixtures.until(
+  await until(
     async () => (await call(CHANNELS.tasksGet, id)).data,
     (task) => task.adjudication?.status !== 'running',
     'adjudication',
@@ -176,9 +175,12 @@ test('baseline: a dirty tree is unavailable until it is cleaned and re-measured'
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
   await fs.writeFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'export const dirty = 1;\n');
   await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
-  assert.equal((await settleBaseline(h.call, 'auth-edge-tests')).reason, 'dirty_tree');
+  // The status is readable before the first run has left the registry, so
+  // wait for the run itself before measuring again.
+  await h.idle();
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.baselineChecks.reason, 'dirty_tree');
   await fixtures.run('git', ['checkout', '--', '.'], { cwd: h.root });
-  await h.call(CHANNELS.packagesMeasureBaseline, 'auth-edge-tests');
+  assert.equal((await h.call(CHANNELS.packagesMeasureBaseline, 'auth-edge-tests')).ok, true);
   await h.idle();
   assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.baselineChecks.status, 'measured');
 });

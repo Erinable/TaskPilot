@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // [人工决策-2026-10-26 13:15:53] vitest 仓库读 JUnit 报告判定测试结果，与 pytest 一致（CARM-22 方案 1）。
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -81,7 +82,7 @@ const criteria = (result: verification.CheckRun, names: string[]) =>
 
 const NAMES = ['auth > login > locks after five failures', 'auth > login > rejects a bad password', 'exports login'];
 
-test('vitest results come from the JUnit report: linked tests are verified or failed, never missing', async () => {
+test('vitest results come from the JUnit report: linked tests are verified or failed, never missing', { tags: ['e2e'] }, async () => {
   const root = await fixtureRepo();
   const resolution = await effectiveSteps.resolve(workspace.normalize({ version: 3, root, steps: {} }));
   assert.deepEqual(resolution.project, { status: 'ok', preset: 'typescript' });
@@ -108,4 +109,4 @@ test('vitest results come from the JUnit report: linked tests are verified or fa
   const missing = await verification.runStep(root, step);
   assert.deepEqual(missing.report, { format: 'junit', trusted: false, problem: 'missing' });
   assert.deepEqual(criteria(missing, NAMES), ['unverifiable', 'unverifiable', 'unverifiable']);
-}, 120_000);
+});

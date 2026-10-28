@@ -1,5 +1,6 @@
+/** @module-tag integration */
 // IPC channels of the environment domain (src/main/ipc/environment.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -7,9 +8,7 @@ import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
+import { until } from '../../fixtures/until.ts';
 
 /** Commits a dependency-free package.json and switches to the login-shell PATH so node/npm resolve. */
 const envHarness = async (options: { overrides?: Record<string, unknown> } & Record<string, unknown> = {}) => {
@@ -27,7 +26,7 @@ const envHarness = async (options: { overrides?: Record<string, unknown> } & Rec
 };
 
 const settleEnv = async (call) =>
-  fixtures.until(
+  until(
     async () => (await call(CHANNELS.envGet)).data,
     (data) => data.status !== 'planning',
     'environment plan',
@@ -94,7 +93,7 @@ test('env: a running step shows its output and start time, and a step reading st
   await h.call(CHANNELS.envPlan);
   await settleEnv(h.call);
   const finished = h.call(CHANNELS.envRunStep, 'test');
-  const live = await fixtures.until(
+  const live = await until(
     async () => (await h.call(CHANNELS.envGet)).data.live,
     (value) => Boolean(value?.output.includes('halfway')),
     'environment step output',

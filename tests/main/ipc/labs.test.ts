@@ -1,3 +1,4 @@
+/** @module-tag integration */
 // Course lab repositories (src/main/courses/lab_service.ts): created from a fixture,
 // claimed, submitted and checked by QA's public tests; the private parts of
 // each lab never reach git, the renderer or a Coding Agent run directory.
@@ -17,9 +18,6 @@ import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { LabArtifact } from '../../../src/main/courses/labs.ts';
 import type { Grader } from '../../../src/main/courses/lab_verify.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
-
-// Runs real git and make per test.
-vi.setConfig({ testTimeout: 60_000 });
 
 const hasTools = await requiredTools.hasTools('cc', 'make');
 
@@ -125,7 +123,7 @@ test('a lab repository is created and opened with its staged packages', async ()
   assert.equal((await h.call(CHANNELS.workspaceGet)).data.course.ref.id, 'os');
 });
 
-test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, and QA runs the public tests of every stage', async () => {
+test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, and QA runs the public tests of every stage', { tags: ['e2e'] }, async () => {
   const h = await labHarness();
   const { root } = await createRepository(h);
 
@@ -174,7 +172,7 @@ const unsorted = async (root: string) => {
 };
 
 // [人工决策-2026-10-27 00:51:12] 隐藏测试失败驳回提交，UI 和 IPC 只给测试名，参考答案保持锁定。
-test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its name reaches QA and the renderer', async () => {
+test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its name reaches QA and the renderer', { tags: ['e2e'] }, async () => {
   const h = await labHarness();
   const { root } = await createRepository(h);
   await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
@@ -204,7 +202,7 @@ test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its n
   assert.equal((await h.call(CHANNELS.practiceReference, 'lab-fcfs')).error.code, 'reference_locked');
 });
 
-test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiable and the reference locked', async () => {
+test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiable and the reference locked', { tags: ['e2e'] }, async () => {
   // The refusal is logged by runHiddenTests; it is expected here.
   captureExpectedErrors((error) => 'code' in error && error.code === 'sandbox_unavailable' && error.message === 'no sandbox');
   const h = await labHarness({
@@ -235,7 +233,7 @@ const solve = async (root: string, lab: labs.LabArtifact) => {
   await fs.rm(path.join(root, 'ref.patch'));
 };
 
-test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by the regression tests', async () => {
+test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by the regression tests', { tags: ['e2e'] }, async () => {
   const h = await labHarness();
   const { root } = await createRepository(h, [FCFS, RR_LAB]);
   // Stage 1 was finished and committed before stage 2 was claimed.

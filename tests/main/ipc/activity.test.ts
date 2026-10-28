@@ -1,12 +1,10 @@
+/** @module-tag integration */
 // IPC channels of the activity domain (src/main/ipc/activity.ts).
-import { test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
-
-// Runs real git and npm processes per test; slow machines and CI need the room.
-vi.setConfig({ testTimeout: 20_000 });
 
 test('activity: the requirement flow and a claim are recorded, newest first', async () => {
   const { call } = await fixtures.harness({ agent: fixtures.fakeAgent() });

@@ -259,17 +259,6 @@ export const harness = async ({
 
 const idleByCall = new WeakMap<object, () => Promise<void>>();
 
-export const until = async <Value>(read: () => Promise<Value>, done: (value: Value) => boolean, label: string): Promise<Value> => {
-  const deadline = Date.now() + 5000;
-  let last: Value | undefined;
-  while (Date.now() < deadline) {
-    last = await read();
-    if (done(last)) return last;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`${label} timed out; last value: ${JSON.stringify(last)}`);
-};
-
 /** Waits until a requirement leaves a running state. */
 export const settle = async (call, id) => {
   await idleByCall.get(call)?.();

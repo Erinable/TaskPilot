@@ -59,7 +59,8 @@ describe('ReleaseView', () => {
     state.current = fakes.releaseState({ draft: fakes.draft() });
     api.get.mockClear();
     api.emitState({ repositoryId: null, domains: ['release'] });
-    await vi.waitFor(() => expect(api.get).toHaveBeenCalled());
+    await flushPromises();
+    expect(api.get).toHaveBeenCalled();
     view.unmount();
     wrapper = null;
     api.get.mockClear();
