@@ -1,14 +1,16 @@
 // Unwraps the {ok, data} | {ok, error} envelope every IPC call returns.
+import { normalizeErrorCode, type ErrorCode } from '@shared/error_codes.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 
 export class IpcError extends Error {
-  code: string;
+  code: ErrorCode;
   // Which settings input the failure belongs to, when the main process knows.
   field?: string;
 
-  constructor(message: string, code: string, field?: string) {
+  constructor(message: string, code: unknown, field?: string) {
     super(message);
-    this.code = code;
+    this.name = 'IpcError';
+    this.code = normalizeErrorCode(code);
     this.field = field;
   }
 }

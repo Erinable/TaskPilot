@@ -6,8 +6,8 @@
 // repository's setup adapter (../setup_adapter.ts) offers and turns into
 // argument arrays, and validatePlan() drops any script the facts do not
 // define. Which language that is, this file never knows.
-import { AgentOutputError, isObject } from './product_lead.ts';
-import type { EnvAdjustment, SetupAdapter } from '../setup_adapter.ts';
+import { AgentOutputError, isObject } from './output_validation.ts';
+import type { EnvAdjustment, SetupAdapter } from '../checking/setup_adapter.ts';
 import type { StepKind } from '../../shared/check_steps.ts';
 
 export const MAX_ISSUES = 6;

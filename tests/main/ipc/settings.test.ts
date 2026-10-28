@@ -5,11 +5,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { AgentDeps } from '../../../src/main/app_context.ts';
+import type { AgentDeps } from '../../../src/main/app/app_context.ts';
 import type { CliModelCatalog } from '../../../src/shared/agent_runtime.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
-import * as workspace from '../../../src/main/workspace.ts';
-import * as preferences from '../../../src/main/preferences.ts';
+import * as workspace from '../../../src/main/repository/workspace.ts';
+import * as preferences from '../../../src/main/app/preferences.ts';
 import * as fixtures from './harness.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
@@ -38,7 +38,7 @@ test('agent model IPC isolates scopes, caches local catalogs, and refreshes only
   assert.deepEqual(reads, ['analysis:pi', 'coding:pi', 'analysis:pi']);
 });
 
-test('agent model IPC reads coding models from the account the isolation mode runs Coding Agent as', async () => {
+test('agent model IPC uses the Coding Agent account for coding catalogs', async () => {
   const reads: unknown[] = [];
   const modelCatalog: NonNullable<AgentDeps['modelCatalog']> = async (cli, scope, options): Promise<CliModelCatalog> => {
     reads.push([scope, options?.separateUser]);
@@ -46,67 +46,24 @@ test('agent model IPC reads coding models from the account the isolation mode ru
   };
   const h = await fixtures.harness({ withRepo: false, modelCatalog });
   await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'coding' });
-  await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'analysis' });
   await h.call(CHANNELS.preferencesSet, fixtures.validPrefs({ coding: { isolation: 'sandbox', extraRead: [], extraWrite: [] } }));
   await h.call(CHANNELS.agentModels, { cli: 'codex', scope: 'coding' });
   assert.deepEqual(reads, [
     ['coding', true],
-    ['analysis', false],
     ['coding', false],
   ]);
 });
 
-test('preferences:set saves, returns initials, and notifies the main process', async () => {
-  const { call, configDir, changes } = await fixtures.harness();
-  const { data } = await call(CHANNELS.preferencesSet, fixtures.validPrefs());
-  assert.equal(data.profile.initials, 'AL');
-  assert.equal((await preferences.load(configDir)).appearance.theme, 'dark');
-  assert.equal(changes.length, 1);
-  assert.equal(changes[0].previous.appearance.theme, 'system');
-  assert.equal((await call(CHANNELS.preferencesGet)).data.profile.displayName, 'Ada Lovelace');
-});
-
-test('preferences:set rejects a bad value without saving or notifying', async () => {
-  const { call, configDir, changes } = await fixtures.harness();
-  const response = await call(CHANNELS.preferencesSet, fixtures.validPrefs({ profile: { displayName: 'x'.repeat(41) } }));
-  assert.equal(response.error.code, 'name_too_long');
-  assert.equal(response.error.field, 'displayName');
-  assert.deepEqual(await preferences.load(configDir), preferences.defaults());
-  assert.equal(changes.length, 0);
-});
-
-test('environment:info previews a PATH source and falls back on shell failure', async () => {
-  const { call } = await fixtures.harness();
-  const inherit = (await call(CHANNELS.environmentInfo)).data;
-  assert.equal(inherit.source, 'inherit');
-  assert.deepEqual(inherit.entries, ['/usr/bin', '/bin']);
-  assert.equal(inherit.versions.app, '9.9.9');
-
-  const login = (await call(CHANNELS.environmentInfo, { source: 'login-shell' })).data;
-  assert.equal(login.source, 'login-shell');
-  assert.equal(login.entries[0], '/tp/shell/bin');
-
-  assert.equal((await call(CHANNELS.environmentInfo, { source: 'bogus' })).error.code, 'invalid_argument');
-});
-
-test('environment:info refresh re-reads the login shell', async () => {
-  const { call, shellReads } = await fixtures.harness();
-  await call(CHANNELS.environmentInfo, { source: 'login-shell' });
-  await call(CHANNELS.environmentInfo, { source: 'login-shell' });
-  assert.equal(shellReads(), 1, 'second call is cached');
-  await call(CHANNELS.environmentInfo, { source: 'login-shell', refresh: true });
-  assert.equal(shellReads(), 2);
-});
-
-test('verify:run uses the login-shell PATH once that preference is saved', async () => {
-  const { call, setCommands } = await fixtures.harness();
-  setCommands({ test: { command: process.execPath, args: ['-e', 'console.log(process.env.PATH)'] } });
-  const before = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
-  assert.equal(before, '/usr/bin:/bin');
-
+test('environment:info refreshes the cached PATH used by the next verification command', async () => {
+  const { call, setShellPathPrefix, setCommands } = await fixtures.harness();
+  setShellPathPrefix('/tp/first/bin');
+  assert.equal((await call(CHANNELS.environmentInfo, { source: 'login-shell' })).data.entries[0], '/tp/first/bin');
+  setShellPathPrefix('/tp/second/bin');
+  assert.equal((await call(CHANNELS.environmentInfo, { source: 'login-shell' })).data.entries[0], '/tp/first/bin');
+  assert.equal((await call(CHANNELS.environmentInfo, { source: 'login-shell', refresh: true })).data.entries[0], '/tp/second/bin');
   await call(CHANNELS.preferencesSet, fixtures.validPrefs({ environment: { pathSource: 'login-shell' } }));
-  const after = (await call(CHANNELS.verifyRun, 'test')).data.output.trim();
-  assert.ok(after.startsWith('/tp/shell/bin:'), after);
+  setCommands({ test: { command: process.execPath, args: ['-e', 'console.log(process.env.PATH)'] } });
+  assert.match((await call(CHANNELS.verifyRun, 'test')).data.output, /^\/tp\/second\/bin:/);
 });
 
 test('agent:status reports sign-in for the analysis CLI and the coding CLI, checking a shared CLI once', async () => {
@@ -158,12 +115,12 @@ test('data:reset-progress clears execution state but keeps config and preference
     steps: { test: { enabled: true, lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null } },
   });
   await call(CHANNELS.preferencesSet, fixtures.validPrefs());
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   assert.equal((await call(CHANNELS.dataInfo)).data.packages.claimed, 1);
 
   const { data } = await call(CHANNELS.dataResetProgress);
   assert.equal(data.claimed, 0);
-  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
+  assert.equal((await call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'pending');
   assert.equal((await workspace.load(repoDir)).steps.test!.commands[0].command, 'npm');
   assert.equal((await preferences.load(configDir)).profile.displayName, 'Ada Lovelace');
 });

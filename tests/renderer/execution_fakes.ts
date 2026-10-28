@@ -45,7 +45,7 @@ export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packag
   ...overrides,
 });
 
-export const state = (task: packageTypes.TaskView): packageTypes.WorkPackageState => ({
+const state = (task: packageTypes.TaskView): packageTypes.WorkPackageState => ({
   status: task.status,
   baseline: task.baseline,
   claimedAt: task.claimedAt,
@@ -67,17 +67,24 @@ export const state = (task: packageTypes.TaskView): packageTypes.WorkPackageStat
 // Installs window.taskpilot; `task` is what getTask() returns now.
 export const installApi = (current: { task: packageTypes.TaskView }) => {
   const api = {
-    listTasks: vi.fn(() => ok([current.task])),
-    getTask: vi.fn(() => ok(current.task)),
-    transition: vi.fn((_id: string, _name: packageTypes.HumanTransition, _options?: packageTypes.TransitionOptions) => ok(state(current.task))),
-    waiveDependency: vi.fn((_id: string, dependency: string) =>
-      ok({
-        ...current.task,
-        dependencies: current.task.dependencies.map((entry) => (entry.id === dependency ? { ...entry, waived: true, blocking: false } : entry)),
-      }),
-    ),
-    measureBaseline: vi.fn(() => ok(current.task)),
-    setStepDone: vi.fn((_id: string, stepIndex: number) => ok(state({ ...current.task, completedSteps: [stepIndex] }))),
+    ...fakeApi({
+      commit: {
+        preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+        create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
+      },
+    }),
+    tasks: { list: vi.fn(() => ok([current.task])), get: vi.fn(() => ok(current.task)) },
+    packages: {
+      transition: vi.fn((_id: string, _name: packageTypes.HumanTransition, _options?: packageTypes.TransitionOptions) => ok(state(current.task))),
+      waiveDependency: vi.fn((_id: string, dependency: string) =>
+        ok({
+          ...current.task,
+          dependencies: current.task.dependencies.map((entry) => (entry.id === dependency ? { ...entry, waived: true, blocking: false } : entry)),
+        }),
+      ),
+      measureBaseline: vi.fn(() => ok(current.task)),
+      setStepDone: vi.fn((_id: string, stepIndex: number) => ok(state({ ...current.task, completedSteps: [stepIndex] }))),
+    },
     review: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
     deviation: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
     diff: {
@@ -130,12 +137,6 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
         }),
       ),
     },
-    ...fakeApi({
-      commit: {
-        preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
-        create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
-      },
-    }),
     notes: {
       list: vi.fn(() => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
       create: vi.fn((input: noteTypes.NoteInput) =>

@@ -123,40 +123,38 @@ test('summarize() rates checks and averages judge scores across cases', () => {
   assert.equal(summary.agentCostUsd, 0.2);
 });
 
-test('QA cases reach the model with their diff when run through the real pipeline (stub model)', async () => {
-  for (const testCase of qaCases) {
-    const repo = await fixtureRepo(testCase.id, TS_API);
-    try {
-      for (const [file, content] of Object.entries(testCase.change)) await fs.writeFile(path.join(repo.root, file), content);
-      let prompt = '';
-      const result = await reviewWorkPackage(testCase.task, {
-        root: repo.root,
-        baseline: repo.head,
-        runAgent: async (options) => {
-          prompt = options.prompt;
-          return { output: { verdict: 'pass', summary: 's', criteria: [], issues: [] }, costUsd: 0 };
-        },
-        checks: [{ kind: 'test', stage: 'submit', blocking: true, line: 'npm test' }],
-        runCheck: async () => ({
-          kind: 'test',
-          command: 'npm test',
-          exitCode: 0,
-          timedOut: false,
-          durationMs: 1,
-          output: '',
-          results: testCase.passingTests.map((name) => ({ name, passed: true, skipped: false, todo: false })),
-          summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true },
-          diagnostics: [],
-          report: { format: 'tests', trusted: true, problem: null },
-          check: { stage: 'submit', blocking: true },
-        }),
-      });
-      assert.ok(result.report, `${testCase.id}: decided without the model (${result.reasons.join(', ')})`);
-      for (const file of Object.keys(testCase.change)) assert.ok(prompt.includes(file), `${testCase.id}: ${file} missing from the prompt`);
-      assert.deepEqual(result.diff.outOfScope, [], testCase.id);
-    } finally {
-      await repo.cleanup();
-    }
+test.each(qaCases)('QA case $id reaches the model with its diff through the real pipeline', async (testCase) => {
+  const repo = await fixtureRepo(testCase.id, TS_API);
+  try {
+    for (const [file, content] of Object.entries(testCase.change)) await fs.writeFile(path.join(repo.root, file), content);
+    let prompt = '';
+    const result = await reviewWorkPackage(testCase.task, {
+      root: repo.root,
+      baseline: repo.head,
+      runAgent: async (options) => {
+        prompt = options.prompt;
+        return { output: { verdict: 'pass', summary: 's', criteria: [], issues: [] }, costUsd: 0 };
+      },
+      checks: [{ kind: 'test', stage: 'submit', blocking: true, line: 'npm test' }],
+      runCheck: async () => ({
+        kind: 'test',
+        command: 'npm test',
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 1,
+        output: '',
+        results: testCase.passingTests.map((name) => ({ name, passed: true, skipped: false, todo: false })),
+        summary: { total: 1, passed: 1, failed: 0, skipped: 0, ok: true },
+        diagnostics: [],
+        report: { format: 'tests', trusted: true, problem: null },
+        check: { stage: 'submit', blocking: true },
+      }),
+    });
+    assert.ok(result.report, `${testCase.id}: decided without the model (${result.reasons.join(', ')})`);
+    for (const file of Object.keys(testCase.change)) assert.ok(prompt.includes(file), `${testCase.id}: ${file} missing from the prompt`);
+    assert.deepEqual(result.diff.outOfScope, [], testCase.id);
+  } finally {
+    await repo.cleanup();
   }
 });
 

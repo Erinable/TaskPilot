@@ -47,7 +47,7 @@ export default tseslint.config(
         },
       ],
       // process.env is read in one config module only.
-      'no-restricted-properties': ['error', { object: 'process', property: 'env', message: 'Read configuration from src/main/env.ts.' }],
+      'no-restricted-properties': ['error', { object: 'process', property: 'env', message: 'Read configuration from src/main/infrastructure/env.ts.' }],
       'vue/no-v-html': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { fixStyle: 'separate-type-imports' }],
@@ -66,7 +66,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-properties': [
         'error',
-        { object: 'process', property: 'env', message: 'Read configuration from src/main/env.ts.' },
+        { object: 'process', property: 'env', message: 'Read configuration from src/main/infrastructure/env.ts.' },
         { object: 'window', property: 'taskpilot', message: 'Call the main process through a store in src/renderer/src/stores/.' },
       ],
     },
@@ -87,13 +87,8 @@ export default tseslint.config(
     },
   },
   {
-    // Writes the CLIs' own TOML config, not repository configuration.
-    files: ['src/main/agents/native_model_profile.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: AGENT_IMPORT_BANS.filter((ban) => !ban.group.includes('smol-toml')) }] },
-  },
-  {
     // The config module, scripts and tests may read the environment directly.
-    files: ['src/main/env.ts', 'evals/**', 'tests/**', '*.config.ts'],
+    files: ['src/main/infrastructure/env.ts', 'evals/**', 'tests/**', '*.config.ts'],
     rules: { 'no-restricted-properties': 'off' },
   },
   {

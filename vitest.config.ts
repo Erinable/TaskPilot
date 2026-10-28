@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { availableParallelism } from 'node:os';
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 
@@ -10,8 +11,8 @@ export default defineConfig({
     include: ['tests/**/*.test.{js,ts}'],
     environment: 'node',
     setupFiles: ['tests/setup/renderer_globals.ts'],
-    // Integration tests spawn git, npm and Electron-free app stacks; running a
-    // worker per CPU starves them past their timeouts.
-    maxWorkers: '50%',
+    // Each worker can start git, npm and compiler children; cap fan-out as well
+    // as using half the CPUs so integration deadlines are not CPU-starved.
+    maxWorkers: Math.min(2, Math.max(1, Math.floor(availableParallelism() / 2))),
   },
 });

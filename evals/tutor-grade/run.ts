@@ -11,7 +11,7 @@
 // evals/tutor-grade/reports/ (gitignored).
 import path from 'node:path';
 
-import * as courses from '../../src/main/courses.ts';
+import * as courses from '../../src/main/courses/courses.ts';
 import { judgeWith, parseArgs, runAgent, runSuite } from '../shared/harness.ts';
 import { cases } from './cases.ts';
 import { check, structure } from './checks.ts';

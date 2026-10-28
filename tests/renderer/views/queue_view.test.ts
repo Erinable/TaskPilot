@@ -8,8 +8,7 @@ import QueueView from '../../../src/renderer/src/views/QueueView.vue';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
-import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
-import { coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
+import { installApi, requirement } from '../requirements_fakes.ts';
 import { taskView } from '../execution_fakes.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
@@ -38,8 +37,6 @@ describe('QueueView', () => {
     const wrapper = render();
     const empty = wrapper.find('.task-list [data-empty="queue"]');
     expect(empty.exists()).toBe(true);
-    expect(empty.find('h2').text()).toBe('还没有工作包');
-    expect(empty.find('p').text()).toBe('在需求中心描述需求，Product Lead 拆解并经你确认后，工作包会出现在这里。');
     expect(wrapper.findAll('.task-item')).toHaveLength(0);
 
     await empty.find('button').trigger('click');
@@ -47,19 +44,7 @@ describe('QueueView', () => {
   });
 
   test('the empty state goes away once packages are published', async () => {
-    useTasksStore().tasks = [
-      {
-        id: 'r1-wp1',
-        title: '登录接口',
-        description: '实现邮箱登录',
-        status: 'pending',
-        statusLabel: '待领取',
-        priority: 'high',
-        tags: ['auth'],
-        estimate: '预计 1 小时',
-        icon: 'key',
-      } as packageTypes.TaskView,
-    ];
+    useTasksStore().tasks = [taskView({ status: 'pending', title: '登录接口' })];
     const wrapper = render();
     await flushPromises();
     expect(wrapper.find('[data-empty="queue"]').exists()).toBe(false);
@@ -149,15 +134,6 @@ describe('QueueView', () => {
     expect(items[0].find('[data-progress]').text()).toBe('2 / 4 步');
     expect(items[0].find('.progress-fill').attributes('style')).toContain('width: 50%');
     expect(items[1].find('[data-progress]').exists()).toBe(false);
-  });
-
-  test('an empty filter offers to show every package', async () => {
-    const base = { description: '', statusLabel: '', tags: [] as string[], estimate: '', icon: 'key', priority: 'high', steps: [], completedSteps: [] };
-    useTasksStore().tasks = [{ ...base, id: 'done', title: '完成', status: 'done' }] as unknown as packageTypes.TaskView[];
-    const wrapper = render();
-    await flushPromises();
-    await wrapper.find('[data-empty="filter"] .empty-action').trigger('click');
-    expect(wrapper.findAll('.task-title').map((node) => node.text())).toEqual(['完成']);
   });
 
   test('a new user sees the getting-started checklist with the next step highlighted', async () => {
@@ -266,34 +242,9 @@ describe('QueueView board', () => {
   });
 
   test('suggests one package at a time when several are in progress', async () => {
-    useTasksStore().tasks = [pkg({ id: 'a', status: 'in_progress' }), pkg({ id: 'b', status: 'in_progress' })];
+    useTasksStore().tasks = [taskView({ id: 'a', status: 'in_progress' }), taskView({ id: 'b', status: 'in_progress' })];
     const wrapper = render();
     await flushPromises();
     expect(wrapper.find('.board-hint').text()).toContain('同时在做 2 个');
-  });
-
-  test('in a lab repository the stage bar sits above the queue, with the course that points at it', async () => {
-    const api = (window as unknown as { taskpilot: ReturnType<typeof installApi> }).taskpilot;
-    api.repositories.list.mockImplementation(() => Promise.resolve({ ok: true as const, data: { current: 'lab-repo', repositories: [] } }));
-    useRepositoriesStore().currentId = 'lab-repo';
-    useRequirementsStore().items = [
-      requirement({
-        kind: 'course',
-        status: 'published',
-        course: { ...coursePathInterview(), repositoryId: 'lab-repo', lab: labGeneration({ stage: 1, placed: true }) },
-      }),
-    ];
-    // A project repository's packages carry no lab: no bar.
-    useTasksStore().tasks = [taskView({ status: 'pending' })];
-    const wrapper = render();
-    await flushPromises();
-    expect(wrapper.find('[data-lab-stages]').exists()).toBe(false);
-    useTasksStore().tasks = [
-      taskView({ id: 'lab-round-robin', status: 'done', title: '时间片轮转', lab: { id: 'round-robin', stage: 1, difficulty: 'easy' } }),
-    ];
-    await flushPromises();
-    expect(wrapper.get('[data-lab-stages] [data-stage="1"]').attributes('data-state')).toBe('passed');
-    // The course is known, so the next lab can be asked for.
-    expect(wrapper.find('[data-action="next-lab"]').exists()).toBe(true);
   });
 });

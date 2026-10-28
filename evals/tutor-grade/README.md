@@ -1,6 +1,6 @@
 # Tutor grading eval
 
-Runs Tutor's grading (`gradeSystemPrompt(course)`, `gradePrompt`, `gradeSchema(course)`, `validateGrade`) against fixed cases with the real Claude CLI. Each built-in course pack has five cases (`cases.ts`). A case is a work package, the developer's submission and Coding Agent's reference, both written over a committed fixture repository, so Tutor reads real `git diff`s through `src/main/review_diff.ts`, the way `practice_service.ts` grades. QA's verdict is fixed, and some cases carry developer notes.
+Runs Tutor's grading (`gradeSystemPrompt(course)`, `gradePrompt`, `gradeSchema(course)`, `validateGrade`) against fixed cases with the real Claude CLI. Each built-in course pack has five cases (`cases.ts`). A case is a work package, the developer's submission and Coding Agent's reference, both written over a committed fixture repository, so Tutor reads real `git diff`s through `src/main/repository/review_diff.ts`, the way `practice_service.ts` grades. QA's verdict is fixed, and some cases carry developer notes.
 
 - programming: the QA eval's `findByEmail` changes on the TS_API fixture (clean, SQL injection, case-sensitive, throws instead of null, naming).
 - os: the C lab in `evals/shared/os_lab/` (pipe ping-pong without closing fds, copy ignoring short writes, a `volatile` counter without a lock, a bounded buffer waiting with `if`, a clean copy). The references are in `os_reference/`, the submissions in `os_submissions/`.

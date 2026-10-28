@@ -1,6 +1,8 @@
 // Release Manager's drafts, releases and milestones (release:*, milestone:*).
 
 import type { ErrorInfo } from './envelope.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 export type ReleaseBump = 'major' | 'minor' | 'patch';
 
@@ -116,3 +118,17 @@ export type ReleaseDraftInput = { notes?: string; checked?: number[] };
 export type ReleaseWriteInput = { path: string };
 
 export type ReleaseWriteResult = { path: string };
+
+export const releaseContract = {
+  get: invoke<[], ReleaseState>('release:get'),
+  recentCommits: invoke<[], ReleaseCommit[]>('release:recent-commits'),
+  generate: invoke<[startCommit?: string], ReleaseState>('release:generate'),
+  updateDraft: invoke<[input: ReleaseDraftInput], ReleaseState>('release:update-draft'),
+  finish: invoke<[], Release>('release:finish'),
+  writeNotes: invoke<[input: ReleaseWriteInput], ReleaseWriteResult>('release:write-notes'),
+  cancel: invoke<[], boolean>('release:cancel'),
+  createMilestone: invoke<[input: MilestoneInput], ReleaseState>('milestone:create'),
+  updateMilestone: invoke<[id: string, input: MilestoneInput], ReleaseState>('milestone:update'),
+  deleteMilestone: invoke<[id: string], ReleaseState>('milestone:delete'),
+  assignMilestone: invoke<[requirementId: string, milestoneId: string | null], ReleaseState>('milestone:assign'),
+} satisfies Contract;

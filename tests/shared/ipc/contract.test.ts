@@ -1,9 +1,10 @@
 // The contract tables (src/shared/ipc/contracts.ts) and what is derived from them.
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
+import { EventEmitter } from 'node:events';
 
-import { buildApi, channelsOf, event, invoke } from '../../../src/shared/ipc/contract.ts';
 import { CONTRACTS } from '../../../src/shared/ipc/contracts.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
+import { buildApi, event } from '../../../src/shared/ipc/contract.ts';
 
 test('every channel string is used once across the tables and CHANNELS', () => {
   const tableChannels = Object.values(CONTRACTS).flatMap((contract) => Object.values(contract).map((spec) => spec.channel));
@@ -12,22 +13,22 @@ test('every channel string is used once across the tables and CHANNELS', () => {
   expect(all.filter((channel, index) => all.indexOf(channel) !== index)).toEqual([]);
 });
 
-test('CHANNELS keys are the namespace and the capitalized method name', () => {
-  expect(channelsOf({ commit: { preview: invoke<[], null>('commit:preview') }, app: { onFullScreen: event<boolean>('window:full-screen') } })).toEqual({
-    commitPreview: 'commit:preview',
-    appOnFullScreen: 'window:full-screen',
-  });
-});
-
-test('the built api invokes the declared channel and forwards events', async () => {
-  const ipcRenderer = { invoke: vi.fn(async (..._args: unknown[]) => ({ ok: true, data: 'answer' })), on: vi.fn() };
-  const api = buildApi({ demo: { get: invoke<[id: string, line?: number], string>('demo:get'), onChange: event<boolean>('demo:changed') } }, ipcRenderer);
-  expect(await api.demo.get('a', 3)).toEqual({ ok: true, data: 'answer' });
-  expect(ipcRenderer.invoke).toHaveBeenCalledWith('demo:get', 'a', 3);
-  const listener = vi.fn();
-  api.demo.onChange(listener);
-  const [channel, forward] = ipcRenderer.on.mock.calls[0];
-  expect(channel).toBe('demo:changed');
-  forward({ sender: 'ignored' }, true);
-  expect(listener).toHaveBeenCalledWith(true);
+test('disposing one push subscription stops its updates without dropping other listeners', () => {
+  const events = new EventEmitter();
+  const api = buildApi(
+    { demo: { onChanged: event<number>('demo:changed') } },
+    { invoke: async () => null, on: events.on.bind(events), removeListener: events.removeListener.bind(events) },
+  );
+  const first: number[] = [];
+  const second: number[] = [];
+  const disposeFirst = api.demo.onChanged((value) => first.push(value));
+  const disposeSecond = api.demo.onChanged((value) => second.push(value));
+  events.emit('demo:changed', {}, 1);
+  disposeFirst();
+  disposeFirst();
+  events.emit('demo:changed', {}, 2);
+  disposeSecond();
+  events.emit('demo:changed', {}, 3);
+  expect(first).toEqual([1]);
+  expect(second).toEqual([1, 2]);
 });

@@ -11,9 +11,9 @@
 //     workspace settings (see ../workspace.ts).
 
 import type { ModeRecommendation, PackageDifficulty } from '../../shared/ipc/packages.ts';
-import type { AcceptanceCriterion, TaskDefinition } from '../tasks.ts';
-import { CONTROL_CHARS } from '../../shared/text_rules.ts';
+import type { AcceptanceCriterion, TaskDefinition } from '../work_packages/tasks.ts';
 import { profileBlock } from './prompt_blocks.ts';
+import { fail, isObject, list, oneOf, optionalText, scopePath, text } from './output_validation.ts';
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
@@ -30,11 +30,6 @@ export const PACKAGE_ICONS = ['key', 'flask', 'blocks', 'rocket', 'file', 'termi
 
 export type Priority = (typeof PRIORITIES)[number];
 export type PackageIcon = (typeof PACKAGE_ICONS)[number];
-
-// Untrusted model output, once it is known to be an object.
-export type RawObject = Record<string, unknown>;
-
-export const isObject = (value: unknown): value is RawObject => Boolean(value) && typeof value === 'object';
 
 export interface RequirementInput {
   title?: string | null;
@@ -88,16 +83,6 @@ export interface Plan {
 
 // A generated package carries the requirement it came from.
 export type PlannedTaskDefinition = TaskDefinition & { requirementId: string };
-
-export class AgentOutputError extends Error {
-  code: string;
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'AgentOutputError';
-    this.code = 'agent_bad_output';
-  }
-}
 
 // Prompts
 
@@ -338,48 +323,6 @@ export const planSchema = (course: Pick<CoursePack, 'concepts'>) => {
       packages: { ...PLAN_SCHEMA.properties.packages, items: { ...item, properties: { ...item.properties, concepts } } },
     },
   };
-};
-
-// Validation: the CLI enforces the schema, but this layer does not rely on it.
-
-// Typed as a declaration so calls narrow: TypeScript only treats a call as
-// unreachable-after when the callee's type is written out.
-const fail: (path: string, problem: string) => never = (path, problem) => {
-  throw new AgentOutputError(`${path} ${problem}`);
-};
-
-export const text = (value: unknown, path: string, maxLength: number): string => {
-  if (typeof value !== 'string') fail(path, 'must be text');
-  const trimmed = value.trim();
-  if (!trimmed) fail(path, 'is empty');
-  if ([...trimmed].length > maxLength) fail(path, `is longer than ${maxLength} characters`);
-  if (CONTROL_CHARS.test(trimmed)) fail(path, 'contains control characters');
-  return trimmed;
-};
-
-const optionalText = (value: unknown, path: string, maxLength: number): string | undefined => (value === undefined ? undefined : text(value, path, maxLength));
-
-export const list = (value: unknown, path: string, { min = 0, max }: { min?: number; max: number }): unknown[] => {
-  if (!Array.isArray(value)) fail(path, 'must be a list');
-  if (value.length < min) fail(path, `needs at least ${min} item(s)`);
-  if (value.length > max) fail(path, `has more than ${max} items`);
-  return value;
-};
-
-const oneOf = <T extends string>(value: unknown, allowed: readonly T[], path: string): T => {
-  if (!(allowed as readonly unknown[]).includes(value)) fail(path, `must be one of ${allowed.join(', ')}`);
-  return value as T;
-};
-
-// A file scope entry: a relative path inside the repository. Rejects absolute
-// paths, `..` segments, and Windows separators, then normalizes `./`.
-export const scopePath = (value: unknown, path: string): string => {
-  const entry = text(value, path, 200);
-  if (entry.startsWith('/') || /^[a-zA-Z]:/.test(entry) || entry.includes('\\')) fail(path, 'must be a relative path');
-  const segments = entry.split('/').filter((segment) => segment !== '' && segment !== '.');
-  if (segments.length === 0) fail(path, 'is not a file path');
-  if (segments.includes('..')) fail(path, 'must not contain ..');
-  return segments.join('/');
 };
 
 // A package's difficulty: a level from the allowlist and a short reason.

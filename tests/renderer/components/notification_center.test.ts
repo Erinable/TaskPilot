@@ -33,10 +33,10 @@ describe('NotificationCenter', () => {
     setActivePinia(pinia);
     state = { list: [requirement({ title: MARKUP, updatedAt: '2026-01-04T00:00:00.000Z' })] };
     api = installApi(state);
-    api.listTasks.mockImplementation(() => Promise.resolve({ ok: true as const, data: [taskView({ status: 'blocked', title: '登录接口' })] as never[] }));
+    api.tasks.list.mockImplementation(() => Promise.resolve({ ok: true as const, data: [taskView({ status: 'blocked', title: '登录接口' })] as never[] }));
   });
 
-  afterEach(() => useNotificationsStore().stopAutoRefresh());
+  afterEach(() => useNotificationsStore().stop());
 
   const render = async () => {
     await useTasksStore().reloadQueue();
@@ -67,10 +67,10 @@ describe('NotificationCenter', () => {
 
   test('opening the popover refreshes, and agent text stays text', async () => {
     const wrapper = await render();
-    api.listTasks.mockClear();
+    api.tasks.list.mockClear();
     api.requirements.list.mockClear();
     await openPopover(wrapper);
-    expect(api.listTasks).toHaveBeenCalledTimes(1);
+    expect(api.tasks.list).toHaveBeenCalledTimes(1);
     expect(api.requirements.list).toHaveBeenCalledTimes(1);
     const items = document.querySelectorAll('[data-notification]');
     expect(items).toHaveLength(2);
@@ -115,7 +115,7 @@ describe('NotificationCenter', () => {
 
   test('an empty center says so', async () => {
     state.list = [];
-    api.listTasks.mockImplementation(() => Promise.resolve({ ok: true as const, data: [] as never[] }));
+    api.tasks.list.mockImplementation(() => Promise.resolve({ ok: true as const, data: [] as never[] }));
     const wrapper = await render();
     await openPopover(wrapper);
     expect(document.querySelector('.notification-empty')?.textContent).toBe('没有需要你处理的事项。');

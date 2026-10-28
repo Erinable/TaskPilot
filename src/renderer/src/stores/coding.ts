@@ -8,8 +8,8 @@ import { MAX_AUTO_ATTEMPTS } from '@shared/coding_types.ts';
 import type * as codingTypes from '@shared/coding_types.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useExecutionStore } from './execution.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 
-export const CODING_POLL_MS = 1000;
 export const CODING_SETUP_SCRIPT = 'scripts/setup-coding-agent-user.sh';
 
 const ACTIVE_STATUSES: codingTypes.CodingRun['status'][] = ['preparing', 'running', 'checking', 'applying', 'verifying'];
@@ -47,7 +47,9 @@ export const useCodingStore = defineStore('coding', () => {
   const selectedId = ref<string | null>(null);
   let generation = 0;
   let runtimeGeneration = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let reading = false;
+  let queued = false;
   // The round whose events and patch are shown.
   let roundId: string | null = null;
   // Patch paths the developer accepts; all applicable files by default.
@@ -91,9 +93,9 @@ export const useCodingStore = defineStore('coding', () => {
   const conflicts = computed(() => (patch.value?.merge ?? []).filter((file) => file.state === 'conflict'));
   const hasBlocked = computed(() => blockedPaths.value.size > 0);
 
-  const stopPolling = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
+  const stopWatching = () => {
+    unsubscribe?.();
+    unsubscribe = null;
   };
 
   const sameSelection = (id: string, token: number) => selectedId.value === id && generation === token && execution.current?.id === id;
@@ -111,7 +113,6 @@ export const useCodingStore = defineStore('coding', () => {
       if (sameSelection(id, token)) {
         patch.value = value;
         resolutions.value = {};
-        // High-risk files start unticked: applying them is an explicit choice.
         selectedFiles.value = value.files.filter((file) => applicable(file) && !file.highRisk).map((file) => file.path);
       }
     } catch (cause) {
@@ -121,8 +122,13 @@ export const useCodingStore = defineStore('coding', () => {
     }
   };
 
-  const poll = async (id: string, token: number) => {
+  const refresh = async (id: string, token: number) => {
     if (!sameSelection(id, token)) return;
+    if (reading) {
+      queued = true;
+      return;
+    }
+    reading = true;
     eventsLoading.value = true;
     try {
       const page = await call(window.taskpilot.coding.events(id, eventCursor.value));
@@ -133,7 +139,6 @@ export const useCodingStore = defineStore('coding', () => {
       }
       const task = await call(window.taskpilot.coding.get(id));
       if (!adopt(task, id, token)) return;
-      // A new automatic round restarts its event sequence and patch.
       if (task.codingRun && task.codingRun.id !== roundId) {
         roundId = task.codingRun.id;
         events.value = [];
@@ -141,28 +146,34 @@ export const useCodingStore = defineStore('coding', () => {
         patch.value = null;
       }
       if (task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
-      if (looping(task)) {
-        timer = setTimeout(() => poll(id, token).catch(() => undefined), CODING_POLL_MS);
-      }
     } catch (cause) {
-      if (sameSelection(id, token)) {
-        error.value = `刷新编码进度失败：${describeError(cause)}`;
-        timer = setTimeout(() => poll(id, token).catch(() => undefined), CODING_POLL_MS);
-      }
+      if (sameSelection(id, token)) error.value = `刷新编码进度失败：${describeError(cause)}`;
     } finally {
+      reading = false;
       if (sameSelection(id, token)) eventsLoading.value = false;
+      if (queued) {
+        queued = false;
+        const currentId = selectedId.value;
+        if (unsubscribe && currentId) refresh(currentId, generation).catch(() => undefined);
+      }
     }
   };
 
-  const startPolling = (id: string, token: number) => {
-    stopPolling();
-    timer = setTimeout(() => poll(id, token).catch(() => undefined), 0);
+  const startWatching = (id: string, token: number) => {
+    stopWatching();
+    const repositories = useRepositoryIdentityStore();
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (!change.domains.some((domain) => domain === 'coding' || domain === 'packages')) return;
+      refresh(id, token).catch(() => undefined);
+    });
+    refresh(id, token).catch(() => undefined);
   };
 
-  // Selecting a task invalidates all in-flight responses. Leaving the view only
-  // stops polling; the main-process run is intentionally left untouched.
+  // Selecting a task invalidates all in-flight responses. Leaving the view
+  // removes the listener; the main-process run is intentionally untouched.
   const select = async (id: string) => {
-    stopPolling();
+    stopWatching();
     const token = ++generation;
     selectedId.value = id;
     events.value = [];
@@ -181,15 +192,15 @@ export const useCodingStore = defineStore('coding', () => {
       if (!adopt(task, id, token)) return;
       instruction.value = task.codingRun?.instruction ?? DEFAULT_INSTRUCTION;
       roundId = task.codingRun?.id ?? null;
-      if (looping(task)) startPolling(id, token);
-      else if (task.codingRun?.status === 'ready') await loadPatch(id, token);
+      startWatching(id, token);
+      if (!looping(task) && task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `读取编码任务失败：${describeError(cause)}`;
     }
   };
 
   const leave = () => {
-    stopPolling();
+    stopWatching();
     selectedId.value = null;
     eventsLoading.value = false;
     patchLoading.value = false;
@@ -214,7 +225,7 @@ export const useCodingStore = defineStore('coding', () => {
       events.value = [];
       eventCursor.value = -1;
       patch.value = null;
-      startPolling(id, token);
+      startWatching(id, token);
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `启动编码失败：${describeError(cause)}`;
@@ -245,8 +256,8 @@ export const useCodingStore = defineStore('coding', () => {
       if (!adopt(task, id, token)) return false;
       patch.value = null;
       // A stopped check run still writes its final state.
-      if (looping(task) || task.codingRun?.status === 'verifying') startPolling(id, token);
-      else stopPolling();
+      if (looping(task) || task.codingRun?.status === 'verifying') startWatching(id, token);
+      else stopWatching();
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `取消编码失败：${describeError(cause)}`;
@@ -312,7 +323,7 @@ export const useCodingStore = defineStore('coding', () => {
       await execution.refreshDiff();
       if (!sameSelection(id, token)) return false;
       patch.value = null;
-      startPolling(id, token);
+      startWatching(id, token);
       showToast(
         result.markers.length
           ? `已写入 ${result.files.length} 个文件，其中 ${result.markers.length} 个有冲突标记。改完后点「冲突已解决，继续」。`
@@ -340,7 +351,7 @@ export const useCodingStore = defineStore('coding', () => {
     try {
       const task = await call(window.taskpilot.coding.resume(id));
       if (!adopt(task, id, token)) return false;
-      startPolling(id, token);
+      startWatching(id, token);
       showToast('冲突已解决，正在跑提交前检查。');
       return true;
     } catch (cause) {

@@ -5,7 +5,7 @@
 // almost every comment. The judge (run.ts) scores how good the teaching is.
 import type { CheckResult } from '../shared/harness.ts';
 import type { GradeCase } from './cases.ts';
-import type { GradeReport } from '../../src/main/agents/tutor.ts';
+import type { GradeReport } from '../../src/main/agents/tutor_grade.ts';
 import type { CoursePack } from '../../src/shared/course_pack.ts';
 
 // One item may take at most this share of a pack's comments.

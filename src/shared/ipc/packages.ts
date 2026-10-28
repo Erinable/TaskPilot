@@ -6,6 +6,8 @@ import type { ErrorInfo } from './envelope.ts';
 import type * as workspaceTypes from './workspace.ts';
 import type { CourseRef, RubricItem } from '../course_pack.ts';
 import type { HintUse } from '../hint_ladder.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
 
@@ -362,3 +364,37 @@ export type PackageDependency = {
   waived: boolean;
   blocking: boolean;
 };
+
+export const tasksContract = {
+  list: invoke<[], TaskView[]>('tasks:list'),
+  get: invoke<[id: string], TaskView>('tasks:get'),
+} satisfies Contract;
+
+export const packagesContract = {
+  transition: invoke<[id: string, name: HumanTransition, options?: TransitionOptions], WorkPackageState>('package:transition'),
+  waiveDependency: invoke<[id: string, dependency: string], TaskView>('package:waive-dependency'),
+  measureBaseline: invoke<[id: string], TaskView>('baseline:measure'),
+  setStepDone: invoke<[id: string, stepIndex: number, done: boolean], WorkPackageState>('package:set-step-done'),
+} satisfies Contract;
+
+export const reviewContract = {
+  retry: invoke<[id: string], WorkPackageState>('review:retry'),
+  cancel: invoke<[id: string], boolean>('review:cancel'),
+} satisfies Contract;
+
+export const deviationContract = {
+  retry: invoke<[id: string], WorkPackageState>('deviation:retry'),
+  cancel: invoke<[id: string], boolean>('deviation:cancel'),
+} satisfies Contract;
+
+export const practiceContract = {
+  // The reference patch; refused until the package was first submitted.
+  reference: invoke<[id: string], string>('reference:get'),
+  // Grades now: a retry, or without waiting for the reference.
+  grade: invoke<[id: string, skipReference: boolean], TaskView>('grade:start'),
+  // Tutor picks the key differences from the reference (once it may be read).
+  explain: invoke<[id: string], TaskView>('explain:start'),
+  // One answer per difference, in order; null skips one.
+  answer: invoke<[id: string, answers: (string | null)[]], TaskView>('explain:answer'),
+  saveExplanation: invoke<[id: string], TaskView>('explain:save-note'),
+} satisfies Contract;

@@ -9,8 +9,16 @@ export const useTasksStore = defineStore('tasks', () => {
   const tasks = ref<packageTypes.TaskView[]>([]);
   const pendingCount = computed(() => tasks.value.filter((task) => task.status !== 'done').length);
 
+  let generation = 0;
   const reloadQueue = async () => {
-    tasks.value = await call(window.taskpilot.listTasks());
+    const token = ++generation;
+    const next = await call(window.taskpilot.tasks.list());
+    if (token === generation) tasks.value = next;
+  };
+
+  const reset = () => {
+    generation += 1;
+    tasks.value = [];
   };
 
   return {
@@ -18,5 +26,6 @@ export const useTasksStore = defineStore('tasks', () => {
     tasks,
     pendingCount,
     reloadQueue,
+    reset,
   };
 });

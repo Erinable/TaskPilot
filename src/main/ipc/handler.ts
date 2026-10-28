@@ -1,5 +1,6 @@
 // The IPC boundary: how a handler's outcome reaches the renderer.
-import type { CodedError } from '../coded_error.ts';
+import { asAgentError } from '../infrastructure/coded_error.ts';
+import { normalizeErrorCode } from '../../shared/error_codes.ts';
 import type { Channel } from '../../shared/ipc_channels.ts';
 import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
 import type { Contract, HandlersOf } from '../../shared/ipc/contract.ts';
@@ -7,14 +8,13 @@ import type { Contract, HandlersOf } from '../../shared/ipc/contract.ts';
 // Electron's ipcMain, or a stand-in exposing `handle`.
 export type IpcMainLike = { handle(channel: Channel, listener: (event: unknown, ...args: unknown[]) => unknown): void };
 
-// Shaped like an Error but safe to send over IPC.
+// Convert arbitrary thrown values to a safe, closed-code wire shape.
 export const toFailure = (error: unknown): { ok: false; error: envelopeTypes.IpcFailure } => {
-  const coded = error as CodedError;
-  const failure: envelopeTypes.IpcFailure = { code: typeof coded.code === 'string' ? coded.code : 'unknown', message: coded.message };
-  if (typeof coded.field === 'string' && coded.field) failure.field = coded.field;
+  const info = asAgentError(error);
+  const failure: envelopeTypes.IpcFailure = { code: normalizeErrorCode(info.code), message: info.message };
+  if (error && typeof error === 'object' && 'field' in error && typeof error.field === 'string' && error.field) failure.field = error.field;
   return { ok: false, error: failure };
 };
-
 // Renderer arguments are untrusted, so handlers receive them as unknown.
 type Handler<T> = (event: unknown, ...args: unknown[]) => T | Promise<T>;
 

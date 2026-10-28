@@ -1,9 +1,9 @@
 // The calibration set for the hint ladder's output filter
-// (src/main/hint_leak.ts): reference patches, hints that give them away
+// (src/main/work_packages/hint_leak.ts): reference patches, hints that give them away
 // (copied, renamed, reformatted, cut into pieces, quoted in the text) and
 // honest hints at L4 and L5 for the same steps. The thresholds must keep
 // recall at least 90% and refuse at most 10% of the honest hints
-// (tests/main/hint_leak.test.ts).
+// (tests/main/work_packages/hint_leak.test.ts).
 import type { TutorAnswer } from '../../src/main/agents/tutor.ts';
 
 const patch = (file: string, lines: string[]) =>

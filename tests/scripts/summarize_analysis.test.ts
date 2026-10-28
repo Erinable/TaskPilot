@@ -1,16 +1,15 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { expect, onTestFinished, test } from 'vitest';
+import { expect, test } from 'vitest';
 
+import { tempDir } from '../fixtures/temp_dir.ts';
 const execute = promisify(execFile);
 const script = fileURLToPath(new URL('../../scripts/summarize_analysis.ts', import.meta.url));
 const fixture = async () => {
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-summary-'));
-  onTestFinished(() => fs.rm(cwd, { recursive: true, force: true }));
+  const cwd = await tempDir('taskpilot-summary-');
   const write = async (name: string, content: string) => {
     const filePath = path.join(cwd, '.taskpilot/analysis', name);
     await fs.mkdir(path.dirname(filePath), { recursive: true });

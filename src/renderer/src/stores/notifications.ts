@@ -9,9 +9,8 @@ import { useExecutionStore } from './execution.ts';
 import { useRequirementsStore } from './requirements.ts';
 import { useTasksStore } from './tasks.ts';
 
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 export const READ_STORAGE_KEY = 'taskpilot.notifications.read';
-export const REFRESH_MS = 30_000;
-
 // Package and requirement ids are only unique within a repository.
 export const readStorageKey = (repositoryId: string | null) => (repositoryId ? `${READ_STORAGE_KEY}.${repositoryId}` : READ_STORAGE_KEY);
 
@@ -71,29 +70,48 @@ export const useNotificationsStore = defineStore('notifications', () => {
 
   // ========== Refresh ==========
   // A failed queue reload skips pruning. requirements.refreshList() logs its
-  // own errors and empties the list instead of throwing.
+  // ========== Refresh ==========
+  const repositories = useRepositoryIdentityStore();
+  let unsubscribe: (() => void) | null = null;
+  let session = 0;
+  let reading = false;
+  let queued = false;
+
   const refresh = async () => {
-    try {
-      await Promise.all([tasks.reloadQueue(), requirements.refreshList()]);
-    } catch (error) {
-      console.error('[notifications] refresh failed', error);
+    if (reading) {
+      queued = true;
       return;
     }
-    pruneRead();
+    const token = session;
+    reading = true;
+    try {
+      await Promise.all([tasks.reloadQueue(), requirements.refreshList()]);
+      if (token === session) pruneRead();
+    } catch (error) {
+      console.error('[notifications] refresh failed', error);
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
+        await refresh();
+      }
+    }
   };
 
-  let refreshTimer: number | null = null;
-
-  const startAutoRefresh = () => {
-    if (refreshTimer !== null) return;
-    refreshTimer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refresh().catch((error) => console.error(error));
-    }, REFRESH_MS);
+  const start = () => {
+    if (unsubscribe) return;
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (change.domains.some((domain) => domain === 'packages' || domain === 'requirements')) refresh().catch((error) => console.error(error));
+    });
+    refresh().catch((error) => console.error(error));
   };
 
-  const stopAutoRefresh = () => {
-    if (refreshTimer !== null) window.clearInterval(refreshTimer);
-    refreshTimer = null;
+  const stop = () => {
+    session += 1;
+    queued = false;
+    unsubscribe?.();
+    unsubscribe = null;
   };
 
   return {
@@ -110,7 +128,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     openItem,
     // Refresh
     refresh,
-    startAutoRefresh,
-    stopAutoRefresh,
+    start,
+    stop,
   };
 });

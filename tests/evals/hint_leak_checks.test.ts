@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { cases } from '../../evals/hint-leak/cases.ts';
 import { check, judge, summarizeVerdicts } from '../../evals/hint-leak/checks.ts';
-import * as hintLeak from '../../src/main/hint_leak.ts';
+import * as hintLeak from '../../src/main/work_packages/hint_leak.ts';
 import * as samples from '../fixtures/hint_leak.ts';
 import type { Verdict } from '../../evals/hint-leak/checks.ts';
 

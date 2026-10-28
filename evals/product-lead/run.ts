@@ -15,9 +15,9 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { summarizeForRequirement } from '../../src/main/agents/pipeline.ts';
-import * as cli from '../../src/main/agents/claude_cli.ts';
+import * as cli from '../../src/main/runtimes/claude_cli.ts';
 import * as productLead from '../../src/main/agents/product_lead.ts';
-import * as courses from '../../src/main/courses.ts';
+import * as courses from '../../src/main/courses/courses.ts';
 import { cases, answerFor } from './fixtures.ts';
 import { check } from './checks.ts';
 import { CRITERIA, judge } from './judge.ts';
@@ -25,7 +25,7 @@ import type { EvalCase } from './fixtures.ts';
 import type { CheckResult, EvalRun } from './checks.ts';
 import type { Criterion, Scores } from './judge.ts';
 import type { SummaryResult } from '../../src/main/agents/pipeline.ts';
-import type { JsonSchema } from '../../src/main/agents/claude_cli.ts';
+import type { JsonSchema } from '../../src/main/runtimes/claude_cli.ts';
 import type { CoursePack } from '../../src/shared/course_pack.ts';
 
 interface Args {

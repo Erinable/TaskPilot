@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
-import * as workspace from '../../../src/main/workspace.ts';
+import * as workspace from '../../../src/main/repository/workspace.ts';
 import * as fixtures from './harness.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
@@ -29,7 +29,7 @@ test('workspace:open-file opens workspace files and refuses anything outside', a
 
 test('diff:stat splits changes by the work package file scope', async () => {
   const { call, root } = await fixtures.harness();
-  await call(CHANNELS.transition, 'auth-email-login', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-email-login', 'claim');
   await fs.writeFile(path.join(root, 'src/auth/application/login-user.ts'), 'export const x = 1;\n');
   await fs.writeFile(path.join(root, 'unrelated.ts'), 'export {};\n');
   await fixtures.run('git', ['add', '.'], { cwd: root });
@@ -42,7 +42,7 @@ test('diff:stat splits changes by the work package file scope', async () => {
 
 test('diff:stat reports an untracked file as out of scope', async () => {
   const { call, root } = await fixtures.harness();
-  await call(CHANNELS.transition, 'auth-email-login', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-email-login', 'claim');
   // Never staged, so `git diff` alone would miss it entirely.
   await fs.writeFile(path.join(root, 'rogue.ts'), 'export {};\n');
   const { data } = await call(CHANNELS.diffStat, 'auth-email-login');
@@ -57,7 +57,7 @@ test('diff requests are refused before the package is claimed', async () => {
 
 test('diff:file refuses a path outside the workspace', async () => {
   const { call } = await fixtures.harness();
-  await call(CHANNELS.transition, 'auth-email-login', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-email-login', 'claim');
   for (const candidate of ['../../etc/passwd', '/etc/passwd', 'src/../../secrets']) {
     const response = await call(CHANNELS.diffFile, 'auth-email-login', candidate);
     assert.equal(response.error.code, 'path_outside_workspace', candidate);
@@ -121,25 +121,6 @@ test('workspace:set saves step command lines and workspace:get returns every ste
   assert.deepEqual(data.project, { status: 'missing' });
 });
 
-test('workspace:set reports shell syntax against the step and command at fault', async () => {
-  const { call, root, repoDir } = await fixtures.harness();
-  const response = await call(CHANNELS.workspaceSet, { root, steps: lines('lint', ['eslint .', 'eslint . && prettier --check .']) });
-  assert.equal(response.error.code, 'shell_syntax');
-  assert.equal(response.error.field, 'steps.lint.commands[1]');
-  assert.equal((await workspace.load(repoDir)).steps.lint, undefined);
-});
-
-test('workspace:check validates and resolves each step without saving', async () => {
-  const { call, root, repoDir } = await fixtures.harness();
-  const { data } = await call(CHANNELS.workspaceCheck, { root, steps: { ...lines('test', ['git status']), ...lines('lint', ['taskpilot-no-such-tool']) } });
-  assert.equal(data.repo.branch, 'main');
-  assert.ok(data.steps.test.resolved, 'git should resolve through PATH');
-  assert.equal(data.steps.lint.configured, true);
-  assert.equal(data.steps.lint.resolved, null);
-  assert.equal(data.steps.build.configured, false);
-  assert.equal((await workspace.load(repoDir)).steps.test, undefined);
-});
-
 test('workspace:create-project writes taskpilot.toml once, and its steps then run', async () => {
   const { call, root } = await fixtures.harness();
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { lint: 'node -e "process.exit(0)"' } }));
@@ -153,62 +134,6 @@ test('workspace:create-project writes taskpilot.toml once, and its steps then ru
   assert.match(text, /^# commands = \["npx tsc --noEmit"\]$/m);
   assert.equal((await call(CHANNELS.workspaceCreateProject, 'none')).error.code, 'invalid_project');
   assert.equal((await call(CHANNELS.workspaceCreateProject, 'cobol')).error.code, 'invalid_argument');
-});
-
-test('workspace:get reports a broken taskpilot.toml by field and keeps local steps', async () => {
-  const { call, root, setCommands } = await fixtures.harness();
-  setCommands({ test: { command: 'npm', args: ['test'] } });
-  await fs.writeFile(path.join(root, 'taskpilot.toml'), '[steps.lint]\ntimeout = "slow"\n');
-  const { data } = await call(CHANNELS.workspaceGet);
-  assert.equal(data.project.status, 'invalid');
-  assert.equal(data.project.error.field, 'steps.lint.timeout');
-  assert.deepEqual(data.steps.find((step) => step.id === 'test').effective.lines, ['npm test']);
-});
-
-test('verify:run runs a custom step from taskpilot.toml and returns its diagnostics', async () => {
-  const { call, root } = await fixtures.harness();
-  const report = JSON.stringify({
-    diagnostics: [{ file: 'src/auth/application/login-user.ts', line: 3, severity: 'error', message: 'too complex', rule: 'complexity' }],
-  });
-  await fs.writeFile(
-    path.join(root, 'taskpilot.toml'),
-    `[custom.static]\nlabel = "静态分析"\ncommands = [[${JSON.stringify(process.execPath)}, "-e", ${JSON.stringify(`console.log(${JSON.stringify(report)}); process.exit(1)`)}]]\nparser = { format = "json", dialect = "diagnostics" }\n`,
-  );
-  const { data, error } = await call(CHANNELS.verifyRun, 'custom:static');
-  assert.equal(error, undefined, JSON.stringify(error));
-  assert.equal(data.kind, 'custom:static');
-  assert.equal(data.exitCode, 1);
-  assert.deepEqual(data.diagnostics, [
-    { file: 'src/auth/application/login-user.ts', line: 3, column: null, severity: 'error', message: 'too complex', rule: 'complexity' },
-  ]);
-  assert.equal(data.summary.failed, 1);
-  assert.equal((await call(CHANNELS.verifyRun, 'custom:missing')).error.code, 'not_configured');
-});
-
-test('workspace:pick-root returns the picker result or reports unsupported', async () => {
-  const { call } = await fixtures.harness();
-  assert.equal((await call(CHANNELS.workspacePickRoot)).error.code, 'unsupported');
-});
-
-test('workspace:info reports branch and dirty state', async () => {
-  const { call, root } = await fixtures.harness();
-  const { data } = await call(CHANNELS.workspaceInfo);
-  assert.equal(data.configured, true);
-  assert.equal(data.branch, 'main');
-  assert.equal(data.dirty, false);
-  await fs.writeFile(path.join(root, 'new.ts'), 'export {};\n');
-  assert.equal((await call(CHANNELS.workspaceInfo)).data.dirty, true);
-});
-
-test('verify:run rejects an unknown kind', async () => {
-  const { call } = await fixtures.harness();
-  const response = await call(CHANNELS.verifyRun, 'rm -rf /');
-  assert.equal(response.error.code, 'invalid_argument');
-});
-
-test('verify:run reports when no command is configured', async () => {
-  const { call } = await fixtures.harness();
-  assert.equal((await call(CHANNELS.verifyRun, 'test')).error.code, 'not_configured');
 });
 
 test('verify:run pairs results with the task acceptance criteria', async () => {

@@ -53,14 +53,13 @@ const onMouseUp = (event: MouseEvent) => {
 };
 
 onMounted(() => {
-  run(notes.refresh());
+  notes.startWatching();
   run(notes.loadCourses());
-  notes.startPolling();
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('mouseup', onMouseUp);
 });
 onUnmounted(() => {
-  notes.stopPolling();
+  notes.stopWatching();
   window.removeEventListener('keydown', onKeydown);
   window.removeEventListener('mouseup', onMouseUp);
 });

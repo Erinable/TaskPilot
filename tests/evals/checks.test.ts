@@ -1,22 +1,36 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { check } from '../../evals/product-lead/checks.ts';
+import type { EvalCase } from '../../evals/product-lead/fixtures.ts';
+import type { EvalRun } from '../../evals/product-lead/checks.ts';
+import type { PlanPackage } from '../../src/main/agents/product_lead.ts';
+import { scopePath } from '../../src/main/agents/output_validation.ts';
 import { cases, answerFor } from '../../evals/product-lead/fixtures.ts';
-import * as productLead from '../../src/main/agents/product_lead.ts';
 
 const files = ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts', 'package.json'];
-const pkg = (overrides = {}) => ({
+const pkg = (overrides: Partial<PlanPackage> = {}): PlanPackage => ({
   title: 'p',
+  description: 'd',
+  module: 'm',
+  tags: [],
+  priority: 'medium',
   estimateHours: 1,
+  icon: 'box',
+  steps: [],
   fileScope: ['src/auth/user-repository.ts', 'tests/auth/user-repository.test.ts'],
   acceptance: [{ text: 'a', test: 'finds by email' }],
+  difficulty: { level: 'medium', reason: 'normal' },
   ...overrides,
 });
-const testCase = (expect = {}): any => ({
+const testCase = (expect: Partial<EvalCase['expect']> = {}): Pick<EvalCase, 'files' | 'expect'> => ({
   files,
   expect: { questions: [0, 1], packages: [1, 2], hours: [0.5, 3], ...expect },
 });
-const run = (packages, questions: string[] = []): any => ({ clarify: { questions }, answers: [], plan: { summary: 's', packages } });
+const run = (packages: PlanPackage[], questions: string[] = []): EvalRun => ({
+  clarify: { title: 't', summary: 's', questions },
+  answers: [],
+  plan: { summary: 's', packages },
+});
 const failing = (results: Record<string, { pass: boolean }>) =>
   Object.entries(results)
     .filter(([, r]) => !r.pass)
@@ -72,12 +86,6 @@ test('testable, unique tests, and invention checks', () => {
   assert.equal(result.noInvention.pass, false);
 });
 
-test('no-repo cases skip grounding checks', () => {
-  const result = check({ files: [], expect: { questions: [0, 3], packages: [1, 2], hours: [1, 4] } } as any, run([pkg({ fileScope: ['anywhere/x.js'] })]));
-  assert.equal(result.grounded, undefined);
-  assert.equal(result.testConvention, undefined);
-});
-
 test('codeGrounding passes at two thirds of the terms and sees through JSON escaping', () => {
   const steps = (text) => run([pkg({ steps: [text] })]);
   const terms = { grounding: ['fakeDb', 'route(', 'variant="danger"'] };
@@ -100,7 +108,7 @@ test('fixtures are well-formed and their must-touch files exist', () => {
       if (term === 'variant="danger"') continue; // the fix itself, not existing code
       assert.ok(code.includes(term), `${c.id}: grounding term ${term} not in sources`);
     }
-    for (const file of c.files) assert.doesNotThrow(() => productLead.scopePath(file, file));
+    for (const file of c.files) assert.doesNotThrow(() => scopePath(file, file));
   }
 });
 

@@ -21,7 +21,7 @@ export const mountApp = () => {
   scheme.addEventListener('change', syncScheme);
 
   // Full screen hides the window buttons the top bar leaves room for.
-  window.taskpilot.onFullScreen((fullScreen) => document.documentElement.classList.toggle('full-screen', fullScreen));
+  window.taskpilot.app.onFullScreen((fullScreen) => document.documentElement.classList.toggle('full-screen', fullScreen));
 
   createApp(App).use(createPinia()).use(ElementPlus, { locale: zhCn }).mount('#app');
 };

@@ -8,7 +8,7 @@
 // The model only picks major/minor/patch; nextVersion() does the arithmetic.
 // Checklist evidence must name a path or commit from the input, and anything
 // else is dropped.
-import { AgentOutputError, isObject } from './product_lead.ts';
+import { AgentOutputError, isObject } from './output_validation.ts';
 import { CONTROL_CHARS_NO_CR } from '../../shared/text_rules.ts';
 import { parseVersion } from '../../shared/semver.ts';
 

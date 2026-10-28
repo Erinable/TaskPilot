@@ -1,7 +1,7 @@
 // Rubric judge: a separate Claude call that scores what deterministic checks
 // can't. Scores are 1–5 with a one-line reason, so a regression can be traced
 // to a specific criterion rather than a single opaque number.
-import * as cli from '../../src/main/agents/claude_cli.ts';
+import * as cli from '../../src/main/runtimes/claude_cli.ts';
 import type { EvalCase } from './fixtures.ts';
 import type { EvalRun } from './checks.ts';
 

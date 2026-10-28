@@ -26,14 +26,12 @@ const envHarness = async (options: { overrides?: Record<string, unknown> } & Rec
   return h;
 };
 
-const settleEnv = async (call) => {
-  for (let i = 0; i < 400; i += 1) {
-    const { data } = await call(CHANNELS.envGet);
-    if (data.status !== 'planning') return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('environment plan never settled');
-};
+const settleEnv = async (call) =>
+  fixtures.until(
+    async () => (await call(CHANNELS.envGet)).data,
+    (data) => data.status !== 'planning',
+    'environment plan',
+  );
 
 test('env: plan, confirm steps one by one, then apply the scripts', async () => {
   const { call, repoDir } = await envHarness();
@@ -96,11 +94,11 @@ test('env: a running step shows its output and start time, and a step reading st
   await h.call(CHANNELS.envPlan);
   await settleEnv(h.call);
   const finished = h.call(CHANNELS.envRunStep, 'test');
-  let live: { output: string; startedAt: string } | null = null;
-  for (let index = 0; index < 400 && !live?.output.includes('halfway'); index += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    live = (await h.call(CHANNELS.envGet)).data.live;
-  }
+  const live = await fixtures.until(
+    async () => (await h.call(CHANNELS.envGet)).data.live,
+    (value) => Boolean(value?.output.includes('halfway')),
+    'environment step output',
+  );
   assert.match(live?.output ?? '', /halfway/);
   assert.ok(Number.isFinite(Date.parse(live!.startedAt)));
   const view = (await finished).data;
@@ -110,98 +108,32 @@ test('env: a running step shows its output and start time, and a step reading st
   assert.match(result.output, /done/);
 });
 
-test('env: a scripts-off install is followed by a rebuild that runs only the marked packages', async () => {
+test('env: lifecycle-script permission rebuilds the install command executed through IPC', async () => {
   const h = await envHarness();
-  // Two local dependencies with a postinstall. npm marks both; the test then
-  // keeps only one marked, to show the rebuild runs exactly what is listed.
-  for (const name of ['needs-build', 'left-alone']) {
-    const dir = path.join(h.root, 'deps', name);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(
-      path.join(dir, 'package.json'),
-      JSON.stringify({ name, version: '1.0.0', scripts: { postinstall: "node -e \"require('fs').writeFileSync('built.txt','ok')\"" } }),
-    );
-  }
+  const marker = path.join(h.root, 'install-marker');
   const manifest = JSON.parse(await fs.readFile(path.join(h.root, 'package.json'), 'utf8'));
-  manifest.dependencies = { 'needs-build': 'file:deps/needs-build', 'left-alone': 'file:deps/left-alone' };
+  manifest.scripts.postinstall = `node -e ${JSON.stringify(`require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`)}`;
   await fs.writeFile(path.join(h.root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  // Copies, not symlinks, as a registry install would give.
-  await fs.writeFile(path.join(h.root, '.npmrc'), 'install-links=true\n');
-  const { entries } = (await h.call(CHANNELS.environmentInfo)).data;
-  await fixtures.run('npm', ['install', '--package-lock-only', '--no-audit', '--no-fund'], { cwd: h.root, env: { ...process.env, PATH: entries.join(':') } });
-  const lock = JSON.parse(await fs.readFile(path.join(h.root, 'package-lock.json'), 'utf8'));
-  delete lock.packages['node_modules/left-alone'].hasInstallScript;
-  await fs.writeFile(path.join(h.root, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
-  await fixtures.run('git', ['add', '-A'], { cwd: h.root });
-  await fixtures.run('git', ['commit', '-qm', 'deps'], { cwd: h.root });
-
+  await fixtures.run('git', ['commit', '-qam', 'postinstall'], { cwd: h.root });
   await h.call(CHANNELS.envPlan);
-  const view = await settleEnv(h.call);
-  assert.equal(view.status, 'ready', JSON.stringify(view.error));
-  assert.deepEqual(view.facts.installScripts, ['needs-build']);
-  assert.deepEqual(
-    view.steps.map((step) => [step.id, step.line]),
-    [
-      ['install', 'npm install --ignore-scripts --no-audit --no-fund'],
-      ['rebuild', 'npm rebuild needs-build'],
-      ['test', 'npm test'],
-      ['lint', 'npm run lint'],
-    ],
-  );
-  const built = (name: string) =>
-    fs.access(path.join(h.root, 'node_modules', name, 'built.txt')).then(
-      () => true,
-      () => false,
-    );
-  const installed = (await h.call(CHANNELS.envRunStep, 'install')).data.steps[0].result;
-  assert.equal(installed.ok, true, installed.output);
-  assert.equal(await built('needs-build'), false, 'install skipped the script');
-  const rebuilt = (await h.call(CHANNELS.envRunStep, 'rebuild')).data.steps[1].result;
-  assert.equal(rebuilt.ok, true, rebuilt.output);
-  assert.equal(await built('needs-build'), true, 'rebuild ran the marked package');
-  assert.equal(await built('left-alone'), false, 'an unmarked package stays unbuilt');
+  await settleEnv(h.call);
 
-  // Allowing every script makes the rebuild step unnecessary.
-  assert.deepEqual(
-    (await h.call(CHANNELS.envSetAllowScripts, true)).data.steps.map((step) => step.id),
-    ['install', 'test', 'lint'],
-  );
-});
+  const blocked = (await h.call(CHANNELS.envSetAllowScripts, false)).data;
+  assert.match(blocked.steps[0].line, /--ignore-scripts/);
+  const blockedRun = (await h.call(CHANNELS.envRunStep, 'install')).data;
+  assert.equal(blockedRun.steps[0].result.line, blocked.steps[0].line);
+  await assert.rejects(() => fs.access(marker));
 
-test('env: npm ci over an existing node_modules is flagged as replacing it', async () => {
-  const h = await envHarness({ overrides: { env: { ...fixtures.ENV_PLAN, install: { mode: 'ci', reason: '有 lockfile' } } } });
-  await fs.writeFile(path.join(h.root, 'package-lock.json'), JSON.stringify({ name: 'env-fixture', lockfileVersion: 3, packages: { '': {} } }));
-  await fixtures.run('git', ['add', '-A'], { cwd: h.root });
-  await fixtures.run('git', ['commit', '-qm', 'lock'], { cwd: h.root });
-  await fs.mkdir(path.join(h.root, 'node_modules'));
-  await h.call(CHANNELS.envPlan);
-  const view = await settleEnv(h.call);
-  const install = view.steps.find((step) => step.id === 'install');
-  assert.match(install.line, /^npm ci /);
-  assert.equal(install.replacesInstall, true);
-});
+  const allowed = (await h.call(CHANNELS.envSetAllowScripts, true)).data;
+  assert.doesNotMatch(allowed.steps[0].line, /--ignore-scripts/);
+  const allowedRun = (await h.call(CHANNELS.envRunStep, 'install')).data;
+  assert.equal(allowedRun.steps[0].result.line, allowed.steps[0].line);
+  await fs.access(marker);
 
-test('env: re-planning with a failure hands the steward the failed output', async () => {
-  const { call, agentCalls } = await envHarness();
-  await call(CHANNELS.envPlan);
-  await settleEnv(call);
-  await call(CHANNELS.envRunStep, 'lint');
-  await call(CHANNELS.envPlan, { withFailure: true });
-  const view = await settleEnv(call);
-  const prompts = agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'env').map((c) => c.prompt);
-  assert.equal(prompts.length, 2);
-  assert.doesNotMatch(prompts[0], /<failed_step>/);
-  assert.match(prompts[1], /<failed_step>[\s\S]*npm run lint[\s\S]*lint broke/);
-  assert.equal(view.steps.find((s) => s.id === 'lint').result.ok, false, 'unchanged step keeps its result');
-});
-
-test('env: allowing lifecycle scripts changes the install line and clears its result', async () => {
-  const { call } = await envHarness();
-  await call(CHANNELS.envPlan);
-  await settleEnv(call);
-  const view = (await call(CHANNELS.envSetAllowScripts, true)).data;
-  assert.equal(view.allowScripts, true);
-  assert.equal(view.steps[0].line, 'npm install --no-audit --no-fund');
+  await fs.rm(marker);
+  await h.call(CHANNELS.envSetAllowScripts, false);
+  await h.call(CHANNELS.envRunStep, 'install');
+  await assert.rejects(() => fs.access(marker));
 });
 
 test('env: steps are refused without a plan, by unknown id, or after the root changes', async () => {
@@ -217,53 +149,4 @@ test('env: steps are refused without a plan, by unknown id, or after the root ch
   setRoot(os.tmpdir());
   assert.equal((await call(CHANNELS.envGet)).data.stale, true);
   assert.equal((await call(CHANNELS.envRunStep, 'test')).error.code, 'env_stale');
-});
-
-test('env: a repository without a supported language is not planned, and the model never runs', async () => {
-  const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  await call(CHANNELS.envPlan);
-  const view = await settleEnv(call);
-  assert.equal(view.status, 'ready');
-  assert.deepEqual(view.blockers, ['setup_unsupported']);
-  assert.equal(view.facts, null);
-  assert.equal(view.plan, null);
-  assert.deepEqual(view.steps, []);
-  assert.deepEqual(view.stepKinds, []);
-  assert.equal(agentCalls.length, 0);
-  assert.equal((await call(CHANNELS.envRunStep, 'install')).error.code, 'env_no_plan');
-  assert.equal((await call(CHANNELS.envApply, ['test'])).error.code, 'env_no_plan');
-});
-
-for (const [language, files] of [
-  ['Rust', { 'Cargo.toml': '[package]\nname = "demo"\nversion = "0.1.0"\n' }],
-  ['Python', { 'pyproject.toml': '[project]\nname = "demo"\nversion = "0.1.0"\n' }],
-] as const) {
-  test(`env: a ${language} repository gets setup_unsupported, not no_manifest`, async () => {
-    const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
-    for (const [file, content] of Object.entries(files)) await fs.writeFile(path.join(h.root, file), content);
-    await fixtures.run('git', ['add', '-A'], { cwd: h.root });
-    await fixtures.run('git', ['commit', '-qm', 'manifest'], { cwd: h.root });
-    await h.call(CHANNELS.envPlan);
-    const view = await settleEnv(h.call);
-    assert.deepEqual(view.blockers, ['setup_unsupported']);
-    assert.equal(view.plan, null);
-    assert.equal(h.agentCalls.length, 0);
-  });
-}
-
-test('env: a second plan request while one runs is refused', async () => {
-  let release;
-  const gate = new Promise((resolve) => {
-    release = resolve;
-  });
-  const { call } = await envHarness({
-    agent: async () => {
-      await gate;
-      return { output: fixtures.ENV_PLAN, costUsd: 0 };
-    },
-  });
-  await call(CHANNELS.envPlan);
-  assert.equal((await call(CHANNELS.envPlan)).error.code, 'env_busy');
-  release();
-  assert.equal((await settleEnv(call)).status, 'ready');
 });

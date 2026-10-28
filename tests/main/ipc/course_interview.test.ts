@@ -1,6 +1,6 @@
 // Course requirements over the requirement channels: Tutor's goal
 // interview, the learning path and the drafted pack
-// (src/main/course_interview_service.ts).
+// (src/main/requirements/course_interview_service.ts).
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -26,15 +26,16 @@ const tutor =
     return { output, costUsd: 0.01 };
   };
 
-const createCourse = async (call, text: string) => {
-  const { data, error } = await call(CHANNELS.requirementsCreate, { text, course: goals.GOAL_FORM });
+const createCourse = async (h, text: string) => {
+  const { data, error } = await h.call(CHANNELS.requirementsCreate, { text, course: goals.GOAL_FORM });
   assert.equal(error, undefined);
-  return fixtures.settle(call, data.id);
+  await h.idle();
+  return (await h.call(CHANNELS.requirementsGet, data.id)).data;
 };
 
 test('course: 想学操作系统的进程调度 picks os, plans a path through its scheduling skeleton and confirms it', async () => {
   const h = await fixtures.harness({ agent: tutor() });
-  let item = await createCourse(h.call, '想学操作系统的进程调度');
+  let item = await createCourse(h, '想学操作系统的进程调度');
   assert.equal(item.kind, 'course');
   assert.equal(item.status, 'answering');
   assert.equal(item.course.pick.course, 'os');
@@ -52,7 +53,8 @@ test('course: 想学操作系统的进程调度 picks os, plans a path through i
   assert.equal(h.agentCalls.length, 1, 'no Architect run for a course');
 
   await h.call(CHANNELS.requirementsPlan, item.id, ['先不用'], { course: 'os' });
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.status, 'reviewing');
   assert.match(h.agentCalls[1].prompt, /A1: 先不用/);
   const plan = item.course.plan;
@@ -78,7 +80,7 @@ test('course: 想学操作系统的进程调度 picks os, plans a path through i
   const published = await h.call(CHANNELS.requirementsPublish, item.id);
   assert.equal(published.data.status, 'published');
   // Nothing reaches the queue: the labs are published later.
-  assert.equal((await h.call(CHANNELS.listTasks)).data.filter((task) => task.requirementId === item.id).length, 0);
+  assert.equal((await h.call(CHANNELS.tasksList)).data.filter((task) => task.requirementId === item.id).length, 0);
 });
 
 test('course: 想学编译原理的词法分析 drafts a pack that validates, saved pending, confirmed, then planned from', async () => {
@@ -89,11 +91,12 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
     extraConcepts: [],
   };
   const h = await fixtures.harness({ agent: tutor({ interview: goals.LEXING_CLARIFY, draft: [badDraft, goals.LEXING_DRAFT], path: lexPath }) });
-  let item = await createCourse(h.call, '想学编译原理的词法分析');
+  let item = await createCourse(h, '想学编译原理的词法分析');
   assert.equal(item.course.pick.course, null);
 
   await h.call(CHANNELS.requirementsPlan, item.id, [], { draft: true });
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.status, 'reviewing');
   // The first draft was refused and its error fed back once.
   const drafts = h.agentCalls.filter((call) => interviewStep(call.schema) === 'draft');
@@ -116,7 +119,8 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
 
   // Unconfirmed, it is not planned from.
   await h.call(CHANNELS.requirementsPlan, item.id);
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.status, 'failed');
   assert.equal(item.error.code, 'course_not_confirmed');
 
@@ -125,7 +129,8 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
   await h.call(CHANNELS.requirementsCourseConfirmDraft, item.id, saved.ref.contentHash);
   assert.equal((await h.call(CHANNELS.coursesList)).data.entries.find((entry) => entry.id === 'lexing').trust, 'confirmed');
   await h.call(CHANNELS.requirementsPlan, item.id);
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.status, 'reviewing');
   assert.equal(item.course.plan.course.id, 'lexing');
   assert.equal(item.course.plan.course.contentHash, saved.ref.contentHash);
@@ -134,15 +139,17 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
 test('course: a draft that fails twice fails the run, and a draft never replaces an existing pack id', async () => {
   const bad = { ...goals.LEXING_DRAFT, rubric: [goals.LEXING_DRAFT.rubric[0]] };
   const h = await fixtures.harness({ agent: tutor({ interview: goals.LEXING_CLARIFY, draft: [bad, bad, { ...goals.LEXING_DRAFT, id: 'os' }] }) });
-  let item = await createCourse(h.call, '想学编译原理的词法分析');
+  let item = await createCourse(h, '想学编译原理的词法分析');
   await h.call(CHANNELS.requirementsPlan, item.id, [], { draft: true });
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.status, 'failed');
   assert.equal(item.error.code, 'agent_bad_output');
   assert.match(item.error.message, /does not validate/);
 
   await h.call(CHANNELS.requirementsPlan, item.id);
-  item = await fixtures.settle(h.call, item.id);
+  await h.idle();
+  item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.course.draft.pack.id, 'os-2');
 });
 
@@ -151,7 +158,8 @@ test('course: the form is checked, and the project flow is unchanged beside it',
   const refused = await h.call(CHANNELS.requirementsCreate, { text: '想学', course: { ...goals.GOAL_FORM, weeklyHours: 100 } });
   assert.equal(refused.error.field, 'goal.weeklyHours');
   const { data } = await h.call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
-  const item = await fixtures.settle(h.call, data.id);
+  await h.idle();
+  const item = (await h.call(CHANNELS.requirementsGet, data.id)).data;
   assert.equal(item.kind, undefined);
   assert.equal(item.course, undefined);
   assert.equal(item.questions[0].text, '连续失败几次锁定？');

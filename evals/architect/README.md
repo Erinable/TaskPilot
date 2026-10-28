@@ -1,6 +1,6 @@
 # Architect eval
 
-Runs Architect's two jobs against fixed cases using the real Claude CLI, each in a temporary git repository read through `src/main/repo_reader.ts`:
+Runs Architect's two jobs against fixed cases using the real Claude CLI, each in a temporary git repository read through `src/main/repository/repo_reader.ts`:
 
 - `summary-*`: picks files for a requirement and publishes the interface summary. Reuses Product Lead's requirements and fixture code (`evals/product-lead/sources.ts`).
 - the rest: rules on a developer's deviation report, dismiss or replan. One case is a contested dismissal, which can only be replanned.

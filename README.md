@@ -287,6 +287,12 @@ CI（`.github/workflows/ci.yml`）在 Ubuntu 和 macOS 上依次跑 typecheck、
 
 打开 Actions 运行页面的 Summary，可直接查看 Code analysis 摘要：三项检查状态、重复率与代码位置、复杂度超限及新增问题、循环依赖诊断。表格最多显示 20 项，完整 JSON 报告和 Knip 日志位于该页面的 Artifacts，保留 14 天；失败或跳过的检查会单独标明。
 
+主进程按 `app`、`infrastructure`、`repository`、`checking`、`runtimes` 及业务领域分目录；单元测试镜像对应目录，IPC 集成测试集中在 `tests/main/ipc/`。所有 IPC 调用都从 `src/shared/ipc/` 契约表派生，不再在 preload 和类型声明里重复维护。
+
+后台进度和外部笔记修改通过 `state:changed` 推送失效通知，界面按领域重新读取，不再定时轮询；离开页面或切换仓库会解除订阅，迟到的响应不会覆盖新选择。主进程日志默认记录 info 及以上，保存在本机数据目录的 `logs/taskpilot.log`。
+
+应用自有 JSON 数据带格式版本：无版本的旧文件按 v1 读取；遇到比当前应用更新的版本会拒绝读取、覆盖或清空。工作区仍是 v3，课程信任记录仍是 v2；并发写入统一串行提交。提示词整篇快照和只检查实现文本的测试已移除，保留行为、安全边界及状态转换测试。
+
 改应用图标：源文件是 `assets/icon/icon.svg`（128 px 及以上）和 `icon_small.svg`（64 px 及以下）。改完先 `brew install librsvg`，再运行 `scripts/build_icon.sh` 重新生成 `icon.icns`。
 
 ### 代码分析

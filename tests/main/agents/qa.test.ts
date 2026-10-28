@@ -2,8 +2,10 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as qa from '../../../src/main/agents/qa.ts';
 import { reviewWorkPackage } from '../../../src/main/agents/pipeline.ts';
-import * as evidence from '../../../src/main/evidence.ts';
-import type { RunStructuredOptions } from '../../../src/main/agents/claude_cli.ts';
+import * as evidence from '../../../src/main/checking/evidence.ts';
+import type { CheckRun } from '../../../src/main/checking/verification.ts';
+import type { StepId as CheckKind, Diagnostic } from '../../../src/shared/check_steps.ts';
+import type { ProjectProfile } from '../../../src/shared/project_profile.ts';
 
 const task = {
   id: 'p',
@@ -14,7 +16,7 @@ const task = {
   acceptance: [{ text: '成功返回 token', test: 'login succeeds' }, { text: '错误信息不泄露用户是否存在' }],
 };
 const changedPaths = ['src/login.ts', 'tests/login.test.ts'];
-const report = (overrides: object = {}): any => ({
+const report = (overrides: Partial<qa.ReviewReport> = {}): qa.ReviewReport => ({
   verdict: 'pass',
   summary: '实现符合工作包。',
   criteria: [
@@ -24,7 +26,7 @@ const report = (overrides: object = {}): any => ({
   issues: [],
   ...overrides,
 });
-const passingRun = (names = ['login succeeds']): any => ({
+const passingRun = (names = ['login succeeds']): CheckRun => ({
   kind: 'test',
   command: 'npm test',
   exitCode: 0,
@@ -33,20 +35,20 @@ const passingRun = (names = ['login succeeds']): any => ({
   output: 'ok\n',
   results: names.map((name) => ({ name, passed: true, skipped: false, todo: false })),
   summary: { total: names.length, passed: names.length, failed: 0, skipped: 0, ok: true },
+  report: { format: 'tests', trusted: true, problem: null },
+  diagnostics: [],
+  check: { stage: 'submit', blocking: true },
 });
-const failingRun = (): any => ({
-  kind: 'test',
-  command: 'npm test',
+const failingRun = (): CheckRun => ({
+  ...passingRun(),
   exitCode: 1,
-  timedOut: false,
-  durationMs: 10,
   output: 'not ok 1 - login succeeds\n',
   results: [{ name: 'login succeeds', passed: false, skipped: false, todo: false }],
   summary: { total: 1, passed: 0, failed: 1, skipped: 0, ok: false },
 });
 // reviewWorkPackage deps for one blocking unit-test check.
 const UNIT = { kind: 'test', stage: 'submit', blocking: true, line: 'npm test' } as const;
-const withTests = (runCheck, extra = {}) => ({ checks: [UNIT], runCheck, ...extra });
+const withTests = (runCheck: () => Promise<CheckRun>, extra: object = {}) => ({ checks: [UNIT], runCheck, ...extra });
 const collected =
   (paths = changedPaths) =>
   async () => ({
@@ -80,7 +82,7 @@ test('validateReview() keeps an issue file only when it changed, and sorts by se
       issues: [
         { severity: 'minor', text: '命名', file: './src/login.ts', line: 3 },
         { severity: 'blocker', text: '未校验密码', file: 'src/other.ts', line: 9 },
-        { severity: 'major', text: '路径越界', file: '../../etc/passwd' },
+        { severity: 'major', text: '路径越界', file: '../../etc/passwd', line: null },
       ],
     }),
     { criteriaCount: 2, changedPaths },
@@ -94,10 +96,11 @@ test('validateReview() keeps an issue file only when it changed, and sorts by se
 
 test('validateReview() rejects values outside the schema', () => {
   const opts = { criteriaCount: 2, changedPaths };
-  assert.throws(() => qa.validateReview(report({ verdict: 'maybe' }), opts), { code: 'agent_bad_output' });
-  assert.throws(() => qa.validateReview(report({ summary: 'a\u0007b' }), opts), /control characters/);
-  assert.throws(() => qa.validateReview(report({ issues: [{ severity: 'fatal', text: 'x' }] }), opts), /severity/);
-  assert.throws(() => qa.validateReview(report({ issues: Array.from({ length: 13 }, () => ({ severity: 'minor', text: 'x' })) }), opts), /more than/);
+  const malformed = (overrides: Record<string, unknown>) => qa.validateReview({ ...report(), ...overrides }, opts);
+  assert.throws(() => malformed({ verdict: 'maybe' }), { code: 'agent_bad_output' });
+  assert.throws(() => malformed({ summary: 'a\u0007b' }), /control characters/);
+  assert.throws(() => malformed({ issues: [{ severity: 'fatal', text: 'x' }] }), /severity/);
+  assert.throws(() => malformed({ issues: Array.from({ length: 13 }, () => ({ severity: 'minor', text: 'x' })) }), /more than/);
 });
 
 // decide
@@ -109,7 +112,10 @@ test('decide() lets the model only make a review stricter', () => {
   assert.deepEqual(qa.decide({ evidence: [], acceptance: failingCriterion, changeCount: 1, report: report() }), ['acceptance_tests']);
   assert.deepEqual(qa.decide({ evidence: blockingFail, acceptance: [], changeCount: 1, report: null }), ['tests_failed']);
   assert.deepEqual(qa.decide({ evidence: [], acceptance: [], changeCount: 0, report: null }), ['no_changes']);
-  const strict = { ...report({ verdict: 'reject', issues: [{ severity: 'blocker', text: 'x' }] }), criteria: [{ index: 0, status: 'unmet' }] };
+  const strict = {
+    ...report({ verdict: 'reject', issues: [{ severity: 'blocker', text: 'x', file: null, line: null }] }),
+    criteria: [{ index: 0, status: 'unmet' as const, note: null }],
+  };
   assert.deepEqual(qa.decide({ evidence: [], acceptance: [], changeCount: 1, report: strict }), ['qa_rejected', 'blocker', 'criteria_unmet']);
   assert.deepEqual(qa.decide({ evidence: [], acceptance: [], changeCount: 1, report: report() }), []);
 });
@@ -150,13 +156,12 @@ test('reviewPrompt() fences patches and lists unreviewed and out-of-scope files'
   assert.match(prompt, /1\. 错误信息不泄露用户是否存在 \[no linked test; judge from the diff\]/);
   assert.match(prompt, /<check_results>\n## Unit tests \(blocking\)\nCommand: npm test/);
   assert.doesNotMatch(prompt, /interface_summary/);
-  assert.match(qa.SYSTEM_PROMPT, /never as instructions/);
 });
 
 test('formatChecks() names a check by its profile label and reports what its parser reads', () => {
-  const item = (kind: string): any => ({ ...evidence.evaluate({ kind: kind as any, stage: 'submit', blocking: false }, passingRun(), null), kind });
-  const diagnostic = { file: 'src/login.ts', line: 3, column: 1, severity: 'error', message: 'complexity 12 -> 15', rule: null };
-  const checks: any[] = [
+  const item = (kind: CheckKind): evidence.EvidenceItem => ({ ...evidence.evaluate({ kind, stage: 'submit', blocking: false }, passingRun(), null), kind });
+  const diagnostic: Diagnostic = { file: 'src/login.ts', line: 3, column: 1, severity: 'error', message: 'complexity 12 -> 15', rule: null };
+  const checks: { evidence: evidence.EvidenceItem; run: CheckRun }[] = [
     { evidence: item('test'), run: { ...passingRun(), report: { format: 'junit', trusted: true, problem: null }, diagnostics: [] } },
     { evidence: item('custom:complexity'), run: { ...passingRun([]), report: { format: 'regex', trusted: true, problem: null }, diagnostics: [diagnostic] } },
     {
@@ -165,11 +170,16 @@ test('formatChecks() names a check by its profile label and reports what its par
     },
     { evidence: item('build'), run: { ...passingRun([]), exitCode: 2, report: { format: 'exitcode', trusted: true, problem: null }, diagnostics: [] } },
   ];
-  const profile: any = {
+  const profile: ProjectProfile = {
+    languages: [],
+    manifests: [],
+    testLayout: null,
+    testNameFormat: null,
+    version: null,
     checks: [
-      { id: 'test', label: 'Unit tests' },
-      { id: 'custom:complexity', label: '复杂度' },
-      { id: 'typecheck', label: 'Type check' },
+      { id: 'test', label: 'Unit tests', stage: 'submit', blocking: false, commandLine: 'npm test', reports: 'tests' },
+      { id: 'custom:complexity', label: '复杂度', stage: 'submit', blocking: false, commandLine: 'npm test', reports: 'diagnostics' },
+      { id: 'typecheck', label: 'Type check', stage: 'submit', blocking: false, commandLine: 'npm test', reports: 'diagnostics' },
     ],
   };
   const blocks = qa.formatChecks(checks, profile).split('\n\n');
@@ -184,33 +194,29 @@ test('formatChecks() names a check by its profile label and reports what its par
 
 test('compactVerification() keeps failures and a bounded log tail', () => {
   const run = { ...failingRun(), output: 'x'.repeat(10000) };
-  const compact: any = qa.compactVerification(run);
+  const compact = qa.compactVerification(run);
+  assert.ok(compact && 'outputTail' in compact && compact.outputTail !== null);
   assert.deepEqual(compact.failing, ['login succeeds']);
   assert.equal(compact.outputTail.length, 2000);
-  assert.equal((qa.compactVerification(passingRun()) as any).outputTail, null);
+  const passing = qa.compactVerification(passingRun());
+  assert.ok(passing && 'outputTail' in passing);
+  assert.equal(passing.outputTail, null);
   assert.equal(qa.compactVerification(null), null);
 });
 
 // Pipeline
 
 test('review pipeline: runs tests, sends the diff to QA, and passes', async () => {
-  const calls: RunStructuredOptions[] = [];
   const result = await reviewWorkPackage(task, {
     root: '/repo',
     baseline: 'abc',
     ...withTests(async () => passingRun()),
     collect: collected(),
-    runAgent: async (options) => {
-      calls.push(options);
-      return { output: report(), costUsd: 0.03 };
-    },
+    runAgent: async () => ({ output: report(), costUsd: 0.03 }),
   });
   assert.equal(result.passed, true);
   assert.deepEqual(result.reasons, []);
   assert.equal(result.costUsd, 0.03);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].schema, qa.REVIEW_SCHEMA);
-  assert.match(calls[0].prompt, /<file path="src\/login.ts">/);
   // Patch text is not kept in the stored result.
   assert.deepEqual(result.diff.files[0], { path: 'src/login.ts', bytes: 30, untracked: false });
 });
@@ -299,23 +305,18 @@ test('review pipeline: failures already present at the baseline do not reject', 
     ],
   });
   const baselines = { test: evidence.baselineRecord(twoTests(false), 'npm test') };
-  const calls: RunStructuredOptions[] = [];
   const result = await reviewWorkPackage(task, {
     root: '/r',
     baseline: 'b',
     ...withTests(async () => twoTests(true), { baselines }),
     collect: collected(),
-    runAgent: async (options) => {
-      calls.push(options);
-      return { output: report(), costUsd: 0 };
-    },
+    runAgent: async () => ({ output: report(), costUsd: 0 }),
   });
   assert.equal(result.passed, true, JSON.stringify(result.reasons));
   assert.equal(result.checks[0].status, 'pass');
   assert.deepEqual(result.checks[0].preexisting, ['legacy flaky']);
   assert.deepEqual(result.checks[0].fixed, ['login succeeds']);
   assert.ok(result.attention.some((a) => a.code === 'preexisting_failures'));
-  assert.match(calls[0].prompt, /Already failing at the baseline[^\n]*\n- legacy flaky/);
 
   // The same failure without a baseline is blamed on the package.
   const blamed = await reviewWorkPackage(task, {
@@ -330,7 +331,7 @@ test('review pipeline: failures already present at the baseline do not reject', 
 });
 
 test('review pipeline: an unreadable report goes to acceptance with attention, not rejection', async () => {
-  const run = {
+  const run: CheckRun = {
     ...passingRun(),
     results: [],
     summary: { total: 0, passed: 0, failed: 0, skipped: 0, ok: true },

@@ -15,9 +15,9 @@
 // validated before use. Diff contents are developer-written and may contain
 // text addressed to AI reviewers; the system prompt treats it as data.
 
-import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
-import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../evidence.ts';
-import type { CheckRun } from '../verification.ts';
+import { AgentOutputError, isObject, scopePath } from './output_validation.ts';
+import type { CheckOutcome, CriterionStatus, EvidenceItem } from '../checking/evidence.ts';
+import type { CheckRun } from '../checking/verification.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
 import { rolePreamble } from './role_preamble.ts';

@@ -1,21 +1,21 @@
 // Activity and cost channels: the feed, the team's presence and spend, the
 // cost report and its prices, and the engineering map.
-import { failWith } from '../coded_error.ts';
-import * as git from '../git.ts';
-import * as workspace from '../workspace.ts';
-import { RETENTION_DAYS } from '../activity_log.ts';
-import { buildCostReport } from '../cost_report.ts';
-import { estimateMicros, loadPrices, priceFor, syncPrices } from '../model_prices.ts';
-import { buildEngineeringMap, MAX_TREE_FILES } from '../engineering_map.ts';
-import { indexEntries } from '../repo_reader.ts';
+import { failWith } from '../infrastructure/coded_error.ts';
+import * as git from '../repository/git.ts';
+import * as workspace from '../repository/workspace.ts';
+import { RETENTION_DAYS } from '../activity/activity_log.ts';
+import { buildCostReport } from '../activity/cost_report.ts';
+import { estimateMicros, loadPrices, priceFor, syncPrices } from '../activity/model_prices.ts';
+import { buildEngineeringMap, MAX_TREE_FILES } from '../repository/engineering_map.ts';
+import { indexEntries } from '../repository/repo_reader.ts';
 import { AGENT_IDS, supportsAgentConfig } from '../../shared/agent_runtime.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { registerContract } from './handler.ts';
+import { activityContract, costsContract, engineeringMapContract } from '../../shared/ipc/activity.ts';
 import type * as activityTypes from '../../shared/ipc/activity.ts';
-import type { PriceTable } from '../model_prices.ts';
-import type { CostRow } from '../cost_rollup.ts';
-import type { AppContext } from '../app_context.ts';
-import type { CodingRuntime } from '../coding_runtime.ts';
+import type { PriceTable } from '../activity/model_prices.ts';
+import type { CostRow } from '../activity/cost_rollup.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { CodingRuntime } from '../coding/coding_runtime.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // The team's analysis agents; Coding Agent's availability is its runtime probe.
@@ -58,12 +58,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
     return found;
   };
 
-  // The feed, the week's metrics, each member's newest events and spend, and
-  // who on the team is busy. Everything but presence comes from the log's
-  // in-memory summary, so a poll reads no day files.
-  ipcMain.handle(
-    CHANNELS.activityOverview,
-    wrap(async (): Promise<activityTypes.ActivityOverview> => {
+  registerContract(ipcMain, activityContract, {
+    // The feed, the week's metrics, each member's newest events and spend, and
+    // who on the team is busy. Everything but presence comes from the log's
+    // in-memory summary, so a poll reads no day files.
+
+    overview: async (): Promise<activityTypes.ActivityOverview> => {
       const activity = requireActivity();
       const settings = ctx.getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
@@ -92,12 +92,20 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         teamRecent: summary.teamRecent,
         timeZone: activity.timeZone,
       };
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.costsReport,
-    wrap(async (_event, rawDays): Promise<activityTypes.CostReport> => {
+    // The full feed, a few business days per page.
+
+    page: async (before): Promise<activityTypes.ActivityPage> => {
+      const activity = requireActivity();
+      // A day key from an earlier page; anything else starts from today.
+      const cursor = typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before) ? before : null;
+      const page = await activity.page({ before: cursor, minEvents: 50 });
+      return { ...page, timeZone: activity.timeZone, retentionDays: RETENTION_DAYS };
+    },
+  });
+  registerContract(ipcMain, costsContract, {
+    report: async (rawDays): Promise<activityTypes.CostReport> => {
       const activity = requireActivity();
       if (rawDays !== 7 && rawDays !== 30 && rawDays !== 90) failWith('days must be 7, 30 or 90', 'invalid_argument', 'days');
       const [records, rollup, table] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup(), currentPrices()]);
@@ -110,12 +118,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         timeZone: activity.timeZone,
         titleOf: (kind, id) => (kind === 'package' ? (ctx.catalog.getTask(id)?.title ?? id) : ctx.requirementTitle(id)),
       });
-    }),
-  );
-  // [人工决策-2026-10-13 16:52:32] 只在用户点「同步价格」时联网，只下载，不上传任何数据。
-  ipcMain.handle(
-    CHANNELS.costsSyncPrices,
-    wrap(async (): Promise<{ syncedAt: string }> => {
+    },
+    // [人工决策-2026-10-13 16:52:32] 只在用户点「同步价格」时联网，只下载，不上传任何数据。
+
+    syncPrices: async (): Promise<{ syncedAt: string }> => {
       const activity = requireActivity();
       const [records, rollup] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup()]);
       // Exact prices are kept only for providers TaskPilot has actually used.
@@ -130,29 +136,16 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       const table = await syncPrices(configDir, providers);
       prices = Promise.resolve(table);
       return { syncedAt: table.syncedAt };
-    }),
-  );
+    },
+  });
+  registerContract(ipcMain, engineeringMapContract, {
+    // Architect's summaries merged by file, beside the tracked tree. Without a
+    // workspace the summaries still show, with unknown freshness.
 
-  // The full feed, a few business days per page.
-  ipcMain.handle(
-    CHANNELS.activityPage,
-    wrap(async (_event, before): Promise<activityTypes.ActivityPage> => {
-      const activity = requireActivity();
-      // A day key from an earlier page; anything else starts from today.
-      const cursor = typeof before === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(before) ? before : null;
-      const page = await activity.page({ before: cursor, minEvents: 50 });
-      return { ...page, timeZone: activity.timeZone, retentionDays: RETENTION_DAYS };
-    }),
-  );
-
-  // Architect's summaries merged by file, beside the tracked tree. Without a
-  // workspace the summaries still show, with unknown freshness.
-  ipcMain.handle(
-    CHANNELS.engineeringMap,
-    wrap(async (): Promise<activityTypes.EngineeringMap> => {
+    get: async (): Promise<activityTypes.EngineeringMap> => {
       const root = ctx.getConfig().root;
       const [index, paths] = root ? await Promise.all([indexEntries(root), git.listFiles(root, { limit: MAX_TREE_FILES + 1 })]) : [null, []];
       return buildEngineeringMap(ctx.requirements?.list() ?? [], index, paths);
-    }),
-  );
+    },
+  });
 };

@@ -2,8 +2,11 @@
 // workspace configuration (workspace:*, diff:*, verify:run).
 
 import type { ErrorInfo } from './envelope.ts';
+import type { ErrorCode } from '../error_codes.ts';
 import type { CheckParser, Diagnostic, StepId, StepSource } from '../check_steps.ts';
 import type { CoursePack, CourseRef, CourseSource } from '../course_pack.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 // `test` links a criterion to a test name; without it the criterion is manual.
 export type AcceptanceCriterion = { text: string; test?: string };
@@ -166,7 +169,7 @@ export type StepView = {
 
 // taskpilot.toml as found in the repository root.
 export type ProjectFileState =
-  { status: 'missing' } | { status: 'invalid'; error: { code: string; message: string; field: string | null } } | { status: 'ok'; preset: string | null };
+  { status: 'missing' } | { status: 'invalid'; error: { code: ErrorCode; message: string; field: string | null } } | { status: 'ok'; preset: string | null };
 
 // How the repository's course pack choice resolved. `pending` is a
 // repository pack this machine has not confirmed (or that changed since):
@@ -175,7 +178,7 @@ export type ProjectFileState =
 export type CourseState =
   | { status: 'ok' }
   | { status: 'pending'; pack: CoursePack; ref: CourseRef }
-  | { status: 'invalid'; error: { code: string; message: string; field: string | null } };
+  | { status: 'invalid'; error: { code: ErrorCode; message: string; field: string | null } };
 
 export type CourseView = {
   // The id asked for and who asked: this machine, taskpilot.toml, or nobody.
@@ -219,3 +222,25 @@ export type WorkspaceInfo = { configured: false } | ({ configured: true; root: s
 // workspace:open-file: where the file ended up. 'folder' means no editor was
 // found and the file was shown in the file manager instead.
 export type OpenedWith = 'vscode' | 'text_editor' | 'folder';
+
+export const workspaceContract = {
+  get: invoke<[], WorkspaceView>('workspace:get'),
+  set: invoke<[form: WorkspaceForm], WorkspaceView>('workspace:set'),
+  check: invoke<[form: WorkspaceForm], WorkspaceCheck>('workspace:check'),
+  pickRoot: invoke<[], string | null>('workspace:pick-root'),
+  info: invoke<[], WorkspaceInfo>('workspace:info'),
+  // Writes taskpilot.toml naming `preset`; refuses when one exists.
+  createProject: invoke<[preset: string], WorkspaceView>('workspace:create-project'),
+  // Confirms the repository's course pack with the content hash the user saw.
+  confirmCourse: invoke<[id: string, contentHash: string], WorkspaceView>('workspace:confirm-course'),
+  openFile: invoke<[filePath: string, line?: number | null], OpenedWith>('workspace:open-file'),
+} satisfies Contract;
+
+export const diffContract = {
+  stat: invoke<[id: string], DiffStat>('diff:stat'),
+  file: invoke<[id: string, filePath: string], DiffFile>('diff:file'),
+} satisfies Contract;
+
+export const verifyContract = {
+  run: invoke<[kind: CheckKind, taskId?: string], VerifyRun>('verify:run'),
+} satisfies Contract;

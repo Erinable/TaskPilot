@@ -58,12 +58,9 @@ const onKeydown = (event: KeyboardEvent) => {
   }
 };
 
-// Agents run in the background; presence and the feed follow them.
-const ACTIVITY_POLL_MS = 15_000;
-
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown);
-  app.startActivityPolling(ACTIVITY_POLL_MS);
+  app.startActivity();
   codingActivity.start();
   // Notification read state is per repository, so the list comes first.
   await repositories.refresh();
@@ -87,7 +84,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
-  app.stopActivityPolling();
+  app.stopActivity();
   codingActivity.stop();
 });
 </script>

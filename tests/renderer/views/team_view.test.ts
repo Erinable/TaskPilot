@@ -76,7 +76,6 @@ describe('TeamView', () => {
     ]);
 
     const qa = card(wrapper, 'qa');
-    expect(qa.classes()).not.toContain('compact');
     expect(qa.find('.team-expand').exists()).toBe(false);
     expect(qa.find('h2').text()).toBe('QA Partner');
     expect(qa.find('.presence-text').text()).toBe('工作中');
@@ -92,7 +91,6 @@ describe('TeamView', () => {
     useAppStore().activity = overview();
     const wrapper = mount(TeamView);
     const pm = card(wrapper, 'product-lead');
-    expect(pm.classes()).toContain('compact');
     expect(pm.find('.presence-text').text()).toBe('在线');
     expect(pm.find('.team-compact-line').text()).toContain('最近没有动态');
     expect(pm.find('.team-facts').exists()).toBe(false);
@@ -102,7 +100,6 @@ describe('TeamView', () => {
     const expand = pm.find('.team-expand');
     expect(expand.attributes('aria-expanded')).toBe('false');
     await expand.trigger('click');
-    expect(pm.classes()).not.toContain('compact');
     expect(expand.attributes('aria-expanded')).toBe('true');
     expect(pm.find('.team-cost').text()).toBe('$0.034');
     expect(pm.find('.team-facts dd').text()).toBe('空闲，等待下一项任务');

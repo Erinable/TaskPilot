@@ -1,8 +1,8 @@
 // The four work packages TaskPilot used to ship as built-in samples. The app
 // now serves only published packages; tests publish these through
 // SAMPLE_REQUIREMENT to exercise a populated queue.
-import type { Requirement } from '../../../src/main/requirement_store.ts';
-import type { TaskDefinition } from '../../../src/main/tasks.ts';
+import type { Requirement } from '../../../src/main/requirements/requirement_store.ts';
+import type { TaskDefinition } from '../../../src/main/work_packages/tasks.ts';
 
 export const SAMPLE_TASKS: TaskDefinition[] = [
   {

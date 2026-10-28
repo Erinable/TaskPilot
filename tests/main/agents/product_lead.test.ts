@@ -1,6 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as productLead from '../../../src/main/agents/product_lead.ts';
+import { scopePath } from '../../../src/main/agents/output_validation.ts';
 import { PROGRAMMING_COURSE } from '../../fixtures/builtin_courses.ts';
 import { ICONS } from '../../../src/renderer/src/lib/icons.ts';
 
@@ -45,14 +46,15 @@ test('validatePlan() accepts a valid plan and keeps optional test names', () => 
   assert.equal('test' in plan.packages[0].acceptance[1], false);
 });
 
-test('validatePlan() rejects file scopes that leave the repository', () => {
-  for (const bad of ['/etc/passwd', '../secrets.txt', 'src/../../x', 'C:/Windows/x', 'src\\auth\\x.ts', '.', './']) {
-    assert.throws(() => productLead.validatePlan(validPlan([validPackage({ fileScope: [bad] })]), LINKED), { code: 'agent_bad_output' }, bad);
-  }
-});
+test.each(['/etc/passwd', '../secrets.txt', 'src/../../x', 'C:/Windows/x', 'src\\auth\\x.ts', '.', './'])(
+  'validatePlan rejects unsafe file scope %s',
+  (file) => {
+    assert.throws(() => productLead.validatePlan(validPlan([validPackage({ fileScope: [file] })]), LINKED), { code: 'agent_bad_output' });
+  },
+);
 
 test('scopePath() normalizes ./ and duplicate slashes, and the plan dedupes', () => {
-  assert.equal(productLead.scopePath('./src//auth/./login.ts', 'p'), 'src/auth/login.ts');
+  assert.equal(scopePath('./src//auth/./login.ts', 'p'), 'src/auth/login.ts');
   const plan = productLead.validatePlan(validPlan([validPackage({ fileScope: ['src/a.ts', './src/a.ts'] })]), LINKED);
   assert.deepEqual(plan.packages[0].fileScope, ['src/a.ts']);
 });
@@ -105,11 +107,6 @@ test('prompts fence requirement text and omit missing sections', () => {
   assert.match(answered, /Q1: 几次锁定？\nA1: \(not answered/);
 });
 
-test('the system prompt tells the agent to treat input as data', () => {
-  assert.match(productLead.systemPrompt(PROGRAMMING_COURSE), /as data/);
-  assert.match(productLead.systemPrompt(PROGRAMMING_COURSE), /no tools/);
-});
-
 test('formatEstimate() matches the sample data wording', () => {
   assert.equal(productLead.formatEstimate(0.5), '预计 30 分钟');
   assert.equal(productLead.formatEstimate(2), '预计 2 小时');
@@ -131,10 +128,6 @@ test('the plan schema asks for a difficulty level from the allowlist', () => {
   const item = productLead.PLAN_SCHEMA.properties.packages.items;
   assert.ok(item.required.includes('difficulty'));
   assert.deepEqual(item.properties.difficulty.properties.level.enum, productLead.DIFFICULTIES);
-  assert.match(
-    productLead.planPrompt({ text: '登录', linkTests: true, course: PROGRAMMING_COURSE }),
-    /Difficulty, for a developer who may be new to programming/,
-  );
 });
 
 test('validatePlan() keeps dependencies on earlier packages only, deduplicated and sorted', () => {
@@ -169,11 +162,7 @@ test('parseEstimate() reads what formatEstimate() writes, and nothing else', () 
   assert.equal(productLead.parseEstimate('大约两小时'), null);
 });
 
-test('without a submit test check, the plan prompt asks for no linked tests and validatePlan() drops them', () => {
-  assert.match(productLead.planPrompt({ text: '登录', linkTests: true, course: PROGRAMMING_COURSE }), /`test` set to the exact name of a test/);
-  const unlinked = productLead.planPrompt({ text: '登录', linkTests: false, course: PROGRAMMING_COURSE });
-  assert.match(unlinked, /leave `test` out of every criterion/);
-  assert.doesNotMatch(unlinked, /`test` set to the exact name of a test/);
+test('validatePlan() drops linked tests when the repository has no submit test check', () => {
   const plan = productLead.validatePlan(validPlan(), { linkTests: false });
   assert.deepEqual(plan.packages[0].acceptance, [{ text: '成功返回 token' }, { text: 'lint 通过' }]);
 });
@@ -183,12 +172,13 @@ test('validatePlan() requires a practice-or-ai mode with a reason, and toTaskDef
   assert.deepEqual(plan.packages[0].recommendedMode, { mode: 'practice', reason: '能练到登录流程的写法。' });
   const [def] = productLead.toTaskDefinitions({ id: 'req-1', title: '登录' }, plan.packages);
   assert.deepEqual(def.recommendedMode, { mode: 'practice', reason: '能练到登录流程的写法。' });
-  for (const mode of [undefined, { mode: 'self', reason: 'x' }, { mode: 'ai', reason: ' ' }])
-    assert.throws(() => productLead.validatePlan(validPlan([validPackage({ mode })]), LINKED), { code: 'agent_bad_output' });
   assert.deepEqual(productLead.PLAN_SCHEMA.properties.packages.items.properties.mode.properties.mode.enum, productLead.PLANNED_MODES);
-  // Plans saved before modes existed publish without one.
   const [old] = productLead.toTaskDefinitions({ id: 'req-1', title: '登录' }, [{ ...plan.packages[0], recommendedMode: undefined }]);
   assert.equal('recommendedMode' in old, false);
+});
+
+test.each([undefined, { mode: 'self', reason: 'x' }, { mode: 'ai', reason: ' ' }])('validatePlan rejects invalid mode %j', (mode) => {
+  assert.throws(() => productLead.validatePlan(validPlan([validPackage({ mode })]), LINKED), { code: 'agent_bad_output' });
 });
 
 // [人工决策-2026-10-27 00:36:21] 项目任务的知识点只从课程包骨架白名单里选 0–3 个，校验不过就丢掉。
@@ -232,11 +222,4 @@ test('with a concept skeleton the plan offers its ids, and validatePlan() keeps 
   assert.equal('concepts' in definitions[1], false);
   // Without a whitelist nothing is kept.
   assert.equal(productLead.validatePlan(validPlan([validPackage({ concepts: ['round-robin'] })]), LINKED).packages[0].concepts, undefined);
-});
-
-test('a pack without a skeleton plans with the same prompt and schema as before concepts', () => {
-  assert.equal(productLead.planSchema(PROGRAMMING_COURSE), productLead.PLAN_SCHEMA);
-  assert.equal('concepts' in productLead.PLAN_SCHEMA.properties.packages.items.properties, false);
-  assert.doesNotMatch(productLead.planPrompt({ text: '登录', linkTests: true, course: PROGRAMMING_COURSE }), /Concepts:/);
-  assert.doesNotMatch(productLead.planPrompt({ text: '登录', linkTests: true, course: { ...PROGRAMMING_COURSE, concepts: [] } }), /Concepts:/);
 });

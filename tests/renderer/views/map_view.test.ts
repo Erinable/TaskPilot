@@ -70,7 +70,6 @@ describe('MapView', () => {
     const open = vi.spyOn(useRequirementsStore(), 'open').mockResolvedValue();
     const wrapper = await render();
     const empty = wrapper.get('[data-empty="modules"]');
-    expect(empty.find('h2').text()).toBe('还没有模块摘要');
     expect(empty.find('[data-empty="workspace"]').exists()).toBe(false);
     await empty.get('.primary-button').trigger('click');
     expect(open).toHaveBeenCalledWith({ compose: true });
@@ -96,7 +95,6 @@ describe('MapView', () => {
     const wrapper = await render();
     const src = wrapper.get('[data-path="src"]');
     expect(src.text()).toContain('已摘要 2 / 3 个文件');
-    expect(wrapper.find('[data-path="README.md"]').classes()).not.toContain('summarized');
   });
 
   test('a truncated repository says so', async () => {

@@ -11,11 +11,11 @@
 // The course pack and the goal are data, never instructions. Everything it
 // returns is validated here, then again by ../labs.ts checkLab() before a
 // file is written.
-import { AgentOutputError, isObject, list, scopePath, text } from './product_lead.ts';
-import { looksSecret } from '../repo_reader.ts';
+import { AgentOutputError, isObject, list, scopePath, text } from './output_validation.ts';
+import { looksSecret } from '../repository/repo_reader.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import { HINT_CODE_LINES, HINT_LEVELS } from '../../shared/hint_ladder.ts';
-import type { RunAgent } from './claude_cli.ts';
+import type { RunAgent } from '../runtimes/claude_cli.ts';
 import type { Concept, CoursePack } from '../../shared/course_pack.ts';
 import type { CoursePlan } from '../../shared/course_plan.ts';
 import type { Difficulty } from '../../shared/ipc/packages.ts';

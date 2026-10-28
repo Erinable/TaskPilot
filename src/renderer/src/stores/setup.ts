@@ -12,10 +12,9 @@ import { STEP_LABELS } from '@/lib/check_steps.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useAppStore } from './app.ts';
 import { useSettingsStore } from './settings.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as envTypes from '@shared/ipc/environment.ts';
-
-const POLL_MS = 800;
 
 // [人工决策-2026-10-25 23:51:35] 非 TS 仓库本期只显示「暂不支持自动环境规划」，不调用模型。
 const BLOCKER_TEXT: Record<string, string> = {
@@ -52,6 +51,7 @@ export const resultText = (result: envTypes.EnvStepResult) => {
 export const useSetupStore = defineStore('setup', () => {
   const app = useAppStore();
   const settings = useSettingsStore();
+  const repository = useRepositoryIdentityStore();
 
   // ========== Session ==========
   const view = ref<envTypes.EnvState | null>(null);
@@ -60,7 +60,10 @@ export const useSetupStore = defineStore('setup', () => {
   const acting = ref(false);
   // Kinds ticked in the apply list; reset whenever a new view arrives.
   const selectedKinds = ref<envTypes.ScriptKind[]>([]);
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribe: (() => void) | null = null;
+  let session = 0;
+  let reading = false;
+  let queued = false;
 
   const busy = computed(() => acting.value || view.value?.status === 'planning' || Boolean(view.value?.running));
   const ready = computed(() => view.value?.status === 'ready');
@@ -169,36 +172,53 @@ export const useSetupStore = defineStore('setup', () => {
 
   const visible = () => app.view === 'settings' && settings.activePage === 'setup';
 
-  const schedulePoll = () => {
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = null;
-    const waiting = view.value && (view.value.status === 'planning' || view.value.running);
-    if (waiting && visible())
-      pollTimer = setTimeout(() => {
-        render().catch((error) => console.error(error));
-      }, POLL_MS);
-  };
-
   const render = async () => {
-    try {
-      setView(await call(window.taskpilot.env.get()));
-      loadError.value = null;
-    } catch (error) {
-      console.error(error);
-      loadError.value = describeError(error);
+    if (!visible()) return;
+    if (reading) {
+      queued = true;
       return;
     }
-    schedulePoll();
+    const token = session;
+    reading = true;
+    try {
+      const next = await call(window.taskpilot.env.get());
+      if (token === session) {
+        setView(next);
+        loadError.value = null;
+      }
+    } catch (error) {
+      if (token === session) {
+        console.error(error);
+        loadError.value = describeError(error);
+      }
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
+        render().catch((error) => console.error(error));
+      }
+    }
   };
 
-  // Runs an action, takes its returned view, and keeps polling if needed.
+  const startWatching = () => {
+    if (unsubscribe) return;
+    const repositories = useRepositoryIdentityStore();
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (change.domains.includes('environment') || change.domains.includes('workspace')) render().catch((error) => console.error(error));
+    });
+    render().catch((error) => console.error(error));
+  };
+
+  const stopWatching = () => {
+    session += 1;
+    queued = false;
+    unsubscribe?.();
+    unsubscribe = null;
+  };
+
   const act = async <T extends envTypes.EnvState>(promise: Promise<envelopeTypes.IpcResult<T>>, failure = '操作失败') => {
     acting.value = true;
-    // Long steps hold the call open; poll meanwhile so "运行中" and Cancel show.
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = setTimeout(() => {
-      render().catch((error) => console.error(error));
-    }, 200);
     try {
       setView(await call(promise));
       return true;
@@ -277,9 +297,22 @@ export const useSetupStore = defineStore('setup', () => {
   watch(
     visible,
     (isVisible) => {
-      if (isVisible) render().catch((error) => console.error(error));
+      if (isVisible) startWatching();
+      else stopWatching();
     },
     { immediate: true },
+  );
+
+  watch(
+    () => repository.currentId,
+    () => {
+      stopWatching();
+      view.value = null;
+      loadError.value = null;
+      selectedKinds.value = [];
+      if (visible()) startWatching();
+    },
+    { flush: 'sync' },
   );
 
   return {

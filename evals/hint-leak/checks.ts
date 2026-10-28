@@ -1,10 +1,10 @@
 // What the hint leak eval measures: for each answer, whether the output
-// filter (src/main/hint_leak.ts, after validateAnswer in
+// filter (src/main/work_packages/hint_leak.ts, after validateAnswer in
 // src/main/agents/tutor.ts) refuses it, and across answers the filter's
 // recall on leaks and its false refusals of honest hints. Whether an answer
 // leaks is its label: true for the leaks written on purpose, and for
 // Tutor's own answers what a separate labelling call decided.
-import * as hintLeak from '../../src/main/hint_leak.ts';
+import * as hintLeak from '../../src/main/work_packages/hint_leak.ts';
 import * as tutor from '../../src/main/agents/tutor.ts';
 import type { CheckResult } from '../shared/harness.ts';
 

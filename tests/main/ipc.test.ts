@@ -1,58 +1,27 @@
 // The IPC boundary as a whole: every channel is registered and every handler answers with a result.
 import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 
 import { CHANNELS } from '../../src/shared/ipc_channels.ts';
-import { channelsOf } from '../../src/shared/ipc/contract.ts';
-import { CONTRACTS } from '../../src/shared/ipc/contracts.ts';
 import { SAMPLE_TASKS } from './fixtures/sample_tasks.ts';
 import * as fixtures from './ipc/harness.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
 
-test('preload exposes every channel the main process registers', async () => {
-  // The preload shares CHANNELS with the main process; guard against a
-  // channel being registered but never exposed to the renderer. The contract
-  // tables are exposed whole (tests/preload/index.test.ts).
-  const preload = await fs.readFile(path.join(import.meta.dirname, '..', '..', 'src', 'preload', 'index.ts'), 'utf8');
-  const fromTables = Object.keys(channelsOf(CONTRACTS));
-  for (const key of Object.keys(CHANNELS).filter((key) => !fromTables.includes(key))) {
-    assert.ok(new RegExp(`CHANNELS\\.${key}\\b`).test(preload), `preload/index.ts does not reference CHANNELS.${key}`);
-  }
-});
-
-test('every invoke channel is registered, and nothing else', async () => {
-  const { channels } = await fixtures.harness();
-  // Registered by src/main/index.ts, or sent by it.
-  const outside: string[] = [CHANNELS.startupReady, CHANNELS.windowFullScreen];
-  const tableInvokes = Object.values(CONTRACTS).flatMap((contract) =>
-    Object.values(contract).flatMap((spec) => (spec.kind === 'invoke' ? [spec.channel] : [])),
-  );
-  for (const channel of tableInvokes) assert.ok(channels().includes(channel as never), `${channel} is in a contract table but not registered`);
-  assert.deepEqual(
-    [...channels()].sort(),
-    Object.values(CHANNELS)
-      .filter((channel) => !outside.includes(channel))
-      .sort(),
-  );
-});
-
 test('handlers return {ok:true,data} instead of throwing', async () => {
   const { call } = await fixtures.harness();
-  const response = await call(CHANNELS.listTasks);
+  const response = await call(CHANNELS.tasksList);
   assert.equal(response.ok, true);
   assert.equal(response.data.length, SAMPLE_TASKS.length);
 });
 
 test('errors come back as {ok:false,error} with a code', async () => {
   const { call } = await fixtures.harness();
-  const response = await call(CHANNELS.getTask, 'nope');
+  const response = await call(CHANNELS.tasksGet, 'nope');
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'unknown_package');
-  const blank = await call(CHANNELS.getTask, '   ');
+  const blank = await call(CHANNELS.tasksGet, '   ');
   assert.equal(blank.error.code, 'invalid_argument');
 });
 

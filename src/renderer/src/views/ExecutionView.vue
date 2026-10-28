@@ -61,7 +61,7 @@ const transition = (name: packageTypes.HumanTransition) => {
 };
 
 onMounted(() => backButton.value?.focus());
-// Leaving the view any way (back, sidebar, settings) stops the polls.
+// Leaving the view any way (back, sidebar, settings) removes state listeners.
 onBeforeUnmount(() => execution.close());
 </script>
 

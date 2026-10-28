@@ -1,12 +1,14 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { expect, onTestFinished, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
+import { tempDir } from '../fixtures/temp_dir.ts';
 import * as analysis from '../../scripts/complexity_analysis.ts';
 
+// Loads real ESLint/TypeScript/Vue parsers, including their cold startup.
+vi.setConfig({ testTimeout: 60_000 });
 const execute = promisify(execFile);
 const cwd = process.cwd();
 const functionSource = (name: string, branches: number) =>
@@ -72,8 +74,7 @@ test('cannot hide complexity through inline disables and fails on parse errors',
 });
 
 const temporaryRepository = async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-complexity-test-'));
-  onTestFinished(() => fs.rm(directory, { recursive: true, force: true }));
+  const directory = await tempDir('taskpilot-complexity-test-');
   await execute('git', ['init', '-q'], { cwd: directory });
   await execute('git', ['config', 'user.name', 'Complexity Test'], { cwd: directory });
   await execute('git', ['config', 'user.email', 'complexity@example.invalid'], { cwd: directory });

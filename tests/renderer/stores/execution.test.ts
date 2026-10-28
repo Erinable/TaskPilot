@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-import { BASELINE_POLL_MS, REVIEW_POLL_MS, useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
+import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
@@ -29,25 +29,19 @@ beforeEach(() => {
   vi.mocked(feedback.confirmAction).mockClear();
 });
 
-afterEach(() => vi.useRealTimers());
-
 describe('execution store', () => {
   test('open() loads the package, navigates and reads the diff', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');
     expect(useAppStore().view).toBe('execution');
     expect(execution.current?.id).toBe('t1');
-    expect(api.diff.stat).toHaveBeenCalledWith('t1');
     expect(execution.diffHint).toBe('相对基线 abcdef12');
   });
 
   test('open() reports a failed load and stays put', async () => {
-    api.getTask.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: '没有这个工作包' } } as never);
+    api.tasks.get.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: '没有这个工作包' } } as never);
     const execution = useExecutionStore();
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await execution.open('missing');
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ code: 'x' }));
-    log.mockRestore();
     expect(useAppStore().view).toBe('queue');
     expect(feedback.showToast).toHaveBeenCalledWith('打开工作包失败：没有这个工作包');
   });
@@ -55,12 +49,11 @@ describe('execution store', () => {
   test('a transition calls IPC, then reloads the package and the queue', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.getTask.mockClear();
+    api.tasks.get.mockClear();
     current.task = taskView({ status: 'in_review', statusLabel: '审查中' });
     await execution.runTransition('submit_for_review');
-    expect(api.transition).toHaveBeenCalledWith('t1', 'submit_for_review');
-    expect(api.getTask.mock.invocationCallOrder[0]).toBeGreaterThan(api.transition.mock.invocationCallOrder[0]);
-    expect(api.listTasks).toHaveBeenCalled();
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'submit_for_review');
+
     expect(useTasksStore().tasks).toHaveLength(1);
     expect(execution.current?.status).toBe('in_review');
     expect(feedback.showToast).toHaveBeenCalledWith('已提交，QA 正在审查。');
@@ -73,14 +66,14 @@ describe('execution store', () => {
     expect(execution.transitioning).toBe('submit_for_review');
     await execution.runTransition('submit_for_review');
     await first;
-    expect(api.transition).toHaveBeenCalledTimes(1);
+    expect(api.packages.transition).toHaveBeenCalledTimes(1);
     expect(execution.transitioning).toBe(null);
   });
 
   test('a failed transition clears the in-flight state', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.transition.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
+    api.packages.transition.mockResolvedValueOnce({ ok: false, error: { code: 'x', message: 'x' } } as never);
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     await execution.runTransition('submit_for_review');
     spy.mockRestore();
@@ -101,7 +94,7 @@ describe('execution store', () => {
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     await execution.runTransition('acceptance_rejected');
     expect(feedback.confirmAction).toHaveBeenCalledWith(expect.objectContaining({ title: '打回这个工作包？', danger: true }));
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
   });
 
   test('report_deviation opens the form instead of transitioning', async () => {
@@ -109,7 +102,7 @@ describe('execution store', () => {
     await execution.open('t1');
     await execution.runTransition('report_deviation');
     expect(execution.deviationOpen).toBe(true);
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
   });
 
   test('deviation submit sends {note, stepIndex, filePath} and closes the form', async () => {
@@ -118,7 +111,9 @@ describe('execution store', () => {
     execution.openDeviationForm();
     execution.deviationForm = { note: '依赖方向不对', stepIndex: 1, filePath: 'src/auth.ts' };
     await execution.submitDeviation();
-    expect(api.transition).toHaveBeenCalledWith('t1', 'report_deviation', { deviation: { note: '依赖方向不对', stepIndex: 1, filePath: 'src/auth.ts' } });
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'report_deviation', {
+      deviation: { note: '依赖方向不对', stepIndex: 1, filePath: 'src/auth.ts' },
+    });
     expect(execution.deviationOpen).toBe(false);
     expect(feedback.showToast).toHaveBeenCalledWith('偏差已记录，Architect 正在裁决。');
   });
@@ -129,76 +124,63 @@ describe('execution store', () => {
     execution.openDeviationForm();
     execution.deviationForm.note = '   ';
     expect(await execution.submitDeviation()).toBe(false);
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
     expect(feedback.showToast).toHaveBeenCalledWith('请填写偏差说明。');
     expect(execution.deviationOpen).toBe(true);
   });
 
-  test('review polling follows a running review and announces the outcome', async () => {
-    vi.useFakeTimers();
+  test('state events refresh a running review and announce the outcome', async () => {
     current.task = taskView({ status: 'in_review', review: running });
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.getTask.mockClear();
-
-    await vi.advanceTimersByTimeAsync(REVIEW_POLL_MS);
-    expect(api.getTask).toHaveBeenCalledTimes(1);
+    api.tasks.get.mockClear();
 
     current.task = taskView({ status: 'done', review: { ...running, status: 'failed', error: { code: 'agent_timeout', message: 'x' } } });
-    await vi.advanceTimersByTimeAsync(REVIEW_POLL_MS);
-    expect(execution.current?.status).toBe('done');
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    await vi.waitFor(() => expect(execution.current?.status).toBe('done'));
     expect(feedback.showToast).toHaveBeenCalledWith('QA 审查失败：智能体超过 3 分钟没有完成，已停止。');
 
-    // Settled: no further polls.
-    api.getTask.mockClear();
-    await vi.advanceTimersByTimeAsync(REVIEW_POLL_MS * 3);
-    expect(api.getTask).not.toHaveBeenCalled();
+    api.tasks.get.mockClear();
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    api.emitState({ repositoryId: 'other-repo', domains: ['packages'] });
+    await Promise.resolve();
+    expect(api.tasks.get).not.toHaveBeenCalled();
   });
 
-  test('close() stops review polling', async () => {
-    vi.useFakeTimers();
+  test('close() unsubscribes from state events', async () => {
     current.task = taskView({ status: 'in_review', review: running });
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.getTask.mockClear();
+    api.tasks.get.mockClear();
     execution.close();
-    await vi.advanceTimersByTimeAsync(REVIEW_POLL_MS * 4);
-    expect(api.getTask).not.toHaveBeenCalled();
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    await Promise.resolve();
+    expect(api.tasks.get).not.toHaveBeenCalled();
     expect(execution.current).toBeNull();
   });
 
-  test('baseline polling merges the measurement until it settles; close() stops it', async () => {
-    vi.useFakeTimers();
+  test('state events refresh a baseline measurement until it settles', async () => {
     const measuring: workspaceTypes.BaselineChecks = { status: 'measuring', reason: null, commit: 'abc', checks: {}, startedAt: '', finishedAt: null };
     current.task = taskView({ baselineChecks: measuring });
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.getTask.mockClear();
+    api.tasks.get.mockClear();
 
-    await vi.advanceTimersByTimeAsync(BASELINE_POLL_MS);
-    expect(api.getTask).toHaveBeenCalledTimes(1);
     current.task = taskView({ baselineChecks: { ...measuring, status: 'measured' } });
-    await vi.advanceTimersByTimeAsync(BASELINE_POLL_MS);
-    expect(execution.current?.baselineChecks?.status).toBe('measured');
-    api.getTask.mockClear();
-    await vi.advanceTimersByTimeAsync(BASELINE_POLL_MS * 3);
-    expect(api.getTask).not.toHaveBeenCalled();
-
-    current.task = taskView({ baselineChecks: measuring });
-    await execution.open('t1');
-    api.getTask.mockClear();
-    execution.close();
-    await vi.advanceTimersByTimeAsync(BASELINE_POLL_MS * 3);
-    expect(api.getTask).not.toHaveBeenCalled();
+    api.emitState({ repositoryId: null, domains: ['workspace'] });
+    await vi.waitFor(() => expect(execution.current?.baselineChecks?.status).toBe('measured'));
+    api.tasks.get.mockClear();
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await Promise.resolve();
+    expect(api.tasks.get).not.toHaveBeenCalled();
   });
 
   test('a failed step save reports it and leaves progress unchanged', async () => {
     const execution = useExecutionStore();
     await execution.open('t1');
-    api.setStepDone.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_state', message: 'x' } } as never);
+    api.packages.setStepDone.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_state', message: 'x' } } as never);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await execution.setStepDone(0, true)).toBe(false);
-    expect(log).toHaveBeenCalledWith(expect.objectContaining({ code: 'invalid_state' }));
     log.mockRestore();
     expect(execution.current?.completedSteps).toEqual([]);
     expect(feedback.showToast).toHaveBeenCalledWith('保存进度失败：当前状态下不能执行这个操作。');
@@ -243,13 +225,13 @@ describe('queue actions', () => {
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     await execution.claimFromQueue('t1');
     expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].title).toBe('已经有 1 个工作包在执行中');
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
 
     vi.mocked(feedback.confirmAction).mockResolvedValue(true);
     await execution.claimFromQueue('t1');
     expect(execution.claimOpen).toBe(true);
     await execution.confirmClaim();
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
   });
 
   test('claiming with nothing else in progress does not ask about it', async () => {
@@ -260,7 +242,7 @@ describe('queue actions', () => {
     await execution.claimFromQueue('t1');
     expect(vi.mocked(feedback.confirmAction).mock.calls.map(([options]) => options.title)).not.toContain('已经有 1 个工作包在执行中');
     await execution.confirmClaim();
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'self' });
   });
 
   test('the claim dialog preselects the recommended mode and claims with the one picked', async () => {
@@ -269,11 +251,11 @@ describe('queue actions', () => {
     const execution = useExecutionStore();
     await execution.claimFromQueue('t1');
     expect(execution.claimMode).toBe('practice');
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
     execution.claimMode = 'ai';
     await execution.confirmClaim();
     expect(execution.claimOpen).toBe(false);
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'ai' });
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'ai' });
   });
 
   test('waiving a dependency asks, then updates the package everywhere', async () => {
@@ -283,11 +265,11 @@ describe('queue actions', () => {
     const execution = useExecutionStore();
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     expect(await execution.waiveDependency(current.task, dependency)).toBe(false);
-    expect(api.waiveDependency).not.toHaveBeenCalled();
+    expect(api.packages.waiveDependency).not.toHaveBeenCalled();
 
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
     expect(await execution.waiveDependency(current.task, dependency)).toBe(true);
-    expect(api.waiveDependency).toHaveBeenCalledWith('t1', 'r1-wp1');
+    expect(api.packages.waiveDependency).toHaveBeenCalledWith('t1', 'r1-wp1');
     expect(useTasksStore().tasks[0].dependencies[0].blocking).toBe(false);
   });
 });

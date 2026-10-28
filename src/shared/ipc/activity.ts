@@ -1,9 +1,12 @@
 // The activity feed and overview, model spend and the engineering map (activity:*,
 // costs:*, engineering-map:get).
 
+import type { ErrorCode } from '../error_codes.ts';
 import type { AgentId, CliId } from '../agent_runtime.ts';
 import type * as packageTypes from './packages.ts';
 import type { InterfaceModule, RequirementStep } from './requirements.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 export type ActivityEvent =
   | {
@@ -18,7 +21,7 @@ export type ActivityEvent =
   | { kind: 'coding_run'; packageId: string; title: string; status: 'started' | 'finished' | 'failed' | 'cancelled'; costUsd: number | null }
   | { kind: 'requirement_created'; requirementId: string; title: string }
   | { kind: 'requirement_finished'; requirementId: string; title: string; step: RequirementStep; costUsd: number | null }
-  | { kind: 'requirement_failed'; requirementId: string; title: string; step: RequirementStep; code: string }
+  | { kind: 'requirement_failed'; requirementId: string; title: string; step: RequirementStep; code: ErrorCode }
   | { kind: 'requirement_published'; requirementId: string; title: string; packageCount: number }
   | { kind: 'release_finished'; version: string; packageCount: number };
 
@@ -103,3 +106,18 @@ export type MapModule = InterfaceModule & { source: MapSource; freshness: MapFre
 export type MapNote = { text: string; source: MapSource };
 
 export type EngineeringMap = { modules: MapModule[]; conventions: MapNote[]; gaps: MapNote[]; files: string[]; truncated: boolean };
+
+export const activityContract = {
+  overview: invoke<[], ActivityOverview>('activity:overview'),
+  page: invoke<[before: string | null], ActivityPage>('activity:page'),
+} satisfies Contract;
+
+export const costsContract = {
+  report: invoke<[days: CostRange], CostReport>('costs:report'),
+  // The one outbound request: downloads the models.dev price list.
+  syncPrices: invoke<[], { syncedAt: string }>('costs:sync-prices'),
+} satisfies Contract;
+
+export const engineeringMapContract = {
+  get: invoke<[], EngineeringMap>('map:get'),
+} satisfies Contract;

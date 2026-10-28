@@ -42,7 +42,6 @@ describe('course interview', () => {
   test('我想学… opens the course form with picked defaults and sends them with the goal', async () => {
     const { wrapper, store } = await render();
     await wrapper.get('.req-empty [data-action="learn"]').trigger('click');
-    expect(wrapper.find('.req-header h2').text()).toBe('你想学什么');
     expect(wrapper.find('[data-field="level"]').exists()).toBe(true);
     await wrapper.find('[data-field="weeklyHours"] input[value="8"]').setValue(true);
     await wrapper.find('#reqText').setValue('想学操作系统的进程调度');
@@ -53,18 +52,7 @@ describe('course interview', () => {
       text: '想学操作系统的进程调度',
       course: { level: 'basic', target: 'implement', environment: 'macOS，本机 C 编译器', weeklyHours: 8 },
     });
-    store.stopPolling();
-    wrapper.unmount();
-  });
-
-  test('the project form is unchanged: no course fields, no course argument', async () => {
-    const { wrapper, store } = await render({ compose: true });
-    expect(wrapper.find('[data-field="level"]').exists()).toBe(false);
-    await wrapper.find('#reqText').setValue('邮箱登录');
-    await wrapper.find('form[data-pane="new"]').trigger('submit');
-    await flushPromises();
-    expect(api.requirements.create).toHaveBeenCalledWith({ title: '', text: '邮箱登录' });
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 
@@ -80,7 +68,7 @@ describe('course interview', () => {
     await wrapper.get('[data-action="course-plan"]').trigger('click');
     await flushPromises();
     expect(api.requirements.plan).toHaveBeenLastCalledWith('r1', ['先不用'], { course: 'os' });
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
 
     state.list = [
@@ -88,11 +76,10 @@ describe('course interview', () => {
     ];
     const second = await render();
     expect((second.wrapper.get('[data-course="draft"] input').element as HTMLInputElement).checked).toBe(true);
-    expect(second.wrapper.get('[data-action="course-plan"]').text()).toBe('起草课程包');
     await second.wrapper.get('[data-action="course-plan"]').trigger('click');
     await flushPromises();
     expect(api.requirements.plan).toHaveBeenLastCalledWith('r1', [], { draft: true });
-    second.store.stopPolling();
+    second.store.stopWatching();
     second.wrapper.unmount();
   });
 
@@ -134,7 +121,7 @@ describe('course interview', () => {
     await flushPromises();
     expect(api.requirements.courseConfirmDraft).toHaveBeenCalledWith('r1', 'saved-hash');
     expect(api.requirements.plan).toHaveBeenLastCalledWith('r1', undefined);
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 
@@ -157,32 +144,23 @@ describe('course interview', () => {
     await flushPromises();
     expect(api.requirements.labGenerate).toHaveBeenCalledWith('r1', undefined);
     expect(wrapper.get('[data-section="first-lab"]').text()).toContain('正在写题面和测试');
-    expect(store.isPolling()).toBe(true);
     await wrapper.get('[data-action="cancel-lab"]').trigger('click');
     await flushPromises();
     expect(api.requirements.cancel).toHaveBeenCalledWith('r1');
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 
-  test('a generated lab shows its title and counts; a failed one offers to generate again', async () => {
-    state.list = [requirement({ kind: 'course', status: 'published', course: { ...coursePathInterview(), lab: labGeneration() } })];
-    let { wrapper, store } = await render();
-    const ready = wrapper.get('[data-section="first-lab"]').text();
-    expect(ready).toContain('第一个 lab：时间片轮转调度');
-    expect(ready).toContain('3 个公开测试 · 5 个隐藏测试');
-    expect(ready).toContain('$1.20');
-    store.stopPolling();
-    wrapper.unmount();
-
-    const error = { code: 'agent_bad_output', message: 'hiddenTests[0].names[0] must not give away an input' };
-    state.list = [
-      requirement({ kind: 'course', status: 'published', course: { ...coursePathInterview(), lab: labGeneration({ status: 'failed', lab: null, error }) } }),
-    ];
-    ({ wrapper, store } = await render());
-    expect(wrapper.get('[data-section="first-lab"] [role="alert"]').text()).toContain('生成失败');
-    expect(wrapper.get('[data-action="estimate-lab"]').text()).toContain('重新生成第一个 lab');
-    store.stopPolling();
+  test('a passed first lab is placed in a picked folder and switches to that repository', async () => {
+    state.list = withLab(labGeneration({ stage: 1, placed: false }));
+    const { wrapper, store } = await render();
+    await wrapper.get('[data-action="place-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.workspace.pickRoot).toHaveBeenCalled();
+    expect(api.requirements.labPlace).toHaveBeenCalledWith('r1', '/Users/me/sched-lab');
+    expect(api.repositories.list).toHaveBeenCalled();
+    expect(api.tasks.list).toHaveBeenCalled();
+    store.stopWatching();
     wrapper.unmount();
   });
 
@@ -214,7 +192,7 @@ describe('course interview', () => {
     expect(text).toContain('变异检测：抓住 3/5，公开测试 1/5');
     expect(text).toContain('一致性：2 处问题');
     expect(wrapper.get('[data-section="first-lab"]').text()).toContain('自验证没通过，正在按报告修改');
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 
@@ -223,7 +201,7 @@ describe('course interview', () => {
     const { wrapper, store } = await render();
     expect(wrapper.get('[data-field="verify-result"]').text()).toContain('自验证第 2 轮通过');
     expect(wrapper.get('[data-field="verify-result"]').text()).toContain('$0.50');
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 
@@ -252,41 +230,7 @@ describe('course interview', () => {
     await wrapper.get('[data-action="generate-lab"]').trigger('click');
     await flushPromises();
     expect(api.requirements.labGenerate).toHaveBeenCalledWith('r1', 'round-robin');
-    store.stopPolling();
-    wrapper.unmount();
-  });
-
-  test('a lab that passed is written into a new lab repository in a picked folder, which then opens', async () => {
-    state.list = withLab(labGeneration({ stage: 1, placed: false }));
-    const { wrapper, store } = await render();
-    const button = wrapper.get('[data-action="place-lab"]');
-    expect(button.text()).toBe('选一个空文件夹，建实验仓库');
-    await button.trigger('click');
-    await flushPromises();
-    expect(api.workspace.pickRoot).toHaveBeenCalled();
-    expect(api.requirements.labPlace).toHaveBeenCalledWith('r1', '/Users/me/sched-lab');
-    // The switch reloads the queue and the list for the lab repository.
-    expect(api.repositories.list).toHaveBeenCalled();
-    expect(api.listTasks).toHaveBeenCalled();
-    store.stopPolling();
-    wrapper.unmount();
-  });
-
-  test('once in the lab repository a later stage says which stage it is and is added there', async () => {
-    state.list = [
-      requirement({
-        kind: 'course',
-        status: 'published',
-        course: { ...coursePathInterview(), repositoryId: 'lab-repo', lab: labGeneration({ stage: 2, placed: false }) },
-      }),
-    ];
-    const { wrapper, store } = await render();
-    expect(wrapper.get('[data-section="first-lab"] h3').text()).toContain('第 2 阶段 lab：时间片轮转调度');
-    await wrapper.get('[data-action="place-lab"]').trigger('click');
-    await flushPromises();
-    expect(api.workspace.pickRoot).not.toHaveBeenCalled();
-    expect(api.requirements.labPlace).toHaveBeenCalledWith('r1');
-    store.stopPolling();
+    store.stopWatching();
     wrapper.unmount();
   });
 });

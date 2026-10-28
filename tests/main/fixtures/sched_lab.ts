@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { LabArtifact, CoursePlan } from '../../../src/main/labs.ts';
+import type { LabArtifact, CoursePlan } from '../../../src/main/courses/labs.ts';
 
 const DIR = path.join(import.meta.dirname, 'sched_lab');
 

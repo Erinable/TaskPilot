@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
-import { MASTERY_FILENAME, MasteryStore } from '../../../src/main/mastery_store.ts';
+import { MASTERY_FILENAME, MasteryStore } from '../../../src/main/courses/mastery_store.ts';
 import * as fixtures from './harness.ts';
 
 afterEach(() => {

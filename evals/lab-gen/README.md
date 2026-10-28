@@ -1,6 +1,6 @@
 # Lab generator eval
 
-Runs the lab generator (`src/main/agents/lab_generator.ts`: `generate`, two calls) against fixed cases with the real Claude CLI, turns each lab into a lab artifact the way the app does (`toLabArtifact` in `src/main/lab_generation_service.ts`, which makes the reference patch with git and runs `checkLab`), then runs it like a lab repository: TaskPilot's `Makefile` and `tests/grade.sh` around the lab's files, `make grade` on the starter code, then again with the reference patch applied and the hidden tests beside the public ones. The model's code runs under the Coding Agent's Seatbelt profile (`buildProfile` in `src/main/coding_sandbox.ts`), so it is macOS only and needs cc and make.
+Runs the lab generator (`src/main/agents/lab_generator.ts`: `generate`, two calls) against fixed cases with the real Claude CLI, turns each lab into a lab artifact the way the app does (`toLabArtifact` in `src/main/courses/lab_generation_service.ts`, which makes the reference patch with git and runs `checkLab`), then runs it like a lab repository: TaskPilot's `Makefile` and `tests/grade.sh` around the lab's files, `make grade` on the starter code, then again with the reference patch applied and the hidden tests beside the public ones. The model's code runs under the Coding Agent's Seatbelt profile (`buildProfile` in `src/main/coding/coding_sandbox.ts`), so it is macOS only and needs cc and make.
 
 Cases (`cases.ts`), all stage 1 from the built-in os pack, for the learner in CARM-33's example (knows basic C, wants to write it, macOS without the xv6 toolchain):
 
@@ -14,7 +14,7 @@ Checks per case (`checks.ts`):
 - `validates`: the output passed every check in `lab_generator.ts` and `checkLab`.
 - `runs`, the eval's criterion: the starter code and the reference both build, and `make grade` reports every test it should (the public tests on the starter; public and hidden with the reference). It does not ask that they pass.
 - `referencePasses` and `starterFails`: two of the self-check's demands, recorded here for reference: the reference passes every test, and the starter passes no public test.
-- `selfCheck`, with `--verify` only: the app's whole self-check (`src/main/lab_verify.ts`: reference, starter, mutants, consistency, at most two repairs) with real calls passed. `run.verify` keeps its report.
+- `selfCheck`, with `--verify` only: the app's whole self-check (`src/main/courses/lab_verify.ts`: reference, starter, mutants, consistency, at most two repairs) with real calls passed. `run.verify` keeps its report.
 
 `suite.firstRoundRunRate` is the share of cases whose first lab runs. The target for CARM-40 is at least 60%.
 

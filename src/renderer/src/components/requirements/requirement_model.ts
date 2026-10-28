@@ -58,15 +58,9 @@ export const stepClasses = (item: Pick<requirementTypes.Requirement, 'status' | 
 
 export const RUNNING = new Set<requirementTypes.RequirementStatus>(['clarifying', 'planning']);
 export const isRunning = (item: Pick<requirementTypes.Requirement, 'status'>) => RUNNING.has(item.status);
-// A confirmed course path whose first lab is being generated: the list
-// keeps polling, but the requirement itself is not running a step.
-export const labRunning = (item: Pick<requirementTypes.Requirement, 'course'>) => item.course?.lab?.status === 'running';
-const isPolled = (item: Pick<requirementTypes.Requirement, 'status' | 'course'>) => isRunning(item) || labRunning(item);
-export const anyPolled = (items: Pick<requirementTypes.Requirement, 'status' | 'course'>[]) => items.some(isPolled);
 export const needsAttention = (item: Pick<requirementTypes.Requirement, 'status'>) =>
   item.status === 'answering' || item.status === 'reviewing' || item.status === 'failed';
 
-export const POLL_MS = 1200;
 export const MAX_TEXT = 4000;
 export const MAX_ANSWER = 1000;
 
@@ -95,11 +89,6 @@ export const validateText = (text: string) => {
 export const rowTitle = (item: Pick<requirementTypes.Requirement, 'title' | 'text'>) => item.title || item.text.slice(0, 40);
 
 export const rowDate = (updatedAt: string) => new Date(updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-
-// Status plus phase, so the Architect -> Product Lead handoff re-renders
-// too, and the first lab's progress on a confirmed course path.
-export const pollKey = (item: Pick<requirementTypes.Requirement, 'status' | 'phase' | 'course'>) =>
-  `${item.status}:${item.phase ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
 
 // ========== Course interview ==========
 // The form's options: every field is picked; the environment also takes a

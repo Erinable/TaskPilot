@@ -9,30 +9,33 @@ import * as architect from './architect.ts';
 import * as qa from './qa.ts';
 import * as envSteward from './env_steward.ts';
 import * as releaseManager from './release_manager.ts';
-import * as git from '../git.ts';
-import { looksSecret } from '../repo_reader.ts';
-import { readTracked } from '../repo_reader.ts';
-import { collectChanges } from '../review_diff.ts';
-import * as evidence from '../evidence.ts';
-import { checkFileScope } from '../tasks.ts';
-import type { RunAgent } from './claude_cli.ts';
+import * as git from '../repository/git.ts';
+import { looksSecret } from '../repository/repo_reader.ts';
+import { readTracked } from '../repository/repo_reader.ts';
+import { collectChanges } from '../repository/review_diff.ts';
+import * as evidence from '../checking/evidence.ts';
+import { checkFileScope } from '../work_packages/tasks.ts';
+import type { RunAgent } from '../runtimes/claude_cli.ts';
 import type { AdjudicationResult, AdjudicationTask, DeviationRecord, InterfaceSummary, SkippedFile, SourceFile } from './architect.ts';
 import type { CompactRun, RejectReason, ReviewReport, ReviewTask } from './qa.ts';
 import type { EnvFailure, EnvPlan } from './env_steward.ts';
 import type { ReleaseInput, ReleasePlan } from './release_manager.ts';
-import type { SetupAdapter } from '../setup_adapter.ts';
+import type { SetupAdapter } from '../checking/setup_adapter.ts';
 import type { EnvBlocker } from '../../shared/ipc/environment.ts';
-import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../evidence.ts';
-import type { AcceptanceCriterion } from '../tasks.ts';
+import type { AttentionItem, BaselineCheck, CheckOutcome, CriterionResult, EvidenceCheck, EvidenceItem } from '../checking/evidence.ts';
+import type { AcceptanceCriterion } from '../work_packages/tasks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 
+import { normalizeErrorCode } from '../../shared/error_codes.ts';
+import type { ErrorCode } from '../../shared/error_codes.ts';
+
 export interface AgentError {
-  code: string;
+  code: ErrorCode;
   message: string;
 }
 
 // The error shape agents and checks throw: an Error carrying a code.
-type CodedError = Error & { code?: string };
+type CodedError = Error & { code?: unknown };
 
 export type ReadFiles = (root: string, paths: string[]) => Promise<{ files: SourceFile[]; skipped: SkippedFile[] }>;
 
@@ -156,7 +159,7 @@ export const summarizeForRequirement = async (
     // Cancellation must stop the whole run, not degrade to a plan without
     // a summary.
     if (coded.code === 'agent_cancelled') throw error;
-    return { ...empty, costUsd, error: { code: coded.code ?? 'agent_failed', message: coded.message } };
+    return { ...empty, costUsd, error: { code: normalizeErrorCode(coded.code), message: coded.message } };
   }
 };
 

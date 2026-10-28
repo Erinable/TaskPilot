@@ -1,5 +1,5 @@
 // Hint leak eval: measures the hint ladder's output filter
-// (src/main/hint_leak.ts) on answers a model really writes, with the real
+// (src/main/work_packages/hint_leak.ts) on answers a model really writes, with the real
 // Claude CLI. For each case it asks Tutor, with the app's prompt and schema,
 // for L4 and L5 on every step (the honest set: Tutor never sees the
 // reference), and asks a separate call to write three answers that give the
@@ -19,10 +19,10 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import * as courses from '../../src/main/courses.ts';
-import * as hintLeak from '../../src/main/hint_leak.ts';
+import * as courses from '../../src/main/courses/courses.ts';
+import * as hintLeak from '../../src/main/work_packages/hint_leak.ts';
 import * as tutor from '../../src/main/agents/tutor.ts';
-import { readTracked } from '../../src/main/repo_reader.ts';
+import { readTracked } from '../../src/main/repository/repo_reader.ts';
 import { HINT_CODE_LINES } from '../../src/shared/hint_ladder.ts';
 import { fixtureRepo, runAgent, runSuite } from '../shared/harness.ts';
 import { cases } from './cases.ts';

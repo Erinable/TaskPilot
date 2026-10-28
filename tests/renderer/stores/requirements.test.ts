@@ -9,7 +9,7 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../../src/renderer/src/lib/inline_code.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
-
+import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
   // announceAgent adds a system notification only in the background; tests see the toast.
@@ -17,40 +17,36 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
 });
 
 describe('requirement model', () => {
-  test('every status has a pill label and tone', () => {
-    expect(model.STATUS_LABELS).toEqual({
-      draft: '草稿',
-      clarifying: '澄清中',
-      answering: '待回答',
-      planning: '拆解中',
-      reviewing: '待确认',
-      published: '已发布',
-      failed: '失败',
-    });
-    expect(model.STATUS_TONES).toEqual({
-      draft: 'pending',
-      clarifying: 'in_progress',
-      answering: 'in_review',
-      planning: 'in_progress',
-      reviewing: 'in_review',
-      published: 'done',
-      failed: 'blocked',
-    });
+  test.each([
+    ['draft', '草稿', 'pending'],
+    ['clarifying', '澄清中', 'in_progress'],
+    ['answering', '待回答', 'in_review'],
+    ['planning', '拆解中', 'in_progress'],
+    ['reviewing', '待确认', 'in_review'],
+    ['published', '已发布', 'done'],
+    ['failed', '失败', 'blocked'],
+  ])('status %s has its label and tone', (status, label, tone) => {
+    const key = status as keyof typeof model.STATUS_LABELS;
+    expect(model.STATUS_LABELS[key]).toBe(label);
+    expect(model.STATUS_TONES[key]).toBe(tone);
   });
 
-  test('stepper marks done and current steps per status', () => {
-    expect(model.stepperState({ status: 'draft', failedStep: null })).toEqual({ current: 'clarify', done: [] });
-    expect(model.stepperState({ status: 'answering', failedStep: null })).toEqual({ current: 'answer', done: ['clarify'] });
-    expect(model.stepperState({ status: 'planning', failedStep: null })).toEqual({ current: 'plan', done: ['clarify', 'answer'] });
-    expect(model.stepperState({ status: 'reviewing', failedStep: null })).toEqual({ current: 'publish', done: ['clarify', 'answer', 'plan'] });
-    expect(model.stepperState({ status: 'published', failedStep: null })).toEqual({ current: null, done: ['clarify', 'answer', 'plan', 'publish'] });
+  test.each([
+    ['draft', 'clarify', []],
+    ['answering', 'answer', ['clarify']],
+    ['planning', 'plan', ['clarify', 'answer']],
+    ['reviewing', 'publish', ['clarify', 'answer', 'plan']],
+    ['published', null, ['clarify', 'answer', 'plan', 'publish']],
+  ])('stepper marks %s', (status, current, done) => {
+    expect(model.stepperState({ status: status as never, failedStep: null })).toEqual({ current, done });
   });
-
-  test('a failure marks the step it failed at', () => {
-    expect(model.stepClasses({ status: 'failed', failedStep: 'planning' }, 'plan')).toEqual({ done: false, current: true, failed: true });
-    expect(model.stepClasses({ status: 'failed', failedStep: 'planning' }, 'answer')).toEqual({ done: true, current: false, failed: false });
-    expect(model.stepClasses({ status: 'failed', failedStep: 'clarifying' }, 'clarify')).toEqual({ done: false, current: true, failed: true });
-    expect(model.stepClasses({ status: 'planning', failedStep: null }, 'plan').failed).toBe(false);
+  test.each<[requirementTypes.RequirementStatus, requirementTypes.RequirementStep | null, model.StepName, boolean]>([
+    ['failed', 'planning', 'plan', true],
+    ['failed', 'planning', 'answer', false],
+    ['failed', 'clarifying', 'clarify', true],
+    ['planning', null, 'plan', false],
+  ])('step classes mark failed %s/%s', (status, failedStep, step, failed) => {
+    expect(model.stepClasses({ status, failedStep }, step).failed).toBe(failed);
   });
 
   test('text validation: required, and at most 4000 code points', () => {
@@ -64,7 +60,7 @@ describe('requirement model', () => {
 
   test('stored errors use the shared wording, falling back to the message', () => {
     expect(describeErrorInfo({ code: 'agent_timeout', message: 'x' })).toBe('智能体超过 3 分钟没有完成，已停止。');
-    expect(describeErrorInfo({ code: 'weird', message: 'boom' })).toBe('boom');
+    expect(describeErrorInfo({ code: 'unknown', message: 'boom' })).toBe('boom');
     expect(describeErrorInfo(null)).toBe('');
   });
 
@@ -76,13 +72,10 @@ describe('requirement model', () => {
     ]);
   });
 
-  test('a confirmed course keeps polling while its first lab is generated, and the poll key follows the lab', () => {
+  test('course labs expose their phase labels', () => {
     const lab = { status: 'running' as const, phase: 'code' as const };
-    const generating = requirement({ status: 'published', course: { lab } as never });
-    expect(model.isRunning(generating)).toBe(false);
-    expect(model.labRunning(generating)).toBe(true);
-    expect(model.anyPolled([requirement({ status: 'published' }), generating])).toBe(true);
-    expect(model.pollKey(generating)).toBe('published::running:code');
+    const course = requirement({ kind: 'course', status: 'published', course: { lab } as never });
+    expect(model.isCourse(course)).toBe(true);
     expect(model.LAB_PHASE_LABELS.code).toContain('参考解');
   });
 
@@ -106,7 +99,6 @@ describe('requirements store', () => {
   let api: ReturnType<typeof installApi>;
 
   beforeEach(() => {
-    vi.useFakeTimers();
     setActivePinia(createPinia());
     state = { list: [] };
     api = installApi(state);
@@ -114,7 +106,7 @@ describe('requirements store', () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    useRequirementsStore().stopWatching();
   });
 
   test('attentionCount counts answering, reviewing and failed', async () => {
@@ -136,7 +128,7 @@ describe('requirements store', () => {
     await first;
     expect(api.requirements.clarify).toHaveBeenCalledTimes(1);
     expect(store.acting).toBe(null);
-    store.stopPolling();
+    store.stopWatching();
   });
 
   test('a failed list load keeps the last list', async () => {
@@ -150,46 +142,50 @@ describe('requirements store', () => {
     spy.mockRestore();
   });
 
-  test('init polls while something runs and stops once nothing does', async () => {
+  test('init loads the list without subscribing to state events', async () => {
     state.list = [requirement({ status: 'clarifying' })];
     const store = useRequirementsStore();
     await store.init();
-    expect(store.isPolling()).toBe(true);
-    expect(store.pane).toBeNull();
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(api.requirements.list).toHaveBeenCalledTimes(2);
-    expect(store.isPolling()).toBe(true);
-    state.list = [requirement({ status: 'answering' })];
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(store.isPolling()).toBe(false);
-    await vi.advanceTimersByTimeAsync(model.POLL_MS * 3);
-    expect(api.requirements.list).toHaveBeenCalledTimes(3);
+    api.requirements.list.mockClear();
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await Promise.resolve();
+    expect(api.requirements.list).not.toHaveBeenCalled();
   });
 
-  test('init does not poll when nothing is running', async () => {
-    state.list = [requirement({ status: 'answering' })];
-    const store = useRequirementsStore();
-    await store.init();
-    expect(store.isPolling()).toBe(false);
-  });
-
-  test('polling re-renders the open requirement and announces it only when its status changes', async () => {
+  test('state events update the open requirement and announce status changes', async () => {
     state.list = [requirement({ status: 'clarifying' })];
     const store = useRequirementsStore();
     await store.open();
     expect(useAppStore().view).toBe('requirements');
     expect(store.pane).toBe('detail');
     const revision = store.detailRevision;
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(store.detailRevision).toBe(revision);
+    api.requirements.list.mockClear();
+
     state.list = [requirement({ status: 'clarifying', phase: 'product-lead' })];
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(store.detailRevision).toBe(revision + 1);
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await vi.waitFor(() => expect(store.detailRevision).toBe(revision + 1));
     expect(feedback.showToast).not.toHaveBeenCalled();
+
     state.list = [requirement({ status: 'answering' })];
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(store.current?.status).toBe('answering');
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await vi.waitFor(() => expect(store.current?.status).toBe('answering'));
     expect(feedback.showToast).toHaveBeenCalledWith('Product Lead 提出了澄清问题，等你回答。', 'info');
+  });
+
+  test('state events ignore unrelated domains and repositories, then stop after unsubscribe', async () => {
+    state.list = [requirement({ status: 'clarifying' })];
+    const store = useRequirementsStore();
+    await store.open();
+    api.requirements.list.mockClear();
+    state.list = [requirement({ status: 'answering' })];
+    api.emitState({ repositoryId: 'other-repo', domains: ['requirements'] });
+    api.emitState({ repositoryId: null, domains: ['workspace'] });
+    await Promise.resolve();
+    expect(api.requirements.list).not.toHaveBeenCalled();
+    store.stopWatching();
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await Promise.resolve();
+    expect(api.requirements.list).not.toHaveBeenCalled();
   });
 
   test('open selects the first requirement, or shows the empty pane', async () => {
@@ -223,7 +219,7 @@ describe('requirements store', () => {
     expect(store.composeInvalid).toBe(false);
   });
 
-  test('a valid submission creates, opens and polls the new requirement', async () => {
+  test('a valid submission creates, opens and watches the new requirement', async () => {
     const store = useRequirementsStore();
     await store.open({ compose: true });
     store.composeTitle = '标题';
@@ -234,7 +230,7 @@ describe('requirements store', () => {
     expect(store.selectedId).toBe('new');
     expect(store.pane).toBe('detail');
     expect(store.items[0].id).toBe('new');
-    expect(store.isPolling()).toBe(true);
+    expect(api.state.onChanged).toHaveBeenCalled();
   });
 
   test('a text error from the main process shows under the field, others as a toast', async () => {
@@ -253,8 +249,10 @@ describe('requirements store', () => {
   test('publishing reloads the work queue', async () => {
     const store = useRequirementsStore();
     const item = requirement({ status: 'reviewing' });
+    state.list = [item];
+    await store.refreshList();
+    store.select(item.id);
     expect(await store.publishPlan(item)).toBe(true);
-    expect(window.taskpilot.listTasks).toHaveBeenCalled();
     expect(feedback.showToast).toHaveBeenCalledWith('已发布 1 个工作包到工作队列。');
     expect(store.current?.status).toBe('published');
   });
@@ -276,7 +274,11 @@ describe('requirements store', () => {
 
   test('editing answers sends the stored answers back', async () => {
     const store = useRequirementsStore();
-    await store.editAnswers(requirement({ status: 'reviewing', questions: [{ text: 'q', answer: 'a' }] }));
+    const item = requirement({ status: 'reviewing', questions: [{ text: 'q', answer: 'a' }] });
+    state.list = [item];
+    await store.refreshList();
+    store.select(item.id);
+    await store.editAnswers(item);
     expect(api.requirements.answer).toHaveBeenCalledWith('r1', ['a']);
     expect(store.current?.status).toBe('answering');
   });

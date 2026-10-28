@@ -15,8 +15,10 @@ import type * as agentRuntimeTypes from '@shared/agent_runtime.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 
-import { AGENT_IDS, CLI_OPTIONS } from '@shared/agent_runtime.ts';
+import { AGENT_IDS } from '@shared/agent_runtime.ts';
 import { isStepId } from '@shared/check_steps.ts';
+import { useAgentSettings } from './settings_agents.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 export type SettingsPage = model.SettingsPage;
 
 export const MAX_NAME_LENGTH = 40;
@@ -117,6 +119,24 @@ export const useSettingsStore = defineStore('settings', () => {
   const preferencesDraft = ref<settingsTypes.PreferencesInput | null>(null);
   const workspaceDraft = ref<WorkspaceDraft | null>(null);
 
+  const agentSettings = useAgentSettings(preferencesDraft);
+  const {
+    agentRuntimes,
+    agentRuntimeLoading,
+    agentRuntimeError,
+    agentConfigNotices,
+    agentFieldErrors,
+    refreshAgentRuntimes,
+    modelCatalogs,
+    modelCatalogLoading,
+    modelsForAgent,
+    modelsLoadingForAgent,
+    loadAgentModels,
+    setAgentCli,
+    setAgentModel,
+    setAgentThinking,
+    agentStatus,
+  } = agentSettings;
   const fillPreferences = (prefs: settingsTypes.PreferencesInput) => {
     preferencesDraft.value = clone(prefs);
     agentFieldErrors.value = {};
@@ -124,97 +144,6 @@ export const useSettingsStore = defineStore('settings', () => {
   };
   const fillWorkspace = (form: WorkspaceDraft) => {
     workspaceDraft.value = clone(form);
-  };
-  const agentRuntimes = ref<agentRuntimeTypes.AgentRuntimeStatus[]>([]);
-  const agentRuntimeLoading = ref(false);
-  const agentRuntimeError = ref<string | null>(null);
-  const agentConfigNotices = ref<Partial<Record<agentRuntimeTypes.AgentId, string>>>({});
-  const agentFieldErrors = ref<Partial<Record<agentRuntimeTypes.AgentId, AgentFieldError>>>({});
-  let agentRuntimeGeneration = 0;
-  const modelCatalogs = ref<Record<string, agentRuntimeTypes.CliModelCatalog>>({});
-  const modelCatalogLoading = ref<Record<string, boolean>>({});
-  const modelCatalogRequests = new Map<string, Promise<void>>();
-  const modelCatalogGenerations = new Map<string, number>();
-  const modelScope = (agent: agentRuntimeTypes.AgentId): agentRuntimeTypes.CliModelScope => (agent === 'coding-agent' ? 'coding' : 'analysis');
-  const modelsForAgent = (agent: agentRuntimeTypes.AgentId) => {
-    const cli = preferencesDraft.value?.agents[agent].cli;
-    return cli ? modelCatalogs.value[`${modelScope(agent)}:${cli}`] : undefined;
-  };
-  const modelsLoadingForAgent = (agent: agentRuntimeTypes.AgentId) => {
-    const cli = preferencesDraft.value?.agents[agent].cli;
-    return cli ? modelCatalogLoading.value[`${modelScope(agent)}:${cli}`] === true : false;
-  };
-  const loadAgentModels = async (agent: agentRuntimeTypes.AgentId, refresh = false) => {
-    const cli = preferencesDraft.value?.agents[agent].cli;
-    if (!cli) return;
-    const scope = modelScope(agent);
-    const key = `${scope}:${cli}`;
-    if (!refresh && modelCatalogs.value[key]) return;
-    const current = modelCatalogRequests.get(key);
-    if (!refresh && current) return current;
-    const generation = (modelCatalogGenerations.get(key) ?? 0) + 1;
-    modelCatalogGenerations.set(key, generation);
-    modelCatalogLoading.value[key] = true;
-    const reading = (async () => {
-      try {
-        const catalog = await call(window.taskpilot.agent.models({ cli, scope, refresh }));
-        if (modelCatalogGenerations.get(key) === generation) modelCatalogs.value[key] = catalog;
-      } catch (error) {
-        if (modelCatalogGenerations.get(key) === generation)
-          modelCatalogs.value[key] = {
-            ...(modelCatalogs.value[key] ?? { cli, scope, models: [], defaultModel: null, defaultThinking: null }),
-            issues: [`读取 CLI 模型目录失败：${describeError(error)}`],
-          };
-      } finally {
-        if (modelCatalogGenerations.get(key) === generation) {
-          modelCatalogLoading.value[key] = false;
-          modelCatalogRequests.delete(key);
-        }
-      }
-    })();
-    modelCatalogRequests.set(key, reading);
-    return reading;
-  };
-  const refreshAgentRuntimes = async () => {
-    const generation = ++agentRuntimeGeneration;
-    agentRuntimeLoading.value = true;
-    agentRuntimeError.value = null;
-    try {
-      const statuses = await call(window.taskpilot.agent.runtimes());
-      if (generation === agentRuntimeGeneration) agentRuntimes.value = statuses;
-    } catch (error) {
-      if (generation === agentRuntimeGeneration) agentRuntimeError.value = describeError(error);
-    } finally {
-      if (generation === agentRuntimeGeneration) agentRuntimeLoading.value = false;
-    }
-  };
-  const setAgentCli = (agent: agentRuntimeTypes.AgentId, cli: agentRuntimeTypes.CliId) => {
-    const current = preferencesDraft.value?.agents[agent];
-    const option = CLI_OPTIONS.find((entry) => entry.id === cli);
-    if (!current || !option || (agent !== 'coding-agent' && !option.analysis)) return;
-    const thinking = option.thinking.includes(current.thinking) ? current.thinking : 'default';
-    delete agentFieldErrors.value[agent];
-    preferencesDraft.value!.agents[agent] = { ...current, cli, thinking };
-    agentConfigNotices.value[agent] = thinking === current.thinking ? '' : `切换到 ${option.label} 后不支持原思考强度，已重置为默认。`;
-    loadAgentModels(agent).catch((error) => console.error(error));
-  };
-  const setAgentModel = (agent: agentRuntimeTypes.AgentId, modelName: string) => {
-    if (!preferencesDraft.value) return;
-    preferencesDraft.value.agents[agent].model = modelName;
-    delete agentFieldErrors.value[agent];
-  };
-  const setAgentThinking = (agent: agentRuntimeTypes.AgentId, thinking: agentRuntimeTypes.ThinkingLevel) => {
-    const current = preferencesDraft.value?.agents[agent];
-    const option = current && CLI_OPTIONS.find((entry) => entry.id === current.cli);
-    if (!current || !option?.thinking.includes(thinking)) return;
-    delete agentFieldErrors.value[agent];
-    preferencesDraft.value!.agents[agent] = { ...current, thinking };
-    agentConfigNotices.value[agent] = '';
-  };
-  const agentStatus = (agent: agentRuntimeTypes.AgentId) => {
-    const status = agentRuntimes.value.find((entry) => entry.agent === agent);
-    const draft = preferencesDraft.value?.agents[agent];
-    return status && draft && model.sameValue(status.config, draft) ? status : undefined;
   };
 
   // ========== Unsaved changes ==========
@@ -520,9 +449,13 @@ export const useSettingsStore = defineStore('settings', () => {
     if (activePage.value === 'environment') renderEnvironment().catch((error) => console.error(error));
   };
 
+  let loadGeneration = 0;
   const load = async () => {
+    const token = ++loadGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
     try {
       const [prefs, view] = await Promise.all([call(window.taskpilot.preferences.get()), call(window.taskpilot.workspace.get())]);
+      if (token !== loadGeneration || repositoryId !== useRepositoryIdentityStore().currentId) return;
       savedPreferences.value = preferencesForm(prefs);
       workspaceView.value = view;
       savedWorkspace.value = workspaceForm(view);
@@ -533,6 +466,7 @@ export const useSettingsStore = defineStore('settings', () => {
       repoFacts.value = null;
       if (activePage.value === 'courses') await useCoursesStore().load();
     } catch (error) {
+      if (token !== loadGeneration || repositoryId !== useRepositoryIdentityStore().currentId) return;
       console.error(error);
       showToast(`读取设置失败：${describeError(error)}`);
     }

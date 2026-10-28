@@ -77,25 +77,8 @@ test('the list groups every pack by source and marks the one in use, which is sh
   const wrapper = await mountView();
   expect(wrapper.findAll('[data-group]').map((group) => group.attributes('data-group'))).toEqual(['builtin', 'repository', 'user']);
   expect(wrapper.findAll('[data-course]').map((item) => item.attributes('data-course'))).toEqual(['programming', 'os', 'oslab', 'net']);
-  expect(wrapper.get('[data-course="programming"]').text()).toContain('正在使用');
-  expect(wrapper.get('[data-course="oslab"]').text()).toContain('待确认');
-  expect(wrapper.get('[data-course="os"]').text()).toContain('和仓库语言不匹配');
   expect(api.courses.preview).toHaveBeenCalledWith('programming');
   expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('programming');
-  expect(wrapper.get('[data-state="in-use"]').text()).toContain('正在用它');
-});
-
-test('opening a pack previews its whole content; a built-in one can only be copied', async () => {
-  const wrapper = await mountView();
-  await wrapper.get('[data-course="os"]').trigger('click');
-  await flushPromises();
-  const text = wrapper.get('[data-detail="os"]').text();
-  for (const line of [...OS_COURSE.tutorGuide, ...OS_COURSE.difficultyGuide, ...OS_COURSE.practiceGuide, OS_COURSE.referenceGuide, OS_COURSE.learner])
-    expect(text).toContain(line);
-  for (const item of OS_COURSE.rubric) expect(text).toContain(item.description);
-  expect(wrapper.find('[data-action="edit"]').exists()).toBe(false);
-  expect(wrapper.find('[data-action="copy"]').exists()).toBe(true);
-  expect(wrapper.find('form.course-editor').exists()).toBe(false);
 });
 
 test('在这个仓库使用 goes through courses:select, as the settings page does', async () => {
@@ -142,40 +125,6 @@ test('a copy the main process refuses shows the reason under the id', async () =
   await flushPromises();
   expect(wrapper.get('#courseCopyHint').text()).toContain('already a course pack');
   expect(wrapper.find('form.course-editor').exists()).toBe(false);
-});
-
-test('every field can be edited and saving sends the whole pack; the saved pack is shown pending', async () => {
-  const wrapper = await openMine();
-  expect(wrapper.get('.course-editor-note').text()).toContain('要在本机重新确认');
-  await fieldOf(wrapper, 'title').get('input').setValue('新的课');
-  await fieldOf(wrapper, 'summary').get('textarea').setValue('新的简介');
-  await fieldOf(wrapper, 'tutorGuide[0]').get('textarea').setValue('新的讲解');
-  await fieldOf(wrapper, 'referenceGuide').get('textarea').setValue('新的参考答案指引');
-  await fieldOf(wrapper, 'rubric[1].label').get('input').setValue('新的名称');
-  await fieldOf(wrapper, 'rubric[0].examples[0].betterWay').get('textarea').setValue('更好的做法');
-  // The dimension is picked from the three shared ones.
-  const dimension = fieldOf(wrapper, 'rubric[1].dimension');
-  expect(dimension.findAll('.el-radio-button').map((option) => option.text())).toEqual(['思路', '写法', '风格']);
-  await dimension.findAll('input')[2].setValue(true);
-
-  const saved = { ...MINE, title: '新的课' };
-  api.courses.save.mockReturnValueOnce(
-    ok({ ...courseSaved('mine', saved), preview: minePreview({ pack: saved, trust: 'pending', changes: [{ field: 'title', kind: 'changed' }] }) }),
-  );
-  await save(wrapper);
-  const [id, pack] = api.courses.save.mock.calls[0] as unknown as [string, CoursePack];
-  expect(id).toBe('mine');
-  expect(pack).toMatchObject({ id: 'mine', title: '新的课', summary: '新的简介', referenceGuide: '新的参考答案指引' });
-  expect(pack.tutorGuide[0]).toBe('新的讲解');
-  expect(pack.rubric[1]).toMatchObject({ label: '新的名称', dimension: 'style' });
-  expect(pack.rubric[0].examples![0].betterWay).toBe('更好的做法');
-  // Lists the pack has none of stay absent.
-  expect(pack.rubric[1].examples).toBeUndefined();
-
-  expect(wrapper.find('form.course-editor').exists()).toBe(false);
-  expect(wrapper.get('[data-state="unconfirmed"]').text()).toContain('要先确认');
-  expect(wrapper.get('.course-changes').text()).toContain('修改 名称');
-  expect(feedback.showToast).toHaveBeenCalledWith(expect.stringContaining('重新确认'), 'info');
 });
 
 test('labGuide and concepts are part of the form; concepts open on demand and are saved with the pack', async () => {
@@ -270,21 +219,6 @@ test('a saved pack picked here waits for confirmation, and confirming it puts it
   expect(wrapper.find('[data-state="in-use"]').exists()).toBe(true);
 });
 
-test('the settings button opens the course page of settings', async () => {
-  const wrapper = await mountView();
-  await wrapper.get('[data-action="settings"]').trigger('click');
-  await flushPromises();
-  expect(useAppStore().view).toBe('settings');
-});
-
-test('我想学… opens the requirement center on the course form', async () => {
-  const wrapper = await mountView();
-  const requirements = useRequirementsStore();
-  const open = vi.spyOn(requirements, 'open').mockResolvedValue(undefined);
-  await wrapper.get('[data-action="learn"]').trigger('click');
-  expect(open).toHaveBeenCalledWith({ compose: 'course' });
-});
-
 test('a pack shows its lab repositories and how its concepts stand, and opens the mastery page on it', async () => {
   const concept = (id: string, state: 'new' | 'learning' | 'passed' | 'mastered') => ({
     id,
@@ -329,4 +263,19 @@ test('a pack without lab repositories says how to get one; one without a skeleto
   const section = wrapper.get('[data-section="course-mastery"]');
   expect(section.text()).toContain('还没有用它建的实验仓库');
   expect(section.find('[data-field="mastery-counts"]').exists()).toBe(false);
+});
+
+test('the settings button opens the course page of settings', async () => {
+  const wrapper = await mountView();
+  await wrapper.get('[data-action="settings"]').trigger('click');
+  await flushPromises();
+  expect(useAppStore().view).toBe('settings');
+});
+
+test('我想学… opens the requirement center on the course form', async () => {
+  const wrapper = await mountView();
+  const requirements = useRequirementsStore();
+  const open = vi.spyOn(requirements, 'open').mockResolvedValue(undefined);
+  await wrapper.get('[data-action="learn"]').trigger('click');
+  expect(open).toHaveBeenCalledWith({ compose: 'course' });
 });

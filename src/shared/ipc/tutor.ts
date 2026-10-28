@@ -2,6 +2,8 @@
 // (../hint_ladder.ts) at a time.
 
 import type { ErrorInfo } from './envelope.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 export type TutorAnswer = {
   explanation: string;
@@ -29,3 +31,13 @@ export type TutorState = {
   maxLevel: number;
   error: ErrorInfo | null;
 };
+
+export const tutorContract = {
+  get: invoke<[id: string, stepIndex: number], TutorState>('tutor:get'),
+  // Opens hint level `level` (at most one above the highest opened);
+  // Tutor writes it in the background, poll get() for the answer.
+  ask: invoke<[id: string, stepIndex: number, level: number], TutorState>('tutor:ask'),
+  cancel: invoke<[id: string, stepIndex: number], boolean>('tutor:cancel'),
+  // Counts a copied snippet; returns the package's count.
+  copied: invoke<[id: string], number>('tutor:copied'),
+} satisfies Contract;

@@ -23,7 +23,7 @@ type PayloadOf<S> = S extends EventSpec<infer P> ? P : never;
 export type ClientOf<C extends Contract> = {
   [K in keyof C]: C[K] extends InvokeSpec
     ? (...args: ArgsOf<C[K]>) => Promise<IpcResult<ResultOf<C[K]>>>
-    : (listener: (payload: PayloadOf<C[K]>) => void) => void;
+    : (listener: (payload: PayloadOf<C[K]>) => void) => () => void;
 };
 
 // What the main process implements: as many arguments as declared, all unknown
@@ -33,10 +33,11 @@ export type HandlersOf<C extends Contract> = {
   [K in keyof C as C[K] extends InvokeSpec ? K : never]: (...args: Untrusted<ArgsOf<C[K]>>) => ResultOf<C[K]> | Promise<ResultOf<C[K]>>;
 };
 
-// Electron's ipcRenderer, or a stand-in exposing `invoke` and `on`.
+// Electron's ipcRenderer, or a stand-in exposing invoke and disposable events.
 export type IpcRendererLike = {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   on(channel: string, listener: (event: unknown, payload: unknown) => void): unknown;
+  removeListener(channel: string, listener: (event: unknown, payload: unknown) => void): unknown;
 };
 
 // One function per declared channel, and nothing else: ipcRenderer itself never
@@ -47,7 +48,11 @@ const buildClient = <C extends Contract>(contract: C, ipcRenderer: IpcRendererLi
       name,
       spec.kind === 'invoke'
         ? (...args: unknown[]) => ipcRenderer.invoke(spec.channel, ...args)
-        : (listener: (payload: unknown) => void) => void ipcRenderer.on(spec.channel, (_event, payload) => listener(payload)),
+        : (listener: (payload: unknown) => void) => {
+            const receive = (_event: unknown, payload: unknown) => listener(payload);
+            ipcRenderer.on(spec.channel, receive);
+            return () => void ipcRenderer.removeListener(spec.channel, receive);
+          },
     ]),
   ) as ClientOf<C>;
 

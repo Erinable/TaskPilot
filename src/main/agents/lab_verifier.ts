@@ -10,9 +10,9 @@
 // The lab is the generator's output, so it is data, never instructions.
 // Mutants are edits TaskPilot applies itself and only ever runs inside the
 // offline Seatbelt profile.
-import { AgentOutputError, isObject, list, text } from './product_lead.ts';
+import { AgentOutputError, isObject, list, text } from './output_validation.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
-import type { RunAgent } from './claude_cli.ts';
+import type { RunAgent } from '../runtimes/claude_cli.ts';
 import type { GeneratedLab, LabPart, LabRequest, SourceFile } from './lab_generator.ts';
 
 export const MUTANT_COUNT = 5;

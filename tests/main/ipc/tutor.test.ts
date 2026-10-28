@@ -1,13 +1,13 @@
-// IPC channels of the tutor domain (src/main/ipc/tutor.ts, src/main/tutor_service.ts):
+// IPC channels of the tutor domain (src/main/ipc/tutor.ts, src/main/work_packages/tutor_service.ts):
 // the hint ladder, its output filter, and what it records.
 import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import * as practice from '../../../src/main/practice.ts';
+import * as practice from '../../../src/main/work_packages/practice.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
-import { HIDDEN_CHECK_KIND } from '../../../src/main/lab_hidden.ts';
+import { HIDDEN_CHECK_KIND } from '../../../src/main/courses/lab_hidden.ts';
 import * as fixtures from './harness.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
@@ -59,7 +59,7 @@ test('tutor: levels open one at a time, each prompt sees the earlier ones, and L
   for (const level of [1, 2, 3, 4]) {
     await call(CHANNELS.tutorAsk, ID, 0, level);
     assert.equal((await fixtures.settleTutor(call, ID, 0)).opened, level);
-    assert.equal((await call(CHANNELS.getTask, ID)).data.referenceLock.unlocked, false);
+    assert.equal((await call(CHANNELS.tasksGet, ID)).data.referenceLock.unlocked, false);
   }
   const prompts = agentCalls.filter((item) => fixtures.stepOf(item.schema) === 'tutor').map((item) => item.prompt);
   assert.match(prompts[2], /<earlier_levels>\nL1: .+\n- [\s\S]*?\n\nL2: [\s\S]*<\/earlier_levels>/);
@@ -71,7 +71,7 @@ test('tutor: levels open one at a time, each prompt sees the earlier ones, and L
   await call(CHANNELS.tutorAsk, ID, 0, 5);
   const five = await fixtures.settleTutor(call, ID, 0);
   assert.deepEqual([five.opened, five.levels.map((item) => item.level)], [5, [1, 2, 3, 4, 5]]);
-  assert.deepEqual((await call(CHANNELS.getTask, ID)).data.referenceLock, { unlocked: true, reason: 'hints_used' });
+  assert.deepEqual((await call(CHANNELS.tasksGet, ID)).data.referenceLock, { unlocked: true, reason: 'hints_used' });
   assert.deepEqual(
     store.get(ID).hints.map((use) => use.level),
     [1, 2, 3, 4, 5],
@@ -80,7 +80,7 @@ test('tutor: levels open one at a time, each prompt sees the earlier ones, and L
   // Copies are counted; a release clears the ladder's records with the claim.
   assert.equal((await call(CHANNELS.tutorCopied, ID)).data, 1);
   assert.equal(store.get(ID).snippetCopies, 1);
-  await call(CHANNELS.transition, ID, 'release');
+  await call(CHANNELS.packagesTransition, ID, 'release');
   assert.deepEqual([store.get(ID).hints, store.get(ID).snippetCopies], [[], 0]);
 });
 

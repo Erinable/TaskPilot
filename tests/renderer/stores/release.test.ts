@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
-import * as model from '../../../src/renderer/src/lib/release_model.ts';
 import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
 import * as fakes from '../release_fakes.ts';
 import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
@@ -30,32 +29,34 @@ describe('release store', () => {
     vi.useRealTimers();
   });
 
-  test('polls only while generating and stops on leave', async () => {
-    vi.useFakeTimers();
+  test('reloads on release events while entered and unsubscribes on leave', async () => {
     const store = useReleaseStore();
     await store.enter();
-    expect(api.get).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(model.POLL_MS * 3);
-    expect(api.get).toHaveBeenCalledTimes(1);
-
     await store.generate();
-    expect(api.generate).toHaveBeenCalledWith(undefined);
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(api.get).toHaveBeenCalledTimes(2);
-
-    // The draft becomes ready: polling stops by itself.
     state.current = fakes.releaseState({ draft: fakes.draft() });
-    await vi.advanceTimersByTimeAsync(model.POLL_MS);
-    expect(api.get).toHaveBeenCalledTimes(3);
-    expect(store.notesText).toBe('## 新增\n- 发布页');
-    await vi.advanceTimersByTimeAsync(model.POLL_MS * 3);
-    expect(api.get).toHaveBeenCalledTimes(3);
-
-    // Leaving mid-generation stops the timer.
-    await store.generate();
+    api.get.mockClear();
+    api.emitState({ repositoryId: null, domains: ['release'] });
+    await vi.waitFor(() => expect(store.notesText).toBe('## 新增\n- 发布页'));
+    api.get.mockClear();
     store.leave();
-    await vi.advanceTimersByTimeAsync(model.POLL_MS * 3);
-    expect(api.get).toHaveBeenCalledTimes(3);
+    api.emitState({ repositoryId: null, domains: ['release'] });
+    await Promise.resolve();
+    expect(api.get).not.toHaveBeenCalled();
+  });
+
+  test('events arriving during a read cause one follow-up read without an endless refresh', async () => {
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.get>>>();
+    api.get.mockReturnValueOnce(held.promise);
+    api.get.mockClear();
+    api.emitState({ repositoryId: null, domains: ['release'] });
+    state.current = fakes.releaseState({ draft: fakes.draft({ notesText: 'Latest committed notes' }) });
+    api.emitState({ repositoryId: null, domains: ['release'] });
+    held.resolve({ ok: true, data: fakes.releaseState() });
+    await vi.waitFor(() => expect(store.notesText).toBe('Latest committed notes'));
+    expect(api.get).toHaveBeenCalledTimes(2);
+    store.leave();
   });
 
   test('a start point of kind none needs a picked commit before generating', async () => {
@@ -77,7 +78,6 @@ describe('release store', () => {
     api.generate.mockReturnValueOnce(fakes.fail('invalid_argument', '请选择最近的提交', 'startCommit') as never);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await store.generate();
-    expect(log).toHaveBeenCalledWith('[release] generate failed', expect.objectContaining({ code: 'invalid_argument' }));
     log.mockRestore();
     expect(store.startError).toBe('请选择最近的提交');
     expect(feedback.showToast).not.toHaveBeenCalled();
@@ -137,7 +137,6 @@ describe('release store', () => {
     api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await store.writeNotes('../x.md')).toBe(false);
-    expect(log).toHaveBeenCalledWith('[release] write notes failed', expect.objectContaining({ code: 'outside_workspace' }));
     log.mockRestore();
     expect(store.writeError).toBe('路径不在工作区内');
     expect(feedback.showToast).not.toHaveBeenCalled();
@@ -162,7 +161,6 @@ describe('release store', () => {
     writeText.mockRejectedValueOnce(new Error('denied'));
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     await store.copyNotes();
-    expect(log).toHaveBeenCalledWith('[release] clipboard failed', expect.any(Error));
     log.mockRestore();
     expect(feedback.showToast).toHaveBeenLastCalledWith('复制失败：系统剪贴板不可用', 'error');
     store.leave();

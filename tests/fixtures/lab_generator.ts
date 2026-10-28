@@ -55,7 +55,7 @@ export const RR_SPEC = {
   ],
 };
 
-// Real C: the self-check (src/main/lab_verify.ts) builds and runs it.
+// Real C: the self-check (src/main/courses/lab_verify.ts) builds and runs it.
 const STARTER = [
   '#include <stdio.h>',
   '',

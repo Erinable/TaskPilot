@@ -4,6 +4,7 @@ import { vi } from 'vitest';
 
 import type * as releaseTypes from '../../src/shared/ipc/release.ts';
 import type * as requirementTypes from '../../src/shared/ipc/requirements.ts';
+import { stateEvents } from './ipc_fakes.ts';
 
 export const plan = (overrides: Partial<releaseTypes.ReleasePlan> = {}): releaseTypes.ReleasePlan => ({
   bump: 'minor',
@@ -60,6 +61,7 @@ export const fail = (code: string, message: string, field?: string) => Promise.r
 
 // `state.current` is what release.get() returns; generate/updateDraft merge into it.
 export const installReleaseApi = (state: { current: releaseTypes.ReleaseState }) => {
+  const events = stateEvents();
   const release = {
     get: vi.fn(() => ok(state.current)),
     recentCommits: vi.fn(() =>
@@ -103,8 +105,8 @@ export const installReleaseApi = (state: { current: releaseTypes.ReleaseState })
   };
   // The milestone form lists published requirements.
   const requirements = { list: vi.fn(() => ok<requirementTypes.Requirement[]>([])) };
-  (window as unknown as { taskpilot: unknown }).taskpilot = { release, requirements };
-  return release;
+  (window as unknown as { taskpilot: unknown }).taskpilot = { release, requirements, state: { onChanged: vi.fn(events.onChanged) } };
+  return Object.assign(release, { emitState: events.emit });
 };
 
 const finishedRelease = (state: { current: releaseTypes.ReleaseState }) => release({ id: 'rel2', version: state.current.draft?.plan?.nextVersion ?? '0.2.0' });

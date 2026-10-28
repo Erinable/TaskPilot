@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Requirement center. Everything Product Lead wrote is rendered as text: it
 // is model output and must never become markup.
+import { onUnmounted } from 'vue';
+
 import AppIcon from '@/components/AppIcon.vue';
 import ComposeForm from '@/components/requirements/ComposeForm.vue';
 import RequirementDetail from '@/components/requirements/RequirementDetail.vue';
@@ -8,6 +10,7 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import * as model from '@/components/requirements/requirement_model.ts';
 
 const store = useRequirementsStore();
+onUnmounted(() => store.stopWatching());
 </script>
 
 <template>

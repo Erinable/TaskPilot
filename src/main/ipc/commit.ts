@@ -1,11 +1,12 @@
 // Committing a finished package (../git_commit.ts).
-import { failWith, requireString } from '../coded_error.ts';
-import * as gitCommit from '../git_commit.ts';
+import { logger } from '../infrastructure/logger.ts';
+import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import * as gitCommit from '../repository/git_commit.ts';
 import { registerContract } from './handler.ts';
 import { commitContract } from '../../shared/ipc/commit.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
-import type { AppContext } from '../app_context.ts';
-import type { TaskDefinition } from '../tasks.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { TaskDefinition } from '../work_packages/tasks.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // Only once the work is accepted: committing earlier would put unreviewed
@@ -37,7 +38,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if (!Array.isArray(rawFiles) || rawFiles.some((file) => typeof file !== 'string')) failWith('files must be a list of paths', 'invalid_argument');
       const files = rawFiles as string[];
       const commit = await gitCommit.commitPaths(ctx.requireRoot(), task.fileScope, files, message);
-      console.debug(`[commit] package=${task.id} files=${files.length} commit=${commit.slice(0, 8)}`);
+      logger.debug(`[commit] package=${task.id} files=${files.length} commit=${commit.slice(0, 8)}`);
       return { commit, files };
     },
   });

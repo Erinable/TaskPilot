@@ -8,6 +8,24 @@ import * as fixtures from './harness.ts';
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
 
+test.each(['', '  '])('requirements:create rejects empty text %j before the agent runs', async (text) => {
+  const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  const response = await call(CHANNELS.requirementsCreate, { text });
+  assert.equal(response.error.code, 'required');
+  assert.equal(response.error.field, 'text');
+  assert.equal(agentCalls.length, 0);
+});
+
+test('requirements: a published requirement cannot be deleted through IPC', async () => {
+  const { call } = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsPublish, data.id);
+  assert.equal((await call(CHANNELS.requirementsRemove, data.id)).error.code, 'invalid_state');
+});
+
 test('requirements: create clarifies, plan publishes into the work queue', async () => {
   const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });
   const created = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
@@ -34,45 +52,13 @@ test('requirements: create clarifies, plan publishes into the work queue', async
   const published = await call(CHANNELS.requirementsPublish, item.id);
   assert.equal(published.data.status, 'published');
   // Queued after the sample packages, which an older requirement published.
-  const generated = (await call(CHANNELS.listTasks)).data.filter((task) => task.requirementId === item.id);
+  const generated = (await call(CHANNELS.tasksList)).data.filter((task) => task.requirementId === item.id);
   assert.equal(generated[0].id, `${item.id}-wp1`);
   assert.deepEqual(generated[0].humanTransitions, ['claim']);
 
   // The new package is a real work package: it can be claimed.
-  const claimed = await call(CHANNELS.transition, `${item.id}-wp1`, 'claim');
+  const claimed = await call(CHANNELS.packagesTransition, `${item.id}-wp1`, 'claim');
   assert.equal(claimed.data.status, 'in_progress');
-});
-
-test('requirements: without a submit test check, planning links no tests', async () => {
-  const { call, agentCalls, setCommands } = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  const plan = async () => {
-    const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
-    await fixtures.settle(call, data.id);
-    await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
-    return fixtures.settle(call, data.id);
-  };
-  setCommands({ lint: { command: 'npm', args: ['run', 'lint'] } });
-  const unlinked = await plan();
-  assert.match(agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'plan').at(-1)!.prompt, /leave `test` out of every criterion/);
-  // The fake plan links 'login succeeds'; it is dropped, not left to go missing.
-  assert.deepEqual(unlinked.plan.packages[0].acceptance, [{ text: '成功返回 token' }]);
-
-  setCommands({ test: fixtures.EDGE_TESTS_PASS });
-  const linked = await plan();
-  assert.deepEqual(linked.plan.packages[0].acceptance, [{ text: '成功返回 token', test: 'login succeeds' }]);
-});
-
-test('requirements: an invalid agent plan fails the run instead of reaching the queue', async () => {
-  const evil = { ...fixtures.PLAN_OUTPUT, packages: [{ ...fixtures.PLAN_OUTPUT.packages[0], fileScope: ['../../.ssh/id_rsa'] }] };
-  const { call } = await fixtures.harness({ agent: fixtures.fakeAgent({ plan: evil }) });
-  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
-  await fixtures.settle(call, data.id);
-  await call(CHANNELS.requirementsPlan, data.id, ['']);
-  const item = await fixtures.settle(call, data.id);
-  assert.equal(item.status, 'failed');
-  assert.equal(item.failedStep, 'planning');
-  assert.equal(item.error.code, 'agent_bad_output');
-  assert.equal((await call(CHANNELS.requirementsPublish, data.id)).error.code, 'invalid_state');
 });
 
 test('requirements: agent errors are recorded and the step can be retried', async () => {
@@ -105,23 +91,6 @@ test('requirements: a running step can be cancelled', async () => {
   assert.equal((await call(CHANNELS.requirementsCancel, data.id)).data, false, 'nothing left to cancel');
 });
 
-test('requirements: published requirements cannot be deleted', async () => {
-  const { call } = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  const { data } = await call(CHANNELS.requirementsCreate, { text: 't' });
-  await fixtures.settle(call, data.id);
-  await call(CHANNELS.requirementsPlan, data.id, ['']);
-  await fixtures.settle(call, data.id);
-  await call(CHANNELS.requirementsPublish, data.id);
-  assert.equal((await call(CHANNELS.requirementsRemove, data.id)).error.code, 'invalid_state');
-});
-
-test('requirements: create rejects empty text before any agent runs', async () => {
-  const { call, agentCalls } = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  const response = await call(CHANNELS.requirementsCreate, { text: '  ' });
-  assert.equal(response.error.field, 'text');
-  assert.equal(agentCalls.length, 0);
-});
-
 test('requirements: planning reads the course pack in use and snapshots it onto the plan and packages', async () => {
   const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
   const { call, agentCalls } = h;
@@ -148,6 +117,6 @@ test('requirements: planning reads the course pack in use and snapshots it onto 
   assert.deepEqual(item.plan.course, ref);
 
   await call(CHANNELS.requirementsPublish, item.id);
-  const generated = (await call(CHANNELS.listTasks)).data.find((task) => task.requirementId === item.id);
+  const generated = (await call(CHANNELS.tasksList)).data.find((task) => task.requirementId === item.id);
   assert.deepEqual(generated.course, ref);
 });

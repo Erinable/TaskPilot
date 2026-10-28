@@ -5,16 +5,18 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { IpcError, call } from '@/lib/ipc.ts';
+import { call } from '@/lib/ipc.ts';
+import type { IpcError } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
 import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/components/requirements/requirement_model.ts';
+import { createRequirementsCourseActions } from './requirements_course.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
-import type { CoursePack } from '@shared/course_pack.ts';
-import type { GoalForm, PathEntry } from '@shared/course_plan.ts';
+import type { GoalForm } from '@shared/course_plan.ts';
 
 export type RequirementPane = 'new' | 'detail' | 'empty';
 
@@ -24,15 +26,16 @@ export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAva
 export const useRequirementsStore = defineStore('requirements', () => {
   // ========== List ==========
   const items = ref<requirementTypes.Requirement[]>([]);
+  let readGeneration = 0;
   // Requirements waiting on the human, for the sidebar badge.
   const attentionCount = computed(() => items.value.filter(model.needsAttention).length);
 
   const refreshList = async () => {
+    const token = readGeneration;
     try {
-      items.value = await call(window.taskpilot.requirements.list());
+      const next = await call(window.taskpilot.requirements.list());
+      if (token === readGeneration) items.value = next;
     } catch (error) {
-      // Keep the last list: clearing it would drop the badge and the
-      // notifications' read state over one failed poll.
       console.error('Failed to load requirements', error);
     }
   };
@@ -47,13 +50,14 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const pane = ref<RequirementPane | null>(null);
   const selectedId = ref<string | null>(null);
   const composing = ref(false);
-  // The requirement the detail pane shows. A snapshot, replaced only when the
-  // page re-renders it, so polling never disturbs answers being typed.
+  // The requirement detail pane keeps a snapshot so state events never
+  // disturb answers being typed.
   const current = ref<requirementTypes.Requirement | null>(null);
   // Bumped on every detail render; the pane is keyed on it to reset its inputs.
   const detailRevision = ref(0);
 
   const renderDetail = (item: requirementTypes.Requirement) => {
+    if (selectedId.value !== item.id) return;
     current.value = item;
     pane.value = 'detail';
     detailRevision.value += 1;
@@ -100,7 +104,6 @@ export const useRequirementsStore = defineStore('requirements', () => {
     composeKind.value = kind;
     composing.value = true;
     selectedId.value = null;
-    stopPolling();
     pane.value = 'new';
     composeStatus.value = { text: '', error: false };
     composeInvalid.value = false;
@@ -126,17 +129,21 @@ export const useRequirementsStore = defineStore('requirements', () => {
       return;
     }
     submitting.value = true;
+    const token = contextGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
     try {
       const course = composeKind.value === 'course' ? { course: { ...composeForm.value } } : {};
       const item = await call(window.taskpilot.requirements.create({ title: composeTitle.value, text, ...course }));
+      if (repositoryId !== useRepositoryIdentityStore().currentId) return;
+      upsert(item);
+      if (token !== contextGeneration || !composing.value) return;
       composeTitle.value = '';
       composeText.value = '';
       composing.value = false;
       contextGeneration += 1;
       selectedId.value = item.id;
-      upsert(item);
       renderDetail(item);
-      startPolling();
+      startWatching();
     } catch (error) {
       if ((error as IpcError).field === 'text') composeStatus.value = { text: describeError(error), error: true };
       else {
@@ -160,13 +167,15 @@ export const useRequirementsStore = defineStore('requirements', () => {
   ) => {
     if (acting.value) return;
     acting.value = step;
+    const token = readGeneration;
     try {
       // A project's plan request carries no choice argument at all.
       const planned = () => (choice ? window.taskpilot.requirements.plan(item.id, answers, choice) : window.taskpilot.requirements.plan(item.id, answers));
       const next = await call(step === 'plan' ? planned() : window.taskpilot.requirements.clarify(item.id));
+      if (token !== readGeneration) return;
       upsert(next);
       renderDetail(next);
-      startPolling();
+      startWatching();
     } catch (error) {
       console.error(error);
       showToast(`操作失败：${describeError(error)}`);
@@ -179,6 +188,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const editAnswers = async (item: requirementTypes.Requirement) => {
     if (acting.value) return;
     acting.value = 'edit';
+    const token = readGeneration;
     try {
       const next = await call(
         window.taskpilot.requirements.answer(
@@ -186,6 +196,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
           item.questions.map((question) => question.answer ?? ''),
         ),
       );
+      if (token !== readGeneration) return;
       upsert(next);
       renderDetail(next);
     } catch (error) {
@@ -198,8 +209,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   // Resolves false when publishing failed, so the button can be used again.
   const publishPlan = async (item: requirementTypes.Requirement) => {
+    const token = readGeneration;
     try {
       const next = await call(window.taskpilot.requirements.publish(item.id));
+      if (token !== readGeneration) return false;
       upsert(next);
       renderDetail(next);
       await useTasksStore().reloadQueue();
@@ -229,11 +242,16 @@ export const useRequirementsStore = defineStore('requirements', () => {
       danger: true,
     });
     if (!confirmed) return;
+    const token = readGeneration;
     try {
       await call(window.taskpilot.requirements.remove(item.id));
-      selectedId.value = null;
+      if (token !== readGeneration) return;
       await refreshList();
-      pane.value = 'empty';
+      if (selectedId.value === item.id) {
+        selectedId.value = null;
+        current.value = null;
+        pane.value = 'empty';
+      }
       showToast('需求已删除。');
     } catch (error) {
       console.error(error);
@@ -243,121 +261,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   const showQueue = () => useAppStore().navigate('queue');
 
-  // ========== Course path and draft ==========
-  const courseBusy = ref(false);
-
-  const courseAction = async (action: () => Promise<requirementTypes.Requirement>, failure: string) => {
-    courseBusy.value = true;
-    try {
-      const next = await action();
-      upsert(next);
-      renderDetail(next);
-      return next;
-    } catch (error) {
-      console.error(error);
-      showToast(`${failure}：${describeError(error)}`);
-      return null;
-    } finally {
-      courseBusy.value = false;
-    }
-  };
-
-  // The learner reordered the path or marked a concept.
-  const savePath = (item: requirementTypes.Requirement, path: PathEntry[]) =>
-    courseAction(() => call(window.taskpilot.requirements.coursePath(item.id, path)), '保存路径失败');
-
-  const confirmPath = async (item: requirementTypes.Requirement) => {
-    const next = await courseAction(() => call(window.taskpilot.requirements.publish(item.id)), '确认路径失败');
-    if (next) showToast('学习路径已确认。');
-  };
-
-  // ========== First lab ==========
-  // The estimate shown before generating; nothing runs until the learner
-  // confirms. `conceptId` is another concept the learner picked after a
-  // self-check that ended in needs_review; null is the path's next one.
-  const labEstimate = ref<{ requirementId: string; conceptId: string | null; estimate: requirementTypes.LabEstimate } | null>(null);
-
-  const loadLabEstimate = async (item: requirementTypes.Requirement, conceptId: string | null = null) => {
-    courseBusy.value = true;
-    try {
-      const estimate = await call(window.taskpilot.requirements.labEstimate(item.id, conceptId ?? undefined));
-      labEstimate.value = { requirementId: item.id, conceptId, estimate };
-    } catch (error) {
-      console.error(error);
-      showToast(`预估费用失败：${describeError(error)}`);
-    } finally {
-      courseBusy.value = false;
-    }
-  };
-
-  const generateLab = async (item: requirementTypes.Requirement) => {
-    const conceptId = labEstimate.value?.requirementId === item.id ? labEstimate.value.conceptId : null;
-    const next = await courseAction(() => call(window.taskpilot.requirements.labGenerate(item.id, conceptId ?? undefined)), '生成 lab 失败');
-    if (!next) return;
-    labEstimate.value = null;
-    startPolling();
-  };
-
-  // ========== Lab repository ==========
-  // Adds the lab whose self-check passed to the open lab repository as its
-  // next stage. The first lab creates the repository instead, which is a
-  // switch (stores/repositories.ts placeLab).
-  const addLab = async (item: requirementTypes.Requirement) => {
-    const next = await courseAction(() => call(window.taskpilot.requirements.labPlace(item.id)), '写入实验仓库失败');
-    if (!next) return false;
-    await useTasksStore().reloadQueue();
-    showToast(`已把「${next.course?.lab?.lab?.title ?? 'lab'}」加入实验仓库。`);
-    return true;
-  };
-
-  // The next lab of the open lab repository: the estimate first, as for
-  // the first lab, in the requirement center.
-  const nextLab = async (item: requirementTypes.Requirement) => {
-    await open({ id: item.id });
-    await loadLabEstimate(item);
-  };
-
-  // Saves the edited draft into the global folder. A refusal naming a field
-  // is returned for the editor to show there.
-  const saveDraft = async (item: requirementTypes.Requirement, pack: CoursePack) => {
-    courseBusy.value = true;
-    try {
-      const saved = await call(window.taskpilot.requirements.courseSaveDraft(item.id, pack));
-      upsert(saved.requirement);
-      renderDetail(saved.requirement);
-      draftSaved.value = { requirementId: item.id, ref: saved.ref, pack };
-      return null;
-    } catch (error) {
-      console.error(error);
-      if (error instanceof IpcError && error.field && error.code !== 'unknown') return { field: error.field, message: describeError(error) };
-      showToast(`保存课程包失败：${describeError(error)}`);
-      return null;
-    } finally {
-      courseBusy.value = false;
-    }
-  };
-
-  // The pack just saved from the draft, shown in full to confirm.
-  const draftSaved = ref<{ requirementId: string; ref: requirementTypes.CourseDraftSaved['ref']; pack: CoursePack } | null>(null);
-
-  // Confirms the saved pack at the content shown, then plans the path with it.
-  const confirmDraft = async (item: requirementTypes.Requirement) => {
-    const saved = draftSaved.value;
-    if (!saved || saved.requirementId !== item.id) return;
-    const next = await courseAction(() => call(window.taskpilot.requirements.courseConfirmDraft(item.id, saved.ref.contentHash)), '确认课程包失败');
-    if (!next) return;
-    draftSaved.value = null;
-    showToast(`已确认课程包「${saved.pack.title}」，开始规划学习路径。`);
-    await runStep(next, 'plan');
-  };
-
-  // ========== Polling ==========
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const stopPolling = () => {
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = null;
-  };
+  // ========== State events ==========
+  let unsubscribe: (() => void) | null = null;
+  let reading = false;
+  let queued = false;
 
   const announceLab = (lab: requirementTypes.LabGeneration) => {
     if (lab.status === 'ready') announceAgent(`lab「${lab.lab?.title ?? ''}」生成好了，自验证已通过。`, 'info');
@@ -379,31 +286,53 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);
   };
 
-  // While any requirement is running, re-reads the list; re-renders the open
-  // one only when its status changes, so typing in answers isn't disturbed.
-  const tick = async () => {
-    const before = new Map(items.value.map((item) => [item.id, model.pollKey(item)]));
-    await refreshList();
-    const open = items.value.find((item) => item.id === selectedId.value);
-    if (open && !composing.value && useAppStore().view === 'requirements' && before.get(open.id) !== model.pollKey(open)) {
-      renderDetail(open);
-      if (!model.isRunning(open) && !model.labRunning(open)) announce(open);
+  const stateKey = (item: requirementTypes.Requirement) =>
+    `${item.status}:${item.phase ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
+  const readState = async () => {
+    if (reading) {
+      queued = true;
+      return;
     }
-    if (model.anyPolled(items.value))
-      pollTimer = setTimeout(() => {
-        tick().catch((error) => console.error(error));
-      }, model.POLL_MS);
-    else pollTimer = null;
+    const token = readGeneration;
+    reading = true;
+    try {
+      const before = new Map(items.value.map((item) => [item.id, stateKey(item)]));
+      await refreshList();
+      if (token !== readGeneration) return;
+      const open = items.value.find((item) => item.id === selectedId.value);
+      if (open && !composing.value && useAppStore().view === 'requirements' && before.get(open.id) !== stateKey(open)) {
+        renderDetail(open);
+        if (!model.isRunning(open) && open.course?.lab?.status !== 'running') announce(open);
+      }
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
+        readState().catch((error) => console.error(error));
+      }
+    }
   };
 
-  const startPolling = () => {
-    stopPolling();
-    pollTimer = setTimeout(() => {
-      tick().catch((error) => console.error(error));
-    }, model.POLL_MS);
+  const startWatching = () => {
+    if (useAppStore().view !== 'requirements') return;
+    if (unsubscribe) {
+      readState().catch((error) => console.error(error));
+      return;
+    }
+    const repositories = useRepositoryIdentityStore();
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (change.domains.includes('requirements')) readState().catch((error) => console.error(error));
+    });
+    readState().catch((error) => console.error(error));
   };
 
-  const isPolling = () => pollTimer !== null;
+  const stopWatching = () => {
+    readGeneration += 1;
+    queued = false;
+    unsubscribe?.();
+    unsubscribe = null;
+  };
 
   // ========== Navigation ==========
   // `compose: 'course'` opens the "我想学…" form.
@@ -416,14 +345,16 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (target) select(target);
     else if (items.value.length) select(items.value[0].id);
     else pane.value = 'empty';
-    if (model.anyPolled(items.value)) startPolling();
+    startWatching();
   };
 
   // Loads counts for the sidebar badge on startup, without opening the view.
   const init = async () => {
     await refreshList();
-    if (model.anyPolled(items.value)) startPolling();
+    // Startup only loads the badge; the view subscribes through open().
   };
+
+  const courseActions = createRequirementsCourseActions({ upsert, renderDetail, open, startWatching, runStep, revision: () => readGeneration });
 
   return {
     // List
@@ -458,24 +389,21 @@ export const useRequirementsStore = defineStore('requirements', () => {
     cancelRun,
     removeRequirement,
     showQueue,
-    // Course path and draft
-    courseBusy,
-    savePath,
-    confirmPath,
-    saveDraft,
-    draftSaved,
-    confirmDraft,
-    // First lab
-    labEstimate,
-    loadLabEstimate,
-    generateLab,
-    // Lab repository
-    addLab,
-    nextLab,
-    // Polling
-    startPolling,
-    stopPolling,
-    isPolling,
+    // Course path, draft and lab actions
+    courseBusy: courseActions.courseBusy,
+    savePath: courseActions.savePath,
+    confirmPath: courseActions.confirmPath,
+    saveDraft: courseActions.saveDraft,
+    draftSaved: courseActions.draftSaved,
+    confirmDraft: courseActions.confirmDraft,
+    labEstimate: courseActions.labEstimate,
+    loadLabEstimate: courseActions.loadLabEstimate,
+    generateLab: courseActions.generateLab,
+    addLab: courseActions.addLab,
+    nextLab: courseActions.nextLab,
+    // State events
+    startWatching,
+    stopWatching,
     // Navigation
     open,
     init,

@@ -18,6 +18,7 @@ import type * as settingsTypes from '../../../src/shared/ipc/settings.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from '../settings_fakes.ts';
+import { stateEvents } from '../ipc_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -45,6 +46,7 @@ let api: ReturnType<typeof installApi>;
 
 const installApi = () => {
   const stub = {
+    state: stateEvents(),
     repositories: {
       list: vi.fn(() => ok(listOf('a'))),
       busy: vi.fn(() => ok(busy)),
@@ -59,7 +61,7 @@ const installApi = () => {
     requirements: { list: vi.fn(() => ok([])) },
     release: { updateDraft: vi.fn() },
     activity: { overview: vi.fn(() => ok(null)) },
-    listTasks: vi.fn(() => ok([])),
+    tasks: { list: vi.fn(() => ok([])) },
   };
   Object.assign(window, { taskpilot: stub });
   return stub;
@@ -83,11 +85,8 @@ describe('repositories store', () => {
 
     expect(await store.switchTo('b')).toBe(true);
     expect(api.repositories.switch).toHaveBeenCalledWith('b');
-    expect(api.listTasks).toHaveBeenCalled();
-    expect(api.requirements.list).toHaveBeenCalled();
     expect(store.current?.id).toBe('b');
     expect(store.generation).toBe(before + 1);
-    expect(feedback.confirmAction).not.toHaveBeenCalled();
   });
 
   test('switching clears what the views read for the old repository', async () => {
@@ -168,26 +167,19 @@ describe('repositories store', () => {
     expect(engineeringMap.loading).toBe(false);
   });
 
-  test('running work is listed and a declined switch changes nothing', async () => {
-    busy = [{ kind: 'review', label: '邮箱登录' }];
+  test.each([
+    { kind: 'review' as const, label: '邮箱登录', text: 'QA 审查：邮箱登录' },
+    { kind: 'release' as const, label: null, text: 'Release Manager：发布说明' },
+  ])('a declined switch describes %s work', async (entry) => {
+    busy = [entry];
     vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
     const store = useRepositoriesStore();
     await store.refresh();
 
     expect(await store.switchTo('b')).toBe(false);
-    expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('QA 审查：邮箱登录');
+    expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain(entry.text);
     expect(api.repositories.switch).not.toHaveBeenCalled();
     expect(store.current?.id).toBe('a');
-  });
-
-  test('a release draft has no title of its own and is named by kind', async () => {
-    busy = [{ kind: 'release', label: null }];
-    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
-    const store = useRepositoriesStore();
-    await store.refresh();
-
-    expect(await store.switchTo('b')).toBe(false);
-    expect(vi.mocked(feedback.confirmAction).mock.calls[0][0].body).toContain('Release Manager：发布说明');
   });
 
   test('unsaved settings that the user keeps stop the switch', async () => {

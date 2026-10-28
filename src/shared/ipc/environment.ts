@@ -3,6 +3,8 @@
 import type { IpcFailure } from './envelope.ts';
 import type { RunSummary } from './workspace.ts';
 import type { StepKind } from '../check_steps.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 // A step kind the plan names a script for; which ones depends on the
 // repository's setup adapter.
@@ -102,3 +104,12 @@ export type EnvPlanOptions = { withFailure?: boolean };
 
 // env:apply writes the scripts into workspace.json and returns the session.
 export type EnvApplyResult = EnvState;
+
+export const envContract = {
+  get: invoke<[], EnvState>('env:get'),
+  plan: invoke<[options?: EnvPlanOptions], EnvState>('env:plan'),
+  setAllowScripts: invoke<[allow: boolean], EnvState>('env:set-allow-scripts'),
+  runStep: invoke<[stepId: string], EnvState>('env:run-step'),
+  apply: invoke<[kinds: ScriptKind[]], EnvApplyResult>('env:apply'),
+  cancel: invoke<[], boolean>('env:cancel'),
+} satisfies Contract;

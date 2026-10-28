@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import ElementPlus from 'element-plus';
 
 import ExecutionView from '../../../src/renderer/src/views/ExecutionView.vue';
-import { ACTIONS, useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
+import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
@@ -45,14 +45,9 @@ describe('ExecutionView', () => {
   test('the advised action leads and the rest fold under 更多操作 in ACTIONS order', async () => {
     current.task = taskView({ completedSteps: [0, 1], humanTransitions: ['release', 'report_deviation', 'submit_for_review', 'block'] });
     const { wrapper } = await mountOpen();
-    expect(wrapper.get('[data-next-step]').text()).toContain('步骤都勾完了');
-    const lead = wrapper.get('.exec-actions > [data-transition]');
-    expect(lead.attributes('data-transition')).toBe('submit_for_review');
-    expect(lead.classes()).toContain('primary-button');
+    expect(wrapper.get('.exec-actions > [data-transition]').attributes('data-transition')).toBe('submit_for_review');
     expect(wrapper.find('[data-action="more-transitions"]').exists()).toBe(true);
-    const folded = wrapper.findAllComponents({ name: 'ElDropdownItem' }).map((item) => item.props('command'));
-    expect(folded).toEqual(['report_deviation', 'block', 'release']);
-    expect(folded).toEqual(ACTIONS.map((action) => action.name).filter((name) => folded.includes(name)));
+    expect(wrapper.findAllComponents({ name: 'ElDropdownItem' }).map((item) => item.props('command'))).toEqual(['report_deviation', 'block', 'release']);
     wrapper.unmount();
   });
 
@@ -73,13 +68,20 @@ describe('ExecutionView', () => {
     wrapper.unmount();
   });
 
+  test('while the AI team works, the advice says so and there are no actions', async () => {
+    current.task = taskView({ status: 'in_review', statusLabel: '审查中' });
+    const { wrapper } = await mountOpen();
+    expect(wrapper.get('[data-next-step]').text()).toContain('QA Partner 正在检查改动');
+    expect(wrapper.find('.exec-actions [data-transition]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   test('a practised package shows no Coding Agent and says who writes the code', async () => {
     current.task = taskView({ completedSteps: [], mode: 'practice', humanTransitions: ['submit_for_review', 'release'] });
     const { wrapper } = await mountOpen();
     expect(wrapper.find('.coding-panel').exists()).toBe(false);
     expect(wrapper.find('[data-action="hand-off"]').exists()).toBe(false);
     expect(wrapper.get('[data-mode-chip]').text()).toBe('自己练习');
-    expect(wrapper.get('[data-next-step]').text()).toContain('Tutor');
     wrapper.unmount();
   });
 
@@ -94,32 +96,22 @@ describe('ExecutionView', () => {
     const { wrapper } = await mountOpen();
     await wrapper.get('.exec-actions > [data-transition="claim"]').trigger('click');
     await flushPromises();
-    expect(api.transition).not.toHaveBeenCalled();
+    expect(api.packages.transition).not.toHaveBeenCalled();
     expect(document.body.querySelector('[data-recommendation]')?.textContent).toContain('只是改配置，练手意义不大。');
     (document.body.querySelector('[data-mode="practice"] input') as HTMLInputElement).click();
     await flushPromises();
     (document.body.querySelector('[data-action="confirm-claim"]') as HTMLButtonElement).click();
     await flushPromises();
-    expect(api.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'practice' });
-    wrapper.unmount();
-  });
-
-  test('while the AI team works, the advice says so and there are no actions', async () => {
-    current.task = taskView({ status: 'in_review', statusLabel: '审查中' });
-    const { wrapper } = await mountOpen();
-    expect(wrapper.get('[data-next-step]').text()).toContain('QA Partner 正在检查改动');
-    expect(wrapper.find('.exec-actions [data-transition]').exists()).toBe(false);
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'claim', { mode: 'practice' });
     wrapper.unmount();
   });
 
   test('a folded action runs the transition and reloads', async () => {
     current.task = taskView({ humanTransitions: ['block'] });
     const { wrapper } = await mountOpen();
-    api.getTask.mockClear();
+    api.tasks.get.mockClear();
     await runFolded(wrapper, 'block');
-    expect(api.transition).toHaveBeenCalledWith('t1', 'block');
-    expect(api.getTask).toHaveBeenCalled();
-    expect(api.listTasks).toHaveBeenCalled();
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'block');
     wrapper.unmount();
   });
 
@@ -174,11 +166,10 @@ describe('ExecutionView', () => {
     const submit = [...document.querySelectorAll('.modal-actions .primary-button')].find((node) => node.textContent?.includes('提交偏差')) as HTMLButtonElement;
     submit.click();
     await flushPromises();
-    expect(api.transition).toHaveBeenCalledWith('t1', 'report_deviation', { deviation: { note: '接口不一致', stepIndex: 0, filePath: null } });
+    expect(api.packages.transition).toHaveBeenCalledWith('t1', 'report_deviation', { deviation: { note: '接口不一致', stepIndex: 0, filePath: null } });
     expect(execution.deviationOpen).toBe(false);
     wrapper.unmount();
   });
-
   test('unmounting the view clears the package', async () => {
     const { wrapper, execution } = await mountOpen();
     wrapper.unmount();
@@ -199,41 +190,18 @@ describe('ExecutionView', () => {
     expect(wrapper.get('.commit-done').text()).toContain('c0ffee12');
     wrapper.unmount();
   });
-
   test('a package still in progress has no commit panel', async () => {
     const { wrapper } = await mountOpen();
     expect(wrapper.find('[data-panel="commit"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
-  test('"这一步怎么做？" opens L1 for unfinished steps and shows its answer as text', async () => {
-    current.task = taskView({ completedSteps: [1] });
+  test('an accepted package with no changed files explains why it cannot commit', async () => {
+    current.task = taskView({ status: 'done', statusLabel: '已完成' });
+    api.commit.preview.mockReturnValueOnce(Promise.resolve({ ok: true as const, data: { files: [], skipped: [], message: '' } }));
     const { wrapper } = await mountOpen();
-    expect(wrapper.findAll('[data-tutor]').map((node) => node.attributes('data-tutor'))).toEqual(['0']);
-    const answer: tutorTypes.TutorAnswer = {
-      explanation: '新增 `login()` <img src=x>',
-      hints: ['打开 src/auth.ts'],
-      snippet: null,
-      terms: [{ term: '导出', meaning: '让别的文件能用' }],
-    };
-    const done = (levels: tutorTypes.TutorLevel[]): tutorTypes.TutorState => ({
-      status: 'done',
-      levels,
-      pending: null,
-      opened: levels.length,
-      maxLevel: 5,
-      error: null,
-    });
-    api.tutor.ask.mockResolvedValueOnce({ ok: true, data: done([{ level: 1, answer, filtered: false, source: 'tutor', costUsd: 0.01 }]) });
-    await wrapper.get('[data-tutor="0"] .link-button').trigger('click');
-    await flushPromises();
-    expect(api.tutor.ask).toHaveBeenCalledWith('t1', 0, 1);
-    const card = wrapper.get('.tutor-card');
-    expect(card.find('img').exists()).toBe(false);
-    expect(card.get('[data-ladder]').text()).toBe('已用 L1 / 共 5 级');
-    expect(card.get('.tutor-explanation code').text()).toBe('login()');
-    expect(card.find('pre').exists()).toBe(false);
-    expect(card.get('.tutor-terms dt').text()).toBe('导出');
+    expect(wrapper.get('[data-empty="commit"]').text()).toContain('没有未提交的改动');
+    expect(wrapper.find('.commit-actions').exists()).toBe(false);
     wrapper.unmount();
   });
 

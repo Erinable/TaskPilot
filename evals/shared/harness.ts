@@ -7,8 +7,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import * as cliRunner from '../../src/main/agents/cli_runner.ts';
-import type { JsonSchema, RunAgent } from '../../src/main/agents/claude_cli.ts';
+import * as cliRunner from '../../src/main/runtimes/cli_runner.ts';
+import type { JsonSchema, RunAgent } from '../../src/main/runtimes/claude_cli.ts';
 
 // The model calls go through cli_runner, as the app's do, so the native
 // Claude configuration (settings.json env such as a gateway token) applies.

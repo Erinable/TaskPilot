@@ -10,7 +10,7 @@
 // Everything it returns is validated here; a drafted pack is checked with the
 // course pack rules (../../shared/course_rules.ts) by the caller, shown to the
 // learner in full and only used once they confirm it on this machine.
-import { AgentOutputError, isObject } from './product_lead.ts';
+import { AgentOutputError, isObject } from './output_validation.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import * as plans from '../../shared/course_plan.ts';
 import { COURSE_DIMENSIONS } from '../../shared/course_pack.ts';

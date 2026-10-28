@@ -2,7 +2,7 @@
 // and tests/grade.sh around the lab's files, `make grade` on the starter
 // code, then with the reference patch applied and the hidden tests beside
 // the public ones. The model's code runs under the Coding Agent's Seatbelt
-// profile (src/main/coding_sandbox.ts): writes only inside its folder and the
+// profile (src/main/coding/coding_sandbox.ts): writes only inside its folder and the
 // temporary directory, no reads of the home folder.
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -10,8 +10,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import * as labs from '../../src/main/labs.ts';
-import { SANDBOX_EXEC_PATH, buildProfile } from '../../src/main/coding_sandbox.ts';
+import * as labs from '../../src/main/courses/labs.ts';
+import { SANDBOX_EXEC_PATH, buildProfile } from '../../src/main/coding/coding_sandbox.ts';
 import type { CheckResult } from '../shared/harness.ts';
 import type { GeneratedLab } from '../../src/main/agents/lab_generator.ts';
 

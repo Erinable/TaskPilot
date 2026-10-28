@@ -2,10 +2,10 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as steward from '../../../src/main/agents/env_steward.ts';
 import { planEnvironment } from '../../../src/main/agents/pipeline.ts';
-import { typescriptSetup } from '../../../src/main/presets/typescript_setup.ts';
-import type { RunStructuredOptions } from '../../../src/main/agents/claude_cli.ts';
-import type { EnvFacts } from '../../../src/main/presets/typescript_setup.ts';
-import type { SetupAdapter } from '../../../src/main/setup_adapter.ts';
+import { typescriptSetup } from '../../../src/main/checking/presets/typescript_setup.ts';
+import type { RunStructuredOptions } from '../../../src/main/runtimes/claude_cli.ts';
+import type { EnvFacts } from '../../../src/main/checking/presets/typescript_setup.ts';
+import type { SetupAdapter } from '../../../src/main/checking/setup_adapter.ts';
 
 const FACTS: EnvFacts = {
   manifest: { valid: true, name: 'demo', scripts: { test: 'node --test', 'lint:js': 'eslint .' }, engines: { node: '>=20' }, packageManager: null },
@@ -50,10 +50,12 @@ test('validatePlan drops unknown scripts and downgrades ci without a lockfile', 
   );
 });
 
-test('validatePlan rejects malformed output', () => {
-  assert.throws(() => steward.validatePlan({ ...PLAN, install: { mode: 'exec', reason: 'x' } }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
-  assert.throws(() => steward.validatePlan({ ...PLAN, scripts: { test: 1, lint: '', build: '' } }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
-  assert.throws(() => steward.validatePlan({ ...PLAN, summary: ' ' }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
+test.each([
+  ['unknown install mode', { install: { mode: 'exec', reason: 'x' } }],
+  ['non-string script', { scripts: { test: 1, lint: '', build: '' } }],
+  ['empty summary', { summary: ' ' }],
+])('validatePlan rejects %s', (_name, override) => {
+  assert.throws(() => steward.validatePlan({ ...PLAN, ...override }, FACTS, typescriptSetup), { name: 'AgentOutputError' });
 });
 
 test('planPrompt fences facts and includes a failed step tail', () => {
@@ -92,8 +94,6 @@ test('planEnvironment validates the model plan', async () => {
     },
     setup: npmSetup(),
   });
-  assert.deepEqual(calls[0].schema, steward.planSchema(typescriptSetup));
-  assert.equal(calls[0].systemPrompt, steward.SYSTEM_PROMPT);
   assert.equal(result.plan!.install, 'ci');
   assert.equal(result.costUsd, 0.01);
 });

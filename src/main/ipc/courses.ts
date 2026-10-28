@@ -8,15 +8,16 @@
 // 已有的计划、工作包和判卷记录带着各自的 CourseRef / rubric 快照，不改写。
 import fs from 'node:fs/promises';
 
-import { failWith, requireString } from '../coded_error.ts';
-import * as courses from '../courses.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { logger } from '../infrastructure/logger.ts';
+import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import * as courses from '../courses/courses.ts';
+import { registerContract } from './handler.ts';
+import { coursesContract } from '../../shared/ipc/courses.ts';
 import { courseChanges } from '../../shared/course_changes.ts';
 import type * as courseTypes from '../../shared/ipc/courses.ts';
 import { isCourseId } from '../../shared/course_pack.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
-import type { AppContext } from '../app_context.ts';
+import type { AppContext } from '../app/app_context.ts';
 import type { IpcMainLike } from './handler.ts';
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
@@ -64,46 +65,37 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return entry ?? failWith(`Course pack ${id} is not available here`, 'unknown_course', 'course');
   };
 
-  ipcMain.handle(
-    CHANNELS.coursesList,
-    wrap(() => list()),
-  );
+  registerContract(ipcMain, coursesContract, {
+    list: () => list(),
 
-  // The built-in default pack: what the renderer shows for packages, grades
-  // and notes from before packs.
-  ipcMain.handle(
-    CHANNELS.coursesDefault,
-    wrap((): CoursePack => courses.defaultCourse(ctx.builtinCourses).pack),
-  );
+    // The built-in default pack: what the renderer shows for packages, grades
+    // and notes from before packs.
 
-  ipcMain.handle(
-    CHANNELS.coursesPreview,
-    wrap(async (_event, rawId): Promise<courseTypes.CoursePreview> => {
+    default: (): CoursePack => courses.defaultCourse(ctx.builtinCourses).pack,
+
+    preview: async (rawId): Promise<courseTypes.CoursePreview> => {
       const { pack, ref } = await courses.loadCourse(ctx.coursePlaces(), await entryOf(rawId));
       return previewOf(pack, ref);
-    }),
-  );
+    },
 
-  // Writes this machine's choice to workspace.json; null leaves it to
-  // taskpilot.toml. A pack that needs confirming is picked as it is and
-  // reported pending, so programming stays in use until it is confirmed.
-  ipcMain.handle(
-    CHANNELS.coursesSelect,
-    wrap(async (_event, rawId): Promise<courseTypes.CourseList> => {
+    // Writes this machine's choice to workspace.json; null leaves it to
+    // taskpilot.toml. A pack that needs confirming is picked as it is and
+    // reported pending, so programming stays in use until it is confirmed.
+
+    select: async (rawId): Promise<courseTypes.CourseList> => {
       ctx.requireRoot();
       const course = rawId === null ? null : (await entryOf(rawId)).id;
       const saved = await ctx.repositories.saveConfig({ ...ctx.getConfig(), course });
       ctx.setConfig(saved);
-      console.debug(`[courses] selected id=${course ?? '(taskpilot.toml)'}`);
+      ctx.changed('courses', 'workspace');
+      logger.debug(`[courses] selected id=${course ?? '(taskpilot.toml)'}`);
       return list();
-    }),
-  );
+    },
 
-  // Picks a pack file and validates it, writing nothing. The preview is
-  // shown in full before courses:import copies it.
-  ipcMain.handle(
-    CHANNELS.coursesPickImport,
-    wrap(async (): Promise<courseTypes.CourseImport | null> => {
+    // Picks a pack file and validates it, writing nothing. The preview is
+    // shown in full before courses:import copies it.
+
+    pickImport: async (): Promise<courseTypes.CourseImport | null> => {
       if (!shell.pickFile) return failWith('File picker is unavailable', 'unsupported');
       pickedImport = null;
       const file = await shell.pickFile(null, [{ name: 'Course pack', extensions: ['toml'] }]);
@@ -118,33 +110,30 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const root = ctx.getConfig().root;
       const shadowed = root ? (await courses.listRepositoryCourses(root)).includes(pack.id) : false;
       pickedImport = { text, pack, ref };
-      console.debug(`[courses] picked import id=${pack.id} replaces=${replaces} shadowed=${shadowed}`);
+      logger.debug(`[courses] picked import id=${pack.id} replaces=${replaces} shadowed=${shadowed}`);
       return { pack, ref, trust: await courses.trustOf(ctx.coursePlaces(), ref), ...(await previousOf(pack, ref)), replaces, shadowed };
-    }),
-  );
+    },
 
-  // Copies the picked file into the global folder. `contentHash` is the one
-  // shown; importing never confirms the pack.
-  ipcMain.handle(
-    CHANNELS.coursesImport,
-    wrap(async (_event, rawHash): Promise<courseTypes.CourseList> => {
+    // Copies the picked file into the global folder. `contentHash` is the one
+    // shown; importing never confirms the pack.
+
+    import: async (rawHash): Promise<courseTypes.CourseList> => {
       const contentHash = requireString(rawHash, 'contentHash');
       if (!pickedImport || pickedImport.ref.contentHash !== contentHash)
         return failWith('Choose the course pack file with the file picker', 'invalid_argument', 'contentHash');
       await courses.importCourse(configDir, pickedImport.text, pickedImport.ref);
+      ctx.changed('courses');
       pickedImport = null;
       return list();
-    }),
-  );
+    },
 
-  // [人工决策-2026-10-27 00:55:52] 内置包只读，想改就复制一份：复制品写进全局目录 userData/courses/<newId>.toml，
-  // 来源是 user，要本机确认后才会用。仓库里的包也只能复制再改，不从这里写仓库文件。
-  // Copies any pack here into the global folder under the id the user
-  // gave. The id must be free: not built in, not the repository's, not
-  // imported already. Copying never confirms.
-  ipcMain.handle(
-    CHANNELS.coursesCopy,
-    wrap(async (_event, rawSourceId, rawId): Promise<courseTypes.CourseSaved> => {
+    // [人工决策-2026-10-27 00:55:52] 内置包只读，想改就复制一份：复制品写进全局目录 userData/courses/<newId>.toml，
+    // 来源是 user，要本机确认后才会用。仓库里的包也只能复制再改，不从这里写仓库文件。
+    // Copies any pack here into the global folder under the id the user
+    // gave. The id must be free: not built in, not the repository's, not
+    // imported already. Copying never confirms.
+
+    copy: async (rawSourceId, rawId): Promise<courseTypes.CourseSaved> => {
       const places = ctx.coursePlaces();
       const source = await courses.loadCourse(places, await entryOf(rawSourceId));
       const id = requireString(rawId, 'id');
@@ -152,23 +141,23 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if ((await courses.availableCourses(places)).some((entry) => entry.id === id) || (await courses.listUserCourses(configDir)).includes(id))
         return failWith(`id: "${id}" is already a course pack`, 'course_exists', 'id');
       const { pack, ref } = await courses.writeUserCourse(configDir, { ...source.pack, id });
-      console.debug(`[courses] copied from=${source.ref.id} id=${id}`);
+      ctx.changed('courses');
+      logger.debug(`[courses] copied from=${source.ref.id} id=${id}`);
       return { list: await list(), preview: await previewOf(pack, ref) };
-    }),
-  );
+    },
 
-  // Saves a pack from the pack editor over its file in the global folder.
-  // Only imported or copied packs can be saved, and only under their own
-  // id; the content is validated again here, whatever the editor checked.
-  // A saved pack has a new content hash, so it is pending again.
-  ipcMain.handle(
-    CHANNELS.coursesSave,
-    wrap(async (_event, rawId, rawPack): Promise<courseTypes.CourseSaved> => {
+    // Saves a pack from the pack editor over its file in the global folder.
+    // Only imported or copied packs can be saved, and only under their own
+    // id; the content is validated again here, whatever the editor checked.
+    // A saved pack has a new content hash, so it is pending again.
+
+    save: async (rawId, rawPack): Promise<courseTypes.CourseSaved> => {
       const entry = await entryOf(rawId);
       if (entry.source !== 'user') return failWith(`Course pack ${entry.id} is read-only here; copy it to edit it`, 'course_read_only', 'course');
       if ((rawPack as { id?: unknown } | null)?.id !== entry.id) return failWith(`id: must stay "${entry.id}"`, 'invalid_course', 'id');
       const { pack, ref } = await courses.writeUserCourse(configDir, rawPack);
+      ctx.changed('courses');
       return { list: await list(), preview: await previewOf(pack, ref) };
-    }),
-  );
+    },
+  });
 };

@@ -53,7 +53,7 @@ describe('ActivityView', () => {
     page = vi.fn((before: string | null) => ok(before ? pages.second : pages.first));
     (window as unknown as { taskpilot: unknown }).taskpilot = {
       activity: { page },
-      getTask: vi.fn(() => ok({ id: 'p1' })),
+      tasks: { get: vi.fn(() => ok({ id: 'p1' })) },
     };
     useTasksStore().tasks = [{ id: 'p1', title: '登录接口' } as packageTypes.TaskView];
   });

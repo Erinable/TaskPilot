@@ -2,58 +2,59 @@
 import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { SAMPLE_REQUIREMENT, SAMPLE_TASKS } from '../fixtures/sample_tasks.ts';
-import * as git from '../../../src/main/git.ts';
+import * as git from '../../../src/main/repository/git.ts';
 import * as fixtures from './harness.ts';
 
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
 
-test('repositories:add rejects a root that is not a git repository', async () => {
+test.each([
+  ['/definitely/not/here', 'root_not_found'],
+  ['projects/app', 'root_not_absolute'],
+])('repositories:add rejects %s with %s', async (root, code) => {
   const { call } = await fixtures.harness({ withRepo: false });
-  const plain = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-plain-'));
-  onTestFinished(() => fs.rm(plain, { recursive: true, force: true }));
-  const response = await call(CHANNELS.repositoriesAdd, plain, true);
-  assert.equal(response.error.code, 'not_a_repo');
-  assert.equal(response.error.field, 'root');
+  assert.equal((await call(CHANNELS.repositoriesAdd, root, true)).error.code, code);
 });
 
-test('repositories:add registers nothing for a rejected root', async () => {
+test('repositories:add normalizes a subdirectory to the repository root', async () => {
+  const root = await fixtures.gitRepo();
+  const subdirectory = path.join(root, 'src');
+  await fs.mkdir(subdirectory, { recursive: true });
   const { call } = await fixtures.harness({ withRepo: false });
-  assert.equal((await call(CHANNELS.repositoriesAdd, '/definitely/not/here', true)).error.code, 'root_not_found');
-  assert.equal((await call(CHANNELS.repositoriesAdd, 'projects/app', true)).error.code, 'root_not_absolute');
-  assert.deepEqual((await call(CHANNELS.repositoriesList)).data, { current: null, repositories: [] });
+  const { data } = await call(CHANNELS.repositoriesAdd, subdirectory, true);
+  assert.equal(data.repositories[0].root, await git.topLevel(root));
+});
+
+test('repositories: a moved repository is flagged and can be pointed at its new place', async () => {
+  const { call, root } = await fixtures.harness();
+  const { current } = (await call(CHANNELS.repositoriesList)).data;
+  const moved = `${root}-moved`;
+  await fs.rename(root, moved);
+  onTestFinished(() => fs.rm(moved, { recursive: true, force: true }));
+  assert.equal((await call(CHANNELS.repositoriesList)).data.repositories[0].missing, true);
+  const relocated = (await call(CHANNELS.repositoriesRelocate, current, moved)).data;
+  assert.equal(relocated.current, current);
+  assert.equal(relocated.repositories[0].missing, false);
 });
 
 test('repositories: adding without opening keeps the open repository, and the list counts work in each', async () => {
   const h = await fixtures.harness();
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   const other = await fixtures.gitRepo();
   const added = await h.call(CHANNELS.repositoriesAdd, other, false);
   assert.equal(added.ok, true);
   const open = added.data.repositories.find((entry) => entry.current);
   assert.equal(await fs.realpath(open.root), await fs.realpath(h.root));
-  assert.equal((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'in_progress', 'nothing was reloaded');
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'in_progress', 'nothing was reloaded');
   // The open repository counts from memory: the sample packages, one claimed.
   assert.equal(open.counts.active, 1);
   assert.equal(open.counts.pending, SAMPLE_TASKS.filter((task) => task.status === 'pending').length - 1);
   // The new one has no saved data yet.
   assert.deepEqual(added.data.repositories.find((entry) => !entry.current).counts, { pending: 0, active: 0, accepting: 0 });
-});
-
-test('repositories:add normalizes a subdirectory to the repository root', async () => {
-  // git reports diff paths from the top level, so a subdirectory root would
-  // make every file scope miss.
-  const { call } = await fixtures.harness({ withRepo: false });
-  const root = await fixtures.gitRepo();
-  const response = await call(CHANNELS.repositoriesAdd, path.join(root, 'src'), true);
-  assert.equal(response.ok, true);
-  assert.equal(response.data.repositories.length, 1);
-  assert.equal(await fs.realpath(response.data.repositories[0].root), await fs.realpath(root));
 });
 
 test('repositories: each repository keeps its own requirements, progress and commands', async () => {
@@ -62,7 +63,7 @@ test('repositories: each repository keeps its own requirements, progress and com
     root,
     steps: { test: { enabled: true, lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null } },
   });
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   const { data: created } = await call(CHANNELS.requirementsCreate, { text: 'first repo' });
   await fixtures.settle(call, created.id);
 
@@ -71,7 +72,7 @@ test('repositories: each repository keeps its own requirements, progress and com
   assert.equal(added.repositories.length, 2);
   assert.equal(added.repositories.find((repo) => repo.current).root, await git.topLevel(other));
   assert.deepEqual((await call(CHANNELS.requirementsList)).data, []);
-  assert.deepEqual((await call(CHANNELS.listTasks)).data, []);
+  assert.deepEqual((await call(CHANNELS.tasksList)).data, []);
   assert.equal((await call(CHANNELS.workspaceGet)).data.steps.find((step) => step.id === 'test').effective, null);
   assert.equal((await call(CHANNELS.workspaceInfo)).data.root, await git.topLevel(other));
 
@@ -102,20 +103,6 @@ test('repositories: switching cancels running work and waits for its writes', as
   assert.equal(item.error.code, 'agent_cancelled');
 });
 
-test('repositories: a moved repository is flagged and can be pointed at its new place', async () => {
-  const { call, root } = await fixtures.harness();
-  const { current } = (await call(CHANNELS.repositoriesList)).data;
-  const moved = `${root}-moved`;
-  await fs.rename(root, moved);
-  onTestFinished(() => fs.rm(moved, { recursive: true, force: true }));
-  assert.equal((await call(CHANNELS.repositoriesList)).data.repositories[0].missing, true);
-
-  const relocated = (await call(CHANNELS.repositoriesRelocate, current, moved)).data;
-  assert.equal(relocated.current, current, 'the id and its data stay');
-  assert.equal(relocated.repositories[0].missing, false);
-  assert.equal((await call(CHANNELS.workspaceInfo)).data.root, await git.topLevel(moved));
-});
-
 test('repositories: switching to an unknown id is refused', async () => {
   const { call } = await fixtures.harness();
   assert.equal((await call(CHANNELS.repositoriesSwitch, 'nope')).error.code, 'unknown_repository');
@@ -135,7 +122,11 @@ test('repositories: switching cancels a running tutor answer so it cannot land i
   await call(CHANNELS.tutorAsk, 'auth-edge-tests', 0, 1);
   // Adding a repository switches to it; the switch must stop the tutor first.
   const switching = call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), true);
-  for (let index = 0; index < 200 && !cancelled; index += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  await fixtures.until(
+    async () => cancelled,
+    (value) => value,
+    'tutor cancellation',
+  );
   release.resolve();
   await switching;
   assert.equal(cancelled, true, 'the tutor run was not cancelled');

@@ -2,6 +2,8 @@
 
 import type { RubricItem } from '../course_pack.ts';
 import type { GradeCategory } from './packages.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 // Where a note came from; every part is optional (a hand-written note has none).
 export type NoteSource = {
@@ -83,3 +85,27 @@ export type NoteSaved = { revision: number; note: Note; relinked: number };
 // the one the open repository uses (`current`).
 export type NoteCourse = { id: string; title: string; rubric: Pick<RubricItem, 'id' | 'label' | 'dimension'>[] };
 export type NoteCourses = { current: string; packs: NoteCourse[] };
+
+export const notesContract = {
+  // Every note without its body; `since` returns null when nothing changed.
+  list: invoke<[since: number | null], NoteList | null>('notes:list'),
+  get: invoke<[id: string], Note>('notes:get'),
+  // Ids of notes whose title, tags or body contain the query.
+  search: invoke<[query: string], string[]>('notes:search'),
+  // autoRename: a taken title gets a number instead of being refused.
+  create: invoke<[input: NoteInput, autoRename: boolean], NoteSaved>('notes:create'),
+  // The source stays as recorded; only the developer's text changes.
+  update: invoke<[id: string, edit: NoteEdit], NoteSaved>('notes:update'),
+  // Moves the file to the system trash.
+  remove: invoke<[id: string], boolean>('notes:delete'),
+  // Tutor writes the note's summary (costs a model call).
+  summarize: invoke<[id: string, baseVersion: string], NoteSaved>('notes:summarize'),
+  // null goes back to the default folder; files are never moved.
+  setDirectory: invoke<[directory: string | null], NoteList>('notes:set-directory'),
+  pickDirectory: invoke<[], string | null>('notes:pick-directory'),
+  reveal: invoke<[], boolean>('notes:reveal'),
+  // http(s) and mailto links only, opened by the system.
+  openUrl: invoke<[url: string], boolean>('notes:open-url'),
+  // The packs whose categories the notes page names, and the one in use.
+  courses: invoke<[], NoteCourses>('notes:courses'),
+} satisfies Contract;

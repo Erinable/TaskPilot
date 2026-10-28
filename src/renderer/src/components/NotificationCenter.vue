@@ -32,8 +32,8 @@ const open = (item: NotificationItem) => {
   store.openItem(item).catch((error) => console.error(error));
 };
 
-onMounted(() => store.startAutoRefresh());
-onUnmounted(() => store.stopAutoRefresh());
+onMounted(() => store.start());
+onUnmounted(() => store.stop());
 </script>
 
 <template>

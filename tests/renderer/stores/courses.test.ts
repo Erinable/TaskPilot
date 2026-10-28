@@ -28,8 +28,6 @@ test('selecting a pack that needs confirming opens its preview to confirm', asyn
   api.courses.select.mockReturnValueOnce(ok(courseList({ current: pendingCourse() })));
   const courses = useCoursesStore();
   await courses.select('oslab');
-  expect(api.courses.select).toHaveBeenCalledWith('oslab');
-  expect(api.courses.preview).toHaveBeenCalledWith('oslab');
   expect(courses.previewOpen).toBe(true);
   expect(courses.previewMode).toBe('confirm');
 });

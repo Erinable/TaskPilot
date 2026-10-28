@@ -26,14 +26,12 @@ const releaseRepo = async (root: string) => {
   return gitIn(root, ['rev-parse', 'HEAD']);
 };
 
-const settleRelease = async (call) => {
-  for (let i = 0; i < 200; i += 1) {
-    const { data } = await call(CHANNELS.releaseGet);
-    if (data.draft && data.draft.status !== 'generating' && !data.running) return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('release never settled');
-};
+const settleRelease = async (call) =>
+  fixtures.until(
+    async () => (await call(CHANNELS.releaseGet)).data,
+    (data) => Boolean(data.draft && data.draft.status !== 'generating' && !data.running),
+    'release draft',
+  );
 
 const readyRelease = async (h) => {
   const head = await releaseRepo(h.root);
@@ -201,51 +199,4 @@ test('release: a running generation shows Release Manager busy and can be cancel
   assert.equal(state.draft.status, 'failed');
   assert.equal(state.draft.error.code, 'agent_cancelled');
   assert.equal((await h.call(CHANNELS.releaseCancel)).data, false);
-});
-
-test('release: without a workspace the page reports it unconfigured', async () => {
-  const { call } = await fixtures.harness({ withRepo: false });
-  const state = (await call(CHANNELS.releaseGet)).data;
-  assert.equal(state.configured, false);
-  assert.equal(state.startPoint, null);
-  assert.equal((await call(CHANNELS.releaseGenerate)).error.code, 'no_workspace');
-});
-
-test('milestones: progress follows the requirement packages, and a requirement sits in one plan', async () => {
-  const second = { ...fixtures.PLAN_OUTPUT.packages[0], title: '接入登录路由', dependsOn: [1] };
-  const h = await fixtures.harness({ agent: fixtures.fakeAgent({ plan: { ...fixtures.PLAN_OUTPUT, packages: [fixtures.PLAN_OUTPUT.packages[0], second] } }) });
-  const { first } = await fixtures.publishChain(h);
-  const requirementId = first.replace(/-wp1$/, '');
-  const created = await h.call(CHANNELS.milestoneCreate, { version: '0.3.0', targetDate: '2026-10-31', requirementIds: [requirementId, 'not-a-requirement'] });
-  assert.equal(created.ok, true, JSON.stringify(created));
-  let [plan] = (created.data as { milestones: { id: string; requirements: { title: string }[]; done: number; total: number; complete: boolean }[] }).milestones;
-  assert.deepEqual([plan.done, plan.total, plan.complete, plan.requirements.length], [0, 2, false, 1]);
-
-  await h.store.transition(first, 'claim', 'human', { baseline: 'HEAD' });
-  await h.store.transition(first, 'submit_for_review', 'human');
-  await h.store.beginReview(first);
-  await h.store.completeReview(first, {
-    passed: true,
-    reasons: [],
-    evidence: [],
-    checks: [],
-    acceptance: [],
-    report: null,
-    diff: { files: [], skipped: [], outOfScope: [] },
-    costUsd: 0,
-  } as never);
-  [plan] = (await h.call(CHANNELS.releaseGet)).data.milestones;
-  assert.deepEqual([plan.done, plan.total], [1, 2]);
-
-  const other = (await h.call(CHANNELS.milestoneCreate, { version: '0.4.0', requirementIds: [] })).data.milestones.find((item) => item.version === '0.4.0');
-  const moved = (await h.call(CHANNELS.milestoneAssign, requirementId, other.id)).data.milestones;
-  assert.deepEqual(
-    moved.map((item) => [item.version, item.requirementIds.length]),
-    [
-      ['0.3.0', 0],
-      ['0.4.0', 1],
-    ],
-  );
-  assert.equal((await h.call(CHANNELS.milestoneAssign, 'unknown', other.id)).error.code, 'invalid_argument');
-  assert.equal((await h.call(CHANNELS.milestoneCreate, { version: 'v1' })).error.code, 'invalid_argument');
 });

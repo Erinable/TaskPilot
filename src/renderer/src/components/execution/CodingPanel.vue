@@ -3,12 +3,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
+import CodingChecks from '@/components/execution/CodingChecks.vue';
+import CodingPatchReview from '@/components/execution/CodingPatchReview.vue';
+import CodingRoundHistory from '@/components/execution/CodingRoundHistory.vue';
+import CodingTranscript from '@/components/execution/CodingTranscript.vue';
 import { useCodingStore } from '@/stores/coding.ts';
-import { stepLabel } from '@/lib/check_steps.ts';
-import { splitPatch } from '@/lib/coding_patch.ts';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
-import { diffLineKind } from '@/lib/review_model.ts';
 import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
 import type * as codingTypes from '@shared/coding_types.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
@@ -32,9 +33,6 @@ const STATUS_LABELS: Record<codingTypes.CodingRun['status'], string> = {
   cancelled: '已取消',
   discarded: '已丢弃',
 };
-// The transcript in plain words; the CLI's raw event kinds mean nothing to a beginner.
-const EVENT_LABELS: Record<codingTypes.CodingEvent['type'], string> = { status: '进度', text: '说明', thinking: '思考', tool: '操作', error: '出错' };
-const TRIGGER_LABELS: Record<codingTypes.CodingTrigger, string> = { human: '你发起', checks_failed: '检查失败后重试', qa_rejected: 'QA 驳回后重试' };
 const HALT_TEXT: Record<codingTypes.CodingHalt, string> = {
   attempts_exhausted: '已自动重试 3 轮仍未通过，交给你处理：可以自己修改，或补充说明后重新开始。',
   high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
@@ -60,27 +58,7 @@ const applyDisabled = computed(
   () =>
     !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.unresolved.length > 0 || coding.operation !== null,
 );
-const MERGE_LABELS: Record<codingTypes.CodingMergeFile['state'], string> = { clean: '', merged: '已和你的改动合并', conflict: '和你的改动冲突' };
-// The choices for one conflict; markers only where the file can carry them.
-const choicesFor = (merge: codingTypes.CodingMergeFile) => [
-  ...(merge.markers ? [{ value: 'markers' as const, label: '写入冲突标记，我来改' }] : []),
-  { value: 'mine' as const, label: '保留我的，跳过 AI 的改动' },
-  { value: 'theirs' as const, label: '用 AI 的版本覆盖' },
-];
-const resume = () => coding.resume().catch((error) => console.error(error));
-const fileDiffs = computed(() => {
-  const segments = coding.patch ? splitPatch(coding.patch.patch) : [];
-  return (coding.patch?.files ?? []).map((file, index) => ({
-    file,
-    lines: (segments[index] ?? '')
-      .split('\n')
-      .filter((line) => line !== '')
-      .map((line) => ({ kind: diffLineKind(line), text: line })),
-    applicable: coding.applicable(file),
-    reasons: (coding.patch?.blocked ?? []).filter((entry) => entry.path === file.path).map((entry) => entry.reason),
-  }));
-});
-const toggle = (filePath: string, event: Event) => coding.toggleFile(filePath, (event.target as HTMLInputElement).checked);
+const toggle = (filePath: string, accepted: boolean) => coding.toggleFile(filePath, accepted);
 const cost = computed(() =>
   coding.run?.usage.costUsd === null || coding.run?.usage.costUsd === undefined ? '未知' : `$${coding.run.usage.costUsd.toFixed(4)}`,
 );
@@ -105,6 +83,7 @@ const start = () => coding.start().catch((error) => console.error(error));
 const retry = () => coding.start(coding.instruction, true).catch((error) => console.error(error));
 const cancel = () => coding.cancel().catch((error) => console.error(error));
 const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch((error) => console.error(error));
+const resume = () => coding.resume().catch((error) => console.error(error));
 </script>
 
 <template>
@@ -164,19 +143,12 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
       </div>
     </details>
 
-    <div v-if="coding.run && (coding.run.rounds.length || coding.run.attempt > 1)" class="coding-rounds" aria-label="编码轮次">
-      <strong>第 {{ coding.run.attempt }} 轮（自动重试最多 {{ coding.maxAutoAttempts }} 轮）</strong>
-      <ol>
-        <li v-for="round in coding.run.rounds" :key="round.attempt">
-          第 {{ round.attempt }} 轮 · {{ TRIGGER_LABELS[round.trigger] }} · {{ STATUS_LABELS[round.status] }} · {{ round.files }} 个文件
-        </li>
-        <li class="current">第 {{ coding.run.attempt }} 轮 · {{ TRIGGER_LABELS[coding.run.trigger] }} · {{ STATUS_LABELS[coding.run.status] }}</li>
-      </ol>
-      <details v-if="coding.run.feedback">
-        <summary>这一轮交给 AI 的问题</summary>
-        <pre class="coding-diff">{{ coding.run.feedback }}</pre>
-      </details>
-    </div>
+    <CodingRoundHistory
+      v-if="coding.run && (coding.run.rounds.length || coding.run.attempt > 1)"
+      :run="coding.run"
+      :status-labels="STATUS_LABELS"
+      :max-auto-attempts="coding.maxAutoAttempts"
+    />
     <p v-if="coding.run?.halt" class="coding-halt" role="status">
       <AppIcon name="info" />
       {{ HALT_TEXT[coding.run.halt] }}
@@ -252,77 +224,26 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         AI 写代码时，尽量别改这个工作包范围内的文件（{{ task.fileScope.slice(0, 3).join('、') }}{{ task.fileScope.length > 3 ? ' 等' : '' }}）。
         改了也没关系：应用时会先合并，撞在同一处才需要你来选。
       </p>
-      <div class="coding-transcript" aria-live="polite" aria-label="编码 Agent 实时记录">
-        <div v-if="coding.events.length === 0" class="empty-hint">等待编码 Agent 输出…</div>
-        <div v-for="event in coding.events" :key="event.sequence" class="coding-event">
-          <time>{{ new Date(event.at).toLocaleTimeString() }}</time>
-          <strong :class="event.type">{{ EVENT_LABELS[event.type] }}</strong>
-          <span>{{ event.text }}</span>
-        </div>
-      </div>
+      <CodingTranscript :events="coding.events" />
 
-      <div v-if="coding.run.status === 'ready' && (coding.run.trigger === 'human' || coding.run.halt)" class="coding-result">
-        <div class="coding-result-heading">
-          <strong>
-            逐个文件确认
-            <TermHint term="patch" label="补丁" />
-          </strong>
-          <span v-if="coding.patchLoading">正在读取补丁…</span>
-          <span v-else-if="coding.patch">已勾选 {{ coding.selectedFiles.length }} / {{ coding.patch.files.length }} 个文件</span>
-        </div>
-        <ul v-if="fileDiffs.length" class="coding-files">
-          <li v-for="entry in fileDiffs" :key="entry.file.path">
-            <details>
-              <summary>
-                <input
-                  type="checkbox"
-                  :aria-label="`应用 ${entry.file.path}`"
-                  :checked="coding.selectedFiles.includes(entry.file.path)"
-                  :disabled="!entry.applicable || coding.operation !== null"
-                  @click.stop
-                  @change="toggle(entry.file.path, $event)"
-                />
-                <code>{{ entry.file.path }}</code>
-                <span>+{{ entry.file.added }} −{{ entry.file.removed }}</span>
-                <strong v-if="entry.file.highRisk" class="risk-label">高风险</strong>
-                <span v-if="coding.mergeOf(entry.file.path)?.state === 'merged'" class="merge-label">{{ MERGE_LABELS.merged }}</span>
-                <strong v-if="coding.mergeOf(entry.file.path)?.state === 'conflict'" class="conflict-label">{{ MERGE_LABELS.conflict }}</strong>
-                <span v-if="!entry.applicable" class="blocked-label">不能应用：{{ entry.reasons.join('；') }}</span>
-              </summary>
-              <div
-                v-if="coding.mergeOf(entry.file.path)?.state === 'conflict' && coding.selectedFiles.includes(entry.file.path)"
-                class="conflict-choice"
-                role="radiogroup"
-                :aria-label="`${entry.file.path} 的冲突怎么处理`"
-              >
-                <label v-for="choice in choicesFor(coding.mergeOf(entry.file.path)!)" :key="choice.value">
-                  <input
-                    type="radio"
-                    :name="`resolve-${entry.file.path}`"
-                    :value="choice.value"
-                    :checked="coding.resolutions[entry.file.path] === choice.value"
-                    :disabled="coding.operation !== null"
-                    @change="coding.setResolution(entry.file.path, choice.value)"
-                  />
-                  {{ choice.label }}
-                </label>
-              </div>
-              <div class="diff-body coding-diff-body">
-                <div v-for="(line, index) in entry.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
-              </div>
-            </details>
-          </li>
-        </ul>
-        <label v-if="coding.highRisk" class="risk-consent">
-          <input v-model="highRiskConsent" type="checkbox" />
-          我已检查勾选的高风险文件的 diff，同意应用
-        </label>
-        <p v-if="coding.unresolved.length" class="coding-hint">还有 {{ coding.unresolved.length }} 个冲突的文件没选怎么处理。</p>
-        <button class="primary-button" type="button" :disabled="applyDisabled" @click="apply">
-          <AppIcon name="check" />
-          应用勾选的文件并自动检查
-        </button>
-      </div>
+      <CodingPatchReview
+        v-if="coding.run.status === 'ready' && (coding.run.trigger === 'human' || coding.run.halt)"
+        :patch="coding.patch"
+        :patch-loading="coding.patchLoading"
+        :selected-files="coding.selectedFiles"
+        :resolutions="coding.resolutions"
+        :high-risk="coding.highRisk"
+        :high-risk-consent="highRiskConsent"
+        :operation="coding.operation"
+        :unresolved="coding.unresolved"
+        :apply-disabled="applyDisabled"
+        :applicable="coding.applicable"
+        :merge-of="coding.mergeOf"
+        @toggle-file="toggle"
+        @set-resolution="coding.setResolution"
+        @update-high-risk-consent="highRiskConsent = $event"
+        @apply="apply"
+      />
       <div v-if="coding.run.status === 'ready' && coding.run.trigger !== 'human' && !coding.run.halt" class="empty-hint">
         <AppIcon name="spinner" class="spin" />
         正在自动应用这一轮的补丁…
@@ -354,13 +275,7 @@ const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch
         <AppIcon name="send" />
         检查通过，Coding Agent 已提交 QA 审查。
       </div>
-      <div v-if="checks.length" class="coding-checks" aria-label="编码前置检查">
-        <strong>前置检查</strong>
-        <div v-for="entry in checks" :key="entry.kind">
-          <span>{{ stepLabel(entry.kind) }}</span>
-          <span :class="entry.check.summary.ok ? 'check-pass' : 'check-fail'">{{ entry.check.summary.ok ? '通过' : '失败' }}</span>
-        </div>
-      </div>
+      <CodingChecks :checks="checks" />
     </template>
     <p v-if="coding.error" class="coding-error">
       <AppIcon name="alert" />
@@ -490,102 +405,8 @@ div.coding-error {
 div.coding-error .coding-raw {
   grid-column: 2;
 }
-.coding-event strong.error {
-  color: var(--danger);
-}
-.coding-event strong.tool {
-  color: var(--accent);
-}
-.coding-transcript {
-  max-height: 220px;
-  overflow: auto;
-  padding: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-md);
-  background: var(--fill);
-  font: var(--text-xs) var(--font-mono);
-}
-.coding-event {
-  display: grid;
-  grid-template-columns: 72px 54px 1fr;
-  gap: 8px;
-  padding: 3px 0;
-}
-.coding-event time,
-.coding-event strong {
-  color: var(--text-tertiary);
-}
-.coding-event span {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.coding-result,
-.coding-checks {
-  display: grid;
-  gap: 8px;
-}
-.coding-result-heading,
-.coding-checks > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-.coding-files {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-sm);
-}
-.coding-files li {
-  margin: 4px 0;
-}
-.coding-files summary {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  cursor: pointer;
-}
-.coding-files summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.coding-files .coding-diff-body {
-  margin-top: 6px;
-}
-.risk-label {
-  color: var(--danger);
-}
-.conflict-label {
-  color: var(--warning);
-}
-.merge-label {
-  color: var(--text-tertiary);
-}
-.conflict-choice {
-  display: grid;
-  gap: 4px;
-  margin: 6px 0 4px 24px;
-  font-size: var(--text-sm);
-}
-.conflict-choice label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.blocked-label {
-  color: var(--danger);
-}
-.coding-rounds,
 .coding-halt {
   font-size: var(--text-sm);
-}
-.coding-rounds ol {
-  margin: 4px 0;
-  padding-left: 20px;
-  color: var(--text-secondary);
-}
-.coding-rounds .current {
-  color: var(--text);
 }
 .coding-halt {
   display: flex;
@@ -593,32 +414,6 @@ div.coding-error .coding-raw {
   align-items: center;
   margin: 0;
   color: var(--warning);
-}
-.risk-consent {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--warning);
-  font-size: var(--text-sm);
-}
-.coding-diff {
-  max-height: 260px;
-  overflow: auto;
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-md);
-  background: var(--fill);
-  color: var(--text-secondary);
-  font: var(--text-xs) var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.check-pass {
-  color: var(--online);
-}
-.check-fail {
-  color: var(--danger);
 }
 .empty-hint {
   margin: 0;

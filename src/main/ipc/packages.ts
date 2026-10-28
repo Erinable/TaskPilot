@@ -1,17 +1,17 @@
 // Work package channels: the queue, transitions and step progress, and the
 // agents that judge a package (QA, Architect's ruling, the baseline).
-import { asAgentError, failWith, requireString } from '../coded_error.ts';
-import * as git from '../git.ts';
-import { toWireState } from '../app_context.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { asAgentError, failWith, requireString } from '../infrastructure/coded_error.ts';
+import * as git from '../repository/git.ts';
+import { toWireState } from '../app/app_context.ts';
+import { registerContract } from './handler.ts';
+import { packagesContract, tasksContract, reviewContract, deviationContract, practiceContract } from '../../shared/ipc/packages.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
-import type { AppContext } from '../app_context.ts';
-import type { ExplanationService } from '../explanation_service.ts';
-import type { PracticeService } from '../practice_service.ts';
-import type { ReviewService } from '../review_service.ts';
-import type { TransitionName } from '../work_package_status.ts';
-import type { DeviationInput } from '../work_package_store.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { ExplanationService } from '../work_packages/explanation_service.ts';
+import type { PracticeService } from '../work_packages/practice_service.ts';
+import type { ReviewService } from '../work_packages/review_service.ts';
+import type { TransitionName } from '../work_packages/work_package_status.ts';
+import type { DeviationInput } from '../work_packages/work_package_state.ts';
 import type { IpcMainLike } from './handler.ts';
 
 const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies packageTypes.ExecutionMode[];
@@ -31,39 +31,21 @@ export const register = (
     return true;
   };
 
-  // The developer starts a package before one of its dependencies is done.
-  ipcMain.handle(
-    CHANNELS.waiveDependency,
-    wrap(async (_event, rawId, rawDependency): Promise<packageTypes.TaskView> => {
+  registerContract(ipcMain, packagesContract, {
+    // The developer starts a package before one of its dependencies is done.
+
+    waiveDependency: async (rawId, rawDependency): Promise<packageTypes.TaskView> => {
       const id = requireString(rawId, 'id');
       const dependency = requireString(rawDependency, 'dependency');
       const task = requireTask(id);
       if (!(task.dependsOn ?? []).includes(dependency)) failWith('Not a dependency of this package', 'invalid_argument', 'dependency');
       return ctx.viewOf(task, await store.waiveDependency(id, dependency));
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.listTasks,
-    wrap((): packageTypes.TaskView[] => {
-      const state = store.all();
-      return ctx.catalog.listTasks().map((task) => ctx.viewOf(store.effective(task), state[task.id]));
-    }),
-  );
+    // Re-measuring is for a package claimed on a dirty tree, once it is clean.
+    // It is only allowed before the developer has submitted anything.
 
-  ipcMain.handle(
-    CHANNELS.getTask,
-    wrap((_event, id): packageTypes.TaskView => {
-      const checked = requireString(id, 'id');
-      return ctx.viewOf(requireTask(checked), store.get(checked));
-    }),
-  );
-
-  // Re-measuring is for a package claimed on a dirty tree, once it is clean.
-  // It is only allowed before the developer has submitted anything.
-  ipcMain.handle(
-    CHANNELS.baselineMeasure,
-    wrap(async (_event, rawId): Promise<packageTypes.TaskView> => {
+    measureBaseline: async (rawId): Promise<packageTypes.TaskView> => {
       const id = requireString(rawId, 'id');
       ctx.requireBaseline(id);
       const state = store.get(id);
@@ -71,14 +53,12 @@ export const register = (
       if (backgroundRuns.has('baseline', id)) failWith('The baseline is already being measured', 'baseline_running');
       review.measureBaseline(id);
       return ctx.viewOf(requireTask(id), store.get(id));
-    }),
-  );
+    },
 
-  // `actor` is fixed to 'human': anything arriving from the renderer is a
-  // human action by definition, so the renderer cannot claim to be an agent.
-  ipcMain.handle(
-    CHANNELS.transition,
-    wrap(async (_event, rawId, rawName, options): Promise<packageTypes.WorkPackageState> => {
+    // `actor` is fixed to 'human': anything arriving from the renderer is a
+    // human action by definition, so the renderer cannot claim to be an agent.
+
+    transition: async (rawId, rawName, options): Promise<packageTypes.WorkPackageState> => {
       const id = requireString(rawId, 'id');
       const name = requireString(rawName, 'name');
       const extra: { baseline?: string; deviation?: DeviationInput; mode?: packageTypes.ExecutionMode } = {};
@@ -132,67 +112,53 @@ export const register = (
           .catch(() => {});
         return toWireState(store.get(id));
       }
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.reviewRetry,
-    wrap((_event, id): Promise<packageTypes.WorkPackageState> => review.startReview(requireString(id, 'id'))),
-  );
+    // The store rejects a stepIndex that is not a non-negative integer.
 
-  ipcMain.handle(
-    CHANNELS.reviewCancel,
-    wrap((_event, id): boolean => abortRun('review', requireString(id, 'id'))),
-  );
-
-  ipcMain.handle(
-    CHANNELS.deviationRetry,
-    wrap((_event, id): Promise<packageTypes.WorkPackageState> => review.startAdjudication(requireString(id, 'id'))),
-  );
-
-  ipcMain.handle(
-    CHANNELS.deviationCancel,
-    wrap((_event, id): boolean => abortRun('adjudication', requireString(id, 'id'))),
-  );
-
-  // The store rejects a stepIndex that is not a non-negative integer.
-  ipcMain.handle(
-    CHANNELS.setStepDone,
-    wrap((_event, id, stepIndex, done): Promise<packageTypes.WorkPackageState> =>
+    setStepDone: (id, stepIndex, done): Promise<packageTypes.WorkPackageState> =>
       store.setStepDone(requireString(id, 'id'), stepIndex as number, done === true).then(toWireState),
-    ),
-  );
+  });
+  registerContract(ipcMain, tasksContract, {
+    list: (): packageTypes.TaskView[] => {
+      const state = store.all();
+      return ctx.catalog.listTasks().map((task) => ctx.viewOf(store.effective(task), state[task.id]));
+    },
 
-  // Practice: the reference is shown after the first submission, and a
-  // grade can be asked for again.
-  ipcMain.handle(
-    CHANNELS.referenceGet,
-    wrap((_event, rawId): Promise<string> => practice.revealReference(requireString(rawId, 'id'))),
-  );
+    get: (id): packageTypes.TaskView => {
+      const checked = requireString(id, 'id');
+      return ctx.viewOf(requireTask(checked), store.get(checked));
+    },
+  });
+  registerContract(ipcMain, reviewContract, {
+    retry: (id): Promise<packageTypes.WorkPackageState> => review.startReview(requireString(id, 'id')),
 
-  ipcMain.handle(
-    CHANNELS.gradeStart,
-    wrap((_event, rawId, skipReference): Promise<packageTypes.TaskView> => {
+    cancel: (id): boolean => abortRun('review', requireString(id, 'id')),
+  });
+  registerContract(ipcMain, deviationContract, {
+    retry: (id): Promise<packageTypes.WorkPackageState> => review.startAdjudication(requireString(id, 'id')),
+
+    cancel: (id): boolean => abortRun('adjudication', requireString(id, 'id')),
+  });
+  registerContract(ipcMain, practiceContract, {
+    // Practice: the reference is shown after the first submission, and a
+    // grade can be asked for again.
+
+    reference: (rawId): Promise<string> => practice.revealReference(requireString(rawId, 'id')),
+
+    grade: (rawId, skipReference): Promise<packageTypes.TaskView> => {
       if (typeof skipReference !== 'boolean') failWith('skipReference must be boolean', 'invalid_argument', 'skipReference');
       return practice.startGrade(requireString(rawId, 'id'), { force: true, skipReference });
-    }),
-  );
+    },
 
-  // Explaining the differences from the reference (../explanation_service.ts):
-  // Tutor picks them, the developer answers (null skips one), and the result
-  // is saved as a note.
-  ipcMain.handle(
-    CHANNELS.explainStart,
-    wrap((_event, rawId): Promise<packageTypes.TaskView> => explanation.start(requireString(rawId, 'id'))),
-  );
+    // Explaining the differences from the reference (../explanation_service.ts):
+    // Tutor picks them, the developer answers (null skips one), and the result
+    // is saved as a note.
 
-  ipcMain.handle(
-    CHANNELS.explainAnswer,
-    wrap((_event, rawId, answers): Promise<packageTypes.TaskView> => explanation.answer(requireString(rawId, 'id'), answers)),
-  );
+    explain: (rawId): Promise<packageTypes.TaskView> => explanation.start(requireString(rawId, 'id')),
 
-  ipcMain.handle(
-    CHANNELS.explainSaveNote,
-    wrap((_event, rawId): Promise<packageTypes.TaskView> => explanation.saveNote(requireString(rawId, 'id'))),
-  );
+    answer: (rawId, answers): Promise<packageTypes.TaskView> => explanation.answer(requireString(rawId, 'id'), answers),
+
+    saveExplanation: (rawId): Promise<packageTypes.TaskView> => explanation.saveNote(requireString(rawId, 'id')),
+  });
 };

@@ -3,22 +3,24 @@ import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 
 import { registerIpcHandlers } from './ipc.ts';
-import { wrap } from './ipc/handler.ts';
-import { createStartupGate } from './startup_gate.ts';
+import { registerContract } from './ipc/handler.ts';
+import { createStartupGate } from './app/startup_gate.ts';
 import type { IpcHandle } from './ipc.ts';
-import { WorkPackageStore } from './work_package_store.ts';
-import { RequirementStore } from './requirement_store.ts';
-import { ReleaseStore } from './release_store.ts';
-import * as preferences from './preferences.ts';
-import { createPathResolver } from './shell_env.ts';
-import { env } from './env.ts';
-import { ActivityLog } from './activity_log.ts';
-import { RepositoryRegistry } from './repositories.ts';
-import { TutorStore } from './tutor_store.ts';
-import { NoteStore } from './note_store.ts';
-import { MasteryStore } from './mastery_store.ts';
-import * as courses from './courses.ts';
+import { WorkPackageStore } from './work_packages/work_package_store.ts';
+import { RequirementStore } from './requirements/requirement_store.ts';
+import { ReleaseStore } from './release/release_store.ts';
+import * as preferences from './app/preferences.ts';
+import { createPathResolver } from './infrastructure/shell_env.ts';
+import { env } from './infrastructure/env.ts';
+import { ActivityLog } from './activity/activity_log.ts';
+import { RepositoryRegistry } from './repository/repositories.ts';
+import { TutorStore } from './work_packages/tutor_store.ts';
+import { NoteStore } from './notes/note_store.ts';
+import { MasteryStore } from './courses/mastery_store.ts';
+import * as courses from './courses/courses.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
+import { appContract } from '../shared/ipc/app.ts';
+import { initializeLogging, flushLogs, logger } from './infrastructure/logger.ts';
 
 // Matches --canvas in tokens.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -80,7 +82,7 @@ const createWindow = (appearance: Appearance) => {
   window.on('closed', () => nativeTheme.off('updated', syncBackground));
 
   // Full screen hides the traffic lights, so the top bar can use their space.
-  const sendFullScreen = () => window.webContents.send(CHANNELS.windowFullScreen, window.isFullScreen());
+  const sendFullScreen = () => window.webContents.send(CHANNELS.appOnFullScreen, window.isFullScreen());
   window.on('enter-full-screen', sendFullScreen);
   window.on('leave-full-screen', sendFullScreen);
   window.webContents.on('did-finish-load', sendFullScreen);
@@ -96,11 +98,13 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
 
   const configDir = app.getPath('userData');
+  await initializeLogging(path.join(configDir, 'logs'));
+  logger.info('[startup] TaskPilot starting');
   // The window opens before the stores load, so its splash covers that time.
   // Only the appearance is read first; initialize() reads the file again and
   // reports a failure on the splash.
   let prefs = await preferences.load(configDir).catch((error) => {
-    console.error('[startup] preferences could not be read', error);
+    logger.error('[startup] preferences could not be read', error);
     return preferences.defaults();
   });
   // themeSource drives prefers-color-scheme in every window, so the CSS
@@ -132,7 +136,7 @@ app.whenReady().then(async () => {
     // So does mastery.
     const mastery = await new MasteryStore(configDir).load();
     // Expired day files go at startup; a failure only leaves old files behind.
-    activity.prune().catch((error) => console.error('[activity] prune failed', error));
+    activity.prune().catch((error) => logger.error('[activity] prune failed', error));
 
     ipcHandle = registerIpcHandlers(ipcMain, {
       store,
@@ -155,6 +159,11 @@ app.whenReady().then(async () => {
       tutor,
       notes,
       mastery,
+      onStateChanged: (change) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.webContents.isDestroyed()) window.webContents.send(CHANNELS.stateOnChanged, change);
+        }
+      },
       onPreferencesChanged: (next) => {
         nativeTheme.themeSource = next.appearance.theme;
         for (const window of BrowserWindow.getAllWindows()) {
@@ -196,13 +205,12 @@ app.whenReady().then(async () => {
 
   const startup = createStartupGate(initialize);
   // The renderer waits on this before any other call.
-  ipcMain.handle(
-    CHANNELS.startupReady,
-    wrap(async (_event, retry) => {
+  registerContract(ipcMain, appContract, {
+    ready: async (retry) => {
       await startup.ready(retry === true);
       return true;
-    }),
-  );
+    },
+  });
   createWindow(prefs.appearance);
 
   app.on('activate', () => {
@@ -214,11 +222,14 @@ app.whenReady().then(async () => {
 // run is reported as failed on the next launch (see requirement_store.js).
 let shuttingDown = false;
 app.on('before-quit', (event) => {
-  if (shuttingDown || !ipcHandle) return;
+  if (shuttingDown) return;
   shuttingDown = true;
   event.preventDefault();
   const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
-  Promise.race([ipcHandle.shutdown(), timeout]).finally(() => app.quit());
+  Promise.race([ipcHandle?.shutdown() ?? Promise.resolve(), timeout])
+    .catch((error) => logger.error('[shutdown] could not finish background runs', error))
+    .then(() => flushLogs())
+    .finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

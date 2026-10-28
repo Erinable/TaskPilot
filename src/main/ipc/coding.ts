@@ -1,13 +1,13 @@
 // Coding Agent channels: rounds, their events and patch, apply and resume.
 // The loop itself is ../coding_service.ts.
-import { failWith, requireString } from '../coded_error.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import { registerContract } from './handler.ts';
+import { codingContract } from '../../shared/ipc/coding.ts';
 import type * as codingTypes from '../../shared/coding_types.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
-import type { AppContext } from '../app_context.ts';
-import type { CodingRuntime } from '../coding_runtime.ts';
-import type { CodingService } from '../coding_service.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { CodingRuntime } from '../coding/coding_runtime.ts';
+import type { CodingService } from '../coding/coding_service.ts';
 import type { IpcMainLike } from './handler.ts';
 
 // The renderer's choices for conflicted files, checked at the boundary.
@@ -22,53 +22,38 @@ const codingResolutions = (raw: unknown): Partial<Record<string, codingTypes.Cod
 };
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext, { coding, runtime }: { coding: CodingService; runtime: CodingRuntime }) => {
-  ipcMain.handle(
-    CHANNELS.codingStatus,
-    wrap(() => runtime.codingStatus()),
-  );
-  ipcMain.handle(
-    CHANNELS.codingStart,
-    wrap((_event, rawId, rawInput): Promise<packageTypes.TaskView> => {
+  registerContract(ipcMain, codingContract, {
+    status: () => runtime.codingStatus(),
+
+    start: (rawId, rawInput): Promise<packageTypes.TaskView> => {
       const id = requireString(rawId, 'id');
       const input = rawInput as { instruction?: unknown } | null | undefined;
       const instruction = requireString(input?.instruction, 'instruction').trim();
       if (instruction.length > 20_000) failWith('Instruction is too long', 'invalid_argument', 'instruction');
       return coding.start(id, instruction);
-    }),
-  );
-  ipcMain.handle(
-    CHANNELS.codingGet,
-    wrap((_event, rawId): packageTypes.TaskView => {
+    },
+
+    get: (rawId): packageTypes.TaskView => {
       const id = requireString(rawId, 'id');
       return ctx.viewOf(ctx.requireTask(id), ctx.store.get(id));
-    }),
-  );
-  ipcMain.handle(
-    CHANNELS.codingEvents,
-    wrap((_event, rawId, rawAfter): codingTypes.CodingEventPage => {
+    },
+
+    events: (rawId, rawAfter): codingTypes.CodingEventPage => {
       const id = requireString(rawId, 'id');
       coding.codingRunOf(id);
       if (!Number.isInteger(rawAfter) || (rawAfter as number) < -1) failWith('after must be a non-negative sequence or -1', 'invalid_argument', 'after');
       return coding.events(id, rawAfter as number);
-    }),
-  );
-  ipcMain.handle(
-    CHANNELS.codingCancel,
-    wrap((_event, rawId): Promise<boolean> => coding.cancel(requireString(rawId, 'id'))),
-  );
-  // The packages with a round or its checks in flight, for the app-wide
-  // indicator. Read from memory, so it is cheap to poll.
-  ipcMain.handle(
-    CHANNELS.codingActive,
-    wrap((): codingTypes.CodingActiveRun[] => coding.activeRuns()),
-  );
-  ipcMain.handle(
-    CHANNELS.codingPatch,
-    wrap((_event, rawId): Promise<codingTypes.CodingPatchPreview> => coding.patch(requireString(rawId, 'id'))),
-  );
-  ipcMain.handle(
-    CHANNELS.codingApply,
-    wrap((_event, rawId, rawInput): Promise<codingTypes.CodingApplyResult> => {
+    },
+
+    cancel: (rawId): Promise<boolean> => coding.cancel(requireString(rawId, 'id')),
+    // The packages with a round or its checks in flight, for the app-wide
+    // indicator. Read from memory, so it is cheap to poll.
+
+    active: (): codingTypes.CodingActiveRun[] => coding.activeRuns(),
+
+    patch: (rawId): Promise<codingTypes.CodingPatchPreview> => coding.patch(requireString(rawId, 'id')),
+
+    apply: (rawId, rawInput): Promise<codingTypes.CodingApplyResult> => {
       const id = requireString(rawId, 'id');
       const input = rawInput as { digest?: unknown; allowHighRisk?: unknown; files?: unknown; resolutions?: unknown } | null | undefined;
       const digest = requireString(input?.digest, 'digest');
@@ -78,10 +63,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { coding, runtim
         failWith('files must be a non-empty list of paths', 'invalid_argument', 'files');
       const resolutions = codingResolutions(input.resolutions);
       return coding.apply(id, { digest, allowHighRisk: input.allowHighRisk, files: files as string[], resolutions });
-    }),
-  );
-  ipcMain.handle(
-    CHANNELS.codingResume,
-    wrap((_event, rawId): Promise<packageTypes.TaskView> => coding.resume(requireString(rawId, 'id'))),
-  );
+    },
+
+    resume: (rawId): Promise<packageTypes.TaskView> => coding.resume(requireString(rawId, 'id')),
+  });
 };

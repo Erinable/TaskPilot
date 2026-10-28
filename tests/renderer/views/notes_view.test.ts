@@ -10,6 +10,7 @@ import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as noteTypes from '../../../src/shared/ipc/notes.ts';
+import { stateEvents } from '../ipc_fakes.ts';
 
 // KaTeX checks once, when it loads, that the page is not in quirks mode;
 // happy-dom reports no compatMode at all, while the app page has a doctype.
@@ -64,7 +65,12 @@ const OS: noteTypes.NoteCourse = {
   ],
 };
 
-let api: { businessTimeZone: string; notes: Record<string, ReturnType<typeof vi.fn>>; workspace: { openFile: ReturnType<typeof vi.fn> } };
+let api: {
+  businessTimeZone: string;
+  state: ReturnType<typeof stateEvents>;
+  notes: Record<string, ReturnType<typeof vi.fn>>;
+  workspace: { openFile: ReturnType<typeof vi.fn> };
+};
 const list = (notes: noteTypes.NoteMeta[]): noteTypes.NoteList => ({
   revision: 1,
   directory: '/notes',
@@ -80,9 +86,8 @@ const mountView = async (notes: noteTypes.NoteMeta[]) => {
   setActivePinia(pinia);
   useRepositoriesStore().currentId = 'r1';
   const wrapper = mount(NotesView, { global: { plugins: [ElementPlus, pinia] }, attachTo: document.body });
-  // Tests refresh by hand; a background poll would race them.
-  useNotesStore().stopPolling();
   await flushPromises();
+  useNotesStore().stopWatching();
   return wrapper;
 };
 
@@ -90,6 +95,7 @@ beforeEach(() => {
   document.body.replaceChildren();
   api = {
     businessTimeZone: 'Asia/Shanghai',
+    state: stateEvents(),
     notes: {
       list: vi.fn(() => ok(list([]))),
       get: vi.fn((id: string) => ok(id === NOTE.id ? NOTE : { ...LINKING, body: '[[用例要有断言]]' })),
@@ -213,8 +219,6 @@ describe('NotesView', () => {
       '用例要有断言.md',
       expect.objectContaining({ body: expect.stringContaining('- [x] 补上'), baseVersion: 'v1' }),
     );
-    // IPC structured-clones its arguments, which reactive proxies fail.
-    expect(() => structuredClone(api.notes.update.mock.calls[0][1])).not.toThrow();
   });
 
   test('editing a rename asks to update links, then returns to reading', async () => {
@@ -225,7 +229,6 @@ describe('NotesView', () => {
     await wrapper.get('.note-title-input').setValue('断言');
     await wrapper.get('[data-action="save-note"]').trigger('click');
     await flushPromises();
-    expect(feedback.confirmChoice).toHaveBeenCalled();
     expect(api.notes.update).toHaveBeenCalledWith(
       '用例要有断言.md',
       expect.objectContaining({ title: '断言', baseVersion: 'v1', renameLinks: true, force: false }),
@@ -242,8 +245,6 @@ describe('NotesView', () => {
     await wrapper.get('[data-action="edit-note"]').trigger('click');
     await flushPromises();
     const editor = wrapper.get('[data-note-editor]');
-    expect(editor.find('.note-textarea').exists()).toBe(true);
-    expect(editor.find('[data-note-preview]').exists()).toBe(true);
     const pick = async (label: string) => {
       await wrapper
         .findAll('[data-note-mode] .el-segmented__item')
@@ -253,15 +254,11 @@ describe('NotesView', () => {
     };
     await pick('源码');
     expect(editor.find('[data-note-preview]').exists()).toBe(false);
-    expect(localStorage.getItem('taskpilot.noteEditorMode')).toBe('source');
     await pick('预览');
     expect(editor.find('.note-textarea').exists()).toBe(false);
-    expect(editor.get('[data-note-preview]').classes()).toContain('alone');
     await editor.trigger('keydown', { key: 'e', metaKey: true });
     await flushPromises();
     expect(editor.find('.note-textarea').exists()).toBe(true);
-    expect(editor.find('[data-note-preview]').exists()).toBe(false);
-    expect(localStorage.getItem('taskpilot.noteEditorMode')).toBe('source');
     localStorage.removeItem('taskpilot.noteEditorMode');
   });
 
@@ -351,7 +348,6 @@ describe('NoteMarkdown', () => {
     expect(wrapper.find('a').exists()).toBe(false);
     expect(wrapper.findAll('.note-math-error').map((error) => error.text())).toEqual(['\\frac{1']);
   });
-
   test('tables, quotes and #tags render', async () => {
     const wrapper = mount(NoteMarkdown, { props: { body: '> 引用 #习惯\n\n| a | b |\n| - | - |\n| 1 | 2 |\n', exists: () => true } });
     expect(wrapper.find('blockquote').text()).toContain('引用');

@@ -1,16 +1,15 @@
-import { onTestFinished, test } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-const SCRIPT = path.resolve('scripts/check_electron.sh');
+import { tempDir } from '../fixtures/temp_dir.ts';
 
+const SCRIPT = path.resolve('scripts/check_electron.sh');
 // A repository copy holding only the script and an electron package.
 const fakeRepo = async (electron: Record<string, string> | null) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-electron-'));
-  onTestFinished(() => fs.rm(root, { recursive: true, force: true }));
+  const root = await tempDir('taskpilot-electron-');
   await fs.mkdir(path.join(root, 'scripts'));
   await fs.copyFile(SCRIPT, path.join(root, 'scripts/check_electron.sh'));
   for (const [file, content] of Object.entries(electron ?? {})) {

@@ -1,5 +1,5 @@
-// Shared by the IPC tests: a registered app over a temporary git repository,
-// fake agents and the polls that wait for background runs.
+// Shared by the IPC tests: a registered app over a temporary git repository
+// and deterministic waits for background runs.
 import { onTestFinished } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -9,32 +9,32 @@ import { promisify } from 'node:util';
 
 import { registerIpcHandlers } from '../../../src/main/ipc.ts';
 import type { IpcHandle } from '../../../src/main/ipc.ts';
-import type { AgentDeps, ShellDeps } from '../../../src/main/app_context.ts';
-import type { CodingDeps } from '../../../src/main/coding_runtime.ts';
-import type { Grader } from '../../../src/main/lab_verify.ts';
+import type { AgentDeps, ShellDeps } from '../../../src/main/app/app_context.ts';
+import type { CodingDeps } from '../../../src/main/coding/coding_runtime.ts';
+import type { Grader } from '../../../src/main/courses/lab_verify.ts';
 import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../../src/shared/coding_types.ts';
-import { parsePatchPreview } from '../../../src/main/coding_workspace.ts';
-import type { RunStructuredOptions, StructuredResult } from '../../../src/main/agents/claude_cli.ts';
+import { parsePatchPreview } from '../../../src/main/coding/coding_workspace.ts';
+import type { RunStructuredOptions, StructuredResult } from '../../../src/main/runtimes/claude_cli.ts';
 import type { Channel } from '../../../src/shared/ipc_channels.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { buildApi } from '../../../src/shared/ipc/contract.ts';
 import { CONTRACTS } from '../../../src/shared/ipc/contracts.ts';
 import type { ContractApi } from '../../../src/shared/ipc/contracts.ts';
-import { WorkPackageStore } from '../../../src/main/work_package_store.ts';
+import { WorkPackageStore } from '../../../src/main/work_packages/work_package_store.ts';
 import { SAMPLE_REQUIREMENT } from '../fixtures/sample_tasks.ts';
-import { REQUIREMENTS_FILENAME, RequirementStore } from '../../../src/main/requirement_store.ts';
-import { ActivityLog } from '../../../src/main/activity_log.ts';
-import { ReleaseStore } from '../../../src/main/release_store.ts';
-import { STATE_FILENAME } from '../../../src/main/work_package_store.ts';
-import * as workspace from '../../../src/main/workspace.ts';
-import * as preferences from '../../../src/main/preferences.ts';
-import { createPathResolver } from '../../../src/main/shell_env.ts';
-import { RepositoryRegistry } from '../../../src/main/repositories.ts';
-import { TutorStore } from '../../../src/main/tutor_store.ts';
-import { NoteStore } from '../../../src/main/note_store.ts';
-import { MasteryStore } from '../../../src/main/mastery_store.ts';
+import { REQUIREMENTS_FILENAME, RequirementStore } from '../../../src/main/requirements/requirement_store.ts';
+import { ActivityLog } from '../../../src/main/activity/activity_log.ts';
+import { ReleaseStore } from '../../../src/main/release/release_store.ts';
+import { STATE_FILENAME } from '../../../src/main/work_packages/work_package_store.ts';
+import * as workspace from '../../../src/main/repository/workspace.ts';
+import * as preferences from '../../../src/main/app/preferences.ts';
+import { createPathResolver } from '../../../src/main/infrastructure/shell_env.ts';
+import { RepositoryRegistry } from '../../../src/main/repository/repositories.ts';
+import { TutorStore } from '../../../src/main/work_packages/tutor_store.ts';
+import { NoteStore } from '../../../src/main/notes/note_store.ts';
+import { MasteryStore } from '../../../src/main/courses/mastery_store.ts';
 import { BUILTIN } from '../../fixtures/builtin_courses.ts';
 
 // A stand-in agent; tests answer with plain objects or reject.
@@ -206,8 +206,13 @@ export const harness = async ({
 
   // Untyped, for the tests that send malformed arguments on purpose.
   const call = (channel: Channel, ...args: unknown[]) => handlers.get(channel)!({}, ...args);
+  idleByCall.set(call, () => ipc!.idle());
   // Typed from the contract tables, as the renderer calls it; no events reach it.
-  const api: ContractApi = buildApi(CONTRACTS, { invoke: async (channel, ...args) => call(channel as Channel, ...args), on: () => undefined });
+  const api: ContractApi = buildApi(CONTRACTS, {
+    invoke: async (channel, ...args) => call(channel as Channel, ...args),
+    on: () => undefined,
+    removeListener: () => undefined,
+  });
   const setCommands = (commands) => {
     config = workspace.normalize({ root: config.root, commands });
   };
@@ -242,23 +247,33 @@ export const harness = async ({
     notes,
     mastery,
     agentCalls,
-    // The lab service main-process callers use (src/main/lab_service.ts).
+    // The lab service main-process callers use (src/main/courses/lab_service.ts).
     labs: ipc.labs,
-    // The first lab's generation (src/main/lab_generation_service.ts).
+    // The first lab's generation (src/main/courses/lab_generation_service.ts).
     labGeneration: ipc.labGeneration,
     shellReads: () => shellReads,
+    idle: () => ipc!.idle(),
     shutdown: () => ipc?.shutdown(),
   };
 };
 
-/** Polls until a requirement leaves a running state. */
-export const settle = async (call, id) => {
-  for (let i = 0; i < 200; i += 1) {
-    const { data } = await call(CHANNELS.requirementsGet, id);
-    if (data.status !== 'clarifying' && data.status !== 'planning') return data;
+const idleByCall = new WeakMap<object, () => Promise<void>>();
+
+export const until = async <Value>(read: () => Promise<Value>, done: (value: Value) => boolean, label: string): Promise<Value> => {
+  const deadline = Date.now() + 5000;
+  let last: Value | undefined;
+  while (Date.now() < deadline) {
+    last = await read();
+    if (done(last)) return last;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error('requirement never settled');
+  throw new Error(`${label} timed out; last value: ${JSON.stringify(last)}`);
+};
+
+/** Waits until a requirement leaves a running state. */
+export const settle = async (call, id) => {
+  await idleByCall.get(call)?.();
+  return (await call(CHANNELS.requirementsGet, id)).data;
 };
 
 export const codingRuntime = (overrides: Partial<CodingRuntimeStatus> = {}): CodingRuntimeStatus => ({
@@ -277,22 +292,12 @@ export const filePatch = (file: string, line: string, scope?: readonly string[])
   parsePatchPreview(`diff --git a/${file} b/${file}\nindex 1111111..2222222 100644\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n-export {};\n+${line}\n`, scope);
 
 export type TestCall = (channel: Channel, ...args: unknown[]) => Promise<IpcResult<unknown>>;
-// Waits on wall-clock time, not event-loop turns: a round writes the store to
-// disk several times, which a slow CI runner can take well over 100 ms to do.
-export const SETTLE_TIMEOUT_MS = 5000;
+// A coding run writes the store several times before its promise settles.
 export const settleCoding = async (call: TestCall, id: string): Promise<TaskView> => {
-  let last = 'no response';
-  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const response = await call(CHANNELS.codingGet, id);
-    if (response.ok) {
-      const task = response.data as TaskView;
-      last = JSON.stringify(task.codingRun);
-      if (task.codingRun && ['ready', 'failed', 'cancelled', 'discarded'].includes(task.codingRun.status)) return task;
-    } else last = JSON.stringify(response.error);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`coding run never settled: ${last}`);
+  await idleByCall.get(call)?.();
+  const response = await call(CHANNELS.codingGet, id);
+  if (!response.ok) throw new Error(`coding run lookup failed: ${response.error.code}`);
+  return response.data as TaskView;
 };
 
 export const CLARIFY_OUTPUT = { title: '邮箱登录', summary: '用户用邮箱和密码登录', questions: ['连续失败几次锁定？'] };
@@ -458,20 +463,16 @@ export const QA_PASS = {
 
 /** Claims auth-edge-tests, writes its test file, and submits it. */
 export const submitEdgeTests = async ({ call, root }) => {
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
-  return call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  return call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
 };
 
-/** Polls until the package's review leaves 'running'. */
+/** Waits until the package's review has finished. */
 export const settleReview = async (call, id) => {
-  for (let i = 0; i < 400; i += 1) {
-    const { data } = await call(CHANNELS.getTask, id);
-    if (data.review?.status !== 'running') return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('review never settled');
+  await idleByCall.get(call)?.();
+  return (await call(CHANNELS.tasksGet, id)).data;
 };
 
 export const ENV_PLAN = {
@@ -481,14 +482,12 @@ export const ENV_PLAN = {
   issues: [],
 };
 
-// Appends are not awaited by handlers; poll the overview until `count` events land.
+// Store appends are complete after the background registry and store queues idle.
 export const overviewWith = async (call, count: number) => {
-  for (let i = 0; i < 200; i += 1) {
-    const { data } = await call(CHANNELS.activityOverview);
-    if (data.recent.length >= count) return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error(`expected ${count} activity events`);
+  await idleByCall.get(call)?.();
+  const overview = (await call(CHANNELS.activityOverview)).data;
+  if (overview.recent.length < count) throw new Error(`expected ${count} activity events, got ${overview.recent.length}`);
+  return overview;
 };
 
 /* Tutor */
@@ -496,12 +495,8 @@ export const overviewWith = async (call, count: number) => {
 export const claimedState = { status: 'in_progress', baseline: null, claimedAt: null, completedSteps: [], deviations: [], review: null };
 
 export const settleTutor = async (call, id, stepIndex) => {
-  for (let i = 0; i < 200; i += 1) {
-    const { data } = await call(CHANNELS.tutorGet, id, stepIndex);
-    if (data.status !== 'running') return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('tutor never settled');
+  await idleByCall.get(call)?.();
+  return (await call(CHANNELS.tutorGet, id, stepIndex)).data;
 };
 
 // Publishes a two-package plan where the second depends on the first.
@@ -515,7 +510,7 @@ export const publishChain = async (h: Awaited<ReturnType<typeof harness>>) => {
   return { first: `${data.id}-wp1`, second: `${data.id}-wp2` };
 };
 
-// A repository course pack (src/main/courses.ts), for the tests that switch packs.
+// A repository course pack (src/main/courses/courses.ts), for the tests that switch packs.
 export const OS_PACK = `
 schemaVersion = 1
 id = "oslab"

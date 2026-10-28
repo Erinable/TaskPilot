@@ -1,20 +1,20 @@
 // The work package open in the execution view: its state, the diff against
-// the baseline, verification runs, the deviation form, and the polls that
-// follow background agents (QA, Architect) and baseline measurement.
+// the baseline, verification runs, and the deviation form. Background work
+// is refreshed by repository-scoped state events.
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError, describeErrorInfo } from '@/lib/errors.ts';
-import { defaultMode } from '@/lib/execution_mode.ts';
-import { announceAgent, confirmAction, showToast } from '@/lib/feedback.ts';
-import type { ConfirmOptions } from '@/lib/feedback.ts';
 import type { IconName } from '@/lib/icons.ts';
+import { announceAgent, showToast } from '@/lib/feedback.ts';
+import { createExecutionActions } from './execution_actions.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 
 export type ActionSpec = { name: packageTypes.HumanTransition; label: string; icon: IconName; primary?: boolean; danger?: boolean };
 
@@ -32,69 +32,46 @@ export const ACTIONS: ActionSpec[] = [
   { name: 'release', label: '放回队列', icon: 'undo' },
 ];
 
-export const TRANSITION_TOASTS: Partial<Record<packageTypes.HumanTransition, string>> = {
-  claim: '已领取，基线已记录。',
-  submit_for_review: '已提交，QA 正在审查。',
-  block: '已标记为阻塞。',
-  unblock: '已解除阻塞。',
-  release: '已放回队列。',
-  accepted: '已验收，工作包完成。',
-  acceptance_rejected: '已打回，工作包回到执行中。',
-  override_dismissal: '已提出异议，Architect 正在重新规划。',
-  revert_replan: '已撤销重新规划，恢复原计划和进度。',
-};
-
-// Transitions that need a confirmation first.
-export const TRANSITION_CONFIRMS: Partial<Record<packageTypes.HumanTransition, ConfirmOptions>> = {
-  acceptance_rejected: { title: '打回这个工作包？', body: '工作包会回到执行中，你需要修改后重新提交审查。', accept: '打回', danger: true },
-  revert_replan: { title: '撤销重新规划？', body: '恢复 Architect 修订前的计划和执行进度，偏差记录会保留。', accept: '撤销' },
-};
-
 const DEFAULT_VERIFY_STEPS: { id: workspaceTypes.CheckKind; label: string | null }[] = [
   { id: 'test', label: null },
   { id: 'lint', label: null },
   { id: 'build', label: null },
 ];
 
-export const REVIEW_POLL_MS = 1500;
-export const BASELINE_POLL_MS = 1000;
-
-// Practice runs count too: the reference, the grade and Tutor's part of
-// explaining the differences land in the open page.
-const RUNNING_STATUSES = new Set(['running', 'waiting', 'picking', 'reviewing']);
-const agentRunning = (task: packageTypes.TaskView | null) =>
-  [task?.review, task?.adjudication, task?.referenceRun, task?.grade, task?.grade?.explanation].some((run) => RUNNING_STATUSES.has(run?.status ?? ''));
-
-export type DeviationForm = { note: string; stepIndex: number | null; filePath: string | null };
-
 export const useExecutionStore = defineStore('execution', () => {
   // ========== Current package ==========
   const current = ref<packageTypes.TaskView | null>(null);
   // Acceptance evidence from the last verification run; falls back to the review's.
   const acceptanceOverride = ref<workspaceTypes.CriterionEvidence[] | null>(null);
-
+  let generation = 0;
+  let unsubscribe: (() => void) | null = null;
+  let reading = false;
+  let queued = false;
   // Re-reads the open package and the queue after a state change.
   const reloadCurrent = async () => {
-    if (!current.value) return;
-    current.value = await call(window.taskpilot.getTask(current.value.id));
+    const before = current.value;
+    const token = generation;
+    if (!before) return;
+    const fresh = await call(window.taskpilot.tasks.get(before.id));
+    if (generation !== token || current.value?.id !== before.id) return;
+    current.value = fresh;
     acceptanceOverride.value = null;
-    watchReview();
-    watchBaseline();
     await refreshDiff();
     await useTasksStore().reloadQueue();
   };
 
   const open = async (id: string) => {
+    const token = ++generation;
     let task: packageTypes.TaskView;
     try {
-      task = await call(window.taskpilot.getTask(id));
+      task = await call(window.taskpilot.tasks.get(id));
     } catch (error) {
       console.error(error);
       showToast(`打开工作包失败：${describeError(error)}`);
       return;
     }
-    if (!(await useAppStore().navigate('execution'))) return;
-    stopTimers();
+    if (generation !== token || !(await useAppStore().navigate('execution'))) return;
+    unsubscribe?.();
     current.value = task;
     acceptanceOverride.value = null;
     diff.value = null;
@@ -103,17 +80,17 @@ export const useExecutionStore = defineStore('execution', () => {
     verifyRunning.value = false;
     verifyResult.value = null;
     verifyError.value = null;
-    deviationOpen.value = false;
-    watchReview();
-    watchBaseline();
+    actions.deviationOpen.value = false;
+    startWatching();
     await Promise.all([refreshDiff(), loadVerifySteps()]);
   };
 
-  // Leaves the execution view; stops any polling.
   const close = () => {
-    stopTimers();
+    generation += 1;
+    unsubscribe?.();
+    unsubscribe = null;
     current.value = null;
-    deviationOpen.value = false;
+    actions.deviationOpen.value = false;
   };
 
   // Replace the open task after a coding or other background IPC action. The
@@ -122,17 +99,17 @@ export const useExecutionStore = defineStore('execution', () => {
     if (current.value?.id !== task.id) return false;
     current.value = task;
     useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === task.id ? task : entry));
-    watchReview();
-    watchBaseline();
     return true;
   };
+
+  const actions = createExecutionActions({ current, reloadCurrent, open, adoptTask });
 
   // ========== Steps ==========
   const setStepDone = async (stepIndex: number, done: boolean) => {
     if (!current.value) return false;
     const id = current.value.id;
     try {
-      const state = await call(window.taskpilot.setStepDone(id, stepIndex, done));
+      const state = await call(window.taskpilot.packages.setStepDone(id, stepIndex, done));
       if (current.value?.id === id) current.value = { ...current.value, completedSteps: state.completedSteps };
       // Keep the queue's progress in step without reloading it.
       const tasks = useTasksStore();
@@ -146,43 +123,10 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Baseline ==========
-  let baselineTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const stopBaselinePolling = () => {
-    if (baselineTimer) clearTimeout(baselineTimer);
-    baselineTimer = null;
-  };
-
-  // Claiming starts the measurement in the background; follow it.
-  const watchBaseline = () => {
-    stopBaselinePolling();
-    const task = current.value;
-    if (!task?.baseline || (task.baselineChecks && task.baselineChecks.status !== 'measuring')) return;
-    const id = task.id;
-    baselineTimer = setTimeout(() => {
-      baselineTimer = null;
-      pollBaseline(id).catch((error) => console.error(error));
-    }, BASELINE_POLL_MS);
-  };
-
-  const pollBaseline = async (id: string) => {
-    if (current.value?.id !== id) return;
-    try {
-      const fresh = await call(window.taskpilot.getTask(id));
-      if (current.value?.id !== id) return;
-      current.value = { ...current.value, baselineChecks: fresh.baselineChecks };
-      watchBaseline();
-    } catch (error) {
-      // Try again on the next reload.
-      console.error(error);
-    }
-  };
-
   const remeasureBaseline = async () => {
     if (!current.value) return;
     try {
-      const task = await call(window.taskpilot.measureBaseline(current.value.id));
-      // The new measurement replaces the old record once it starts.
+      const task = await call(window.taskpilot.packages.measureBaseline(current.value.id));
       const measuring: workspaceTypes.BaselineChecks = {
         status: 'measuring',
         reason: null,
@@ -192,7 +136,6 @@ export const useExecutionStore = defineStore('execution', () => {
         finishedAt: null,
       };
       current.value = { ...task, baselineChecks: measuring };
-      watchBaseline();
     } catch (error) {
       console.error(error);
       showToast(`无法重新测量：${describeError(error)}`, 'error');
@@ -200,12 +143,6 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Review and adjudication ==========
-  let reviewTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const stopReviewPolling = () => {
-    if (reviewTimer) clearTimeout(reviewTimer);
-    reviewTimer = null;
-  };
 
   const announceReview = (task: packageTypes.TaskView) => {
     const review = task.review;
@@ -226,70 +163,43 @@ export const useExecutionStore = defineStore('execution', () => {
     else if (decision === 'replan') announceAgent('Architect 已重新规划，工作包回到队列。');
   };
 
-  // Re-reads the open package while QA or Architect runs, until it settles.
-  const watchReview = () => {
-    stopReviewPolling();
+  const refreshBackground = async () => {
     const before = current.value;
-    if (!before || !agentRunning(before)) return;
-    reviewTimer = setTimeout(() => {
-      reviewTimer = null;
-      pollReview(before).catch((error) => console.error(error));
-    }, REVIEW_POLL_MS);
-  };
-
-  const pollReview = async (before: packageTypes.TaskView) => {
-    const id = before.id;
-    let task: packageTypes.TaskView;
-    try {
-      task = await call(window.taskpilot.getTask(id));
-    } catch (error) {
-      console.error(error);
-      if (current.value?.id === id) watchReview();
+    const token = generation;
+    if (!before) return;
+    if (reading) {
+      queued = true;
       return;
     }
-    if (current.value?.id !== id) return; // the user moved on
-    if (agentRunning(task)) {
+    reading = true;
+    try {
+      const task = await call(window.taskpilot.tasks.get(before.id));
+      if (generation !== token || current.value?.id !== before.id) return;
       current.value = task;
-      watchReview();
-      return;
-    }
-    try {
-      await reloadCurrent();
+      acceptanceOverride.value = null;
+      await refreshDiff();
+      await useTasksStore().reloadQueue();
+      if (before.review?.status === 'running' && task.review?.status !== 'running') announceReview(task);
+      if (before.grade && before.grade.status !== 'done' && task.grade?.status === 'done') announceAgent('导师判完卷了，参考答案也可以看了。');
+      if (before.adjudication?.status === 'running' && task.adjudication?.status !== 'running') announceAdjudication(task);
     } catch (error) {
-      console.error(error);
-    }
-    if (before.review?.status === 'running') announceReview(task);
-    if (before.grade && before.grade.status !== 'done' && task.grade?.status === 'done') announceAgent('导师判完卷了，参考答案也可以看了。');
-    if (before.adjudication?.status === 'running') announceAdjudication(task);
-  };
-
-  const runReviewAction = async (action: 'cancel' | 'retry') => {
-    if (!current.value) return;
-    try {
-      if (action === 'cancel') await call(window.taskpilot.review.cancel(current.value.id));
-      else await call(window.taskpilot.review.retry(current.value.id));
-      await reloadCurrent();
-    } catch (error) {
-      console.error(error);
-      showToast(`操作失败：${describeError(error)}`);
+      console.error('[execution] state refresh failed', error);
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
+        refreshBackground().catch((error) => console.error(error));
+      }
     }
   };
 
-  const runDeviationAction = async (action: 'cancel' | 'retry') => {
-    if (!current.value) return;
-    try {
-      if (action === 'cancel') await call(window.taskpilot.deviation.cancel(current.value.id));
-      else await call(window.taskpilot.deviation.retry(current.value.id));
-      await reloadCurrent();
-    } catch (error) {
-      console.error(error);
-      showToast(`操作失败：${describeError(error)}`);
-    }
-  };
-
-  const stopTimers = () => {
-    stopReviewPolling();
-    stopBaselinePolling();
+  const startWatching = () => {
+    unsubscribe?.();
+    const repositories = useRepositoryIdentityStore();
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (change.domains.some((domain) => domain === 'packages' || domain === 'workspace')) refreshBackground().catch((error) => console.error(error));
+    });
   };
 
   // ========== Diff ==========
@@ -360,74 +270,6 @@ export const useExecutionStore = defineStore('execution', () => {
     }
   };
 
-  // ========== Transitions ==========
-  // Claiming on a dirty tree records no baseline, so failures that were
-  // already there would count against the package. Say so before claiming.
-  const confirmDirtyClaim = async () => {
-    const info = await useAppStore().refreshWorkspaceStatus();
-    if (!info?.configured || !info.dirty) return true;
-    return confirmAction({
-      title: '项目里还有没提交的改动',
-      body: `有 ${info.changedFiles} 个文件改过但还没提交。建议先把它们提交（上一个工作包完成后可以在「保存到 git」里提交），或者还原。现在开始也可以，但 TaskPilot 分不清哪些问题是这次引入的。`,
-      accept: '仍然开始',
-    });
-  };
-
-  // The transition in flight; its button spins and the others wait.
-  const transitioning = ref<packageTypes.HumanTransition | null>(null);
-
-  // [人工决策-2026-10-14] 同时只做 1 个是软提示：已有执行中的包时，确认后仍可领取。
-  const confirmBusyClaim = async (id: string) => {
-    const others = useTasksStore().tasks.filter((task) => task.status === 'in_progress' && task.id !== id);
-    if (!others.length) return true;
-    return confirmAction({
-      title: `已经有 ${others.length} 个工作包在执行中`,
-      body: `「${others[0].title}」${others.length > 1 ? ` 等 ${others.length} 个` : ''}还没做完。同时做几个包时，改动容易混在一起，QA 也分不清哪些属于哪个包。建议先做完或放回队列，再开始新的。`,
-      accept: '仍然开始',
-    });
-  };
-
-  const runTransition = async (name: packageTypes.HumanTransition) => {
-    if (!current.value || transitioning.value) return;
-    if (name === 'report_deviation') {
-      openDeviationForm();
-      return;
-    }
-    const confirm = TRANSITION_CONFIRMS[name];
-    if (confirm && !(await confirmAction(confirm))) return;
-    if (name === 'claim') {
-      if (!(await confirmBusyClaim(current.value.id)) || !(await confirmDirtyClaim())) return;
-      // The claim itself goes out from the dialog, with the chosen mode.
-      claimMode.value = defaultMode(current.value);
-      claimOpen.value = true;
-      return;
-    }
-    if (name === 'submit_for_review' && current.value.codingRun?.status === 'applied') {
-      const proceed = await confirmAction({
-        title: '确认提交审查？',
-        body: '编码 Agent 的改动已写入工作区。验证和 QA 将以当前主机用户权限执行，请先确认文件范围和命令风险。',
-        accept: '仍然提交审查',
-      });
-      if (!proceed) return;
-    }
-    await sendTransition(name);
-  };
-
-  const sendTransition = async (name: packageTypes.HumanTransition, options?: packageTypes.TransitionOptions) => {
-    if (!current.value) return;
-    transitioning.value = name;
-    try {
-      await call(options ? window.taskpilot.transition(current.value.id, name, options) : window.taskpilot.transition(current.value.id, name));
-      await reloadCurrent();
-      showToast(TRANSITION_TOASTS[name] ?? '状态已更新。');
-    } catch (error) {
-      console.error(error);
-      showToast(`操作失败：${describeError(error)}`);
-    } finally {
-      transitioning.value = null;
-    }
-  };
-
   // ========== Practice ==========
   // The reference patch, fetched once the main process allows it.
   const reference = ref<{ id: string; patch: string } | null>(null);
@@ -479,82 +321,6 @@ export const useExecutionStore = defineStore('execution', () => {
     if (current.value?.grade?.explanation?.noteId) showToast('已存到学习笔记。');
   };
 
-  // ========== Claim dialog ==========
-  // Open while the developer picks who writes the code.
-  const claimOpen = ref(false);
-  const claimMode = ref<packageTypes.ExecutionMode>('self');
-
-  const closeClaim = () => {
-    claimOpen.value = false;
-  };
-
-  const confirmClaim = async () => {
-    claimOpen.value = false;
-    await sendTransition('claim', { mode: claimMode.value });
-  };
-
-  // ========== Modals ==========
-  // True while the deviation dialog is open, so Escape closes it first.
-  const deviationOpen = ref(false);
-  const deviationForm = ref<DeviationForm>({ note: '', stepIndex: null, filePath: null });
-
-  const openDeviationForm = () => {
-    deviationForm.value = { note: '', stepIndex: null, filePath: null };
-    deviationOpen.value = true;
-  };
-
-  const closeDeviationForm = () => {
-    deviationOpen.value = false;
-  };
-
-  // Resolves false when the note is blank, so the view can refocus it.
-  const submitDeviation = async () => {
-    if (!current.value) return false;
-    const { note, stepIndex, filePath } = deviationForm.value;
-    if (!note.trim()) {
-      showToast('请填写偏差说明。');
-      return false;
-    }
-    try {
-      await call(window.taskpilot.transition(current.value.id, 'report_deviation', { deviation: { note, stepIndex, filePath } }));
-      closeDeviationForm();
-      await reloadCurrent();
-      showToast('偏差已记录，Architect 正在裁决。');
-    } catch (error) {
-      console.error(error);
-      showToast(`提交失败：${describeError(error)}`);
-    }
-    return true;
-  };
-
-  // From a board card: open the package, then claim it there, so the same
-  // confirmations apply as on the execution page.
-  const claimFromQueue = async (id: string) => {
-    await open(id);
-    if (current.value?.id === id) await runTransition('claim');
-  };
-
-  // Lets a pending package start before one of its dependencies is done.
-  const waiveDependency = async (task: packageTypes.TaskView, dependency: packageTypes.PackageDependency) => {
-    const confirmed = await confirmAction({
-      title: '不等前置，直接开始？',
-      body: `「${task.title}」原计划等「${dependency.title ?? dependency.id}」完成后再做，因为它可能要用到前置包写的代码。不等的话，你可能要自己补上缺的部分。`,
-      accept: '解除这条依赖',
-    });
-    if (!confirmed) return false;
-    try {
-      const updated = await call(window.taskpilot.waiveDependency(task.id, dependency.id));
-      useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === updated.id ? updated : entry));
-      if (current.value?.id === updated.id) current.value = updated;
-      showToast('已解除这条依赖，可以开始执行了。');
-      return true;
-    } catch (error) {
-      console.error(error);
-      showToast(`解除依赖失败：${describeError(error)}`);
-      return false;
-    }
-  };
-
   return {
     // Current package
     current,
@@ -564,15 +330,15 @@ export const useExecutionStore = defineStore('execution', () => {
     close,
     reloadCurrent,
     // Queue actions
-    claimFromQueue,
-    waiveDependency,
+    claimFromQueue: actions.claimFromQueue,
+    waiveDependency: actions.waiveDependency,
     // Steps
     setStepDone,
     // Baseline
     remeasureBaseline,
     // Review and adjudication
-    runReviewAction,
-    runDeviationAction,
+    runReviewAction: actions.runReviewAction,
+    runDeviationAction: actions.runDeviationAction,
     // Diff
     diff,
     diffHint,
@@ -588,8 +354,8 @@ export const useExecutionStore = defineStore('execution', () => {
     verifyError,
     runVerification,
     // Transitions
-    transitioning,
-    runTransition,
+    transitioning: actions.transitioning,
+    runTransition: actions.runTransition,
     // Practice
     reference,
     referenceError,
@@ -600,15 +366,15 @@ export const useExecutionStore = defineStore('execution', () => {
     answerExplanation,
     saveExplanation,
     // Claim dialog
-    claimOpen,
-    claimMode,
-    closeClaim,
-    confirmClaim,
+    claimOpen: actions.claimOpen,
+    claimMode: actions.claimMode,
+    closeClaim: actions.closeClaim,
+    confirmClaim: actions.confirmClaim,
     // Modals
-    deviationOpen,
-    deviationForm,
-    openDeviationForm,
-    closeDeviationForm,
-    submitDeviation,
+    deviationOpen: actions.deviationOpen,
+    deviationForm: actions.deviationForm,
+    openDeviationForm: actions.openDeviationForm,
+    closeDeviationForm: actions.closeDeviationForm,
+    submitDeviation: actions.submitDeviation,
   };
 });

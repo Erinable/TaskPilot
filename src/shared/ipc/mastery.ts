@@ -1,3 +1,5 @@
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 // Review of notes that carry concepts (mastery:*): the Leitner schedule and
 // the notes due on the business day.
 
@@ -39,3 +41,12 @@ export type CourseMastery = {
   errorTypes: { type: string; count: number }[];
   repositories: { id: string; name: string; labs: number; current: boolean }[];
 };
+
+export const masteryContract = {
+  // The notes due for review on the business day.
+  reviews: invoke<[], ReviewList>('mastery:reviews'),
+  // The learner's verdict on a note due today; returns its next schedule.
+  review: invoke<[noteId: string, remembered: boolean], ReviewSchedule>('mastery:review'),
+  // One course pack's concepts and how each stands; the pack in use without an id.
+  course: invoke<[id?: string], CourseMastery>('mastery:course'),
+} satisfies Contract;

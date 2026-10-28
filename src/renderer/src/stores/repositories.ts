@@ -1,7 +1,7 @@
 // The repositories TaskPilot knows and the switch between them. A switch
-// stops every poll, asks the main process to cancel running work (after the
-// user confirms), then reloads every store for the new repository.
-import { defineStore } from 'pinia';
+// unsubscribes repository listeners, asks the main process to cancel running
+// work (after the user confirms), then reloads every store.
+import { defineStore, storeToRefs } from 'pinia';
 import { computed, ref } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
@@ -22,6 +22,7 @@ import { useRequirementsStore } from './requirements.ts';
 import { useSettingsStore } from './settings.ts';
 import { useTasksStore } from './tasks.ts';
 import { useTutorStore } from './tutor.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as repositoryTypes from '@shared/ipc/repositories.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
@@ -42,7 +43,7 @@ const BUSY_LABELS: Record<repositoryTypes.BusyKind, string> = {
 export const useRepositoriesStore = defineStore('repositories', () => {
   // ========== List ==========
   const repositories = ref<repositoryTypes.Repository[]>([]);
-  const currentId = ref<string | null>(null);
+  const { currentId } = storeToRefs(useRepositoryIdentityStore());
   const current = computed(() => repositories.value.find((repo) => repo.id === currentId.value) ?? null);
   // Bumped after every switch; the main content is keyed on it so each view
   // remounts and reloads its own state.
@@ -72,16 +73,16 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     generation.value += 1;
   };
 
-  // Settles what belongs to the old repository: unsaved settings, the notes
-  // editor, polls. Resolves false when the user stays.
+  // Settles what belongs to the old repository: unsaved settings and notes.
   const leaveCurrent = async () => {
     const app = useAppStore();
     if (!(await app.confirmLeaveSettings())) return false;
     await useReleaseStore().flushNotes();
     const execution = useExecutionStore();
-    useRequirementsStore().stopPolling();
+    useRequirementsStore().stopWatching();
     useReleaseStore().leave();
     execution.close();
+    useTasksStore().reset();
     // What the views read for the old repository; each view reloads on remount.
     useActivityFeedStore().reset();
     useCommitStore().reset();

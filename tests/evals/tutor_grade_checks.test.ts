@@ -5,7 +5,8 @@ import { cases } from '../../evals/tutor-grade/cases.ts';
 import { check, structure } from '../../evals/tutor-grade/checks.ts';
 import { gradeCase } from '../../evals/tutor-grade/grade.ts';
 import { BUILTIN_COURSES, OS_COURSE, PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
-import type { GradeReport } from '../../src/main/agents/tutor.ts';
+import type { GradeReport } from '../../src/main/agents/tutor_grade.ts';
+type GradeSchema = { properties: { comments: { items: { properties: { category: { enum: string[] } } } } } };
 
 const comment = (category: string, file: string | null = null, repeated = false) => ({
   category,
@@ -85,7 +86,11 @@ test('every case is graded through the real prompt, schema and validation (stub 
     const course = BUILTIN_COURSES.find((pack) => pack.id === testCase.course)!;
     let seen = { prompt: '', systemPrompt: '', enum: [] as string[] };
     const graded = await gradeCase(testCase, course, async (options) => {
-      seen = { prompt: options.prompt, systemPrompt: options.systemPrompt!, enum: (options.schema as any).properties.comments.items.properties.category.enum };
+      seen = {
+        prompt: options.prompt,
+        systemPrompt: options.systemPrompt!,
+        enum: (options.schema as GradeSchema).properties.comments.items.properties.category.enum,
+      };
       const file = Object.keys(testCase.submission)[0];
       const levels = Object.fromEntries(course.rubric.map((item) => [item.id, 2]));
       return { output: { summary: 's', strengths: [], comments: [comment(course.rubric[0].id, file, true)], levels }, costUsd: 0 };

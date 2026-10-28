@@ -1,12 +1,11 @@
 // Learning notes: the list (every note without its body), the open note,
 // the filters the notes page shows, and saving a grade comment as a note.
-// The files can change outside TaskPilot, so the page polls a revision and
-// only refetches when it moved. Notes are global, so a repository switch
-// leaves them alone.
+// State events track files changed outside TaskPilot. Notes are global, so a
+// repository switch leaves them alone.
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-import { call } from '@/lib/ipc.ts';
+import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
@@ -16,8 +15,8 @@ import type * as noteTypes from '@shared/ipc/notes.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useCoursesStore } from './courses.ts';
 import { useRepositoriesStore } from './repositories.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 
-const POLL_MS = 2000;
 // Drafts are reactive proxies, which IPC cannot clone; they are plain JSON.
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -54,16 +53,22 @@ export const useNotesStore = defineStore('notes', () => {
     loaded.value = true;
   };
 
+  let session = 0;
   // Resolves whether anything changed since the last load.
   const load = async () => {
+    const token = session;
     const list = await call(window.taskpilot.notes.list(revision.value));
-    if (!list) return false;
+    if (!list || token !== session) return false;
     applyList(list);
     return true;
   };
 
+  let coursesGeneration = 0;
   const loadCourses = async () => {
-    loadedCourses.value = await call(window.taskpilot.notes.courses());
+    const token = ++coursesGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
+    const next = await call(window.taskpilot.notes.courses());
+    if (token === coursesGeneration && repositoryId === useRepositoryIdentityStore().currentId) loadedCourses.value = next;
   };
 
   let searchGeneration = 0;
@@ -163,14 +168,19 @@ export const useNotesStore = defineStore('notes', () => {
     return JSON.stringify(edit) !== JSON.stringify(toDraft(note));
   });
 
+  let noteGeneration = 0;
   const openNote = async (id: string) => {
+    const token = ++noteGeneration;
+    const fromSession = session;
     const note = await call(window.taskpilot.notes.get(id));
+    if (token !== noteGeneration || fromSession !== session) return;
     current.value = note;
     draft.value = toDraft(note);
     conflict.value = false;
   };
 
   const closeNote = () => {
+    noteGeneration += 1;
     current.value = null;
     draft.value = null;
     conflict.value = false;
@@ -195,8 +205,23 @@ export const useNotesStore = defineStore('notes', () => {
     await openNote(note.id);
   };
 
+  let reading = false;
+  let queued = false;
   const refresh = async () => {
-    if (await load()) await syncOpen();
+    if (reading) {
+      queued = true;
+      return;
+    }
+    reading = true;
+    try {
+      if (await load()) await syncOpen();
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
+        refresh().catch((error) => console.error('[notes] refresh failed', error));
+      }
+    }
   };
 
   // Drops the developer's edits for what is on disk now.
@@ -214,7 +239,7 @@ export const useNotesStore = defineStore('notes', () => {
     conflict.value = false;
     const { body: _body, ...meta } = saved.note;
     notes.value = [meta, ...notes.value.filter((entry) => entry.id !== meta.id && entry.id !== previousId)];
-    // Renames touch other notes; the next poll brings their versions.
+    // Renames touch other notes; the next state event brings their versions.
     revision.value = null;
   };
 
@@ -231,7 +256,7 @@ export const useNotesStore = defineStore('notes', () => {
       if (saved.relinked) showToast(`已同步更新 ${saved.relinked} 篇笔记里的链接。`);
       return saved.note;
     } catch (error) {
-      if ((error as { code?: string }).code === 'note_conflict') {
+      if (error instanceof IpcError && error.code === 'note_conflict') {
         conflict.value = true;
         return null;
       }
@@ -250,7 +275,7 @@ export const useNotesStore = defineStore('notes', () => {
     try {
       const saved = await call(window.taskpilot.notes.create(plain(input), autoRename));
       const { body: _body, ...meta } = saved.note;
-      notes.value = [meta, ...notes.value];
+      notes.value = [meta, ...notes.value.filter((entry) => entry.id !== meta.id)];
       revision.value = null;
       if (open) {
         afterSave(saved);
@@ -298,7 +323,7 @@ export const useNotesStore = defineStore('notes', () => {
       if (keep && current.value) draft.value = { ...keep, summary: saved.note.summary };
       showToast('导师写好了总结。');
     } catch (error) {
-      if ((error as { code?: string }).code === 'note_conflict') conflict.value = true;
+      if (error instanceof IpcError && error.code === 'note_conflict') conflict.value = true;
       console.error('[notes] summarize failed', error);
       showToast(`总结没写成：${describeError(error)}`, 'error');
     } finally {
@@ -335,14 +360,19 @@ export const useNotesStore = defineStore('notes', () => {
   // A link in a note opens in the system browser or mail app.
   const openUrl = (url: string) => call(window.taskpilot.notes.openUrl(url));
 
-  let pollTimer: number | null = null;
-  const startPolling = () => {
-    if (pollTimer !== null) return;
-    pollTimer = window.setInterval(() => refresh().catch((error) => console.error('[notes] refresh failed', error)), POLL_MS);
+  let unsubscribe: (() => void) | null = null;
+  const startWatching = () => {
+    if (unsubscribe) return;
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.domains.includes('notes')) refresh().catch((error) => console.error('[notes] refresh failed', error));
+    });
+    refresh().catch((error) => console.error('[notes] refresh failed', error));
   };
-  const stopPolling = () => {
-    if (pollTimer !== null) window.clearInterval(pollTimer);
-    pollTimer = null;
+  const stopWatching = () => {
+    session += 1;
+    queued = false;
+    unsubscribe?.();
+    unsubscribe = null;
   };
 
   // ========== From grading ==========
@@ -425,8 +455,8 @@ export const useNotesStore = defineStore('notes', () => {
     resetDirectory,
     revealDirectory,
     openUrl,
-    startPolling,
-    stopPolling,
+    startWatching,
+    stopWatching,
     // From grading
     saveComment,
   };

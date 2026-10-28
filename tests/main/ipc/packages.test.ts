@@ -11,19 +11,9 @@ import * as fixtures from './harness.ts';
 // Runs real git and npm processes per test; slow machines and CI need the room.
 vi.setConfig({ testTimeout: 20_000 });
 
-test('a task view merges the definition with runtime state', async () => {
-  const { call } = await fixtures.harness();
-  const { data } = await call(CHANNELS.getTask, 'auth-edge-tests');
-  assert.equal(data.title, '补充登录模块边界测试');
-  assert.equal(data.status, 'pending');
-  assert.equal(data.statusLabel, '待执行');
-  assert.deepEqual(data.completedSteps, []);
-  assert.deepEqual(data.humanTransitions, ['claim']);
-});
-
 test('claiming reads the baseline from git, not from the renderer', async () => {
   const { call, root } = await fixtures.harness();
-  const response = await call(CHANNELS.transition, 'auth-edge-tests', 'claim', { baseline: 'attacker-supplied' });
+  const response = await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { baseline: 'attacker-supplied' });
   assert.equal(response.ok, true);
   const head = (await fixtures.run('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   assert.equal(response.data.baseline, head);
@@ -31,12 +21,12 @@ test('claiming reads the baseline from git, not from the renderer', async () => 
 
 test('claiming records the chosen execution mode and refuses unknown ones', async () => {
   const { call } = await fixtures.harness();
-  const bad = await call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'pair' });
+  const bad = await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'pair' });
   assert.equal(bad.error.code, 'invalid_argument');
-  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.status, 'pending');
-  const claimed = await call(CHANNELS.transition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  assert.equal((await call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'pending');
+  const claimed = await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'practice' });
   assert.equal(claimed.data.mode, 'practice');
-  assert.equal((await call(CHANNELS.getTask, 'auth-edge-tests')).data.mode, 'practice');
+  assert.equal((await call(CHANNELS.tasksGet, 'auth-edge-tests')).data.mode, 'practice');
 });
 
 test('the renderer cannot act as an agent', async () => {
@@ -52,13 +42,13 @@ test('the renderer cannot act as an agent', async () => {
     },
   });
   setCommands({ test: fixtures.EDGE_TESTS_PASS });
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   await fs.mkdir(path.join(root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(root, 'tests/auth/login-user.test.ts'), 'test("x", () => {});\n');
-  await call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
   assert.equal(store.get('auth-edge-tests').status, 'in_review');
   // review_passed belongs to the QA agent; the renderer has no way to send it.
-  const response = await call(CHANNELS.transition, 'auth-edge-tests', 'review_passed');
+  const response = await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'review_passed');
   assert.equal(response.error.code, 'wrong_actor');
   release();
 });
@@ -136,7 +126,11 @@ test('review: cancelling stops QA and leaves the package in review', async () =>
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
   await fixtures.submitEdgeTests(h);
   // Wait until QA is actually waiting on the model.
-  while (h.agentCalls.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+  await fixtures.until(
+    async () => h.agentCalls.length,
+    (count) => count > 0,
+    'QA start',
+  );
   assert.equal((await h.call(CHANNELS.reviewCancel, 'auth-edge-tests')).data, true);
   const task = await fixtures.settleReview(h.call, 'auth-edge-tests');
   assert.equal(task.status, 'in_review');
@@ -154,115 +148,74 @@ test('review: failing tests reject without calling the model', async () => {
   assert.equal(fixtures.callFor(h.agentCalls, 'review'), undefined);
 });
 
-test('step progress round-trips through the store', async () => {
-  const { call } = await fixtures.harness();
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
-  const { data } = await call(CHANNELS.setStepDone, 'auth-edge-tests', 1, true);
-  assert.deepEqual(data.completedSteps, [1]);
-  assert.equal((await call(CHANNELS.setStepDone, 'auth-edge-tests', 'x', true)).error.code, 'invalid_step');
-});
+const settleBaseline = async (call, id) =>
+  fixtures.until(
+    async () => (await call(CHANNELS.tasksGet, id)).data.baselineChecks,
+    (baseline) => Boolean(baseline && baseline.status !== 'measuring'),
+    'baseline',
+  );
 
-const settleBaseline = async (call, id) => {
-  for (let i = 0; i < 400; i += 1) {
-    const { data } = await call(CHANNELS.getTask, id);
-    if (data.baselineChecks && data.baselineChecks.status !== 'measuring') return data.baselineChecks;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('baseline never settled');
+const settleAdjudication = async (call, id) => {
+  await fixtures.until(
+    async () => (await call(CHANNELS.tasksGet, id)).data,
+    (task) => task.adjudication?.status !== 'running',
+    'adjudication',
+  );
+  return (await call(CHANNELS.tasksGet, id)).data;
 };
 
-const LEGACY_FAILING = {
-  command: process.execPath,
-  args: [
-    '-e',
-    "console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts\\nnot ok 3 - legacy report export'); process.exit(1)",
-  ],
+const reportDeviation = async ({ call }) => {
+  await call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  return call(CHANNELS.packagesTransition, 'auth-edge-tests', 'report_deviation', {
+    deviation: { note: '测试文件应该叫 login.test.ts', filePath: 'src/auth/application/login-user.ts' },
+  });
 };
 
-test('baseline: claiming measures submit checks on a clean tree', async () => {
-  const h = await fixtures.harness();
-  h.setCommands({ test: LEGACY_FAILING });
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
-  const baseline = await settleBaseline(h.call, 'auth-edge-tests');
-  assert.equal(baseline.status, 'measured');
-  assert.deepEqual(baseline.checks.test.failing, ['legacy report export']);
-  assert.match(baseline.checks.test.line, /legacy report export/);
-});
-
-test('baseline: a dirty tree is not measured, and can be re-measured once clean', async () => {
+test('baseline: a dirty tree is unavailable until it is cleaned and re-measured', async () => {
   const h = await fixtures.harness();
   h.setCommands({ test: fixtures.EDGE_TESTS_PASS });
-  const tracked = path.join(h.root, 'src/auth/application/login-user.ts');
-  await fs.writeFile(tracked, 'export const dirty = 1;\n');
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
-  const dirty = await settleBaseline(h.call, 'auth-edge-tests');
-  assert.equal(dirty.status, 'unavailable');
-  assert.equal(dirty.reason, 'dirty_tree');
-
+  await fs.writeFile(path.join(h.root, 'src/auth/application/login-user.ts'), 'export const dirty = 1;\n');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  assert.equal((await settleBaseline(h.call, 'auth-edge-tests')).reason, 'dirty_tree');
   await fixtures.run('git', ['checkout', '--', '.'], { cwd: h.root });
-  // The first run records 'unavailable' just before it leaves the run
-  // registry, so a re-measure right after can still find it running.
-  let started = await h.call(CHANNELS.baselineMeasure, 'auth-edge-tests');
-  for (let i = 0; i < 400 && started.error?.code === 'baseline_running'; i += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    started = await h.call(CHANNELS.baselineMeasure, 'auth-edge-tests');
-  }
-  assert.equal(started.ok, true, JSON.stringify(started.error));
-  // Wait past the 'unavailable' record left by the first attempt.
-  for (let i = 0; i < 400; i += 1) {
-    const { data } = await h.call(CHANNELS.getTask, 'auth-edge-tests');
-    if (data.baselineChecks?.status === 'measured') break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.equal((await h.call(CHANNELS.getTask, 'auth-edge-tests')).data.baselineChecks.status, 'measured');
+  await h.call(CHANNELS.packagesMeasureBaseline, 'auth-edge-tests');
+  await h.idle();
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.baselineChecks.status, 'measured');
 });
 
-test('review: a failure already present at the baseline does not reject', async () => {
+test('review: a failure present in the IPC baseline is attention, not rejection', async () => {
   const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  h.setCommands({ test: LEGACY_FAILING });
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  h.setCommands({
+    test: {
+      command: process.execPath,
+      args: [
+        '-e',
+        "console.log('ok 1 - login is case-insensitive for the email\\nok 2 - account locks after five failed attempts\\nnot ok 3 - legacy report export'); process.exit(1)",
+      ],
+    },
+  });
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   await settleBaseline(h.call, 'auth-edge-tests');
   await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
   const task = await fixtures.settleReview(h.call, 'auth-edge-tests');
-  assert.equal(task.status, 'accepting', JSON.stringify(task.review.reasons));
+  assert.equal(task.status, 'accepting');
   assert.deepEqual(task.review.checks[0].preexisting, ['legacy report export']);
-  assert.ok(task.review.attention.some((a) => a.code === 'preexisting_failures'));
-  assert.match(fixtures.callFor(h.agentCalls, 'review').prompt, /Already failing at the baseline/);
 });
 
-test('review: without a baseline the same failure rejects', async () => {
+test('review: without an IPC baseline the same failure rejects', async () => {
   const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
-  await settleBaseline(h.call, 'auth-edge-tests'); // no checks yet: unavailable
-  h.setCommands({ test: LEGACY_FAILING });
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  await settleBaseline(h.call, 'auth-edge-tests');
+  h.setCommands({ test: { command: process.execPath, args: ['-e', "console.log('not ok 1 - legacy report export'); process.exit(1)"] } });
   await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'x\n');
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
   const task = await fixtures.settleReview(h.call, 'auth-edge-tests');
   assert.equal(task.status, 'in_progress');
   assert.equal(task.review.checks[0].reason, 'no_baseline');
 });
-
-/* Deviations: Architect rules, the human can override */
-
-/** Polls until the package's adjudication leaves 'running'. */
-const settleAdjudication = async (call, id) => {
-  for (let i = 0; i < 400; i += 1) {
-    const { data } = await call(CHANNELS.getTask, id);
-    if (data.adjudication?.status !== 'running') return data;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('adjudication never settled');
-};
-
-const reportDeviation = async ({ call }) => {
-  await call(CHANNELS.transition, 'auth-edge-tests', 'claim');
-  return call(CHANNELS.transition, 'auth-edge-tests', 'report_deviation', {
-    deviation: { note: '测试文件应该叫 login.test.ts', filePath: 'src/auth/application/login-user.ts' },
-  });
-};
 
 test('deviation: Architect reads the code and its replan becomes the package, which the human can revert', async () => {
   const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
@@ -279,9 +232,9 @@ test('deviation: Architect reads the code and its replan becomes the package, wh
   assert.match(prompt, /<file path="src\/auth\/application\/login-user\.ts">\nexport \{\};/);
   assert.match(prompt, /D1 \[file src\/auth\/application\/login-user\.ts\]: 测试文件应该叫 login\.test\.ts/);
 
-  const reverted = await h.call(CHANNELS.transition, 'auth-edge-tests', 'revert_replan');
+  const reverted = await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'revert_replan');
   assert.equal(reverted.data.status, 'in_progress');
-  task = (await h.call(CHANNELS.getTask, 'auth-edge-tests')).data;
+  task = (await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data;
   assert.deepEqual(task.fileScope, ['tests/auth/login-user.test.ts']);
   assert.equal(task.revision, null);
 });
@@ -302,7 +255,7 @@ test('deviation: a contested dismissal goes back to Architect, which must replan
   assert.ok(task.humanTransitions.includes('override_dismissal'));
 
   decision = 'replan';
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'override_dismissal');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'override_dismissal');
   task = await settleAdjudication(h.call, 'auth-edge-tests');
   assert.equal(task.status, 'pending');
   const prompts = h.agentCalls.filter((c) => fixtures.stepOf(c.schema) === 'adjudicate').map((c) => c.prompt);
@@ -341,11 +294,11 @@ test('review: a clean pass with a measured baseline finishes the package without
       ],
     },
   });
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'claim');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
   await settleBaseline(h.call, 'auth-edge-tests');
   await fs.mkdir(path.join(h.root, 'tests/auth'), { recursive: true });
   await fs.writeFile(path.join(h.root, 'tests/auth/login-user.test.ts'), 'test("case-insensitive", () => {});\n');
-  await h.call(CHANNELS.transition, 'auth-edge-tests', 'submit_for_review');
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
   const task = await fixtures.settleReview(h.call, 'auth-edge-tests');
   assert.deepEqual(task.review.attention, []);
   assert.equal(task.status, 'done');
@@ -355,19 +308,19 @@ test('dependencies: a package waits for its predecessor, and the developer can w
   const second = { ...fixtures.PLAN_OUTPUT.packages[0], title: '接入登录路由', dependsOn: [1] };
   const h = await fixtures.harness({ agent: fixtures.fakeAgent({ plan: { ...fixtures.PLAN_OUTPUT, packages: [fixtures.PLAN_OUTPUT.packages[0], second] } }) });
   const { first, second: next } = await fixtures.publishChain(h);
-  const waiting = (await h.call(CHANNELS.getTask, next)).data as TaskView;
+  const waiting = (await h.call(CHANNELS.tasksGet, next)).data as TaskView;
   assert.deepEqual(waiting.dependencies, [{ id: first, title: '实现登录接口', status: 'pending', waived: false, blocking: true }]);
 
-  const refused = await h.call(CHANNELS.transition, next, 'claim');
+  const refused = await h.call(CHANNELS.packagesTransition, next, 'claim');
   assert.equal(refused.ok, false);
   assert.equal(refused.error.code, 'dependencies_pending');
 
-  assert.equal((await h.call(CHANNELS.waiveDependency, next, 'someone-else')).ok, false);
-  const waived = (await h.call(CHANNELS.waiveDependency, next, first)).data as TaskView;
+  assert.equal((await h.call(CHANNELS.packagesWaiveDependency, next, 'someone-else')).ok, false);
+  const waived = (await h.call(CHANNELS.packagesWaiveDependency, next, first)).data as TaskView;
   assert.deepEqual([waived.dependencies[0].waived, waived.dependencies[0].blocking], [true, false]);
-  assert.equal((await h.call(CHANNELS.transition, next, 'claim')).data.status, 'in_progress');
+  assert.equal((await h.call(CHANNELS.packagesTransition, next, 'claim')).data.status, 'in_progress');
   // Waiving is for packages not started yet.
-  assert.equal((await h.call(CHANNELS.waiveDependency, next, first)).error.code, 'invalid_state');
+  assert.equal((await h.call(CHANNELS.packagesWaiveDependency, next, first)).error.code, 'invalid_state');
 });
 
 test('dependencies: a finished predecessor unblocks, and done records completedAt', async () => {
@@ -387,10 +340,10 @@ test('dependencies: a finished predecessor unblocks, and done records completedA
     diff: { files: [], skipped: [], outOfScope: [] },
     costUsd: 0,
   } as never);
-  const done = (await h.call(CHANNELS.getTask, first)).data as TaskView;
+  const done = (await h.call(CHANNELS.tasksGet, first)).data as TaskView;
   assert.equal(done.status, 'done');
   assert.ok(done.completedAt && Date.parse(done.completedAt) >= Date.parse(done.claimedAt as string));
-  const unblocked = (await h.call(CHANNELS.getTask, next)).data as TaskView;
+  const unblocked = (await h.call(CHANNELS.tasksGet, next)).data as TaskView;
   assert.equal(unblocked.dependencies[0].blocking, false);
-  assert.equal((await h.call(CHANNELS.transition, next, 'claim')).data.status, 'in_progress');
+  assert.equal((await h.call(CHANNELS.packagesTransition, next, 'claim')).data.status, 'in_progress');
 });

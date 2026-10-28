@@ -5,6 +5,8 @@
 import type { CourseChange } from '../course_changes.ts';
 import type { CoursePack, CourseRef, CourseSource } from '../course_pack.ts';
 import type { CourseView } from './workspace.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
 
 // `builtin` needs no confirmation; `pending` is a repository or imported
 // pack this machine has not confirmed at its current content.
@@ -54,3 +56,20 @@ export type CourseImport = CoursePreview & { replaces: boolean; shadowed: boolea
 // written, previewed as it now stands (a saved pack is pending until this
 // machine confirms it again).
 export type CourseSaved = { list: CourseList; preview: CoursePreview };
+
+export const coursesContract = {
+  list: invoke<[], CourseList>('courses:list'),
+  preview: invoke<[id: string], CoursePreview>('courses:preview'),
+  // Writes this machine's choice; null leaves it to taskpilot.toml.
+  select: invoke<[id: string | null], CourseList>('courses:select'),
+  // Opens the file picker and validates the file; nothing is copied yet.
+  pickImport: invoke<[], CourseImport | null>('courses:pick-import'),
+  // Copies the picked file, the content with the hash shown, into the global folder.
+  import: invoke<[contentHash: string], CourseList>('courses:import'),
+  // The built-in default pack, for records from before packs.
+  default: invoke<[], CoursePack>('courses:default'),
+  // Copies a pack into the global folder as `id`; the copy needs confirming.
+  copy: invoke<[sourceId: string, id: string], CourseSaved>('courses:copy'),
+  // Saves an imported or copied pack from the editor; it needs confirming again.
+  save: invoke<[id: string, pack: CoursePack], CourseSaved>('courses:save'),
+} satisfies Contract;

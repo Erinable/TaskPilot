@@ -2,15 +2,15 @@
 // repositories.
 import path from 'node:path';
 
-import { failWith, requireString } from '../coded_error.ts';
-import * as git from '../git.ts';
-import { readCounts } from '../repository_summary.ts';
+import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import * as git from '../repository/git.ts';
+import { readCounts } from '../repository/repository_summary.ts';
 import { countStatuses } from '../../shared/repository_counts.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { registerContract } from './handler.ts';
+import { repositoriesContract } from '../../shared/ipc/repositories.ts';
 import type * as repositoryTypes from '../../shared/ipc/repositories.ts';
-import type { AppContext } from '../app_context.ts';
-import type { RepositoryEntry } from '../repositories.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { RepositoryEntry } from '../repository/repositories.ts';
 import type { IpcMainLike } from './handler.ts';
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
@@ -40,46 +40,34 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     };
   };
 
-  ipcMain.handle(
-    CHANNELS.repositoriesList,
-    wrap(() => repositoryList()),
-  );
+  registerContract(ipcMain, repositoriesContract, {
+    list: () => repositoryList(),
 
-  ipcMain.handle(
-    CHANNELS.repositoriesBusy,
-    wrap((): repositoryTypes.BusyRun[] => ctx.backgroundRuns.busy()),
-  );
+    busy: (): repositoryTypes.BusyRun[] => ctx.backgroundRuns.busy(),
 
-  ipcMain.handle(
-    CHANNELS.repositoriesAdd,
-    wrap(async (_event, rawRoot, open): Promise<repositoryTypes.RepositoryList> => {
+    add: async (rawRoot, open): Promise<repositoryTypes.RepositoryList> => {
       const { root } = await ctx.validateRoot(rawRoot);
       const hadCurrent = repositories.current !== null;
       const entry = await repositories.add(root);
       // The first repository adopts the unassigned data, which is what is loaded.
       if (!hadCurrent || open === true) await openRepository(entry.id);
       return repositoryList();
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.repositoriesSwitch,
-    wrap(async (_event, rawId): Promise<repositoryTypes.RepositoryList> => {
+    switch: async (rawId): Promise<repositoryTypes.RepositoryList> => {
       const id = requireString(rawId, 'id');
       if (!repositories.get(id)) return failWith(`Unknown repository: ${id}`, 'unknown_repository');
       if (repositories.current?.id !== id) await openRepository(id);
       return repositoryList();
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.repositoriesRelocate,
-    wrap(async (_event, rawId, rawRoot): Promise<repositoryTypes.RepositoryList> => {
+    relocate: async (rawId, rawRoot): Promise<repositoryTypes.RepositoryList> => {
       const id = requireString(rawId, 'id');
       const { root } = await ctx.validateRoot(rawRoot);
       await repositories.relocate(id, root);
       if (repositories.current?.id === id) ctx.setConfig({ ...ctx.getConfig(), root });
+      if (repositories.current?.id === id) ctx.changed('workspace');
       return repositoryList();
-    }),
-  );
+    },
+  });
 };

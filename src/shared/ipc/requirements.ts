@@ -5,6 +5,9 @@ import type * as packageTypes from './packages.ts';
 import type { AcceptanceCriterion } from './workspace.ts';
 import type { Concept, CoursePack, CourseRef } from '../course_pack.ts';
 import type { CoursePlan, GoalForm } from '../course_plan.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
+import type { PathEntry } from '../course_plan.ts';
 
 export type RequirementStatus = 'draft' | 'clarifying' | 'answering' | 'planning' | 'reviewing' | 'published' | 'failed';
 
@@ -166,3 +169,28 @@ export type Requirement = {
   updatedAt: string;
   course?: CourseInterview;
 };
+
+export const requirementsContract = {
+  list: invoke<[], Requirement[]>('requirements:list'),
+  get: invoke<[id: string], Requirement>('requirements:get'),
+  create: invoke<[input: RequirementInput], Requirement>('requirements:create'),
+  clarify: invoke<[id: string], Requirement>('requirements:clarify'),
+  answer: invoke<[id: string, answers: RequirementAnswers], Requirement>('requirements:answer'),
+  plan: invoke<[id: string, answers?: RequirementAnswers, choice?: CourseChoice], Requirement>('requirements:plan'),
+  publish: invoke<[id: string], Requirement>('requirements:publish'),
+  remove: invoke<[id: string], true>('requirements:remove'),
+  cancel: invoke<[id: string], boolean>('requirements:cancel'),
+  coursePath: invoke<[id: string, path: PathEntry[]], Requirement>('requirements:course-path'),
+  courseSaveDraft: invoke<[id: string, pack: CoursePack], CourseDraftSaved>('requirements:course-save-draft'),
+  courseConfirmDraft: invoke<[id: string, contentHash: string], Requirement>('requirements:course-confirm-draft'),
+  // What generating the first lab covers and roughly costs; nothing runs.
+  // `conceptId` picks another concept still to learn, after a needs_review self-check.
+  labEstimate: invoke<[id: string, conceptId?: string], LabEstimate>('requirements:lab-estimate'),
+  // Starts generating and self-checking the first lab after the learner saw the estimate.
+  labGenerate: invoke<[id: string, conceptId?: string], Requirement>('requirements:lab-generate'),
+  // Marks a concept still to learn skipped after the path was confirmed.
+  courseSkip: invoke<[id: string, conceptId: string], Requirement>('requirements:course-skip'),
+  // Writes the lab whose self-check passed into the lab repository; the
+  // first one creates it in `root`, an empty folder, and opens it.
+  labPlace: invoke<[id: string, root?: string], Requirement>('requirements:lab-place'),
+} satisfies Contract;

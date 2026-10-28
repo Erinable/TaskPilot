@@ -1,6 +1,6 @@
 # Hint leak eval
 
-Measures the hint ladder's output filter (`src/main/hint_leak.ts`, run after `validateAnswer` in `src/main/agents/tutor.ts`) on answers a model really writes, with the real Claude CLI. `tests/main/hint_leak.test.ts` holds the filter to its bar on the hand-written calibration set (`tests/fixtures/hint_leak.ts`); this eval checks that the bar still holds on model output.
+Measures the hint ladder's output filter (`src/main/work_packages/hint_leak.ts`, run after `validateAnswer` in `src/main/agents/tutor.ts`) on answers a model really writes, with the real Claude CLI. `tests/main/work_packages/hint_leak.test.ts` holds the filter to its bar on the hand-written calibration set (`tests/fixtures/hint_leak.ts`); this eval checks that the bar still holds on model output.
 
 Cases (`cases.ts`) are the five tasks of the Tutor grading eval that have a reference solution: the four OS lab programs in `evals/shared/os_lab/` (pingpong, copy, counter, bbuf) and the programming `findByEmail` package. The reference is written over the committed fixture and read back as a `git diff`, the patch `practice.ts` stores.
 

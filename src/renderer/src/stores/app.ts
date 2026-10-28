@@ -7,6 +7,7 @@ import * as layout from '@/lib/sidebar_layout.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 
 export type ViewName =
   'queue' | 'execution' | 'requirements' | 'settings' | 'map' | 'activity' | 'release' | 'team' | 'costs' | 'notes' | 'mastery' | 'courses';
@@ -15,6 +16,7 @@ export const SIDEBAR_STORAGE_KEY = 'taskpilot.sidebar.collapsed';
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'taskpilot.sidebar.width';
 
 export const useAppStore = defineStore('app', () => {
+  const repository = useRepositoryIdentityStore();
   // ========== Navigation ==========
   const view = ref<ViewName>('queue');
   // Set by the settings store: resolves true when it is fine to leave settings.
@@ -98,12 +100,18 @@ export const useAppStore = defineStore('app', () => {
   // ========== Workspace ==========
   const workspaceInfo = ref<workspaceTypes.WorkspaceInfo | null>(null);
   const workspaceError = ref<string | null>(null);
+  let workspaceGeneration = 0;
 
   const refreshWorkspaceStatus = async () => {
+    const token = ++workspaceGeneration;
+    const repositoryId = repository.currentId;
     try {
-      workspaceInfo.value = await call(window.taskpilot.workspace.info());
+      const next = await call(window.taskpilot.workspace.info());
+      if (token !== workspaceGeneration || repositoryId !== repository.currentId) return workspaceInfo.value;
+      workspaceInfo.value = next;
       workspaceError.value = null;
     } catch (error) {
+      if (token !== workspaceGeneration || repositoryId !== repository.currentId) return workspaceInfo.value;
       // A configured root that has since vanished or broken lands here.
       console.error('Failed to read workspace info', error);
       workspaceInfo.value = null;
@@ -112,29 +120,52 @@ export const useAppStore = defineStore('app', () => {
     return workspaceInfo.value;
   };
 
-  // ========== Activity ==========
+  // Activity is pushed by the main process; keep one serialized read so a
+  // notification arriving during a read is handled immediately afterwards.
   const activity = ref<activityTypes.ActivityOverview | null>(null);
-  let activityTimer: number | null = null;
+  let activityUnsubscribe: (() => void) | null = null;
+  let activityGeneration = 0;
+  let activityReading = false;
+  let activityQueued = false;
 
-  // A failed read keeps the last overview; the feed is not worth a toast.
   const refreshActivity = async () => {
+    if (activityReading) {
+      activityQueued = true;
+      return;
+    }
+    const token = activityGeneration;
+    const repositoryId = repository.currentId;
+    activityReading = true;
     try {
-      activity.value = await call(window.taskpilot.activity.overview());
+      const next = await call(window.taskpilot.activity.overview());
+      if (token === activityGeneration && repositoryId === repository.currentId) activity.value = next;
     } catch (error) {
       console.error('[activity] overview failed', error);
+    } finally {
+      activityReading = false;
+      if (activityQueued) {
+        activityQueued = false;
+        await refreshActivity();
+      }
     }
   };
 
-  // Agents run in the background, so presence and the feed are polled.
-  const startActivityPolling = (intervalMs: number) => {
-    if (activityTimer !== null) return;
+  const startActivity = () => {
+    if (activityUnsubscribe) return;
+    activityUnsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repository.currentId) return;
+      if (change.domains.includes('workspace')) refreshWorkspaceStatus().catch((error) => console.error(error));
+      if (change.domains.some((domain) => domain === 'activity' || domain === 'coding' || domain === 'packages' || domain === 'requirements'))
+        refreshActivity().catch((error) => console.error(error));
+    });
     refreshActivity().catch((error) => console.error(error));
-    activityTimer = window.setInterval(() => refreshActivity().catch((error) => console.error(error)), intervalMs);
   };
 
-  const stopActivityPolling = () => {
-    if (activityTimer !== null) window.clearInterval(activityTimer);
-    activityTimer = null;
+  const stopActivity = () => {
+    activityGeneration += 1;
+    activityQueued = false;
+    activityUnsubscribe?.();
+    activityUnsubscribe = null;
   };
 
   return {
@@ -161,7 +192,7 @@ export const useAppStore = defineStore('app', () => {
     // Activity
     activity,
     refreshActivity,
-    startActivityPolling,
-    stopActivityPolling,
+    startActivity,
+    stopActivity,
   };
 });

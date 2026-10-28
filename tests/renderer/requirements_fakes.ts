@@ -9,6 +9,7 @@ import type * as settingsTypes from '../../src/shared/ipc/settings.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
 import type { PathEntry } from '../../src/shared/course_plan.ts';
+import { stateEvents } from './ipc_fakes.ts';
 
 export const requirement = (overrides: Partial<requirementTypes.Requirement> = {}): requirementTypes.Requirement => ({
   id: 'r1',
@@ -115,6 +116,7 @@ export const labGeneration = (overrides: Partial<requirementTypes.LabGeneration>
 });
 
 export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
+  const events = stateEvents();
   const api = {
     requirements: {
       list: vi.fn(() => ok(state.list)),
@@ -177,7 +179,9 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) => {
         ok({ root: null, steps: [], project: { status: 'missing' }, course: defaultCourse(), detected: [], presets: [] } as workspaceTypes.WorkspaceView),
       ),
     },
-    listTasks: vi.fn(() => ok([])),
+    tasks: { list: vi.fn(() => ok([])) },
+    state: { onChanged: vi.fn(events.onChanged) },
+    emitState: events.emit,
   };
   (globalThis as unknown as { window: unknown }).window ??= globalThis;
   Object.assign(window, { taskpilot: api });

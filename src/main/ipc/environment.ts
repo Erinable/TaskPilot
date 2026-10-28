@@ -2,20 +2,20 @@
 // steps run one by one on the user's click, and its scripts copied into the
 // checks config. The repository's languages pick the setup adapter; this
 // file only passes it on.
-import { failWith, requireString } from '../coded_error.ts';
-import * as workspace from '../workspace.ts';
-import { formatCommandLine } from '../command_line.ts';
-import * as verification from '../verification.ts';
-import * as presets from '../presets/index.ts';
-import { buildProfile } from '../project_profile.ts';
+import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import * as workspace from '../repository/workspace.ts';
+import { formatCommandLine } from '../checking/command_line.ts';
+import * as verification from '../checking/verification.ts';
+import * as presets from '../checking/presets/index.ts';
+import { buildProfile } from '../repository/project_profile.ts';
 import { planEnvironment } from '../agents/pipeline.ts';
-import { toFailure, wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { registerContract, toFailure } from './handler.ts';
+import { envContract } from '../../shared/ipc/environment.ts';
 import type * as envelopeTypes from '../../shared/ipc/envelope.ts';
 import type * as envTypes from '../../shared/ipc/environment.ts';
 import type { EnvFailure } from '../agents/env_steward.ts';
-import type { AppContext } from '../app_context.ts';
-import type { SetupAdapter } from '../setup_adapter.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { SetupAdapter } from '../checking/setup_adapter.ts';
 import type { IpcMainLike } from './handler.ts';
 
 type EnvSession = {
@@ -120,14 +120,10 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     return { step: failed.id, command: formatCommandLine(failed), exitCode: result.exitCode, timedOut: result.timedOut, output: result.output };
   };
 
-  ipcMain.handle(
-    CHANNELS.envGet,
-    wrap((): envTypes.EnvState => envView()),
-  );
+  registerContract(ipcMain, envContract, {
+    get: (): envTypes.EnvState => envView(),
 
-  ipcMain.handle(
-    CHANNELS.envPlan,
-    wrap(async (_event, options): Promise<envTypes.EnvState> => {
+    plan: async (options): Promise<envTypes.EnvState> => {
       const root = ctx.requireRoot();
       const stewardRunner = ctx.runnerFor('env-steward');
       if (env.status === 'planning' || env.running) failWith('The Environment Steward is busy', 'env_busy');
@@ -151,6 +147,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         running: null,
         live: null,
       };
+      ctx.changed('environment');
       const session = env;
       const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', agent: () => 'env-steward', label: () => '环境初始化' });
       const { path: envPath } = await ctx.commandPath();
@@ -159,6 +156,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
           try {
             const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
             Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
+            ctx.changed('environment');
             // Results only carry over for steps the new plan still runs unchanged.
             const lines = new Map(envSteps().map((step) => [step.id, formatCommandLine(step)]));
             for (const id of Object.keys(session.results) as envTypes.EnvStepId[]) {
@@ -166,30 +164,27 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             }
           } catch (error) {
             Object.assign(session, { status: 'failed', error: toFailure(error).error });
+            ctx.changed('environment');
           } finally {
             backgroundRuns.finish('environment', '', controller);
           }
         })(),
       );
       return envView();
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.envSetAllowScripts,
-    wrap((_event, allow): envTypes.EnvState => {
+    setAllowScripts: (allow): envTypes.EnvState => {
       if (env.running) failWith('A setup step is already running', 'env_busy');
       env.allowScripts = allow === true;
       delete env.results.install;
+      ctx.changed('environment');
       return envView();
-    }),
-  );
+    },
 
-  // The click is the user's confirmation; the command itself is rebuilt here
-  // from the stored plan, never taken from the renderer.
-  ipcMain.handle(
-    CHANNELS.envRunStep,
-    wrap(async (_event, stepId): Promise<envTypes.EnvState> => {
+    // The click is the user's confirmation; the command itself is rebuilt here
+    // from the stored plan, never taken from the renderer.
+
+    runStep: async (stepId): Promise<envTypes.EnvState> => {
       requireString(stepId, 'stepId');
       const { setup } = requireEnvPlan();
       const step = envSteps().find((candidate) => candidate.id === stepId);
@@ -201,6 +196,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
       session.running = step.id;
       session.live = { output: '', startedAt: new Date().toISOString() };
+      ctx.changed('environment');
       const line = formatCommandLine(step);
       const run = (async () => {
         try {
@@ -210,6 +206,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             timeoutMs: 15 * 60 * 1000,
             onOutput: (chunk) => {
               if (session.live) session.live.output = (session.live.output + chunk).slice(-ENV_OUTPUT_CHARS);
+              ctx.changed('environment');
             },
           });
           session.results[step.id] = {
@@ -222,9 +219,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             output: result.output.slice(-ENV_OUTPUT_CHARS),
             at: new Date().toISOString(),
           };
+          ctx.changed('environment');
         } finally {
           session.running = null;
           session.live = null;
+          ctx.changed('environment');
           backgroundRuns.finish('environment', '', controller);
         }
       })();
@@ -236,14 +235,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         throw error;
       }
       return envView();
-    }),
-  );
+    },
 
-  // Copies the plan's verification scripts into this machine's steps, for
-  // the kinds the user ticked. Lines are rebuilt here, as in envRunStep.
-  ipcMain.handle(
-    CHANNELS.envApply,
-    wrap(async (_event, kinds): Promise<envTypes.EnvApplyResult> => {
+    // Copies the plan's verification scripts into this machine's steps, for
+    // the kinds the user ticked. Lines are rebuilt here, as in envRunStep.
+
+    apply: async (kinds): Promise<envTypes.EnvApplyResult> => {
       const { plan, setup } = requireEnvPlan();
       if (!Array.isArray(kinds) || kinds.some((kind) => !setup.stepKinds.includes(kind))) {
         failWith(`kinds must be a list of ${setup.stepKinds.join(', ')}`, 'invalid_argument');
@@ -260,17 +257,15 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         steps[kind] = { commands: [setup.commandFor(kind, name)], stage: kept?.stage, blocking: kept?.blocking };
       }
       ctx.setConfig(await ctx.repositories.saveConfig(workspace.normalize({ ...config, version: workspace.CONFIG_VERSION, steps })));
+      ctx.changed('workspace', 'environment');
       return envView();
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.envCancel,
-    wrap((): boolean => {
+    cancel: (): boolean => {
       const controller = backgroundRuns.get('environment', '');
       if (!controller) return false;
       controller.abort();
       return true;
-    }),
-  );
+    },
+  });
 };

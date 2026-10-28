@@ -11,16 +11,16 @@ import path from 'node:path';
 
 import * as generator from '../../src/main/agents/lab_generator.ts';
 import * as verifier from '../../src/main/agents/lab_verifier.ts';
-import * as labVerify from '../../src/main/lab_verify.ts';
-import * as courses from '../../src/main/courses.ts';
-import { toLabArtifact } from '../../src/main/lab_generation_service.ts';
+import * as labVerify from '../../src/main/courses/lab_verify.ts';
+import * as courses from '../../src/main/courses/courses.ts';
+import { toLabArtifact } from '../../src/main/courses/lab_artifact.ts';
 import { runAgent, runSuite } from '../shared/harness.ts';
 import { cases, requestFor } from './cases.ts';
 import { check, runLab } from './checks.ts';
 import type { CaseOutcome } from '../shared/harness.ts';
 import type { LabCase } from './cases.ts';
 import type { LabRun } from './checks.ts';
-import type { RunAgent } from '../../src/main/agents/claude_cli.ts';
+import type { RunAgent } from '../../src/main/runtimes/claude_cli.ts';
 
 const BUILTIN = await courses.loadBuiltinCourses(path.join(import.meta.dirname, '..', '..', courses.BUILTIN_COURSES_DIR));
 const OS = BUILTIN.get('os')!.pack;

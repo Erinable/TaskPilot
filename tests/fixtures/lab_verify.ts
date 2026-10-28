@@ -4,7 +4,7 @@
 import * as generator from '../../src/main/agents/lab_generator.ts';
 import { RR_CODE, RR_REQUEST, RR_SOLUTION, RR_SPEC } from './lab_generator.ts';
 import type { GeneratedLab } from '../../src/main/agents/lab_generator.ts';
-import type { GradeRun } from '../../src/main/lab_verify.ts';
+import type { GradeRun } from '../../src/main/courses/lab_verify.ts';
 
 const spec = generator.validateSpec(RR_SPEC, RR_REQUEST);
 export const RR_LAB: GeneratedLab = { ...spec, ...generator.validateCode(RR_CODE, spec) };

@@ -10,12 +10,13 @@ import type * as courseTypes from '@shared/ipc/courses.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 import { BUILTIN_COURSES, OS_COURSE } from '../fixtures/builtin_courses.ts';
 import { STEP_KINDS } from '@shared/check_steps.ts';
+import { stateEvents } from './ipc_fakes.ts';
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string; field?: string } };
 
 export const ok = <T>(data: T): Promise<Result<T>> => Promise.resolve({ ok: true, data });
 
-// Typed as any result, so it can replace a success in mockReturnValueOnce.
+// Typed failure result, so it can replace a success in mockReturnValueOnce.
 export const fail = (code: string, message: string, field?: string): Promise<Result<never>> => Promise.resolve({ ok: false, error: { code, message, field } });
 
 export const preferences = (): settingsTypes.Preferences => ({
@@ -27,7 +28,7 @@ export const preferences = (): settingsTypes.Preferences => ({
 });
 
 // A step this machine sets to `lines`, or one left to the project ([]).
-export const stepView = (id: workspaceTypes.CheckKind, lines: string[] = []): workspaceTypes.StepView => {
+const stepView = (id: workspaceTypes.CheckKind, lines: string[] = []): workspaceTypes.StepView => {
   const form = {
     enabled: true,
     lines,
@@ -91,7 +92,7 @@ export const courseSaved = (id: string, pack: CoursePack = { ...OS_COURSE, id })
   };
 };
 
-export const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): workspaceTypes.WorkspaceView => ({
+const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): workspaceTypes.WorkspaceView => ({
   root: '/repo',
   steps: STEP_KINDS.map((id) => stepView(id, id === 'test' ? ['npm test'] : [])),
   project: { status: 'missing' },
@@ -101,7 +102,7 @@ export const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> =
   ...overrides,
 });
 
-export const workspaceCheck = (): workspaceTypes.WorkspaceCheck => ({
+const workspaceCheck = (): workspaceTypes.WorkspaceCheck => ({
   root: '/repo',
   repo: { commit: 'abcdef1234567890', branch: 'main', dirty: false, changedFiles: 0 },
   steps: Object.fromEntries(
@@ -148,9 +149,10 @@ export const envState = (overrides: Record<string, unknown> = {}) => ({
 });
 
 export const installApi = () => {
-  let savedPreferences: settingsTypes.Preferences = preferences();
+  const events = stateEvents();
+  let savedPreferences = preferences();
   const api = {
-    listTasks: vi.fn(() => ok([])),
+    tasks: { list: vi.fn(() => ok([])) },
     workspace: {
       get: vi.fn(() => ok(workspaceView())),
       set: vi.fn((form: workspaceTypes.WorkspaceForm) =>
@@ -238,6 +240,8 @@ export const installApi = () => {
       apply: vi.fn(() => ok(envState())),
       cancel: vi.fn(() => ok(true)),
     },
+    state: { onChanged: vi.fn(events.onChanged) },
+    emitState: events.emit,
   };
   Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
   return api;

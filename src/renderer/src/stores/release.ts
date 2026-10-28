@@ -2,7 +2,7 @@
 // the commits since the last release. TaskPilot never tags, commits or pushes;
 // the only repository write is inserting the notes into a .md file on request.
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
@@ -11,6 +11,7 @@ import * as model from '@/lib/release_model.ts';
 import type { IpcError } from '@/lib/ipc.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 import type * as releaseTypes from '@shared/ipc/release.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 
 export type NotesStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
@@ -18,14 +19,15 @@ export type NotesStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 const NOTES_DEBOUNCE_MS = 800;
 
 export const useReleaseStore = defineStore('release', () => {
+  const repository = useRepositoryIdentityStore();
   // ========== State ==========
   const state = ref<releaseTypes.ReleaseState | null>(null);
   const loadError = ref<string | null>(null);
   const draft = computed(() => state.value?.draft ?? null);
   const generating = computed(() => draft.value?.status === 'generating');
 
-  // The notes editor's text. Copied from the draft only when a new draft
-  // becomes ready, so polling never overwrites what the user is typing.
+  // The notes editor's text is copied only when a new draft becomes ready,
+  // so state events never overwrite what the user is typing.
   const notesText = ref('');
   let notesSource: string | null = null;
 
@@ -41,43 +43,57 @@ export const useReleaseStore = defineStore('release', () => {
     if (next.startPoint?.kind === 'none' && commits.value === null) loadCommits().catch((error) => console.error(error));
   };
 
+  let session = 0;
   const load = async () => {
-    try {
-      apply(await call(window.taskpilot.release.get()));
-      loadError.value = null;
-    } catch (error) {
-      console.error('[release] get failed', error);
-      loadError.value = describeError(error);
+    if (reading) {
+      queued = true;
+      return;
     }
-    schedulePoll();
-  };
-
-  // ========== Polling ==========
-  // Polls only while the page is open and a draft is being generated.
-  let active = false;
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const stopPolling = () => {
-    if (pollTimer !== null) clearTimeout(pollTimer);
-    pollTimer = null;
-  };
-
-  const schedulePoll = () => {
-    stopPolling();
-    if (active && generating.value)
-      pollTimer = setTimeout(() => {
+    const token = session;
+    reading = true;
+    try {
+      const next = await call(window.taskpilot.release.get());
+      if (token === session) {
+        apply(next);
+        loadError.value = null;
+      }
+    } catch (error) {
+      if (token === session) {
+        console.error('[release] get failed', error);
+        loadError.value = describeError(error);
+      }
+    } finally {
+      reading = false;
+      if (queued) {
+        queued = false;
         load().catch((error) => console.error(error));
-      }, model.POLL_MS);
+      }
+    }
+  };
+
+  let unsubscribe: (() => void) | null = null;
+  let reading = false;
+  let queued = false;
+
+  const startWatching = () => {
+    if (unsubscribe) return;
+    const repositories = useRepositoryIdentityStore();
+    unsubscribe = window.taskpilot.state.onChanged((change) => {
+      if (change.repositoryId !== repositories.currentId) return;
+      if (change.domains.includes('release')) load().catch((error) => console.error(error));
+    });
   };
 
   const enter = async () => {
-    active = true;
+    startWatching();
     await load();
   };
 
   const leave = () => {
-    active = false;
-    stopPolling();
+    session += 1;
+    queued = false;
+    unsubscribe?.();
+    unsubscribe = null;
     flushNotes().catch((error) => console.error(error));
   };
 
@@ -88,9 +104,12 @@ export const useReleaseStore = defineStore('release', () => {
   const startError = ref<string | null>(null);
 
   const loadCommits = async () => {
+    const token = session;
     try {
-      commits.value = await call(window.taskpilot.release.recentCommits());
+      const next = await call(window.taskpilot.release.recentCommits());
+      if (token === session) commits.value = next;
     } catch (error) {
+      if (token !== session) return;
       console.error('[release] recent commits failed', error);
       commits.value = [];
       startError.value = `读取最近提交失败：${describeError(error)}`;
@@ -119,7 +138,6 @@ export const useReleaseStore = defineStore('release', () => {
       if ((error as IpcError).field === 'startCommit') startError.value = describeError(error);
       else showToast(`生成失败：${describeError(error)}`, 'error');
     }
-    schedulePoll();
   };
 
   const cancel = async () => {
@@ -286,6 +304,24 @@ export const useReleaseStore = defineStore('release', () => {
   const assignMilestone = (requirementId: string, milestoneId: string | null) =>
     milestoneCall(() => window.taskpilot.release.assignMilestone(requirementId, milestoneId), milestoneId ? '已放进版本计划。' : '已移出版本计划。');
 
+  watch(
+    () => repository.currentId,
+    () => {
+      session += 1;
+      queued = false;
+      state.value = null;
+      loadError.value = null;
+      commits.value = null;
+      selectedStart.value = null;
+      startError.value = null;
+      notesText.value = '';
+      notesSource = null;
+      notesStatus.value = 'idle';
+      if (unsubscribe) load().catch((error) => console.error(error));
+    },
+    { flush: 'sync' },
+  );
+
   return {
     // State
     state,
@@ -301,7 +337,7 @@ export const useReleaseStore = defineStore('release', () => {
     updateMilestone,
     deleteMilestone,
     assignMilestone,
-    // Polling
+    // Lifecycle
     enter,
     leave,
     // Start point

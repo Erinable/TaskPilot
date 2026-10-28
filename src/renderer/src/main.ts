@@ -17,7 +17,7 @@ let app = new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolv
 const start = async (retry: boolean) => {
   splash.showSplashLoading();
   try {
-    await call(window.taskpilot.startupReady(retry));
+    await call(window.taskpilot.app.ready(retry));
     (await app).mountApp();
   } catch (error) {
     console.error('[startup] TaskPilot could not start', error);

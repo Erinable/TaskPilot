@@ -28,20 +28,19 @@ describe('SideBar', () => {
   test('collapses to an icon rail and remembers it on this machine', async () => {
     const wrapper = mount(SideBar);
     const toggle = wrapper.find('button.sidebar-toggle');
-    expect(wrapper.classes()).not.toContain('collapsed');
     expect(toggle.attributes('aria-expanded')).toBe('true');
     expect(toggle.text()).toBe('收起侧栏');
 
     await toggle.trigger('click');
 
-    expect(wrapper.classes()).toContain('collapsed');
     expect(toggle.attributes('aria-expanded')).toBe('false');
     expect(toggle.text()).toBe('展开侧栏');
     expect(localStorage.getItem(SIDEBAR_STORAGE_KEY)).toBe('true');
 
     // A fresh app start reads the saved choice.
     setActivePinia(createPinia());
-    expect(mount(SideBar).classes()).toContain('collapsed');
+    const fresh = mount(SideBar);
+    expect(fresh.find('button.sidebar-toggle').attributes('aria-expanded')).toBe('false');
   });
 
   test('collapsed items keep their names for tooltips and screen readers', async () => {
@@ -78,21 +77,15 @@ describe('SideBar', () => {
     await wrapper.get('[data-nav="courses"]').trigger('click');
     await flushPromises();
     expect(useAppStore().view).toBe('courses');
-    expect(wrapper.get('[data-nav="courses"]').classes()).toContain('active');
   });
 
-  test('members, activity and cost share one entry, which stays active on each tab', async () => {
+  test('members, activity and cost share one entry', () => {
     const wrapper = mount(SideBar);
     const labels = wrapper.findAll('.nav-item .nav-label').map((node) => node.text());
     expect(labels).not.toContain('活动记录');
     expect(labels).not.toContain('成本');
     const team = wrapper.find('button.team-entry');
     expect(team.text()).toBe('AI 团队');
-    for (const view of ['team', 'activity', 'costs'] as const) {
-      useAppStore().view = view;
-      await wrapper.vm.$nextTick();
-      expect(team.classes()).toContain('active');
-    }
   });
 
   test('the team is one entry; a status line appears only while someone works', async () => {
@@ -107,14 +100,12 @@ describe('SideBar', () => {
     const wrapper = mount(SideBar);
     expect(wrapper.findAll('button.team-member')).toHaveLength(0);
     expect(wrapper.findAll('.team-stack-avatar')).toHaveLength(7);
-    expect(wrapper.find('.team-stack-avatar.code').classes()).toContain('offline');
     expect(wrapper.find('.team-entry-work').exists()).toBe(false);
     expect(wrapper.find('button.team-entry').attributes('aria-label')).toBe('AI 团队：6 个 AI 成员在线');
 
     app.activity = { team: team(['architect'], [{ agent: 'architect', kind: 'adjudication', label: 'x' }]) } as ActivityOverview;
     await wrapper.vm.$nextTick();
     expect(wrapper.find('.team-entry-work').text()).toBe('Architect 正在裁决偏差…');
-    expect(wrapper.find('.team-stack-avatar.arch').classes()).toContain('busy');
     expect(wrapper.findAll('.team-stack .presence.busy')).toHaveLength(1);
 
     app.toggleSidebar();

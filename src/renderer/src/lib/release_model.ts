@@ -2,9 +2,6 @@
 import { businessTimeZone } from './time_zone.ts';
 import type * as releaseTypes from '@shared/ipc/release.ts';
 
-// How often the page re-reads the draft while Release Manager is writing it.
-export const POLL_MS = 1200;
-
 // History rows rendered before 显示更多.
 export const HISTORY_PAGE = 20;
 

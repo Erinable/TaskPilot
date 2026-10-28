@@ -29,7 +29,7 @@ v2 tells Product Lead to infer from the file list before asking, to plan only wh
 
 ## Architect
 
-`--architect` runs Architect first. Each fixture is materialized as a temporary git repository (`sources.ts` holds file contents), so Architect reads through the same `src/main/repo_reader.ts` path the app uses. Product Lead then plans against Architect's interface summary.
+`--architect` runs Architect first. Each fixture is materialized as a temporary git repository (`sources.ts` holds file contents), so Architect reads through the same `src/main/repository/repo_reader.ts` path the app uses. Product Lead then plans against Architect's interface summary.
 
 From this version on, the judge always sees the fixture source code, with or without Architect, so it can tell a plan that matches the code from one that only matches file names. Scores in this section are therefore not comparable with the table above.
 

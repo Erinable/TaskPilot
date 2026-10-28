@@ -4,17 +4,17 @@
 import { test, onTestFinished } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 
-import * as courses from '../../src/main/courses.ts';
-import * as effectiveSteps from '../../src/main/effective_steps.ts';
-import * as projectConfig from '../../src/main/project_config.ts';
-import * as verification from '../../src/main/verification.ts';
-import * as workspace from '../../src/main/workspace.ts';
-import { env } from '../../src/main/env.ts';
-import { PRESET_IDS } from '../../src/main/presets/index.ts';
+import * as courses from '../../src/main/courses/courses.ts';
+import * as effectiveSteps from '../../src/main/checking/effective_steps.ts';
+import * as projectConfig from '../../src/main/repository/project_config.ts';
+import * as verification from '../../src/main/checking/verification.ts';
+import * as workspace from '../../src/main/repository/workspace.ts';
+import { env } from '../../src/main/infrastructure/env.ts';
+import { PRESET_IDS } from '../../src/main/checking/presets/index.ts';
 import { BUILTIN, OS_COURSE } from '../fixtures/builtin_courses.ts';
+import { tempDir } from '../fixtures/temp_dir.ts';
 import * as requiredTools from '../fixtures/required_tools.ts';
 import { fixtureRepo } from '../../evals/shared/harness.ts';
 import { OS_LAB, osReference } from '../../evals/shared/os_lab.ts';
@@ -28,8 +28,7 @@ const repo = async () => {
 test('the OS lab picks the built-in os pack without confirming it', async () => {
   const root = await repo();
   const project = projectConfig.parseProject((await projectConfig.readProjectText(root))!, PRESET_IDS);
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tp-os-lab-data-'));
-  onTestFinished(() => fs.rm(dataDir, { recursive: true, force: true }));
+  const dataDir = await tempDir('tp-os-lab-data-');
   const resolved = await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: null, project: project.course });
   assert.deepEqual(resolved.selected, { id: 'os', from: 'project' });
   assert.deepEqual(resolved.state, { status: 'ok' });

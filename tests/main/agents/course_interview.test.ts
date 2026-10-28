@@ -36,24 +36,27 @@ test('validatePath() puts the os scheduling path in prerequisite order', () => {
   assert.ok(ids.indexOf('aging') < ids.indexOf('mlfq'));
   assert.ok(!ids.includes('multicore-sched'));
   assert.equal(planned.path.find((entry) => entry.conceptId === 'process-state')?.status, 'known');
+  const extra = { id: 'ai:sched-sim', label: '调度模拟器', summary: '用 C 写一个调度模拟器。', prerequisites: ['fcfs'] };
+  assert.equal(
+    interview.validatePath(
+      { ...fixtures.SCHEDULING_PATH, path: [...fixtures.SCHEDULING_PATH.path, { conceptId: extra.id, status: 'planned' }], extraConcepts: [extra] },
+      OS_COURSE,
+    ).extraConcepts[0].id,
+    extra.id,
+  );
 });
 
-test('validatePath() refuses ids outside the skeleton, extras off the path and more than three extras', () => {
-  const extra = { id: 'ai:sched-sim', label: '调度模拟器', summary: '用 C 写一个调度模拟器。', prerequisites: ['fcfs'] };
-  const withExtra = {
-    ...fixtures.SCHEDULING_PATH,
-    path: [...fixtures.SCHEDULING_PATH.path, { conceptId: extra.id, status: 'planned' }],
-    extraConcepts: [extra],
-  };
-  assert.equal(interview.validatePath(withExtra, OS_COURSE).extraConcepts[0].id, 'ai:sched-sim');
-  assert.throws(() => interview.validatePath({ ...fixtures.SCHEDULING_PATH, extraConcepts: [extra] }, OS_COURSE), /not on the path/);
-  assert.throws(
-    () => interview.validatePath({ ...fixtures.SCHEDULING_PATH, path: [{ conceptId: 'lexing', status: 'planned' }] }, OS_COURSE),
-    /"lexing", which is not a concept/,
-  );
-  assert.throws(() => interview.validatePath({ ...withExtra, extraConcepts: [{ ...extra, id: 'sched-sim' }] }, OS_COURSE), /"ai:"/);
-  const four = ['a', 'b', 'c', 'd'].map((slug) => ({ ...extra, id: `ai:${slug}` }));
-  assert.throws(() => interview.validatePath({ ...withExtra, extraConcepts: four }, OS_COURSE), /more than 3/);
+test.each([
+  [
+    'extra not on path',
+    { extraConcepts: [{ id: 'ai:sched-sim', label: '调度模拟器', summary: '用 C 写一个调度模拟器。', prerequisites: ['fcfs'] }] },
+    /not on the path/,
+  ],
+  ['unknown skeleton concept', { path: [{ conceptId: 'lexing', status: 'planned' }] }, /"lexing", which is not a concept/],
+  ['non-ai extra id', { extraConcepts: [{ id: 'sched-sim', label: '调度模拟器', summary: 'x', prerequisites: [] }] }, /"ai:"/],
+  ['too many extras', { extraConcepts: ['a', 'b', 'c', 'd'].map((id) => ({ id: `ai:${id}`, label: id, summary: 'x', prerequisites: [] })) }, /more than 3/],
+])('validatePath rejects %s', (_name, override, expected) => {
+  assert.throws(() => interview.validatePath({ ...fixtures.SCHEDULING_PATH, ...override }, OS_COURSE), expected);
 });
 
 test('a draft gets TaskPilot’s schema version and first version and validates as a course pack', () => {

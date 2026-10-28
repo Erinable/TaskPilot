@@ -4,6 +4,9 @@
 import type { AvatarColor as SharedAvatarColor } from '../avatar.ts';
 import type { AgentSettings, CliId } from '../agent_runtime.ts';
 import type { ErrorInfo } from './envelope.ts';
+import { invoke } from './contract.ts';
+import type { Contract } from './contract.ts';
+import type * as agentRuntimeTypes from '../agent_runtime.ts';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type AvatarColor = SharedAvatarColor;
@@ -53,3 +56,24 @@ export type AgentStatus = {
   signIn: CliSignIn | null;
   coding: { cli: CliId; installed: boolean; signIn: CliSignIn | null };
 };
+
+export const preferencesContract = {
+  get: invoke<[], Preferences>('preferences:get'),
+  set: invoke<[prefs: PreferencesInput], Preferences>('preferences:set'),
+} satisfies Contract;
+
+export const environmentContract = {
+  info: invoke<[options?: EnvironmentInfoOptions], EnvironmentInfo>('environment:info'),
+} satisfies Contract;
+
+export const dataContract = {
+  info: invoke<[], DataInfo>('data:info'),
+  resetProgress: invoke<[], PackageSummary>('data:reset-progress'),
+  reveal: invoke<[], true>('data:reveal'),
+} satisfies Contract;
+
+export const agentContract = {
+  status: invoke<[], AgentStatus>('agent:status'),
+  runtimes: invoke<[], agentRuntimeTypes.AgentRuntimeStatus[]>('agent:runtimes'),
+  models: invoke<[request: agentRuntimeTypes.CliModelsRequest], agentRuntimeTypes.CliModelCatalog>('agent:models'),
+} satisfies Contract;

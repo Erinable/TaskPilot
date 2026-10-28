@@ -2,19 +2,19 @@
 // the agents' runtimes and models.
 import path from 'node:path';
 
-import { failWith } from '../coded_error.ts';
-import * as preferences from '../preferences.ts';
-import * as workspace from '../workspace.ts';
-import { REGISTRY_FILENAME, REPO_FILES } from '../repositories.ts';
-import { env as appEnv } from '../env.ts';
+import { failWith } from '../infrastructure/coded_error.ts';
+import * as preferences from '../app/preferences.ts';
+import * as workspace from '../repository/workspace.ts';
+import { REGISTRY_FILENAME, REPO_FILES } from '../repository/repositories.ts';
+import { env as appEnv } from '../infrastructure/env.ts';
 import { AGENT_IDS, CLI_IDS } from '../../shared/agent_runtime.ts';
-import { wrap } from './handler.ts';
-import { CHANNELS } from '../../shared/ipc_channels.ts';
+import { registerContract } from './handler.ts';
+import { preferencesContract, environmentContract, dataContract, agentContract } from '../../shared/ipc/settings.ts';
 import type * as agentRuntimeTypes from '../../shared/agent_runtime.ts';
 import type * as settingsTypes from '../../shared/ipc/settings.ts';
-import type { CliProbeResult } from '../agents/cli_runner.ts';
-import type { AppContext } from '../app_context.ts';
-import type { CodingRuntime } from '../coding_runtime.ts';
+import type { CliProbeResult } from '../runtimes/cli_environment.ts';
+import type { AppContext } from '../app/app_context.ts';
+import type { CodingRuntime } from '../coding/coding_runtime.ts';
 import type { IpcMainLike } from './handler.ts';
 
 const isPathSource = (value: unknown): value is settingsTypes.PathSource => preferences.PATH_SOURCES.includes(value as settingsTypes.PathSource);
@@ -22,30 +22,31 @@ const isPathSource = (value: unknown): value is settingsTypes.PathSource => pref
 export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { runtime: CodingRuntime }) => {
   const { configDir, getPreferences, pathResolver, store, probeAgent, checkSignIn } = ctx;
 
-  ipcMain.handle(
-    CHANNELS.preferencesGet,
-    wrap((): settingsTypes.Preferences => preferences.toView(getPreferences())),
-  );
+  // Opening settings reads local CLI config only. Refresh invalidates this
+  // metadata cache; it never runs inference, auth helpers or remote catalogs.
+  const modelCatalogs = new Map<string, Promise<agentRuntimeTypes.CliModelCatalog>>();
 
-  // preferences.save() validates the raw value strictly.
-  ipcMain.handle(
-    CHANNELS.preferencesSet,
-    wrap(async (_event, raw): Promise<settingsTypes.Preferences> => {
+  registerContract(ipcMain, preferencesContract, {
+    get: (): settingsTypes.Preferences => preferences.toView(getPreferences()),
+
+    // preferences.save() validates the raw value strictly.
+
+    set: async (raw): Promise<settingsTypes.Preferences> => {
       const previous = getPreferences();
       const saved = await preferences.save(configDir, raw);
       ctx.setPreferences(saved);
       // Switching the PATH source should take effect without a restart.
       if (saved.environment.pathSource !== previous.environment.pathSource) pathResolver.refresh();
       ctx.onPreferencesChanged?.(saved, previous);
+      ctx.changed('preferences');
       return preferences.toView(saved);
-    }),
-  );
+    },
+  });
+  registerContract(ipcMain, environmentContract, {
+    // Reports which PATH verification commands will use and what it contains.
+    // `source` lets the page preview a choice before saving it.
 
-  // Reports which PATH verification commands will use and what it contains.
-  // `source` lets the page preview a choice before saving it.
-  ipcMain.handle(
-    CHANNELS.environmentInfo,
-    wrap(async (_event, rawOptions): Promise<settingsTypes.EnvironmentInfo> => {
+    info: async (rawOptions): Promise<settingsTypes.EnvironmentInfo> => {
       const options = rawOptions as { source?: unknown; refresh?: unknown } | null | undefined;
       const requested = options?.source ?? getPreferences().environment.pathSource;
       if (!isPathSource(requested)) return failWith(`Unknown PATH source: ${requested}`, 'invalid_argument');
@@ -62,47 +63,39 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         platform: process.platform,
         versions: { app: ctx.appVersion ?? null, electron: process.versions.electron ?? null, node: process.versions.node },
       };
-    }),
-  );
-
-  ipcMain.handle(
-    CHANNELS.dataInfo,
-    wrap((): settingsTypes.DataInfo => {
+    },
+  });
+  registerContract(ipcMain, dataContract, {
+    info: (): settingsTypes.DataInfo => {
       const repoDir = path.relative(configDir, ctx.repositories.dataDir());
       return {
         configDir,
         files: [preferences.PREFERENCES_FILENAME, REGISTRY_FILENAME, ...REPO_FILES.map((name) => path.join(repoDir, name))],
         packages: store.summary(),
       };
-    }),
-  );
+    },
 
-  // Only resets execution progress; workspace config and preferences stay.
-  ipcMain.handle(
-    CHANNELS.dataResetProgress,
-    wrap(async (): Promise<settingsTypes.PackageSummary> => {
+    // Only resets execution progress; workspace config and preferences stay.
+
+    resetProgress: async (): Promise<settingsTypes.PackageSummary> => {
       // Every background run would otherwise write its result over the reset;
       // a coding round or baseline left running could hold it for minutes.
       await ctx.cancelAll();
       await store.reset();
       return store.summary();
-    }),
-  );
+    },
 
-  ipcMain.handle(
-    CHANNELS.dataReveal,
-    wrap(async (): Promise<true> => {
+    reveal: async (): Promise<true> => {
       if (!ctx.shell.revealPath) return failWith('Opening the folder is unavailable', 'unsupported');
       await ctx.shell.revealPath(configDir);
       return true;
-    }),
-  );
+    },
+  });
+  registerContract(ipcMain, agentContract, {
+    // Requirements need both configured planning runtimes, never an unrelated
+    // hard-coded executable. The settings page probes every role separately.
 
-  // Requirements need both configured planning runtimes, never an unrelated
-  // hard-coded executable. The settings page probes every role separately.
-  ipcMain.handle(
-    CHANNELS.agentStatus,
-    wrap(async (): Promise<settingsTypes.AgentStatus> => {
+    status: async (): Promise<settingsTypes.AgentStatus> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const codingCli = settings['coding-agent'].cli;
@@ -125,11 +118,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         signIn: analysisSignIn,
         coding: { cli: codingCli, installed: codingInstalled, signIn: codingSignIn },
       };
-    }),
-  );
-  ipcMain.handle(
-    CHANNELS.agentRuntimes,
-    wrap(async (): Promise<agentRuntimeTypes.AgentRuntimeStatus[]> => {
+    },
+
+    runtimes: async (): Promise<agentRuntimeTypes.AgentRuntimeStatus[]> => {
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const probes = new Map<string, Promise<CliProbeResult>>();
@@ -149,15 +140,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
           return { agent, config, ...(await probing) };
         }),
       );
-    }),
-  );
+    },
 
-  // Opening settings reads local CLI config only. Refresh invalidates this
-  // metadata cache; it never runs inference, auth helpers or remote catalogs.
-  const modelCatalogs = new Map<string, Promise<agentRuntimeTypes.CliModelCatalog>>();
-  ipcMain.handle(
-    CHANNELS.agentModels,
-    wrap(async (_event, request): Promise<agentRuntimeTypes.CliModelCatalog> => {
+    models: async (request): Promise<agentRuntimeTypes.CliModelCatalog> => {
       if (!request || typeof request !== 'object' || Array.isArray(request)) failWith('Model request must be an object', 'invalid_argument');
       const raw = request as Record<string, unknown>;
       if (!CLI_IDS.includes(raw.cli as agentRuntimeTypes.CliId)) failWith('Unknown CLI', 'invalid_argument', 'cli');
@@ -175,6 +160,6 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         modelCatalogs.set(key, reading);
       }
       return reading;
-    }),
-  );
+    },
+  });
 };

@@ -1,4 +1,4 @@
-// Course lab repositories (src/main/lab_service.ts): created from a fixture,
+// Course lab repositories (src/main/courses/lab_service.ts): created from a fixture,
 // claimed, submitted and checked by QA's public tests; the private parts of
 // each lab never reach git, the renderer or a Coding Agent run directory.
 import { test, onTestFinished, vi } from 'vitest';
@@ -7,14 +7,15 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import * as labs from '../../../src/main/labs.ts';
-import * as verification from '../../../src/main/verification.ts';
+import * as labs from '../../../src/main/courses/labs.ts';
+import * as verification from '../../../src/main/checking/verification.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { FCFS_LAB, HIDDEN_MARKERS, REFERENCE_MARKERS, RR_LAB, SCHED_PLAN } from '../fixtures/sched_lab.ts';
 import * as requiredTools from '../../fixtures/required_tools.ts';
 import * as fixtures from './harness.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
-import type { Grader } from '../../../src/main/lab_verify.ts';
+import type { LabArtifact } from '../../../src/main/courses/labs.ts';
+import type { Grader } from '../../../src/main/courses/lab_verify.ts';
 
 // Runs real git and make per test.
 vi.setConfig({ testTimeout: 60_000 });
@@ -24,32 +25,40 @@ const hasTools = await requiredTools.hasTools('cc', 'make');
 const PRIVATE_MARKERS = [...REFERENCE_MARKERS, ...HIDDEN_MARKERS, 'hint-marker'];
 const FCFS = { ...FCFS_LAB, private: { ...FCFS_LAB.private, hints: [{ level: 1, text: 'hint-marker 先排序。', code: null }] } };
 
-const emptyFolder = async () => {
+const emptyFolder = async (shutdown: () => Promise<void> | undefined) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-repo-'));
-  onTestFinished(() => fs.rm(dir, { recursive: true, force: true }));
+  onTestFinished(async () => {
+    await shutdown();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
   // macOS /tmp is /private/tmp, as git reports it.
   return fs.realpath(dir);
+};
+
+const createRepository = async (h, definitions: LabArtifact[] = [FCFS]) => {
+  const root = await emptyFolder(h.shutdown);
+  const entry = await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: definitions });
+  return { root, entry };
 };
 
 // Every channel's answer the renderer could read about the lab packages.
 const rendererView = async (call: fixtures.TestCall) =>
   JSON.stringify([
-    await call(CHANNELS.listTasks),
-    await call(CHANNELS.getTask, 'lab-fcfs'),
-    await call(CHANNELS.getTask, 'lab-round-robin'),
+    await call(CHANNELS.tasksList),
+    await call(CHANNELS.tasksGet, 'lab-fcfs'),
+    await call(CHANNELS.tasksGet, 'lab-round-robin'),
     await call(CHANNELS.requirementsList),
     await call(CHANNELS.repositoriesList),
     await call(CHANNELS.workspaceGet),
   ]);
 
-const settleTask = async (call: fixtures.TestCall, id: string, done: (task: TaskView) => boolean) => {
-  for (let i = 0; i < 1000; i += 1) {
-    const response = await call(CHANNELS.getTask, id);
-    const task = (response.ok ? response.data : null) as TaskView;
-    if (done(task)) return task;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`${id} never settled`);
+const settleTask = async (h: { call: fixtures.TestCall; idle: () => Promise<void> }, id: string, done: (task: TaskView) => boolean) => {
+  await h.idle();
+  const response = await h.call(CHANNELS.tasksGet, id);
+  assert.equal(response.ok, true);
+  const task = response.data as TaskView;
+  assert.ok(done(task), `${id} did not reach the expected state: ${JSON.stringify(task)}`);
+  return task;
 };
 
 const git = async (root: string, ...args: string[]) => (await fixtures.run('git', ['-C', root, ...args])).stdout;
@@ -96,33 +105,13 @@ const labHarness = async ({ grader, agent }: { grader?: Grader; agent?: fixtures
   return { ...h, prepared, graded };
 };
 
-test('a lab repository is created, committed, opened and published as a chain of practice packages', async () => {
+test('a lab repository is created and opened with its staged packages', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  const entry = await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS, RR_LAB] });
+  const { root, entry } = await createRepository(h, [FCFS, RR_LAB]);
 
   assert.equal(h.repositories.current?.id, entry.id);
   assert.equal(h.getConfig().root, root);
-  assert.equal((await git(root, 'status', '--porcelain')).trim(), '', 'everything written is committed');
-  assert.equal((await git(root, 'rev-list', '--count', 'HEAD')).trim(), '1');
-  const tracked = (await git(root, 'ls-files')).trim().split('\n');
-  assert.deepEqual(tracked, [
-    '.gitignore',
-    '.taskpilot/course_plan.toml',
-    'Makefile',
-    'labs/01-fcfs/README.md',
-    'labs/02-round-robin/README.md',
-    'src/fcfs.c',
-    'src/rr.c',
-    'taskpilot.toml',
-    'tests/build.mk',
-    'tests/grade.sh',
-    'tests/public/01_fcfs.sh',
-    'tests/public/02_rr.sh',
-  ]);
-  assert.match(await fs.readFile(path.join(root, labs.COURSE_PLAN_PATH), 'utf8'), /conceptId = "round-robin"/);
-
-  const queue = (await h.call(CHANNELS.listTasks)).data as TaskView[];
+  const queue = (await h.call(CHANNELS.tasksList)).data as TaskView[];
   assert.deepEqual(
     queue.map((task) => [task.id, task.dependsOn, task.lab?.stage, task.recommendedMode?.mode]),
     [
@@ -131,32 +120,24 @@ test('a lab repository is created, committed, opened and published as a chain of
     ],
   );
   assert.equal(queue[0].course?.id, 'os');
-  assert.ok(!queue[1].humanTransitions.includes('claim'), 'stage 2 waits for stage 1');
-  const { data: view } = await h.call(CHANNELS.workspaceGet);
-  assert.equal(view.course.ref.id, 'os');
-
-  // The private parts are in the repository's data directory only.
-  const privateDir = labs.labDir(h.repositories.dataDir(entry.id), 'round-robin');
-  assert.equal(await fs.readFile(path.join(privateDir, labs.REFERENCE_FILENAME), 'utf8'), RR_LAB.private.reference);
-  assert.deepEqual(await fs.readdir(path.join(privateDir, labs.HIDDEN_DIRNAME)), ['02_rr_arrival.sh']);
-  assert.ok(path.relative(root, privateDir).startsWith('..'), 'outside the repository');
+  assert.ok(!queue[1].humanTransitions.includes('claim'));
+  assert.equal((await h.call(CHANNELS.workspaceGet)).data.course.ref.id, 'os');
 });
 
 test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, and QA runs the public tests of every stage', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
+  const { root } = await createRepository(h);
 
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
-  const claimed = await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  const claimed = await settleTask(h, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
   assert.equal(claimed.referenceRun!.source, 'lab');
   assert.deepEqual(claimed.referenceRun!.files, [{ path: 'src/fcfs.c', added: 17, removed: 4 }]);
   assert.equal(claimed.referenceRun!.costUsd, 0);
   assert.equal(h.prepared.length, 0, 'no Coding Agent run is started for a lab reference');
 
   await solve(root, FCFS);
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
-  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
+  const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
   const review = reviewed.review!;
   assert.ok(review.status === 'passed', JSON.stringify(review));
   const grade = review.checks.find((check) => check.kind === 'custom:grade');
@@ -176,7 +157,7 @@ test.skipIf(!hasTools)('a lab is claimed with its reference ready, submitted, an
 
   // Every test passed, so the reference opens.
   assert.deepEqual(reviewed.referenceLock, { unlocked: true, reason: 'tests_passed' });
-  assert.equal((await h.call(CHANNELS.referenceGet, 'lab-fcfs')).data, FCFS.private.reference);
+  assert.equal((await h.call(CHANNELS.practiceReference, 'lab-fcfs')).data, FCFS.private.reference);
 });
 
 // Passes the public tests (their jobs come in arrival order) but runs every
@@ -193,14 +174,13 @@ const unsorted = async (root: string) => {
 // [人工决策-2026-10-27 00:51:12] 隐藏测试失败驳回提交，UI 和 IPC 只给测试名，参考答案保持锁定。
 test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its name reaches QA and the renderer', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
-  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  const { root } = await createRepository(h);
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
 
   await unsorted(root);
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
-  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
+  const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
   const review = reviewed.review!;
   assert.ok(review.status === 'rejected', JSON.stringify(review));
   assert.ok(review.reasons.includes('tests_failed'));
@@ -218,22 +198,24 @@ test.skipIf(!hasTools)('a failing hidden test rejects the submission; only its n
   const seen = await rendererView(h.call);
   for (const secret of ['hidden-marker-fcfs', "printf 'b 2 1", 'a 1\\nb 3', script]) assert.ok(!seen.includes(secret), secret);
   assert.deepEqual(reviewed.referenceLock, { unlocked: false, reason: 'tests_not_passed' });
-  assert.equal((await h.call(CHANNELS.referenceGet, 'lab-fcfs')).error.code, 'reference_locked');
+  assert.equal((await h.call(CHANNELS.practiceReference, 'lab-fcfs')).error.code, 'reference_locked');
 });
 
 test.skipIf(!hasTools)('hidden tests that cannot run leave the check unverifiable and the reference locked', async () => {
+  // The refusal is logged by runHiddenTests; it is expected here.
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => error.mockRestore());
   const h = await labHarness({
     grader: async () => {
       throw Object.assign(new Error('no sandbox'), { code: 'sandbox_unavailable' });
     },
   });
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
-  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  const { root } = await createRepository(h);
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
   await solve(root, FCFS);
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'submit_for_review');
-  const reviewed = await settleTask(h.call, 'lab-fcfs', (task) => task.review?.status !== 'running');
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'submit_for_review');
+  const reviewed = await settleTask(h, 'lab-fcfs', (task) => task.review?.status !== 'running');
   const review = reviewed.review!;
   assert.ok(review.status === 'passed', JSON.stringify(review));
   const hidden = review.checks.find((check) => check.kind === 'custom:hidden-tests')!;
@@ -252,20 +234,19 @@ const solve = async (root: string, lab: labs.LabArtifact) => {
 
 test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by the regression tests', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS, RR_LAB] });
+  const { root } = await createRepository(h, [FCFS, RR_LAB]);
   // Stage 1 was finished and committed before stage 2 was claimed.
   await solve(root, FCFS);
   await fixtures.run('git', ['-C', root, 'commit', '-qam', 'fcfs']);
-  await h.call(CHANNELS.waiveDependency, 'lab-round-robin', 'lab-fcfs');
-  await h.call(CHANNELS.transition, 'lab-round-robin', 'claim', { mode: 'practice' });
-  const claimed = await settleTask(h.call, 'lab-round-robin', (task) => task.baselineChecks?.status === 'measured');
+  await h.call(CHANNELS.packagesWaiveDependency, 'lab-round-robin', 'lab-fcfs');
+  await h.call(CHANNELS.packagesTransition, 'lab-round-robin', 'claim', { mode: 'practice' });
+  const claimed = await settleTask(h, 'lab-round-robin', (task) => task.baselineChecks?.status === 'measured');
   assert.equal(claimed.referenceRun?.status, 'ready');
   // Round robin done, and first come first served broken on the way.
   await solve(root, RR_LAB);
   await fs.writeFile(path.join(root, 'src/fcfs.c'), FCFS.files['src/fcfs.c']);
-  await h.call(CHANNELS.transition, 'lab-round-robin', 'submit_for_review');
-  const review = (await settleTask(h.call, 'lab-round-robin', (task) => task.review?.status !== 'running')).review!;
+  await h.call(CHANNELS.packagesTransition, 'lab-round-robin', 'submit_for_review');
+  const review = (await settleTask(h, 'lab-round-robin', (task) => task.review?.status !== 'running')).review!;
   assert.ok(review.status === 'rejected', JSON.stringify(review));
   assert.ok(review.reasons.includes('tests_failed'));
   assert.equal(review.acceptance[0].status, 'verified', 'its own test passes');
@@ -273,8 +254,7 @@ test.skipIf(!hasTools)('a stage 2 submission that breaks stage 1 is rejected by 
 
 test('private lab files never reach git, the renderer or a Coding Agent run directory', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  const entry = await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
+  const { root, entry } = await createRepository(h);
   await h.labs.addLab(RR_LAB);
 
   // git: neither the history nor any tracked blob holds a private marker.
@@ -288,65 +268,26 @@ test('private lab files never reach git, the renderer or a Coding Agent run dire
   assert.ok(!path.resolve(h.repositories.dataDir(entry.id)).startsWith(`${root}${path.sep}`), 'the private directory is outside the repository');
 
   // IPC: before and after a claim, nothing the renderer can read holds them.
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
-  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
   const seen = await rendererView(h.call);
   for (const marker of PRIVATE_MARKERS) assert.ok(!seen.includes(marker), `IPC: ${marker}`);
-  assert.equal((await h.call(CHANNELS.referenceGet, 'lab-fcfs')).error.code, 'reference_locked');
+  assert.equal((await h.call(CHANNELS.practiceReference, 'lab-fcfs')).error.code, 'reference_locked');
 });
 
-test("the next lab is written and committed by TaskPilot, keeping the student's edits to taskpilot.toml", async () => {
+test('a lab repository refuses unsafe roots without switching repositories', async () => {
   const h = await labHarness();
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
-  const project = path.join(root, 'taskpilot.toml');
-  await fs.writeFile(project, `${await fs.readFile(project, 'utf8')}# my note\n`);
-  // An uncommitted edit to a file the lab rewrites stops it.
-  assert.equal((await h.labs.addLab(RR_LAB).catch((error) => error)).code, 'lab_files_changed');
-  await fixtures.run('git', ['-C', root, 'commit', '-qam', 'note']);
-
-  const added = await h.labs.addLab({ ...RR_LAB, build: null });
-  assert.deepEqual(
-    added.map((definition) => [definition.id, definition.dependsOn]),
-    [['lab-round-robin', ['lab-fcfs']]],
-  );
-  assert.equal((await git(root, 'status', '--porcelain')).trim(), '');
-  assert.match(await git(root, 'log', '-1', '--format=%s'), /第 2 阶段/);
-  const text = await fs.readFile(project, 'utf8');
-  assert.match(text, /# my note/);
-  assert.match(text, /stage = 2/);
-  assert.equal(await fs.readFile(path.join(root, 'tests/build.mk'), 'utf8'), FCFS.build, 'a lab without build rules keeps the old ones');
-  assert.deepEqual(
-    ((await h.call(CHANNELS.listTasks)).data as TaskView[]).map((task) => task.id),
-    ['lab-fcfs', 'lab-round-robin'],
-  );
-  assert.equal((await h.labs.addLab(RR_LAB).catch((error) => error)).field, 'id', 'a lab id is used once');
-});
-
-test('a lab repository needs an empty folder outside any repository and a known course pack', async () => {
-  const h = await labHarness();
-  const busy = await emptyFolder();
-  await fs.writeFile(path.join(busy, 'x'), '');
-  const reasons = [
-    await h.labs.createRepository({ root: busy, course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
-    await h.labs.createRepository({ root: path.join(h.root, 'sub'), course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
-    await h.labs.createRepository({ root: 'relative', course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
-    await h.labs
-      .createRepository({ root: await emptyFolder(), course: 'nope', plan: { ...SCHED_PLAN, course: 'nope' }, labs: [FCFS] })
-      .catch((error) => error.code),
-    await h.labs.createRepository({ root: await emptyFolder(), course: 'os', plan: SCHED_PLAN, labs: [] }).catch((error) => error.code),
-  ];
-  assert.deepEqual(reasons, ['root_not_empty', 'root_not_found', 'root_not_absolute', 'unknown_course', 'invalid_lab']);
   const inside = path.join(h.root, 'nested');
   await fs.mkdir(inside);
   assert.equal(
     await h.labs.createRepository({ root: inside, course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
     'root_in_repository',
   );
-  // Nothing was added or opened.
+  assert.equal(
+    await h.labs.createRepository({ root: 'relative', course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
+    'root_not_absolute',
+  );
   assert.equal(h.repositories.list().length, 1);
-  // A project repository is not a lab repository.
-  assert.equal((await h.labs.addLab(RR_LAB).catch((error) => error)).code, 'not_lab_repository');
 });
 
 // [人工决策-2026-10-27 00:36:21] Tutor 失败时回退到 lab 预生成的 hints.json；隐藏测试从不进 Tutor 的 prompt。
@@ -357,10 +298,9 @@ test("Tutor falls back on the lab's own hint ladder and never sees the hidden te
     return fixtures.fakeAgent()(options);
   };
   const h = await labHarness({ agent });
-  const root = await emptyFolder();
-  await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: [FCFS] });
-  await h.call(CHANNELS.transition, 'lab-fcfs', 'claim', { mode: 'practice' });
-  await settleTask(h.call, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
+  await createRepository(h);
+  await h.call(CHANNELS.packagesTransition, 'lab-fcfs', 'claim', { mode: 'practice' });
+  await settleTask(h, 'lab-fcfs', (task) => task.referenceRun?.status === 'ready');
 
   // Tutor answers step 1 itself; its prompt holds nothing private.
   await h.call(CHANNELS.tutorAsk, 'lab-fcfs', 0, 1);

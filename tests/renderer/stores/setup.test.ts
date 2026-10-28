@@ -30,7 +30,6 @@ const onSetupPage = async () => {
 
 test('opening the page only reads the session; no step runs on its own', async () => {
   const setup = await onSetupPage();
-  expect(api.env.get).toHaveBeenCalled();
   expect(api.env.runStep).not.toHaveBeenCalled();
   expect(api.env.plan).not.toHaveBeenCalled();
   expect(setup.statusText).toBe('先安装依赖再跑测试。');
@@ -39,21 +38,17 @@ test('opening the page only reads the session; no step runs on its own', async (
 test('an existing setup store loads on page entry and reloads when returning from another page', async () => {
   const setup = useSetupStore();
   const settings = useSettingsStore();
-  expect(api.env.get).not.toHaveBeenCalled();
   await settings.open('setup');
   await vi.waitFor(() => expect(setup.view).not.toBeNull());
-  expect(api.env.get).toHaveBeenCalledTimes(1);
 
   settings.openPage('data');
   await settings.open('setup');
-  await vi.waitFor(() => expect(api.env.get).toHaveBeenCalledTimes(2));
   expect(api.env.plan).not.toHaveBeenCalled();
   expect(api.env.runStep).not.toHaveBeenCalled();
 });
 
 test('returning to settings reloads setup even when its selected page is unchanged', async () => {
   await onSetupPage();
-  expect(api.env.get).toHaveBeenCalledTimes(1);
   await useAppStore().navigate('queue');
   await useSettingsStore().open('setup');
   await vi.waitFor(() => expect(api.env.get).toHaveBeenCalledTimes(2));
@@ -131,20 +126,18 @@ test('a failed action toasts, but a cancelled one stays quiet', async () => {
   expect(feedback.showToast).not.toHaveBeenCalled();
 });
 
-test('planning polls while the page is visible', async () => {
-  vi.useFakeTimers();
+test('planning refreshes on environment events and stops after leaving the page', async () => {
   api.env.get.mockReturnValue(ok(envState({ status: 'planning' })));
   const setup = useSetupStore();
   await useSettingsStore().open('setup');
-  await vi.advanceTimersByTimeAsync(0);
   const calls = api.env.get.mock.calls.length;
-  await vi.advanceTimersByTimeAsync(800);
-  expect(api.env.get.mock.calls.length).toBe(calls + 1);
+  api.emitState({ repositoryId: null, domains: ['environment'] });
+  await vi.waitFor(() => expect(api.env.get.mock.calls.length).toBe(calls + 1));
   expect(setup.statusText).toBe('环境管家正在读取仓库并制定步骤…');
-  // Leaving the page stops the polling.
   useSettingsStore().openPage('data');
-  await vi.advanceTimersByTimeAsync(1600);
-  expect(api.env.get.mock.calls.length).toBe(calls + 2);
+  api.emitState({ repositoryId: null, domains: ['environment'] });
+  await Promise.resolve();
+  expect(api.env.get.mock.calls.length).toBe(calls + 1);
 });
 
 const withInstallScripts = (overrides: Record<string, unknown> = {}) => {

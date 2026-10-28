@@ -16,9 +16,9 @@
 // limits in repo_reader.ts. Its output is validated like Product Lead's, and
 // only the validated summary moves on: raw contents never reach Product Lead.
 
-import { AgentOutputError, isObject, scopePath } from './product_lead.ts';
-import type { RawObject } from './product_lead.ts';
-import type { AcceptanceCriterion } from '../tasks.ts';
+import { AgentOutputError, isObject, scopePath } from './output_validation.ts';
+import type { RawObject } from './output_validation.ts';
+import type { AcceptanceCriterion } from '../work_packages/tasks.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 import { profileBlock } from './prompt_blocks.ts';
 import { rolePreamble } from './role_preamble.ts';

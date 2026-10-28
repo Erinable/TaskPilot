@@ -1,0 +1,349 @@
+// Releases Release Manager prepared, and the one draft being prepared now.
+//
+// A draft moves generating → ready (plan shown, notes editable, checklist
+// ticked) or failed; finishing a ready draft whose checklist is all ticked
+// records it as a release and clears the draft. Only the newest
+// MAX_HISTORY releases are kept, but every released package id is kept (one
+// short string per package), so a package is never offered for a second
+// release after its release has aged out of the history.
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+import { logger } from '../infrastructure/logger.ts';
+import { formatNotes } from '../agents/release_manager.ts';
+import type { ReleasePlan } from '../agents/release_manager.ts';
+import type { ErrorInfo } from '../../shared/ipc/envelope.ts';
+import type { ErrorCode } from '../../shared/error_codes.ts';
+import { MAX_MILESTONES, MilestoneError, assignRequirement, parseMilestoneInput } from './milestones.ts';
+import { CONTROL_CHARS } from '../../shared/text_rules.ts';
+import type { StateChanged } from '../infrastructure/state_changes.ts';
+import { readStoredJson, writeStoredJson } from '../infrastructure/persisted_json.ts';
+import type { Milestone } from '../../shared/ipc/release.ts';
+import type { ReleaseInputSummary } from '../../shared/ipc/release.ts';
+import { JsonWriteQueue } from '../infrastructure/atomic_json_file.ts';
+
+export const RELEASES_FILENAME = 'releases.json';
+export const MAX_HISTORY = 50;
+export const MAX_NOTES_TEXT = 20000;
+const DRAFT_STATUSES = ['generating', 'ready', 'failed'] as const;
+// Tabs and newlines are allowed in the Markdown body.
+
+export type DraftStatus = (typeof DRAFT_STATUSES)[number];
+
+export interface ReleaseDraft {
+  status: DraftStatus;
+  error: ErrorInfo | null;
+  startCommit: string;
+  endCommit: string;
+  input: ReleaseInputSummary | null;
+  plan: ReleasePlan | null;
+  notesText: string;
+  checked: number[];
+  costUsd: number;
+  startedAt: string;
+  updatedAt: string;
+}
+
+export interface Release {
+  id: string;
+  version: string;
+  startCommit: string;
+  endCommit: string;
+  notesText: string;
+  checklist: { text: string; evidence: string[]; checked: boolean }[];
+  packageIds: string[];
+  finishedAt: string;
+}
+
+interface SavedState {
+  draft: ReleaseDraft | null;
+  history: Release[];
+  releasedPackageIds: string[];
+  milestones: Milestone[];
+}
+
+export type ReleaseErrorCode = 'invalid_argument' | 'invalid_state' | 'too_long' | 'invalid_text' | 'release_unchecked';
+
+export class ReleaseError extends Error {
+  code: ReleaseErrorCode;
+  field?: string;
+
+  constructor(message: string, code: ReleaseErrorCode, field?: string) {
+    super(message);
+    this.name = 'ReleaseError';
+    this.code = code;
+    if (field) this.field = field;
+  }
+}
+
+const fail = (message: string, code: ReleaseErrorCode, field?: string): never => {
+  throw new ReleaseError(message, code, field);
+};
+
+const isDraft = (value: unknown): value is ReleaseDraft => {
+  const draft = value as ReleaseDraft | null | undefined;
+  return Boolean(draft) && DRAFT_STATUSES.includes(draft!.status) && typeof draft!.startCommit === 'string' && typeof draft!.endCommit === 'string';
+};
+
+export class ReleaseStore {
+  #file: string;
+  #state: SavedState = { draft: null, history: [], releasedPackageIds: [], milestones: [] };
+  #onChanged?: StateChanged;
+  #newId: () => string;
+  #now: () => Date;
+
+  setOnChanged(listener: StateChanged): void {
+    this.#onChanged = listener;
+  }
+
+  #notify() {
+    try {
+      this.#onChanged?.('release');
+    } catch (error) {
+      logger.error('[release] change listener failed', error);
+    }
+  }
+
+  constructor(
+    configDir: string,
+    { newId = () => `rel-${crypto.randomBytes(4).toString('hex')}`, now = () => new Date() }: { newId?: () => string; now?: () => Date } = {},
+  ) {
+    this.#file = path.join(configDir, RELEASES_FILENAME);
+    this.#newId = newId;
+    this.#now = now;
+  }
+
+  // Rebinds the store to another data directory (a repository switch) and
+  // loads it. Pending writes land in the old directory first.
+  async open(configDir: string): Promise<this> {
+    await this.flush();
+    this.#file = path.join(configDir, RELEASES_FILENAME);
+    this.#state = { draft: null, history: [], releasedPackageIds: [], milestones: [] };
+    return this.load();
+  }
+
+  async load(): Promise<this> {
+    try {
+      const raw = await readStoredJson(this.#file, 1);
+      const saved = raw && typeof raw === 'object' && !Array.isArray(raw) && 'version' in raw && 'state' in raw ? raw.state : raw;
+      const value = saved as Partial<SavedState> | null;
+      const draft = isDraft(value?.draft) ? value.draft : null;
+      if (draft?.status === 'generating') {
+        draft.status = 'failed';
+        draft.error = { code: 'agent_interrupted', message: 'TaskPilot 在 Release Manager 运行时退出了' };
+      }
+      this.#state = {
+        draft,
+        history: (Array.isArray(value?.history) ? value.history : []).filter((item) => typeof item?.id === 'string').slice(0, MAX_HISTORY),
+        releasedPackageIds: (Array.isArray(value?.releasedPackageIds) ? value.releasedPackageIds : []).filter((id) => typeof id === 'string'),
+        milestones: (Array.isArray(value?.milestones) ? value.milestones : []).filter(
+          (item) => typeof item?.id === 'string' && typeof item.version === 'string' && Array.isArray(item.requirementIds),
+        ),
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
+    return this;
+  }
+
+  #writes = new JsonWriteQueue();
+
+  #persist = async () => {
+    await this.#writes.enqueue(() => writeStoredJson(this.#file, { version: 1, state: this.#state }));
+    this.#notify();
+  };
+
+  // Resolves once every write so far has landed.
+  flush(): Promise<void> {
+    return this.#writes.flush();
+  }
+
+  #mustDraft(statuses: DraftStatus[]): ReleaseDraft {
+    const draft = this.#state.draft;
+    if (!draft || !statuses.includes(draft.status)) return fail('There is no release draft in that state', 'invalid_state');
+    return draft;
+  }
+
+  async #setDraft(draft: ReleaseDraft | null): Promise<ReleaseDraft | null> {
+    this.#state.draft = draft;
+    await this.#persist();
+    return structuredClone(draft);
+  }
+
+  draft(): ReleaseDraft | null {
+    return structuredClone(this.#state.draft);
+  }
+
+  // Newest first.
+  history(): Release[] {
+    return structuredClone(this.#state.history);
+  }
+
+  latest(): Release | null {
+    return structuredClone(this.#state.history[0] ?? null);
+  }
+
+  isReleased(packageId: string): boolean {
+    return this.#state.releasedPackageIds.includes(packageId);
+  }
+
+  // Replaces any ready or failed draft; refuses while one is generating.
+  async begin({ startCommit, endCommit }: { startCommit: string; endCommit: string }): Promise<ReleaseDraft> {
+    if (this.#state.draft?.status === 'generating') fail('Release Manager is already running', 'invalid_state');
+    const now = this.#now().toISOString();
+    return (await this.#setDraft({
+      status: 'generating',
+      error: null,
+      startCommit,
+      endCommit,
+      input: null,
+      plan: null,
+      notesText: '',
+      checked: [],
+      costUsd: 0,
+      startedAt: now,
+      updatedAt: now,
+    }))!;
+  }
+
+  async complete(plan: ReleasePlan, input: ReleaseInputSummary, costUsd: number): Promise<ReleaseDraft> {
+    const draft = this.#mustDraft(['generating']);
+    return (await this.#setDraft({
+      ...draft,
+      status: 'ready',
+      plan,
+      input,
+      notesText: formatNotes(plan.notes),
+      checked: [],
+      costUsd,
+      updatedAt: this.#now().toISOString(),
+    }))!;
+  }
+
+  async failRun(error: { code?: ErrorCode; message: string }): Promise<ReleaseDraft> {
+    const draft = this.#mustDraft(['generating']);
+    return (await this.#setDraft({
+      ...draft,
+      status: 'failed',
+      error: { code: error.code ?? 'agent_failed', message: error.message },
+      updatedAt: this.#now().toISOString(),
+    }))!;
+  }
+
+  // Saves the user's edits to a ready draft. `checked` replaces the ticked set.
+  async update(raw: unknown): Promise<ReleaseDraft> {
+    const draft = this.#mustDraft(['ready']);
+    const changes = raw as { notes?: unknown; checked?: unknown } | null | undefined;
+    if (!changes || typeof changes !== 'object') return fail('Edits must be an object', 'invalid_argument');
+    const next = { ...draft };
+    if (changes.notes !== undefined) {
+      if (typeof changes.notes !== 'string') fail('notes must be text', 'invalid_argument', 'notes');
+      const notes = changes.notes as string;
+      if ([...notes].length > MAX_NOTES_TEXT) fail(`notes is longer than ${MAX_NOTES_TEXT} characters`, 'too_long', 'notes');
+      if (CONTROL_CHARS.test(notes)) fail('notes contains control characters', 'invalid_text', 'notes');
+      next.notesText = notes;
+    }
+    if (changes.checked !== undefined) {
+      const count = draft.plan?.checklist.length ?? 0;
+      const checked = changes.checked;
+      if (!Array.isArray(checked) || checked.some((index) => !Number.isInteger(index) || index < 0 || index >= count)) {
+        fail('checked must list checklist indices', 'invalid_argument', 'checked');
+      }
+      next.checked = [...new Set(checked as number[])].sort((a, b) => a - b);
+    }
+    next.updatedAt = this.#now().toISOString();
+    return (await this.#setDraft(next))!;
+  }
+
+  // Records the ready draft as a release once every checklist item is ticked.
+  async finish({ packageIds }: { packageIds: string[] }): Promise<Release> {
+    const draft = this.#mustDraft(['ready']);
+    const plan = draft.plan;
+    if (!plan) return fail('The draft has no plan', 'invalid_state');
+    const ticked = new Set(draft.checked);
+    if (plan.checklist.some((_item, index) => !ticked.has(index))) fail('Tick every checklist item first', 'release_unchecked');
+    if (!draft.notesText.trim()) fail('The release notes are empty', 'invalid_argument', 'notes');
+    const release: Release = {
+      id: this.#newId(),
+      version: plan.nextVersion,
+      startCommit: draft.startCommit,
+      endCommit: draft.endCommit,
+      notesText: draft.notesText,
+      checklist: plan.checklist.map((item) => ({ ...item, checked: true })),
+      packageIds,
+      finishedAt: this.#now().toISOString(),
+    };
+    this.#state.history = [release, ...this.#state.history].slice(0, MAX_HISTORY);
+    this.#state.releasedPackageIds = [...new Set([...this.#state.releasedPackageIds, ...packageIds])];
+    // Releasing a version closes its plan.
+    this.#state.milestones = this.#state.milestones.map((milestone) =>
+      milestone.version === release.version && !milestone.releasedAt ? { ...milestone, releasedAt: release.finishedAt } : milestone,
+    );
+    await this.#setDraft(null);
+    return structuredClone(release);
+  }
+
+  // ========== Milestones ==========
+
+  milestones(): Milestone[] {
+    return structuredClone(this.#state.milestones);
+  }
+
+  // `known`: existing requirement ids. A new milestone takes its requirements
+  // out of any other open milestone.
+  async createMilestone(raw: unknown, known: ReadonlySet<string>): Promise<Milestone> {
+    const open = this.#state.milestones.filter((milestone) => !milestone.releasedAt);
+    if (open.length >= MAX_MILESTONES) throw new MilestoneError(`At most ${MAX_MILESTONES} open milestones`, 'invalid_state');
+    const input = parseMilestoneInput(raw, known);
+    if (open.some((milestone) => milestone.version === input.version))
+      throw new MilestoneError('This version already has a plan', 'invalid_argument', 'version');
+    const milestone: Milestone = {
+      id: `ms-${this.#newId().replace(/^rel-/, '')}`,
+      ...input,
+      requirementIds: [],
+      createdAt: this.#now().toISOString(),
+      releasedAt: null,
+    };
+    let milestones = [...this.#state.milestones, milestone];
+    for (const id of input.requirementIds) milestones = assignRequirement(milestones, id, milestone.id);
+    this.#state.milestones = milestones;
+    await this.#persist();
+    return structuredClone(milestones.find((item) => item.id === milestone.id) as Milestone);
+  }
+
+  async updateMilestone(id: string, raw: unknown, known: ReadonlySet<string>): Promise<Milestone> {
+    const current = this.#openMilestone(id);
+    const input = parseMilestoneInput(raw, known);
+    if (this.#state.milestones.some((milestone) => !milestone.releasedAt && milestone.id !== id && milestone.version === input.version)) {
+      throw new MilestoneError('This version already has a plan', 'invalid_argument', 'version');
+    }
+    let milestones = this.#state.milestones.map((milestone) =>
+      milestone.id === id ? { ...current, version: input.version, targetDate: input.targetDate, requirementIds: [] } : milestone,
+    );
+    for (const requirementId of input.requirementIds) milestones = assignRequirement(milestones, requirementId, id);
+    this.#state.milestones = milestones;
+    await this.#persist();
+    return structuredClone(milestones.find((item) => item.id === id) as Milestone);
+  }
+
+  async deleteMilestone(id: string): Promise<void> {
+    this.#openMilestone(id);
+    this.#state.milestones = this.#state.milestones.filter((milestone) => milestone.id !== id);
+    await this.#persist();
+  }
+
+  // Plans one requirement into a milestone, or out of every one when null.
+  async assignRequirement(requirementId: string, milestoneId: string | null): Promise<Milestone[]> {
+    this.#state.milestones = assignRequirement(this.#state.milestones, requirementId, milestoneId);
+    await this.#persist();
+    return this.milestones();
+  }
+
+  #openMilestone(id: string): Milestone {
+    const found = this.#state.milestones.find((milestone) => milestone.id === id);
+    if (!found) throw new MilestoneError('No such milestone', 'not_found');
+    if (found.releasedAt) throw new MilestoneError('A released milestone cannot change', 'invalid_state');
+    return found;
+  }
+}
