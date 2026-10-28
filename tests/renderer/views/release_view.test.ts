@@ -153,13 +153,13 @@ describe('ReleaseView', () => {
     const dialog = () => document.querySelector('.release-write-dialog') as HTMLElement;
     expect(dialog()).not.toBeNull();
 
-    api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
+    api.writeNotes.mockReturnValueOnce(fakes.fail('path_outside_workspace', 'Path is outside the workspace', 'path'));
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     (dialog().querySelector('.write-confirm') as HTMLElement).click();
     await flushPromises();
     log.mockRestore();
     expect(api.writeNotes).toHaveBeenLastCalledWith({ path: 'CHANGELOG.md' });
-    expect(dialog().querySelector('#release-notes-path-error')!.textContent).toBe('路径不在工作区内');
+    expect(dialog().querySelector('#release-notes-path-error')!.textContent).toBe('路径不在工作区内。');
 
     (dialog().querySelector('.write-confirm') as HTMLElement).click();
     await flushPromises();

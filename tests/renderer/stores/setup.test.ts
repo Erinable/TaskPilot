@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { resultText, useSetupStore } from '@/stores/setup.ts';
 import { envState, fail, installApi, ok } from '../settings_fakes.ts';
+import type * as envTypes from '@shared/ipc/environment.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -93,7 +94,9 @@ test('allowing install scripts asks first; declining sends nothing', async () =>
 test('a failed step offers a replan with the failure', async () => {
   const setup = await onSetupPage();
   const failed = { line: 'npm ci', ok: false, exitCode: 1, timedOut: false, durationMs: 2500, summary: null, output: 'gyp ERR', at: '' };
-  api.env.get.mockReturnValue(ok(envState({ steps: [{ id: 'install', kind: 'install', script: null, line: 'npm ci', result: failed }] })));
+  api.env.get.mockReturnValue(
+    ok(envState({ steps: [{ id: 'install', kind: 'install', script: null, packages: [], replacesInstall: false, line: 'npm ci', result: failed }] })),
+  );
   await setup.render();
   expect(setup.failedStep?.id).toBe('install');
   expect(setup.retryText).toContain('允许依赖的安装脚本');
@@ -105,7 +108,9 @@ test('a failed step offers a replan with the failure', async () => {
 test('a successful unconfigured script is ticked for writing by default', async () => {
   const setup = await onSetupPage();
   const passed = { line: 'npm run test', ok: true, exitCode: 0, timedOut: false, durationMs: 1000, summary: null, output: '', at: '' };
-  api.env.get.mockReturnValue(ok(envState({ steps: [{ id: 'test', kind: 'test', script: 'test', line: 'npm run test', result: passed }] })));
+  api.env.get.mockReturnValue(
+    ok(envState({ steps: [{ id: 'test', kind: 'test', script: 'test', packages: [], replacesInstall: false, line: 'npm run test', result: passed }] })),
+  );
   await setup.render();
   expect(setup.selectedKinds).toEqual(['test']);
   expect(setup.applyItems).toEqual([{ kind: 'test', proposed: 'npm run test', current: '', disabled: false, note: '当前未配置' }]);
@@ -145,10 +150,10 @@ test('planning refreshes on environment events and stops after leaving the page'
   expect(api.env.get.mock.calls.length).toBe(calls + 1);
 });
 
-const withInstallScripts = (overrides: Record<string, unknown> = {}) => {
+const withInstallScripts = (overrides: Partial<envTypes.EnvState> = {}) => {
   const base = envState();
   return envState({
-    facts: { ...base.facts, installScripts: ['electron', 'esbuild'] },
+    facts: { ...base.facts!, installScripts: ['electron', 'esbuild'] },
     steps: [
       { ...base.steps[0], replacesInstall: true },
       {

@@ -27,7 +27,7 @@ vi.mock('@/components/notes/NoteChart.vue', () => ({
   default: { name: 'NoteChart', props: ['lang', 'source'], template: '<pre data-chart :data-lang="lang">{{ source }}</pre>' },
 }));
 
-let api: ReturnType<typeof installApi> & { mastery: Record<string, ReturnType<typeof vi.fn>>; notes: Record<string, ReturnType<typeof vi.fn>> };
+let api: ReturnType<typeof installApi>;
 
 const concept = (id: string, label: string, prerequisites: string[], state: masteryTypes.ConceptState, attempts: masteryTypes.ConceptAttempt[] = []) => ({
   id,
@@ -85,22 +85,19 @@ const RR_NOTE = note('RR 入队顺序.md', { concepts: ['round-robin'] });
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  api = installApi() as typeof api;
-  Object.assign(api, {
-    businessTimeZone: 'Asia/Shanghai',
+  api = installApi({
     mastery: {
-      course: vi.fn((id?: string) => ok(id && id !== 'os' ? { ...OS_MASTERY, course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [] } : OS_MASTERY)),
-      reviews: vi.fn(() =>
+      course: (id?: string) => ok(id && id !== 'os' ? { ...OS_MASTERY, course: { id, title: `${id} 课程` }, concepts: [], errorTypes: [] } : OS_MASTERY),
+      reviews: () =>
         ok<masteryTypes.ReviewList>({
           today: '2026-10-28',
           due: [{ noteId: RR_NOTE.id, box: 1, dueDay: '2026-10-28', title: 'RR 入队顺序', concepts: ['round-robin'] }],
           total: 1,
         }),
-      ),
-      review: vi.fn((noteId: string, remembered: boolean) => ok({ noteId, box: remembered ? 2 : 1, dueDay: remembered ? '2026-10-31' : '2026-10-29' })),
+      review: (noteId: string, remembered: boolean) => ok({ noteId, box: remembered ? 2 : 1, dueDay: remembered ? '2026-10-31' : '2026-10-29' }),
     },
     notes: {
-      list: vi.fn(() =>
+      list: () =>
         ok<noteTypes.NoteList>({
           notes: [RR_NOTE, note('别的.md'), note('编程的.md', { course: null, concepts: ['round-robin'] })],
           revision: 1,
@@ -109,7 +106,6 @@ beforeEach(() => {
           unavailable: null,
           truncated: false,
         }),
-      ),
     },
   });
   api.courses.list.mockReturnValue(ok(courseList()));

@@ -1,6 +1,5 @@
-// Shared fakes for the execution view tests: a TaskView builder and a
-// window.taskpilot stub whose calls resolve {ok: true, data}.
-import { vi } from 'vitest';
+// Shared fakes for the execution view tests: a TaskView builder and its
+// installFakeApi() defaults: every other call rejects as not faked.
 
 import type * as codingTypes from '../../src/shared/coding_types.ts';
 import type * as noteTypes from '../../src/shared/ipc/notes.ts';
@@ -8,7 +7,7 @@ import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
-import { fakeApi, ok } from './ipc_fakes.ts';
+import { installFakeApi, ok } from './ipc_fakes.ts';
 import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
@@ -66,34 +65,30 @@ const state = (task: packageTypes.TaskView): packageTypes.WorkPackageState => ({
 
 // Installs window.taskpilot; `task` is what getTask() returns now.
 export const installApi = (current: { task: packageTypes.TaskView }) => {
-  const api = {
-    ...fakeApi({
-      commit: {
-        preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
-        create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
-      },
-    }),
-    tasks: { list: vi.fn(() => ok([current.task])), get: vi.fn(() => ok(current.task)) },
+  return installFakeApi({
+    commit: {
+      preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+      create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
+    },
+    tasks: { list: () => ok([current.task]), get: () => ok(current.task) },
     packages: {
-      transition: vi.fn((_id: string, _name: packageTypes.HumanTransition, _options?: packageTypes.TransitionOptions) => ok(state(current.task))),
-      waiveDependency: vi.fn((_id: string, dependency: string) =>
+      transition: (_id: string, _name: packageTypes.HumanTransition, _options?: packageTypes.TransitionOptions) => ok(state(current.task)),
+      waiveDependency: (_id: string, dependency: string) =>
         ok({
           ...current.task,
           dependencies: current.task.dependencies.map((entry) => (entry.id === dependency ? { ...entry, waived: true, blocking: false } : entry)),
         }),
-      ),
-      measureBaseline: vi.fn(() => ok(current.task)),
-      setStepDone: vi.fn((_id: string, stepIndex: number) => ok(state({ ...current.task, completedSteps: [stepIndex] }))),
+      measureBaseline: () => ok(current.task),
+      setStepDone: (_id: string, stepIndex: number) => ok(state({ ...current.task, completedSteps: [stepIndex] })),
     },
-    review: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
-    deviation: { retry: vi.fn(() => ok(state(current.task))), cancel: vi.fn(() => ok(true)) },
+    review: { retry: () => ok(state(current.task)), cancel: () => ok(true) },
+    deviation: { retry: () => ok(state(current.task)), cancel: () => ok(true) },
     diff: {
-      stat: vi.fn(() => ok<workspaceTypes.DiffStat>({ changes: [], scope: { inScope: [], outOfScope: [], untouched: current.task.fileScope } })),
-      file: vi.fn(() => ok('')),
+      stat: () => ok<workspaceTypes.DiffStat>({ changes: [], scope: { inScope: [], outOfScope: [], untouched: current.task.fileScope } }),
+      file: () => ok(''),
     },
-    verify: { run: vi.fn() },
     coding: {
-      status: vi.fn(() =>
+      status: () =>
         ok<codingTypes.CodingRuntimeStatus>({
           backend: 'codex',
           protocol: 'codex-exec',
@@ -103,20 +98,19 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
           reason: null,
           config: { user: 'coding-agent', cli: 'codex', model: 'test-model', thinking: 'default', timeoutMinutes: 30 },
         }),
-      ),
-      start: vi.fn((_id: string, _input: codingTypes.CodingStart) => ok(current.task)),
-      get: vi.fn(() => ok(current.task)),
-      events: vi.fn((_id: string, _after: number) => ok<codingTypes.CodingEventPage>({ events: [], next: -1, truncated: false })),
-      cancel: vi.fn(() => ok(true)),
-      patch: vi.fn(() => ok<codingTypes.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] })),
-      apply: vi.fn((_id: string, _input: codingTypes.CodingApply) => ok<codingTypes.CodingApplyResult>({ files: [], markers: [], kept: [] })),
-      active: vi.fn(() => ok<codingTypes.CodingActiveRun[]>([])),
-      resume: vi.fn((_id: string) => ok(current.task)),
+      start: (_id: string, _input: codingTypes.CodingStart) => ok(current.task),
+      get: () => ok(current.task),
+      events: (_id: string, _after: number) => ok<codingTypes.CodingEventPage>({ events: [], next: -1, truncated: false }),
+      cancel: () => ok(true),
+      patch: () => ok<codingTypes.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] }),
+      apply: (_id: string, _input: codingTypes.CodingApply) => ok<codingTypes.CodingApplyResult>({ files: [], markers: [], kept: [] }),
+      active: () => ok<codingTypes.CodingActiveRun[]>([]),
+      resume: (_id: string) => ok(current.task),
     },
     workspace: {
-      info: vi.fn(() => ok<workspaceTypes.WorkspaceInfo>({ configured: false })),
-      openFile: vi.fn(() => ok<workspaceTypes.OpenedWith>('vscode')),
-      get: vi.fn(() =>
+      info: () => ok<workspaceTypes.WorkspaceInfo>({ configured: false }),
+      openFile: () => ok<workspaceTypes.OpenedWith>('vscode'),
+      get: () =>
         ok<workspaceTypes.WorkspaceView>({
           root: '/repo',
           steps: [
@@ -135,11 +129,10 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
           detected: [],
           presets: [],
         }),
-      ),
     },
     notes: {
-      list: vi.fn(() => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] })),
-      create: vi.fn((input: noteTypes.NoteInput) =>
+      list: () => ok<noteTypes.NoteList>({ revision: 1, directory: '/notes', custom: false, unavailable: null, truncated: false, notes: [] }),
+      create: (input: noteTypes.NoteInput) =>
         ok<noteTypes.NoteSaved>({
           revision: 2,
           relinked: 0,
@@ -159,29 +152,24 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
             frontmatterError: false,
           },
         }),
-      ),
-      update: vi.fn(),
-      remove: vi.fn(() => ok(true)),
+      remove: () => ok(true),
     },
     practice: {
-      reference: vi.fn(() => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n')),
-      grade: vi.fn((_id: string, _skipReference: boolean) => ok(current.task)),
-      explain: vi.fn((_id: string) => ok(current.task)),
-      answer: vi.fn((_id: string, _answers: (string | null)[]) => ok(current.task)),
-      saveExplanation: vi.fn((_id: string) => ok(current.task)),
+      reference: () => ok('diff --git a/src/auth.ts b/src/auth.ts\n+export const login = () => true;\n'),
+      grade: (_id: string, _skipReference: boolean) => ok(current.task),
+      explain: (_id: string) => ok(current.task),
+      answer: (_id: string, _answers: (string | null)[]) => ok(current.task),
+      saveExplanation: (_id: string) => ok(current.task),
     },
-    courses: { default: vi.fn(() => ok(PROGRAMMING_COURSE)) },
+    courses: { default: () => ok(PROGRAMMING_COURSE) },
     tutor: {
-      get: vi.fn(() => ok<tutorTypes.TutorState>({ status: 'idle', levels: [], pending: null, opened: 0, maxLevel: 5, error: null })),
-      ask: vi.fn((_id: string, _stepIndex: number, level: number) =>
+      get: () => ok<tutorTypes.TutorState>({ status: 'idle', levels: [], pending: null, opened: 0, maxLevel: 5, error: null }),
+      ask: (_id: string, _stepIndex: number, level: number) =>
         ok<tutorTypes.TutorState>({ status: 'running', levels: [], pending: level, opened: level - 1, maxLevel: 5, error: null }),
-      ),
-      copied: vi.fn(() => ok(1)),
-      cancel: vi.fn(() => ok(true)),
+      copied: () => ok(1),
+      cancel: () => ok(true),
     },
-  };
-  Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
-  return api;
+  });
 };
 
 // A Coding Agent round, ready for review unless overridden.

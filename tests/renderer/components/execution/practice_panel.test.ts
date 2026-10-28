@@ -61,7 +61,6 @@ const mountPanel = async (overrides: Partial<packageTypes.TaskView>) => {
 beforeEach(() => {
   current = { task: taskView() };
   api = installApi(current);
-  Object.assign(window.taskpilot, { businessTimeZone: 'Asia/Shanghai' });
 });
 
 describe('PracticePanel', () => {

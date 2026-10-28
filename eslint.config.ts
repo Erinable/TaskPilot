@@ -116,8 +116,18 @@ export default tseslint.config(
           selector: "CallExpression[callee.object.name='vi'][callee.property.name=/^(waitFor|waitUntil)$/]",
           message: 'Await the promise and flushPromises(), or poll real processes with until() (tests/fixtures/until.ts).',
         },
+        {
+          selector:
+            "CallExpression[callee.object.name='Object'][callee.property.name=/^(assign|defineProperty)$/][arguments.0.name='window'], CallExpression[callee.object.name='Object'][callee.property.name='assign'][arguments.0.object.name='window'][arguments.0.property.name='taskpilot'], AssignmentExpression[left.property.name='taskpilot']",
+          message: 'Install fakes with installFakeApi() (tests/renderer/ipc_fakes.ts), typed from the contract tables.',
+        },
       ],
     },
+  },
+  {
+    // The one place a fake reaches window.taskpilot, and the setup file that adds the preload's fixed fields.
+    files: ['tests/renderer/ipc_fakes.ts', 'tests/setup/renderer_globals.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...restrictedSyntax] },
   },
   prettier,
 );

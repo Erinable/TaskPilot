@@ -8,6 +8,7 @@ import CodingIsolation from '../../../../src/renderer/src/components/settings/Co
 import { useSettingsStore } from '../../../../src/renderer/src/stores/settings.ts';
 import * as feedback from '../../../../src/renderer/src/lib/feedback.ts';
 import { preferences } from '../../settings_fakes.ts';
+import { installFakeApi, ok } from '../../ipc_fakes.ts';
 
 vi.mock('../../../../src/renderer/src/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
 
@@ -16,7 +17,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
   const prefs = preferences();
   useSettingsStore().preferencesDraft = { ...prefs, coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 } } as never;
-  (window as unknown as { taskpilot: unknown }).taskpilot = { workspace: { pickRoot: vi.fn(async () => ({ ok: true, data: picked })) } };
+  installFakeApi({ workspace: { pickRoot: () => ok(picked) } });
   vi.mocked(feedback.confirmAction).mockClear();
 });
 

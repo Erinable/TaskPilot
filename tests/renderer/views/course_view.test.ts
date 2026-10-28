@@ -228,7 +228,7 @@ test('a pack shows its lab repositories and how its concepts stand, and opens th
     totals: { attempts: 0, pass: 0, partial: 0, fail: 0 },
     attempts: [],
   });
-  api.mastery.course.mockImplementation((id: string) =>
+  api.mastery.course.mockImplementation((id = 'programming') =>
     ok({
       course: { id, title: '操作系统实验' },
       concepts: [concept('fcfs', 'mastered'), concept('round-robin', 'passed'), concept('mlfq', 'new')],

@@ -5,14 +5,13 @@ import { flushPromises } from '@vue/test-utils';
 
 import { createStateWatcher } from '../../../src/renderer/src/stores/state_watcher.ts';
 import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/repository_identity.ts';
-import { fakeApi } from '../ipc_fakes.ts';
+import { installFakeApi } from '../ipc_fakes.ts';
 
-let api: ReturnType<typeof fakeApi>;
+let api: ReturnType<typeof installFakeApi>;
 
 beforeEach(() => {
   setActivePinia(createPinia());
-  api = fakeApi();
-  Object.assign(window, { taskpilot: api });
+  api = installFakeApi();
   useRepositoryIdentityStore().currentId = 'repo-a';
 });
 

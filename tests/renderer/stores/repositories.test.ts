@@ -12,21 +12,21 @@ import { useTutorStore } from '../../../src/renderer/src/stores/tutor.ts';
 import { readStorageKey, useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as activityTypes from '../../../src/shared/ipc/activity.ts';
+import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import type * as commitTypes from '../../../src/shared/ipc/commit.ts';
 import type * as repositoryTypes from '../../../src/shared/ipc/repositories.ts';
 import type * as settingsTypes from '../../../src/shared/ipc/settings.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from '../settings_fakes.ts';
-import { stateEvents } from '../ipc_fakes.ts';
+import { installFakeApi, ok } from '../ipc_fakes.ts';
+import { activityOverview } from '../activity_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
   // announceAgent adds a system notification only in the background; tests see the toast.
   return { showToast, announceAgent: (...args: unknown[]) => showToast(...args), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } };
 });
-
-const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 const repo = (id: string, overrides: Partial<repositoryTypes.Repository> = {}): repositoryTypes.Repository => ({
   id,
@@ -44,28 +44,23 @@ const listOf = (current: string): repositoryTypes.RepositoryList => ({ current, 
 let busy: repositoryTypes.BusyRun[];
 let api: ReturnType<typeof installApi>;
 
-const installApi = () => {
-  const stub = {
-    state: stateEvents(),
+const installApi = () =>
+  installFakeApi({
     repositories: {
-      list: vi.fn(() => ok(listOf('a'))),
-      busy: vi.fn(() => ok(busy)),
-      switch: vi.fn((id: string) => ok(listOf(id))),
-      add: vi.fn((root: string) => ok({ current: 'c', repositories: [repo('c', { root, current: true })] })),
-      relocate: vi.fn((id: string, root: string) => ok({ current: 'a', repositories: [repo(id, { root, current: true })] })),
+      list: () => ok(listOf('a')),
+      busy: () => ok(busy),
+      switch: (id: string) => ok(listOf(id)),
+      add: (root: string) => ok({ current: 'c', repositories: [repo('c', { root, current: true })] }),
+      relocate: (id: string, root: string) => ok({ current: 'a', repositories: [repo(id, { root, current: true })] }),
     },
     workspace: {
-      pickRoot: vi.fn(() => ok<string | null>('/work/c')),
-      info: vi.fn(() => ok({ configured: false } as workspaceTypes.WorkspaceInfo)),
+      pickRoot: () => ok<string | null>('/work/c'),
+      info: () => ok({ configured: false } as workspaceTypes.WorkspaceInfo),
     },
-    requirements: { list: vi.fn(() => ok([])) },
-    release: { updateDraft: vi.fn() },
-    activity: { overview: vi.fn(() => ok(null)) },
-    tasks: { list: vi.fn(() => ok([])) },
-  };
-  Object.assign(window, { taskpilot: stub });
-  return stub;
-};
+    requirements: { list: () => ok([]) },
+    activity: { overview: () => ok(activityOverview()) },
+    tasks: { list: () => ok([]) },
+  });
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -93,39 +88,33 @@ describe('repositories store', () => {
     const tutorState: tutorTypes.TutorState = { status: 'done', levels: [], pending: null, opened: 1, maxLevel: 5, error: null };
     const preview: commitTypes.CommitPreview = { files: ['a.ts'], skipped: [], message: 'feat: a' };
     const map: activityTypes.EngineeringMap = { modules: [], conventions: [], gaps: [], files: ['a.ts'], truncated: false };
-    Object.assign(window.taskpilot, {
-      activity: {
-        ...api.activity,
-        page: vi.fn(() => ok({ days: [{ day: '2026-10-25', records: [] }], nextBefore: '2026-10-24', timeZone: 'Asia/Shanghai', retentionDays: 30 })),
-      },
-      commit: { preview: vi.fn(() => ok(preview)) },
-      engineeringMap: { get: vi.fn(() => ok(map)) },
-      agent: { status: vi.fn(() => ok({ available: true } as settingsTypes.AgentStatus)) },
-      workspace: {
-        ...api.workspace,
-        get: vi.fn(() =>
-          ok({
-            root: '/r',
-            steps: [
-              {
-                id: 'test',
-                label: null,
-                effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
-                source: 'local',
-                skipped: null,
-                local: null,
-                suggestions: [],
-              },
-            ],
-            project: { status: 'missing' },
-            course: defaultCourse(),
-            detected: [],
-            presets: [],
-          } as workspaceTypes.WorkspaceView),
-        ),
-      },
-      tutor: { get: vi.fn(() => ok(tutorState)) },
-    });
+    api.activity.page.mockImplementation(() =>
+      ok({ days: [{ day: '2026-10-25', records: [] }], nextBefore: '2026-10-24', timeZone: 'Asia/Shanghai', retentionDays: 30 }),
+    );
+    api.commit.preview.mockImplementation(() => ok(preview));
+    api.engineeringMap.get.mockImplementation(() => ok(map));
+    api.agent.status.mockImplementation(() => ok({ available: true } as settingsTypes.AgentStatus));
+    api.workspace.get.mockImplementation(() =>
+      ok<workspaceTypes.WorkspaceView>({
+        root: '/r',
+        steps: [
+          {
+            id: 'test',
+            label: null,
+            effective: { lines: ['npm test'], cwd: '', stage: 'submit', blocking: true, parser: { format: 'tests' }, timeoutSeconds: null },
+            source: 'local',
+            skipped: null,
+            local: null,
+            suggestions: [],
+          },
+        ],
+        project: { status: 'missing' },
+        course: defaultCourse(),
+        detected: [],
+        presets: [],
+      }),
+    );
+    api.tutor.get.mockImplementation(() => ok(tutorState));
     const feed = useActivityFeedStore();
     const commit = useCommitStore();
     const engineeringMap = useEngineeringMapStore();
@@ -152,8 +141,8 @@ describe('repositories store', () => {
   });
 
   test('an answer for the old repository that lands after the switch is dropped', async () => {
-    let answer: (value: { ok: true; data: activityTypes.EngineeringMap }) => void = () => {};
-    Object.assign(window.taskpilot, { engineeringMap: { get: vi.fn(() => new Promise((resolve) => (answer = resolve))) } });
+    const held = Promise.withResolvers<IpcResult<activityTypes.EngineeringMap>>();
+    api.engineeringMap.get.mockReturnValueOnce(held.promise);
     const engineeringMap = useEngineeringMapStore();
     const loading = engineeringMap.open();
     expect(engineeringMap.loading).toBe(true);
@@ -161,7 +150,7 @@ describe('repositories store', () => {
     const store = useRepositoriesStore();
     await store.refresh();
     expect(await store.switchTo('b')).toBe(true);
-    answer({ ok: true, data: { modules: [], conventions: [], gaps: [], files: ['old.ts'], truncated: false } });
+    held.resolve({ ok: true, data: { modules: [], conventions: [], gaps: [], files: ['old.ts'], truncated: false } });
     await loading;
     expect(engineeringMap.map).toBeNull();
     expect(engineeringMap.loading).toBe(false);

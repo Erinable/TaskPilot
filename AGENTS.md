@@ -103,6 +103,8 @@ Tests come in three tiers, set in `vitest.config.ts` `tags`, and never pick thei
 - integration (`/** @module-tag integration */` on the file, or `{ tags: ['integration'] }` on a test; 30s): temp repositories, the IPC harness, child processes, file watchers or a full view mount.
 - e2e (`{ tags: ['e2e'] }`, 600s): drives uv, python3, cargo, cc, make, perl or Seatbelt end to end; left out by `npm run test:fast`.
 
+Renderer tests reach `window.taskpilot` only through `installFakeApi(overrides)` (`tests/renderer/ipc_fakes.ts`): it is typed from the contract tables, so a fake that drifts from a channel's arguments or result fails typecheck, and a call no test faked rejects. The `*_fakes.ts` modules build on it. ESLint rejects assigning `window.taskpilot` anywhere else.
+
 State another process or the OS changes is polled with `until()` (`tests/fixtures/until.ts`), whose deadline follows the running test's timeout.
 
 Tests that drive external tools (uv, python3, cargo, cc, make, perl) gate on `hasTools()` from `tests/fixtures/required_tools.ts`: a machine without a tool skips the test, but with `CI` set a missing tool fails the test file. A new tool such a test needs is installed in `ci.yml` at a pinned version.

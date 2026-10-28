@@ -138,11 +138,11 @@ describe('release store', () => {
     expect(store.writeError).toBe('只能写入 .md 文件。');
     expect(api.writeNotes).not.toHaveBeenCalled();
 
-    api.writeNotes.mockReturnValueOnce(fakes.fail('outside_workspace', '路径不在工作区内', 'path') as never);
+    api.writeNotes.mockReturnValueOnce(fakes.fail('path_outside_workspace', 'Path is outside the workspace', 'path'));
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(await store.writeNotes('../x.md')).toBe(false);
     log.mockRestore();
-    expect(store.writeError).toBe('路径不在工作区内');
+    expect(store.writeError).toBe('路径不在工作区内。');
     expect(feedback.showToast).not.toHaveBeenCalled();
 
     expect(await store.writeNotes(' docs/CHANGELOG.md ')).toBe(true);

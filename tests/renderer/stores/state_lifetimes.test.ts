@@ -15,7 +15,7 @@ import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/rep
 import { installApi as executionApi, taskView } from '../execution_fakes.ts';
 import { installApi as settingsApi, envState } from '../settings_fakes.ts';
 import { installReleaseApi, releaseState, draft } from '../release_fakes.ts';
-import { fakeApi, ok } from '../ipc_fakes.ts';
+import { installFakeApi, ok } from '../ipc_fakes.ts';
 import { requirement } from '../requirements_fakes.ts';
 import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import type { Note, NoteList } from '../../../src/shared/ipc/notes.ts';
@@ -93,8 +93,7 @@ test('setup re-entry and repository changes refresh the mounted settings page', 
 test('an old workspace response cannot overwrite the current repository status', async () => {
   const held = Promise.withResolvers<IpcResult<WorkspaceInfo>>();
   const current = { configured: false } as const;
-  const api = fakeApi({ workspace: { info: () => ok(current) } });
-  Object.assign(window, { taskpilot: api });
+  const api = installFakeApi({ workspace: { info: () => ok(current) } });
   api.workspace.info.mockReturnValueOnce(held.promise);
   const app = useAppStore();
   const old = app.refreshWorkspaceStatus();
@@ -124,8 +123,7 @@ test('an old settings load cannot restore the previous repository draft', async 
 
 test('late note navigation cannot repopulate an article after returning to the index', async () => {
   const held = Promise.withResolvers<IpcResult<Note>>();
-  const api = fakeApi({ notes: { get: () => held.promise } });
-  Object.assign(window, { taskpilot: api });
+  installFakeApi({ notes: { get: () => held.promise } });
   const store = useNotesStore();
   const opening = store.goNote('old.md');
   await Promise.resolve();
@@ -161,8 +159,7 @@ test('a completed requirement action updates its list without replacing a newer 
   const first = requirement({ id: 'first' });
   const second = requirement({ id: 'second' });
   const held = Promise.withResolvers<IpcResult<Requirement>>();
-  const api = fakeApi({ requirements: { list: () => ok([first, second]), clarify: () => held.promise } });
-  Object.assign(window, { taskpilot: api });
+  installFakeApi({ requirements: { list: () => ok([first, second]), clarify: () => held.promise } });
   const store = useRequirementsStore();
   onTestFinished(() => store.stopWatching());
   await store.refreshList();

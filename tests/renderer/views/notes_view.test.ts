@@ -10,7 +10,7 @@ import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as noteTypes from '../../../src/shared/ipc/notes.ts';
-import { stateEvents } from '../ipc_fakes.ts';
+import { installFakeApi, ok } from '../ipc_fakes.ts';
 
 // KaTeX checks once, when it loads, that the page is not in quirks mode;
 // happy-dom reports no compatMode at all, while the app page has a doctype.
@@ -24,7 +24,6 @@ vi.mock('../../../src/renderer/src/lib/feedback.ts', () => ({
   openDialogs: { value: 0 },
 }));
 
-const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 const meta = (overrides: Partial<noteTypes.NoteMeta> = {}): noteTypes.NoteMeta => ({
   id: '用例要有断言.md',
   title: '用例要有断言',
@@ -65,12 +64,7 @@ const OS: noteTypes.NoteCourse = {
   ],
 };
 
-let api: {
-  businessTimeZone: string;
-  state: ReturnType<typeof stateEvents>;
-  notes: Record<string, ReturnType<typeof vi.fn>>;
-  workspace: { openFile: ReturnType<typeof vi.fn> };
-};
+let api: ReturnType<typeof installFakeApi>;
 const list = (notes: noteTypes.NoteMeta[]): noteTypes.NoteList => ({
   revision: 1,
   directory: '/notes',
@@ -93,30 +87,24 @@ const mountView = async (notes: noteTypes.NoteMeta[]) => {
 
 beforeEach(() => {
   document.body.replaceChildren();
-  api = {
-    businessTimeZone: 'Asia/Shanghai',
-    state: stateEvents(),
+  api = installFakeApi({
     notes: {
-      list: vi.fn(() => ok(list([]))),
-      get: vi.fn((id: string) => ok(id === NOTE.id ? NOTE : { ...LINKING, body: '[[用例要有断言]]' })),
-      search: vi.fn(() => ok([])),
-      create: vi.fn((input: noteTypes.NoteInput) =>
+      list: () => ok(list([])),
+      get: (id: string) => ok(id === NOTE.id ? NOTE : { ...LINKING, body: '[[用例要有断言]]' }),
+      search: () => ok([]),
+      create: (input: noteTypes.NoteInput) =>
         ok({ revision: 2, relinked: 0, note: { ...meta({ id: `${input.title}.md`, title: input.title, source: null }), body: input.body } }),
-      ),
-      update: vi.fn((id: string, edit: noteTypes.NoteEdit) =>
+      update: (id: string, edit: noteTypes.NoteEdit) =>
         ok({ revision: 2, relinked: 1, note: { ...NOTE, ...edit, id: `${edit.title}.md`, version: 'v2', summary: edit.summary ?? null } }),
-      ),
-      remove: vi.fn(() => ok(true)),
-      summarize: vi.fn(() => ok({ revision: 3, relinked: 0, note: { ...NOTE, summary: '测试必须有断言', version: 'v3' } })),
-      pickDirectory: vi.fn(() => ok(null)),
-      setDirectory: vi.fn(),
-      reveal: vi.fn(() => ok(true)),
-      openUrl: vi.fn(() => ok(true)),
-      courses: vi.fn(() => ok<noteTypes.NoteCourses>({ current: 'programming', packs: [PROGRAMMING] })),
+      remove: () => ok(true),
+      summarize: () => ok({ revision: 3, relinked: 0, note: { ...NOTE, summary: '测试必须有断言', version: 'v3' } }),
+      pickDirectory: () => ok(null),
+      reveal: () => ok(true),
+      openUrl: () => ok(true),
+      courses: () => ok<noteTypes.NoteCourses>({ current: 'programming', packs: [PROGRAMMING] }),
     },
-    workspace: { openFile: vi.fn(() => ok('vscode')) },
-  };
-  Object.defineProperty(window, 'taskpilot', { value: api, configurable: true, writable: true });
+    workspace: { openFile: () => ok('vscode') },
+  });
 });
 
 const openFirst = async (wrapper: Awaited<ReturnType<typeof mountView>>) => {

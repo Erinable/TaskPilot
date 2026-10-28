@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
 import ElementPlus from 'element-plus';
@@ -7,6 +8,7 @@ import ElementPlus from 'element-plus';
 import MapView from '@/views/MapView.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
+import { installFakeApi } from '../ipc_fakes.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
 
@@ -45,15 +47,15 @@ const engineeringMap = (overrides: Partial<activityTypes.EngineeringMap> = {}): 
   ...overrides,
 });
 
-let state: { result: { ok: true; data: activityTypes.EngineeringMap } | { ok: false; error: envelopeTypes.ErrorInfo } };
-let get: ReturnType<typeof vi.fn>;
+let state: { result: envelopeTypes.IpcResult<activityTypes.EngineeringMap> };
+let get: Mock<() => Promise<envelopeTypes.IpcResult<activityTypes.EngineeringMap>>>;
 let pinia: ReturnType<typeof createPinia>;
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
   state = { result: { ok: true, data: engineeringMap() } };
   get = vi.fn(() => Promise.resolve(state.result));
-  (window as unknown as { taskpilot: unknown }).taskpilot = { engineeringMap: { get } };
+  installFakeApi({ engineeringMap: { get } });
   pinia = createPinia();
   setActivePinia(pinia);
 });
