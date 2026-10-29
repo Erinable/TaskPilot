@@ -65,13 +65,13 @@ Keep automated tests under `tests/`, static files under `assets/`, and scripts u
 - `npm run build` — bundle main, preload and renderer into `out/`.
 - `npm start` — run the built app (`electron-vite preview`).
 - `npm test` — run `tests/**/*.test.ts` with Vitest. Component tests opt into a DOM with `// @vitest-environment happy-dom`.
-- `npm run test:fast` — the same without the `e2e` tier, for local runs; CI runs `npm test`.
+- `npm run test:fast` / `npm run test:e2e` — the same without / with only the `e2e` tier. Unit files (no `integration` or `e2e` tag anywhere in the file) run in the `unit` project on threads across all CPUs; tagged files run in the `integration` project on half of them. Transformed modules are cached in `node_modules/.vitest-cache`.
 - `npm run typecheck` — vue-tsc over main, preload, renderer and tests.
-- `npm run lint` — ESLint (`eslint.config.ts`): checks the conventions below that a tool can (const arrow functions, // comments, inline exports, no `v-html`/`innerHTML`, `process.env` only in `src/main/infrastructure/env.ts`, no explicit `any`).
-- `npm run format` / `npm run format:check` — Prettier (`.prettierrc.json`). The one-time formatting commit is listed in `.git-blame-ignore-revs`.
+- `npm run lint` — ESLint (`eslint.config.ts`), cached by content in `node_modules/.cache/eslint/`: checks the conventions below that a tool can (const arrow functions, // comments, inline exports, no `v-html`/`innerHTML`, `process.env` only in `src/main/infrastructure/env.ts`, no explicit `any`).
+- `npm run format` / `npm run format:check` — Prettier (`.prettierrc.json`), cached in `node_modules/.cache/prettier/`. The one-time formatting commit is listed in `.git-blame-ignore-revs`.
 - `npm run eval:product-lead` / `eval:qa` / `eval:architect` / `eval:tutor-grade` / `eval:lab-gen` — eval harnesses for Product Lead, QA, Architect, Tutor's grading and the lab generator (real model calls, cost money); Node runs the `.ts` files directly.
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, format:check, test and build on Ubuntu and macOS, with uv, Rust, cc and make installed at pinned versions; its `analyze` job fails when jscpd's duplication over `src` and `tests` exceeds the `.jscpd.json` threshold (1%). Do not introduce duplicate commands that bypass these scripts.
+CI (`.github/workflows/ci.yml`) runs on Ubuntu and macOS in parallel jobs: `checks` (typecheck, lint, format:check, build, with the ESLint/Prettier caches and `*.tsbuildinfo` restored), and `tests` split by tier into `test:fast` and `test:e2e`, both with uv, Rust, cc and make installed at pinned versions (a tool-gated file checks for them when it loads). Its `analyze` job fails when jscpd's duplication over `src` and `tests` exceeds the `.jscpd.json` threshold (1%). Do not introduce duplicate commands that bypass these scripts.
 
 ## Coding Style & Naming Conventions
 

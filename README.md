@@ -120,13 +120,14 @@ npm run dev
 npm run dev          # 开发模式，带热更新
 npm test             # 全部测试
 npm run test:fast    # 跳过调用 uv、cargo、make 的端到端测试
+npm run test:e2e     # 只跑端到端测试
 npm run typecheck
 npm run lint
 npm run format:check
 npm run build
 ```
 
-CI 在 Ubuntu 和 macOS 上跑上面的检查，另外检查 `src` 和 `tests` 的重复代码（阈值 1%）、新增的函数复杂度和循环依赖。本地可以用 `npm run analyze:duplicates`、`npm run check:complexity`、`npm run analyze:cycles` 单独跑。
+CI 在 Ubuntu 和 macOS 上并行跑三类 job：类型检查、lint、格式和构建；`test:fast`；`test:e2e`。另外检查 `src` 和 `tests` 的重复代码（阈值 1%）、新增的函数复杂度和循环依赖。本地可以用 `npm run analyze:duplicates`、`npm run check:complexity`、`npm run analyze:cycles` 单独跑。
 
 改了某个 AI 角色的提示词，用对应的评测检查有没有变差：`npm run eval:product-lead`、`eval:qa`、`eval:architect`、`eval:tutor-grade`、`eval:lab-gen`、`eval:hint-leak`。评测调用真实模型，会产生费用，用法见各 `evals/*/README.md`。
 

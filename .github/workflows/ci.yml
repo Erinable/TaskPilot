@@ -14,9 +14,9 @@ concurrency:
 
 jobs:
   check:
-    name: ${{ matrix.os }}
+    name: checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -27,8 +27,47 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # Electron's postinstall downloads its binary; the build and tests do not need it.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # After npm ci, which empties node_modules. ESLint (content strategy),
+      # Prettier and tsc compare file contents, so a fresh checkout's mtimes
+      # do not invalidate them. Each run saves under its commit; the newest
+      # entry for the OS is restored.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            node_modules/.cache/eslint
+            node_modules/.cache/prettier
+            *.tsbuildinfo
+          key: checks-${{ runner.os }}-${{ github.sha }}
+          restore-keys: checks-${{ runner.os }}-
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run build
+
+  test:
+    name: ${{ matrix.tier }} tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # e2e is the tier that drives uv, cargo, cc and make; everything else
+        # runs beside it as test:fast.
+        tier: [fast, e2e]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
       # Tools the end-to-end preset and lab tests drive. Under CI a missing one
-      # fails its test file (tests/fixtures/required_tools.ts) instead of skipping.
+      # fails its test file (tests/fixtures/required_tools.ts) instead of
+      # skipping, and the file checks when it loads, so both tiers need them.
       - uses: astral-sh/setup-uv@v10.3.2
         with:
           version: 0.13.6
@@ -39,15 +78,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential=12.10ubuntu1 make=4.3-4.1build2
       - if: runner.os == 'macOS'
         run: sudo xcode-select --switch /Applications/Xcode_26.6.app
-      # Electron's postinstall downloads its binary; the build and tests do not need it.
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm test
-      - run: npm run build
+      # Vitest's transformed-module cache (fsModuleCache), keyed by content.
+      - uses: actions/cache@v6
+        with:
+          path: node_modules/.vitest-cache
+          key: vitest-${{ runner.os }}-${{ matrix.tier }}-${{ github.sha }}
+          restore-keys: vitest-${{ runner.os }}-${{ matrix.tier }}-
+      # npm test runs the wrapper check as its pretest; the split tiers run it once.
+      - if: matrix.tier == 'fast'
+        run: npm run test:bootstrap
+      - run: npm run test:${{ matrix.tier }}
 
   analyze:
     name: Code analysis

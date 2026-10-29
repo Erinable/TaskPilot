@@ -10,6 +10,13 @@ if (typeof document !== 'undefined' && document.compatMode === undefined) {
   Object.defineProperty(document, 'compatMode', { configurable: true, value: 'CSS1Compat' });
 }
 
+// happy-dom's Element.toString() returns outerHTML where browsers return
+// "[object HTMLDivElement]". Popper calls it on every node it walks, so each
+// Element Plus popper serialized the whole document.
+if (typeof Element !== 'undefined') {
+  Object.defineProperty(Element.prototype, 'toString', { configurable: true, writable: true, value: Object.prototype.toString });
+}
+
 beforeEach(() => {
   if (typeof window === 'undefined') return;
   let api: Record<string, unknown> = {};
