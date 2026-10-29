@@ -15,11 +15,11 @@ const devCsp = (): Plugin => ({
 
 export default defineConfig({
   main: {
-    build: { rollupOptions: { input: resolve('src/main/index.ts') } },
+    build: { rolldownOptions: { input: resolve('src/main/index.ts') } },
   },
   preload: {
     // A sandboxed preload must be CommonJS.
-    build: { rollupOptions: { input: resolve('src/preload/index.ts'), output: { format: 'cjs', entryFileNames: '[name].cjs' } } },
+    build: { rolldownOptions: { input: resolve('src/preload/index.ts'), output: { format: 'cjs', entryFileNames: '[name].cjs' } } },
   },
   renderer: {
     resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } },

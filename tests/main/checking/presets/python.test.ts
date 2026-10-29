@@ -247,6 +247,8 @@ const runAll = async (envPath: string, setup: string) => {
   );
 };
 
+// The two runs stay sequential: on macOS, loading a fresh venv's compiled
+// mypy while the other run installs one is refused by system policy.
 test.skipIf(!hasUv)('every Python preset step runs green on the sample with uv', { tags: ['e2e'] }, () => runAll(env.path, 'uv'));
 
 test.skipIf(!hasPython || process.platform === 'win32')('every Python preset step runs green on the sample with venv + pip', { tags: ['e2e'] }, () =>
