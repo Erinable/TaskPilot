@@ -32,6 +32,7 @@ import { env } from '../infrastructure/env.ts';
 import * as labs from './labs.ts';
 import * as verification from '../checking/verification.ts';
 import { SANDBOX_EXEC_PATH, buildProfile, toolchainRoots } from '../coding/coding_sandbox.ts';
+import { PRESETS } from '../checking/presets/index.ts';
 import { ISSUE_PARTS, MUTANT_COUNT } from '../agents/lab_verifier.ts';
 import type { ConsistencyIssue, Mutant } from '../agents/lab_verifier.ts';
 import type { GeneratedLab, LabPart, SourceFile } from '../agents/lab_generator.ts';
@@ -84,7 +85,10 @@ const toGradeRun = (result: verification.RunResult): GradeRun => ({
 
 // Writes `files` into a scratch folder and runs `make grade` there under the
 // Seatbelt profile with the network denied and only PATH, HOME (the scratch
-// folder), TMPDIR and LANG set. Refuses where Seatbelt is not available.
+// folder), TMPDIR, LANG and every preset's toolchain variables set (a lab's
+// language is whatever its build rules compile, so all of them): rustup's
+// toolchains are read where it installed them, caches go in the scratch
+// folder. Refuses where Seatbelt is not available.
 export const sandboxGrader =
   (home = os.homedir()): Grader =>
   async (files, { signal, envPath }) => {
@@ -94,9 +98,25 @@ export const sandboxGrader =
     try {
       await writeFiles(root, files);
       const pathValue = envPath || env.path;
-      const readable = toolchainRoots(home, pathValue.split(':').filter(Boolean), null);
+      const readable = [...toolchainRoots(home, pathValue.split(':').filter(Boolean), null), ...PRESETS.flatMap((preset) => preset.sandboxRead(home))];
       const profile = buildProfile({ home, runDir: root, writable: [], readable, offline: true });
-      const args = ['-p', profile, '/usr/bin/env', '-i', `PATH=${pathValue}`, `HOME=${root}`, `TMPDIR=${os.tmpdir()}`, 'LANG=en_US.UTF-8', 'make', 'grade'];
+      const toolchainEnv = Object.entries(Object.assign({}, ...PRESETS.map((preset) => preset.sandboxEnv(root, home)))).map(
+        ([name, value]) => `${name}=${value}`,
+      );
+      // Later assignments win in env(1), so a preset cannot replace these.
+      const args = [
+        '-p',
+        profile,
+        '/usr/bin/env',
+        '-i',
+        ...toolchainEnv,
+        `PATH=${pathValue}`,
+        `HOME=${root}`,
+        `TMPDIR=${os.tmpdir()}`,
+        'LANG=en_US.UTF-8',
+        'make',
+        'grade',
+      ];
       const target = { root, commands: { grade: { command: SANDBOX_EXEC_PATH, args } } };
       return toGradeRun(await verification.run(target, 'grade', { signal, timeoutMs: GRADE_TIMEOUT_MS, envPath }));
     } finally {

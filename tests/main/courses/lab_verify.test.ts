@@ -13,10 +13,12 @@ import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { SANDBOX_EXEC_PATH } from '../../../src/main/coding/coding_sandbox.ts';
 import { HIDDEN_NAMES, IDLE_LAB, PUBLIC_NAMES, RR_LAB, RR_MUTANT_EDITS, allTests, graded, mutated } from '../../fixtures/lab_verify.ts';
 import { RR_SPEC } from '../../fixtures/lab_generator.ts';
+import * as requiredTools from '../../fixtures/required_tools.ts';
 import type { GeneratedLab } from '../../../src/main/agents/lab_generator.ts';
 import type { Grader, VerifyDeps } from '../../../src/main/courses/lab_verify.ts';
 
 const sandboxed = process.platform === 'darwin' && fs.existsSync(SANDBOX_EXEC_PATH);
+const hasRustc = await requiredTools.hasTools('rustc');
 const unbuilt = { built: false, results: {}, output: 'cc: error' };
 const mutant = (description: string) => ({ description, files: [] });
 
@@ -292,6 +294,22 @@ test.skipIf(!sandboxed)('generated code runs with no network and cannot read the
   } finally {
     fs.rmSync(probe, { force: true });
   }
+});
+
+// rustup finds its toolchains through RUSTUP_HOME, which the scratch HOME
+// would otherwise hide: every Rust lab then failed to build.
+test.skipIf(!sandboxed || !hasRustc)('a Rust lab builds with the rustup toolchain under the sandbox', { tags: ['e2e'] }, async () => {
+  const build = 'build:\n\t@mkdir -p build\n\t@rustc --edition 2021 -o build/hello src/main.rs\n\nclean:\n\t@rm -rf build\n';
+  const script = '#!/bin/sh\nif [ "$(./build/hello)" = hi ]; then echo "ok - prints hi"; else echo "not ok - prints hi"; fi\n';
+  const files = {
+    ...labVerify.FIRST_STAGE_BASE,
+    'tests/build.mk': build,
+    'tests/public/01_hello.sh': script,
+    'src/main.rs': 'fn main() { println!("hi"); }\n',
+  };
+  const run = await labVerify.sandboxGrader()(files, {});
+  assert.equal(run.built, true, run.output);
+  assert.deepEqual(run.results, { 'prints hi': true });
 });
 
 test.skipIf(sandboxed)('without Seatbelt the check refuses to run generated code', async () => {
