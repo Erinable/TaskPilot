@@ -32,7 +32,9 @@ import type { TaskDefinition } from '../work_packages/tasks.ts';
 import type { AcceptanceCriterion } from '../../shared/ipc/workspace.ts';
 import type { PackageDifficulty } from '../../shared/ipc/packages.ts';
 import { isCourseId } from '../../shared/course_pack.ts';
+import { PROGRAM_NAME } from '../../shared/lab_toolchains.ts';
 import type { Concept, CourseRef } from '../../shared/course_pack.ts';
+import type { LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { LabEntry } from '../repository/project_config.ts';
 
 const LABS_DIRNAME = 'labs';
@@ -78,8 +80,10 @@ export type LabArtifact = {
   fileScope: string[];
   // By file name in tests/public/: NN_<name>.sh, NN being the stage.
   publicTests: Record<string, string>;
-  // tests/build.mk: the first lab must give it, a later one may replace it.
-  build: string | null;
+  // What tests/build.mk builds for the lab: build/<program> from `sources`,
+  // starter files. TaskPilot writes build.mk from the toolchain and every lab.
+  program: string;
+  sources: string[];
   private: LabPrivate;
 };
 
@@ -162,14 +166,20 @@ export const checkLab = (lab: LabArtifact, stage: number): LabArtifact => {
     return isOwnedPath(clean) ? fail('is a TaskPilot file', `fileScope[${index}]`) : clean;
   });
   if (fileScope.length === 0) fail('needs at least one file', 'fileScope');
-  if (stage === 1 && lab.build === null) fail('the first lab must give the build rules', 'build');
+  if (!PROGRAM_NAME.test(lab.program)) fail('must be lowercase letters, digits or -, starting with a letter, at most 32', 'program');
+  if (!Array.isArray(lab.sources) || lab.sources.length === 0) fail('needs at least one source', 'sources');
+  lab.sources.forEach((source, index) => {
+    if (!Object.hasOwn(files, source)) fail('must be a starter file', `sources[${index}]`);
+    // build.mk names sources unquoted.
+    if (!/^[A-Za-z0-9_./-]+$/.test(source)) fail('must be a plain path', `sources[${index}]`);
+  });
   const checked: LabArtifact = {
     ...lab,
     readme: text(lab.readme, 'readme', MAX_FILE_BYTES),
     files,
     fileScope,
     publicTests,
-    build: lab.build === null ? null : text(lab.build, 'build', MAX_FILE_BYTES),
+    sources: [...lab.sources],
     private: {
       reference: text(lab.private.reference, 'private.reference', MAX_LAB_BYTES),
       hidden,
@@ -190,7 +200,14 @@ export const checkLab = (lab: LabArtifact, stage: number): LabArtifact => {
 };
 
 // The lab's line in taskpilot.toml.
-export const labEntry = (lab: LabArtifact, stage: number): LabEntry => ({ id: lab.id, stage, dir: stageDir({ id: lab.id, stage }), concepts: lab.concepts });
+export const labEntry = (lab: LabArtifact, stage: number): LabEntry => ({
+  id: lab.id,
+  stage,
+  dir: stageDir({ id: lab.id, stage }),
+  concepts: lab.concepts,
+  program: lab.program,
+  sources: lab.sources,
+});
 
 // `make grade`: a clean build with tests/build.mk's rules, then every
 // stage's public tests.
@@ -225,13 +242,15 @@ export const GRADE_SCRIPT = [
 
 export const GITIGNORE = ['/build/', '/.taskpilot/*', `!/${COURSE_PLAN_PATH}`, '!/.taskpilot/courses/', ''].join('\n');
 
-// A new lab repository's taskpilot.toml: the pack, the grade step and the labs.
-export const projectText = (course: string, labs: LabEntry[]) =>
+// A new lab repository's taskpilot.toml: the pack, the toolchain, the grade
+// step and the labs.
+export const projectText = (course: string, toolchain: LabToolchainId, labs: LabEntry[]) =>
   [
     '# Written by TaskPilot for a course lab repository. TaskPilot adds each new',
     '# lab below together with its files; `make grade` runs every stage so far.',
     stringifyToml({
       course,
+      toolchain,
       custom: { grade: { label: '评分', commands: ['make grade'], timeout: 120, required: true, stage: 'submit' } },
     }),
     '',
@@ -245,11 +264,11 @@ export const coursePlanText = (plan: CoursePlan) =>
   ['# Your path through the course pack. Mark a concept known or skipped, or reorder it.', stringifyToml(plan), ''].join('\n');
 
 // Every repository file a lab adds, by path: what the student sees.
+// tests/build.mk is the repository's, written from all its labs.
 export const repositoryFiles = (lab: LabArtifact, stage: number): Record<string, string> => ({
   [`${stageDir({ id: lab.id, stage })}/README.md`]: lab.readme,
   ...lab.files,
   ...Object.fromEntries(Object.entries(lab.publicTests).map(([name, content]) => [`${PUBLIC_TESTS_DIR}/${name}`, content])),
-  ...(lab.build === null ? {} : { [BUILD_RULES_PATH]: lab.build }),
 });
 
 // ========== private store ==========

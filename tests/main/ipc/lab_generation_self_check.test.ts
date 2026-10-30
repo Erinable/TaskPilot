@@ -8,7 +8,7 @@ import * as lab from './lab_generation_fixtures.ts';
 const settleLab = lab.settleLab;
 
 test('repair() rewrites the named parts of the draft and keeps the new version', async () => {
-  const hiddenTests = [{ file: '01_rr_more.sh', names: ['空闲之后到达的作业'], script: 'echo "ok - 空闲之后到达的作业"\n' }];
+  const hiddenTests = [{ file: '01_rr_more.sh', names: ['空闲之后到达的作业'], script: 'build/rr </dev/null\necho "ok - 空闲之后到达的作业"\n' }];
   const base = lab.team();
   const h = await lab.harness({
     agent: async (options) => {

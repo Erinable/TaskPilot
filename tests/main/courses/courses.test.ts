@@ -292,11 +292,12 @@ test('parseCourseText validates an import: size, fields, and the file name when 
 // The hashes of the built-in packs. programming's is the one it had as a
 // TypeScript constant: grade snapshots recorded then name it, so it must not
 // move. os changed on purpose in CARM-37 (version 0.2.0, labGuide and the
-// concept skeleton; it was 88d0d064… before). A built-in pack needs no
-// confirmation, so a new hash only marks new grades with the new content.
+// concept skeleton; it was 88d0d064… before) and again when it named its lab
+// toolchains (appliesTo.toolchains; it was b05058dc… before). A built-in pack
+// needs no confirmation, so a new hash only marks new grades with the new content.
 const BUILTIN_HASHES = {
   programming: '22470ff4e07f076fc4e40ac5105b99c9cae2656e88f788569e8eba8fa7ea3518',
-  os: 'b05058dcc6b38e2ed108d9d0c68ea251ea2e468b55b6a037a493d21b041dea9f',
+  os: 'b6cae22ef2d9f097904193adeba6a7e42ac4d2fe3110e00c9986b6652232f2e2',
 };
 
 test('the built-in TOML packs hash as recorded; programming as the constant it replaced', () => {

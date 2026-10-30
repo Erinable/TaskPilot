@@ -35,11 +35,14 @@ import type { IpcMainLike } from './ipc/handler.ts';
 import type { LabService } from './courses/lab_service.ts';
 import type { LabGenerationService } from './courses/lab_generation_service.ts';
 import { sandboxGrader } from './courses/lab_verify.ts';
+import { sandboxProbe } from './courses/lab_toolchain.ts';
 import type { Grader } from './courses/lab_verify.ts';
+import type { ToolchainProbe } from './courses/lab_toolchain.ts';
 
 // `labGrader` replaces the sandboxed `make grade` of the lab self-check and
-// of a lab's hidden tests at review (tests).
-export type IpcDeps = AppDeps & { coding?: CodingDeps; labGrader?: Grader };
+// of a lab's hidden tests at review, `labProbe` the toolchain check before
+// either (tests).
+export type IpcDeps = AppDeps & { coding?: CodingDeps; labGrader?: Grader; labProbe?: ToolchainProbe };
 
 // `labs` and `labGeneration` are for main-process callers (the self-check);
 // the renderer never hands TaskPilot a lab or reads one, since a lab carries
@@ -50,6 +53,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const ctx = createAppContext(deps);
   const runtime = createCodingRuntime(ctx, deps.coding);
   const grader = deps.labGrader ?? sandboxGrader();
+  const probe = deps.labProbe ?? sandboxProbe();
   // QA's verdict leads on to grading and the next coding round, which in
   // turn hand submissions back to QA; the services are wired late for that.
   const review = createReviewService(ctx, {
@@ -58,6 +62,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
       coding.continueAfterReview(id);
     },
     grader,
+    probe,
   });
   const practice = createPracticeService(ctx, runtime);
   const coding = createCodingService(ctx, runtime, { startReview: review.startReview });
@@ -67,7 +72,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });
   const labs = createLabService(ctx);
-  const labGeneration = createLabGenerationService(ctx, { grader, labService: labs });
+  const labGeneration = createLabGenerationService(ctx, { grader, probe, labService: labs });
   const courseInterview = createCourseInterviewService(ctx);
   const requirementService = createRequirementService(ctx, { courseInterview });
   requirementsIpc.register(ipcMain, ctx, { courseInterview, labGeneration, requirementService });

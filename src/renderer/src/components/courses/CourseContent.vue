@@ -6,6 +6,7 @@
 import { computed } from 'vue';
 
 import { FIELD_LABELS, GUIDE_FIELDS, changedFields, dimensionLabel, itemChanged } from '@/lib/course_model.ts';
+import { TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import type { CourseChange } from '@shared/course_changes.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -16,6 +17,11 @@ const isMarked = (field: string) => marked.value.has(field);
 const conceptLabels = computed(() => new Map((props.pack.concepts ?? []).map((item) => [item.id, item.label])));
 // labGuide is optional: shown when the pack has it, or when it was removed.
 const guides = computed(() => GUIDE_FIELDS.filter((name) => props.pack[name] || isMarked(name)));
+const appliesToText = computed(() => {
+  const languages = props.pack.appliesTo?.languages?.join(', ') ?? '不限';
+  const toolchains = props.pack.appliesTo?.toolchains?.map((id) => TOOLCHAIN_LABELS[id]).join(', ') ?? '不限';
+  return `语言：${languages}；工具链：${toolchains}`;
+});
 </script>
 
 <template>
@@ -32,9 +38,9 @@ const guides = computed(() => GUIDE_FIELDS.filter((name) => props.pack[name] || 
       <dt>{{ FIELD_LABELS.learner }}</dt>
       <dd>{{ pack.learner }}</dd>
     </div>
-    <div v-if="pack.appliesTo?.languages || isMarked('appliesTo')" :class="{ changed: isMarked('appliesTo') }">
+    <div v-if="pack.appliesTo?.languages || pack.appliesTo?.toolchains || isMarked('appliesTo')" :class="{ changed: isMarked('appliesTo') }">
       <dt>{{ FIELD_LABELS.appliesTo }}</dt>
-      <dd>{{ pack.appliesTo?.languages?.join(', ') ?? '不限' }}</dd>
+      <dd>{{ appliesToText }}</dd>
     </div>
     <div v-for="guide in guides" :key="guide" :class="{ changed: isMarked(guide) }">
       <dt>{{ FIELD_LABELS[guide] }}</dt>

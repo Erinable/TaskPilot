@@ -56,6 +56,11 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
     return loaded.flat();
   };
 
+  const packFitsToolchain = (pack: CoursePack, toolchain: NonNullable<plans.GoalForm['toolchain']>) => {
+    const supported = pack.appliesTo?.toolchains;
+    return !supported || supported.includes(toolchain);
+  };
+
   const goalOf = (item: Requirement): interview.GoalInput => ({ goal: item.text, form: item.course!.form, questions: item.questions });
 
   // Runs one interview step in the background and records the outcome, as
@@ -103,7 +108,10 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
   // ========== Interview ==========
   const clarify = (id: string) =>
     startRun(id, 'clarifying', async (item, signal) => {
-      const offered = await trustedPacks();
+      const form = item.course?.form;
+      const toolchain = form?.toolchain;
+      if (!toolchain) return failWith('Choose a lab toolchain before starting the course interview', 'toolchain_unset', 'toolchain');
+      const offered = (await trustedPacks()).filter(({ pack }) => packFitsToolchain(pack, toolchain));
       const courseIds = offered.map((entry) => entry.pack.id);
       const options = offered.map(({ pack }) => ({ id: pack.id, title: pack.title, summary: pack.summary, domain: pack.domain, concepts: pack.concepts! }));
       const { output, costUsd } = await run(id, {
@@ -118,8 +126,12 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
 
   // ========== Path or draft ==========
   const planPath = async (id: string, item: Requirement, courseId: string, signal: AbortSignal) => {
+    const form = item.course?.form;
+    if (!form?.toolchain) return failWith('Choose a lab toolchain before planning the course path', 'toolchain_unset', 'toolchain');
     const chosen = (await trustedPacks()).find((entry) => entry.pack.id === courseId);
     if (!chosen) return failWith(`Course pack ${courseId} is not confirmed on this machine or has no concepts`, 'course_not_confirmed', 'course');
+    if (!packFitsToolchain(chosen.pack, form.toolchain))
+      return failWith(`Course pack ${courseId} does not support the ${form.toolchain} toolchain`, 'toolchain_mismatch', 'course');
     const goal = goalOf(item);
     const { output, costUsd } = await run(id, {
       prompt: interview.pathPrompt({ ...goal, course: chosen.pack }),
@@ -154,6 +166,7 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
   // One retry: the first draft's errors are fed back to Tutor.
   const draftPack = async (id: string, item: Requirement, signal: AbortSignal) => {
     const goal = goalOf(item);
+    if (!goal.form.toolchain) return failWith('Choose a lab toolchain before drafting a course pack', 'toolchain_unset', 'toolchain');
     let errors: ReturnType<typeof checkCourse>['errors'] = [];
     let costUsd = 0;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -164,7 +177,7 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
       const checked = checkCourse(drafted);
       if (checked.pack) {
         // course_file.ts is the check that counts, as for every pack TaskPilot reads or saves.
-        const pack = courseFile.normalizeCourse(checked.pack);
+        const pack = courseFile.normalizeCourse({ ...checked.pack, appliesTo: { ...checked.pack.appliesTo, toolchains: [goal.form.toolchain] } });
         logger.debug(`[course-interview] draft requirement=${id} id=${pack.id} attempt=${attempt} concepts=${pack.concepts?.length ?? 0}`);
         await requireRequirements().finishCourseDraft(id, { pack, contentHash: courseFile.contentHash(pack) }, costUsd);
         return;

@@ -23,6 +23,7 @@ export const requestFor = (testCase: LabCase, course: CoursePack): LabRequest =>
     goal: testCase.goal,
     level: 'basic',
     target: 'implement',
+    toolchain: 'c',
     environment: 'macOS，本机 C 编译器',
     weeklyHours: 4,
     knownConcepts: ['process-state'],
@@ -34,5 +35,6 @@ export const requestFor = (testCase: LabCase, course: CoursePack): LabRequest =>
   }),
   difficulty: testCase.difficulty,
   stage: 1,
-  existing: { labIds: [], files: [], build: null },
+  toolchain: 'c',
+  existing: { labIds: [], files: [], programs: [] },
 });

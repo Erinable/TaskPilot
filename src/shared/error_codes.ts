@@ -141,6 +141,7 @@ export const ERROR_CODES = [
   'invalid_level',
   'lab_files_changed',
   'lab_not_placed',
+  'lab_outdated',
   'level_locked',
   'no_lab_draft',
   'not_due',
@@ -155,6 +156,9 @@ export const ERROR_CODES = [
   'root_in_repository',
   'root_not_empty',
   'sandbox_unavailable',
+  'toolchain_mismatch',
+  'toolchain_missing',
+  'toolchain_unset',
   'unknown_note',
   'unsupported_version',
 ] as const;

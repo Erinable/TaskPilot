@@ -1,8 +1,9 @@
 // A hand-written two-stage scheduling lab (./sched_lab/): stage 1 is first
 // come, first served, stage 2 round robin. Each folder holds the README, the
-// build rules, the starter code, the public and hidden tests and the
-// reference patch (starter → solution). The reference and hidden tests carry
-// a marker line, so a test can look for leaks of the private parts.
+// starter code, the public and hidden tests and the reference patch
+// (starter → solution); TaskPilot writes tests/build.mk for the C
+// toolchain. The reference and hidden tests carry a marker line, so a test
+// can look for leaks of the private parts.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -29,7 +30,8 @@ export const FCFS_LAB: LabArtifact = {
   files: { 'src/fcfs.c': read('01-fcfs', 'starter/src/fcfs.c') },
   fileScope: ['src/fcfs.c'],
   publicTests: folder('01-fcfs', 'public'),
-  build: read('01-fcfs', 'build.mk'),
+  program: 'fcfs',
+  sources: ['src/fcfs.c'],
   private: {
     reference: read('01-fcfs', 'reference.patch'),
     hidden: folder('01-fcfs', 'hidden'),
@@ -51,7 +53,8 @@ export const RR_LAB: LabArtifact = {
   files: { 'src/rr.c': read('02-round-robin', 'starter/src/rr.c') },
   fileScope: ['src/rr.c'],
   publicTests: folder('02-round-robin', 'public'),
-  build: read('02-round-robin', 'build.mk'),
+  program: 'rr',
+  sources: ['src/rr.c'],
   private: {
     reference: read('02-round-robin', 'reference.patch'),
     hidden: folder('02-round-robin', 'hidden'),

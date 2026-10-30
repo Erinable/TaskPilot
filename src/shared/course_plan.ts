@@ -7,7 +7,9 @@
 // 学习路径从课程包骨架里选子图并排序，最多补 3 个 ai: 前缀的临时节点。学生可以标"已会 / 跳过"、调整顺序，骨架本身不能改。
 import { CONTROL_CHARS } from './text_rules.ts';
 import { conceptCycle, isCourseId } from './course_pack.ts';
+import { isLabToolchain, LAB_TOOLCHAINS } from './lab_toolchains.ts';
 import type { Concept, CourseRef } from './course_pack.ts';
+import type { LabToolchainId } from './lab_toolchains.ts';
 
 const COURSE_LEVELS = ['new', 'basic', 'solid'] as const;
 export type CourseLevel = (typeof COURSE_LEVELS)[number];
@@ -21,7 +23,10 @@ export const MAX_COURSE_QUESTIONS = 3;
 const GOAL_LIMITS = { environment: 100, minHours: 1, maxHours: 40 } as const;
 
 // The form the learner fills before the interview, every field picked.
-export type GoalForm = { level: CourseLevel; target: CourseTarget; environment: string; weeklyHours: number };
+// `toolchain` is what the labs are built with; `environment` is an optional
+// note (OS, editor). Forms saved before toolchains have no toolchain unless
+// one was read from their environment on load (RequirementStore).
+export type GoalForm = { level: CourseLevel; target: CourseTarget; toolchain?: LabToolchainId; environment: string; weeklyHours: number };
 
 // The interview's result, stored on the requirement. `knownConcepts` are
 // skeleton ids the learner already knows, filled in when the path is planned.
@@ -44,9 +49,9 @@ export const goalFormProblem = (value: unknown): { field: string; message: strin
   const raw = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   if (!COURSE_LEVELS.includes(raw.level as CourseLevel)) return { field: 'goal.level', message: `goal.level must be one of ${COURSE_LEVELS.join(', ')}` };
   if (!COURSE_TARGETS.includes(raw.target as CourseTarget)) return { field: 'goal.target', message: `goal.target must be one of ${COURSE_TARGETS.join(', ')}` };
+  if (!isLabToolchain(raw.toolchain)) return { field: 'goal.toolchain', message: `goal.toolchain must be one of ${LAB_TOOLCHAINS.join(', ')}` };
   const environment = typeof raw.environment === 'string' ? raw.environment.trim() : '';
-  if (!environment) return { field: 'goal.environment', message: 'goal.environment is required' };
-  if ([...environment].length > GOAL_LIMITS.environment || CONTROL_CHARS.test(environment))
+  if (typeof raw.environment !== 'string' || [...environment].length > GOAL_LIMITS.environment || CONTROL_CHARS.test(environment))
     return { field: 'goal.environment', message: `goal.environment must be at most ${GOAL_LIMITS.environment} characters of plain text` };
   const hours = raw.weeklyHours;
   if (typeof hours !== 'number' || !Number.isInteger(hours) || hours < GOAL_LIMITS.minHours || hours > GOAL_LIMITS.maxHours)

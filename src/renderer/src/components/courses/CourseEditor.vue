@@ -14,6 +14,7 @@ import { FIELD_LABELS, GUIDE_FIELDS, draftOf, fieldErrorText, packOf } from '@/l
 import { useCoursesStore } from '@/stores/courses.ts';
 import ConceptEditor from './ConceptEditor.vue';
 import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS } from '@shared/course_pack.ts';
+import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import { COURSE_LIMITS, checkCourse } from '@shared/course_rules.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -149,7 +150,13 @@ const save = async () => {
       >
         <el-option v-for="language in languageOptions" :key="language" :label="language" :value="language" />
       </el-select>
-      <small>只用来提醒和仓库语言不匹配，不会限制使用。</small>
+      <div class="course-editor-toolchains">
+        <span>工具链：</span>
+        <el-checkbox-group v-model="draft.toolchains" aria-label="适用工具链" @change="edited">
+          <el-checkbox v-for="toolchain in LAB_TOOLCHAINS" :key="toolchain" :value="toolchain">{{ TOOLCHAIN_LABELS[toolchain] }}</el-checkbox>
+        </el-checkbox-group>
+        <small v-if="!draft.toolchains.length">不限</small>
+      </div>
       <template v-for="(_, index) in draft.languages" :key="index">
         <small v-if="errorOf(`appliesTo.languages[${index}]`)" class="course-field-error" role="alert">
           {{ draft.languages[index] }}：{{ errorOf(`appliesTo.languages[${index}]`) }}

@@ -7,6 +7,7 @@
 // which the editor words for the user.
 import { semverOrNull } from './semver.ts';
 import { CONTROL_CHARS } from './text_rules.ts';
+import { isLabToolchain, LAB_TOOLCHAINS } from './lab_toolchains.ts';
 import * as coursePack from './course_pack.ts';
 import type { Concept, CoursePack, RubricExample, RubricItem } from './course_pack.ts';
 
@@ -52,7 +53,7 @@ const TOP_KEYS = new Set([
 const CONCEPT_KEYS = new Set(['id', 'label', 'summary', 'prerequisites', 'dimension']);
 const RUBRIC_KEYS = new Set(['id', 'label', 'description', 'dimension', 'examples']);
 const EXAMPLE_KEYS = new Set(['observation', 'betterWay']);
-const APPLIES_KEYS = new Set(['languages']);
+const APPLIES_KEYS = new Set(['languages', 'toolchains']);
 const ID_RULE = 'must be lowercase letters, digits, - or _, start with a letter and be at most 32 long';
 
 type CourseErrorKind =
@@ -70,7 +71,8 @@ type CourseErrorKind =
   | 'schema'
   | 'size'
   | 'prerequisite'
-  | 'cycle';
+  | 'cycle'
+  | 'toolchain';
 
 // `message` is the main process's English text; `min` / `max` are the
 // bounds a `list` or `too_long` error broke.
@@ -215,11 +217,24 @@ const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(v
 const appliesTo = (value: unknown, errors: Errors): CoursePack['appliesTo'] | null => {
   const raw = table(value, APPLIES_KEYS, 'appliesTo', errors);
   if (!raw) return null;
-  if (raw.languages === undefined) return {};
-  const languages = each(list(raw.languages, 'appliesTo.languages', 1, COURSE_LIMITS.languages, errors), (language, index) =>
-    coursePack.isCourseId(language) ? language : report(errors, `appliesTo.languages[${index}]`, 'id', ID_RULE),
-  );
-  return languages ? { languages } : null;
+  const applies: NonNullable<CoursePack['appliesTo']> = {};
+  let failed = false;
+  if (raw.languages !== undefined) {
+    const languages = each(list(raw.languages, 'appliesTo.languages', 1, COURSE_LIMITS.languages, errors), (language, index) =>
+      coursePack.isCourseId(language) ? language : report(errors, `appliesTo.languages[${index}]`, 'id', ID_RULE),
+    );
+    if (languages) applies.languages = languages;
+    else failed = true;
+  }
+  if (raw.toolchains !== undefined) {
+    const toolchains = each(list(raw.toolchains, 'appliesTo.toolchains', 1, LAB_TOOLCHAINS.length, errors), (toolchain, index) =>
+      isLabToolchain(toolchain) ? toolchain : report(errors, `appliesTo.toolchains[${index}]`, 'toolchain', `must be one of ${LAB_TOOLCHAINS.join(', ')}`),
+    );
+    if (toolchains && new Set(toolchains).size !== toolchains.length) report(errors, 'appliesTo.toolchains', 'repeat', 'repeats a toolchain');
+    if (toolchains && new Set(toolchains).size === toolchains.length) applies.toolchains = toolchains;
+    else failed = true;
+  }
+  return failed ? null : applies;
 };
 
 // Checks a parsed pack and lists every error. The pack is null when any

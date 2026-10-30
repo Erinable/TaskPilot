@@ -50,7 +50,7 @@ const concept = (id: string, label: string, prerequisites: string[] = []) => ({ 
 const PATH_CONCEPTS = [concept('process-state', '进程状态'), concept('fcfs', '先来先服务', ['process-state']), concept('round-robin', '时间片轮转', ['fcfs'])];
 
 export const courseInterview = (overrides: Partial<requirementTypes.CourseInterview> = {}): requirementTypes.CourseInterview => ({
-  form: { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4 },
+  form: { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4, toolchain: 'c' },
   pick: { course: 'os', reason: 'os 包的骨架覆盖调度。', options: [{ id: 'os', title: '操作系统实验' }] },
   choice: null,
   plan: null,
@@ -71,7 +71,16 @@ export const coursePathInterview = (
     pathConcepts: PATH_CONCEPTS,
     plan: {
       course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' },
-      goal: { kind: 'course', goal: '调度', level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4, knownConcepts: ['process-state'] },
+      goal: {
+        kind: 'course',
+        goal: '调度',
+        level: 'basic',
+        target: 'implement',
+        environment: 'macOS',
+        weeklyHours: 4,
+        toolchain: 'c',
+        knownConcepts: ['process-state'],
+      },
       summary: '从进程状态到时间片轮转。',
       path,
       extraConcepts: [],
@@ -80,7 +89,7 @@ export const coursePathInterview = (
 
 // Installs window.taskpilot; `list` is what requirements.list() returns now.
 // ========== First lab ==========
-const LAB_ESTIMATE: requirementTypes.LabEstimate = {
+export const LAB_ESTIMATE: requirementTypes.LabEstimate = {
   concepts: [{ id: 'round-robin', label: '时间片轮转' }],
   difficulty: 'easy',
   change: 'kept',
@@ -90,6 +99,15 @@ const LAB_ESTIMATE: requirementTypes.LabEstimate = {
   tokens: { input: 30000, output: 26000 },
   model: 'claude-opus-5-5',
   usd: { low: 0.42, high: 1.35 },
+  toolchain: {
+    id: 'c',
+    ready: true,
+    problem: null,
+    tools: [
+      { command: 'cc', version: 'Apple clang 1', install: 'xcode-select --install' },
+      { command: 'make', version: 'GNU Make 1', install: 'xcode-select --install' },
+    ],
+  },
 };
 
 export const labGeneration = (overrides: Partial<requirementTypes.LabGeneration> = {}): requirementTypes.LabGeneration => ({

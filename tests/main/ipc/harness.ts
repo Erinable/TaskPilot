@@ -13,6 +13,8 @@ import type { IpcHandle } from '../../../src/main/ipc.ts';
 import type { AgentDeps, ShellDeps } from '../../../src/main/app/app_context.ts';
 import type { CodingDeps } from '../../../src/main/coding/coding_runtime.ts';
 import type { Grader } from '../../../src/main/courses/lab_verify.ts';
+import type { ToolchainProbe } from '../../../src/main/courses/lab_toolchain.ts';
+import { TOOLCHAINS } from '../../../src/shared/lab_toolchains.ts';
 import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
 import type { CodingPatchPreview, CodingRuntimeStatus } from '../../../src/shared/coding_types.ts';
@@ -61,6 +63,14 @@ export const run = promisify(execFile);
 // A one-commit repository with src/auth/application/login-user.ts.
 export const gitRepo = async () => (await sharedGitRepo({ 'src/auth/application/login-user.ts': 'export {};\n' }, { prefix: 'taskpilot-ipc-repo-' })).root;
 
+// A lab toolchain check that finds every tool.
+export const readyToolchain: ToolchainProbe = async (toolchain) => ({
+  id: toolchain,
+  tools: TOOLCHAINS[toolchain].tools.map(({ command, install }) => ({ command, version: `${command} 1.0`, install })),
+  ready: true,
+  problem: null,
+});
+
 export const harness = async ({
   withRepo = true,
   agent = null,
@@ -68,6 +78,7 @@ export const harness = async ({
   coding = {},
   modelCatalog,
   labGrader = undefined,
+  labProbe = readyToolchain,
 }: {
   withRepo?: boolean;
   agent?: FakeAgent | null;
@@ -76,6 +87,8 @@ export const harness = async ({
   modelCatalog?: AgentDeps['modelCatalog'];
   // The lab self-check's `make grade`; the real one runs only under Seatbelt.
   labGrader?: Grader;
+  // The lab toolchain check; never the real sandboxed one from a test.
+  labProbe?: ToolchainProbe;
 } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directories go.
@@ -183,6 +196,7 @@ export const harness = async ({
         snapshot: coding.codingSnapshot,
       },
       labGrader,
+      labProbe,
     },
   );
 

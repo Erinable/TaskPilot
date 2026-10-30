@@ -12,7 +12,13 @@ import type { RequirementService } from '../requirements/requirement_service.ts'
 import { goalFormProblem } from '../../shared/course_plan.ts';
 import type { GoalForm } from '../../shared/course_plan.ts';
 
-const formOf = (form: GoalForm): GoalForm => ({ level: form.level, target: form.target, environment: form.environment.trim(), weeklyHours: form.weeklyHours });
+const formOf = (form: GoalForm): GoalForm => ({
+  level: form.level,
+  target: form.target,
+  toolchain: form.toolchain,
+  environment: form.environment.trim(),
+  weeklyHours: form.weeklyHours,
+});
 
 export const register = (
   ipcMain: IpcMainLike,

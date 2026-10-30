@@ -76,6 +76,10 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   merge_markers_left: '还有文件里留着冲突标记（<<<<<<< 那几行）。改完保存后再点继续。',
   merge_cannot_apply: '这个文件没法写成带冲突标记的版本（比如二进制文件，或一边删了一边改了）。请选「保留我的」或「用 AI 的」。',
   workspace_process_failed: '准备或读取项目副本时出错了。展开原始信息看看原因。',
+  toolchain_missing: '工具链不完整，请按下方安装命令安装缺少的工具后重新检查。',
+  toolchain_unset: '这份课程要求没有选择工具链，请新建课程要求并选择一种工具链。',
+  toolchain_mismatch: '课程包不适用于所选工具链，请换课程包或重新选择工具链。',
+  lab_outdated: '这个 lab 创建于工具链切换前，请在新的实验仓库中重新生成。',
 };
 
 export const describeError = (error: unknown) => (error instanceof Error ? (ERROR_HINTS[(error as IpcError).code] ?? error.message) : String(error));

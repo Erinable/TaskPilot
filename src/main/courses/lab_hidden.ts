@@ -16,9 +16,13 @@ import * as git from '../repository/git.ts';
 import * as labs from './labs.ts';
 import * as verification from '../checking/verification.ts';
 import { looksSecret } from '../repository/repo_reader.ts';
+import * as projectConfig from '../repository/project_config.ts';
+import { PRESET_IDS } from '../checking/presets/index.ts';
 import type { EvidenceItem, RunFailure } from '../checking/evidence.ts';
 import type { Grader } from './lab_verify.ts';
 import type { CheckRun } from '../checking/verification.ts';
+import { toolchainMissing } from './lab_toolchain.ts';
+import type { ToolchainProbe } from './lab_toolchain.ts';
 
 // The check's id beside the repository's own steps.
 export const HIDDEN_CHECK_KIND = 'custom:hidden-tests';
@@ -62,12 +66,16 @@ const evidenceOf = (run: CheckRun | RunFailure): EvidenceItem => {
 // Runs a lab's hidden tests on the working tree at `root`. TaskPilot's own
 // Makefile and tests/grade.sh replace the repository's, so the student's
 // edits to them cannot change what runs. A grader that cannot run (no
-// sandbox) leaves the check unverifiable rather than failing the student.
+// sandbox, or the repository's toolchain missing under it) leaves the check
+// unverifiable rather than failing the student. The toolchain is the
+// repository's taskpilot.toml one (absent before toolchains: not probed,
+// and the grader opens every preset's variables).
 export const runHiddenTests = async ({
   root,
   dataDir,
   labId,
   grader,
+  probe,
   envPath,
   signal,
 }: {
@@ -75,6 +83,7 @@ export const runHiddenTests = async ({
   dataDir: string;
   labId: string;
   grader: Grader;
+  probe: ToolchainProbe;
   envPath?: string | null;
   signal?: AbortSignal;
 }): Promise<{ evidence: EvidenceItem; run: CheckRun | RunFailure } | null> => {
@@ -89,7 +98,11 @@ export const runHiddenTests = async ({
   const startedAt = Date.now();
   let run: CheckRun | RunFailure;
   try {
-    const graded = await grader(files, { signal, envPath });
+    const text = await projectConfig.readProjectText(root);
+    const toolchain = text === null ? null : projectConfig.parseProject(text, PRESET_IDS).toolchain;
+    const check = toolchain ? await probe(toolchain, { envPath, signal }) : null;
+    if (check && !check.ready) throw toolchainMissing(check);
+    const graded = await grader(files, { signal, envPath, toolchain });
     const results = Object.entries(graded.results).map(([name, passed]) => ({ name, fullName: name, passed, skipped: false, todo: false }));
     const exitCode = graded.built ? 0 : 1;
     run = {

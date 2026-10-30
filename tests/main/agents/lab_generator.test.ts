@@ -39,12 +39,11 @@ test('the prompts carry the pack’s labGuide and rubric, the goal, the concepts
   assert.match(code, /code is null for levels 1 to 3/);
 });
 
-test('a later stage is told the labs and files so far and may keep the build rules', () => {
-  const request = { ...RR_REQUEST, stage: 2, existing: { labIds: ['fcfs'], files: ['src/fcfs.c'], build: 'build:\nclean:\n' } };
+test('a later stage is told the labs, files and programs so far', () => {
+  const request = { ...RR_REQUEST, stage: 2, existing: { labIds: ['fcfs'], files: ['src/fcfs.c'], programs: ['fcfs'] } };
   const prompt = generator.specPrompt(request);
-  assert.match(prompt, /Labs so far: fcfs\. Files: src\/fcfs\.c\./);
-  assert.match(prompt, /<build_mk>\nbuild:\nclean:\n\n<\/build_mk>/);
-  assert.match(prompt, /or null to keep the current one/);
+  assert.match(prompt, /Labs so far: fcfs\. Files: src\/fcfs\.c\. Programs: fcfs\./);
+  assert.match(prompt, /not one of fcfs\. Every test file/);
   assert.match(prompt, /`02_<name>\.sh`/);
 });
 
@@ -63,7 +62,7 @@ test('a repair names only the parts to rewrite, with the previous lab and the re
 test('starter files are unique, new in a later stage, and the file scope is among them', () => {
   refusedSpec({ starterFiles: ['src/rr.c', 'src/rr.c'] }, /repeats "src\/rr\.c"/);
   refusedSpec({ fileScope: ['src/other.c'] }, /"src\/other\.c" is not a starter file/);
-  refusedSpec({}, /already in the repository/, { ...RR_REQUEST, existing: { labIds: [], files: ['src/rr.c'], build: null } });
+  refusedSpec({}, /already in the repository/, { ...RR_REQUEST, existing: { labIds: [], files: ['src/rr.c'], programs: [] } });
   refusedSpec({ starterFiles: Array.from({ length: 9 }, (_unused, index) => `src/f${index}.c`) }, /more than 8/);
 });
 
@@ -100,7 +99,7 @@ test('a hidden test’s name never gives away an input or an expected value', ()
   const named = '时间片为 2 时轮流运行';
   assert.ok(
     generator.validateSpec(
-      spec({ publicTests: publicFile({ names: [named], script: `echo "ok - ${named}"` }), acceptance: [{ text: 'x', test: named }] }),
+      spec({ publicTests: publicFile({ names: [named], script: `build/rr </dev/null\necho "ok - ${named}"` }), acceptance: [{ text: 'x', test: named }] }),
       RR_REQUEST,
     ),
   );
@@ -114,19 +113,30 @@ test('acceptance criteria name a public test, never a hidden one', () => {
 // ========== Spec: the rest ==========
 test('the id is a lab id not already in the repository', () => {
   refusedSpec({ id: 'Round Robin' }, /^id must be lowercase/);
-  refusedSpec({}, /"round-robin" is already a lab here/, { ...RR_REQUEST, existing: { labIds: ['round-robin'], files: [], build: null } });
+  refusedSpec({}, /"round-robin" is already a lab here/, { ...RR_REQUEST, existing: { labIds: ['round-robin'], files: [], programs: [] } });
 });
 
-test('the build rules define build and clean, and only a later stage may keep the current ones', () => {
-  refusedSpec({ build: 'build:\n\tcc x.c\n' }, /must define the clean target/);
-  refusedSpec({ build: null }, /build must be file contents/);
-  assert.equal(
-    generator.validateSpec(spec({ build: null, publicTests: publicFile({ file: '02_rr.sh' }), hiddenTests: hiddenFile({ file: '02_rr_hidden.sh' }) }), {
-      ...RR_REQUEST,
-      stage: 2,
-    }).build,
-    null,
+test('the program is a new name, its entry a starter file of the toolchain, and every test runs it', () => {
+  refusedSpec({ program: 'RR' }, /^program must be lowercase/);
+  refusedSpec({}, /"rr" is already an earlier stage's program/, { ...RR_REQUEST, existing: { labIds: [], files: [], programs: ['rr'] } });
+  refusedSpec({ entry: 'src/main.c' }, /"src\/main\.c" is not a starter file/);
+  refusedSpec({ starterFiles: ['src/rr.py'], fileScope: ['src/rr.py'], entry: 'src/rr.py' }, /"src\/rr\.py" must be a \.c or \.h file/);
+  refusedSpec(
+    {
+      publicTests: publicFile({ names: ['两个作业同时到达时轮流运行'], script: '#!/bin/sh\necho "ok - 两个作业同时到达时轮流运行"\n' }),
+      acceptance: [{ text: 'x', test: '两个作业同时到达时轮流运行' }],
+    },
+    /01_rr\.sh never runs build\/rr/,
   );
+});
+
+test('C builds every starter .c file into the program, the other toolchains only the entry', () => {
+  const lab = { program: 'rr', entry: 'src/rr.c', starterFiles: ['src/rr.c', 'src/queue.c', 'src/queue.h'] };
+  assert.deepEqual(generator.programOfLab(lab, 'c'), { program: 'rr', sources: ['src/rr.c', 'src/queue.c'] });
+  assert.deepEqual(generator.programOfLab({ program: 'rr', entry: 'src/main.rs', starterFiles: ['src/main.rs', 'src/queue.rs'] }, 'rust'), {
+    program: 'rr',
+    sources: ['src/main.rs'],
+  });
 });
 
 test('text fields are bounded and free of control characters; the estimate is 0.5 to 4 hours', () => {
@@ -218,7 +228,7 @@ test('generate() stops before a call once cancelled', async () => {
 
 test('repair() rewrites only the named parts and keeps the rest, checked again as a whole', async () => {
   const lab = { ...validSpec(), ...generator.validateCode(RR_CODE, validSpec()) };
-  const hiddenTests = [{ file: '01_rr_more.sh', names: ['空闲之后到达的作业'], script: 'echo "ok - 空闲之后到达的作业"\n' }];
+  const hiddenTests = [{ file: '01_rr_more.sh', names: ['空闲之后到达的作业'], script: 'build/rr </dev/null\necho "ok - 空闲之后到达的作业"\n' }];
   let asked: string[] = [];
   const runAgent = async ({ schema }: { schema: Record<string, unknown> }) => {
     asked = schema.required as string[];
@@ -230,7 +240,10 @@ test('repair() rewrites only the named parts and keeps the rest, checked again a
   assert.equal(repaired.lab.title, lab.title);
   assert.deepEqual(repaired.lab.solution, lab.solution);
   // A rewrite that breaks the lab is refused like a first answer.
-  const breaking = async () => ({ output: { hiddenTests: [{ ...hiddenTests[0], names: ['输出 a=3'], script: 'echo "ok - 输出 a=3"' }] }, costUsd: 0 });
+  const breaking = async () => ({
+    output: { hiddenTests: [{ ...hiddenTests[0], names: ['输出 a=3'], script: 'build/rr </dev/null\necho "ok - 输出 a=3"' }] },
+    costUsd: 0,
+  });
   await assert.rejects(generator.repair(RR_REQUEST, lab, { report: 'x', parts: ['hiddenTests'] }, { runAgent: breaking }), /must not give away/);
   await assert.rejects(generator.repair(RR_REQUEST, lab, { report: 'x', parts: [] }, { runAgent }), /parts must name/);
 });

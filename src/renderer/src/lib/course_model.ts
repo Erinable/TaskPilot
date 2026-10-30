@@ -5,6 +5,7 @@
 import { COURSE_DIMENSION_LABELS, COURSE_SCHEMA_VERSION, conceptCycle, isCourseId } from '@shared/course_pack.ts';
 import type { CourseChange } from '@shared/course_changes.ts';
 import type { Concept, CourseDimension, CoursePack, CourseSource } from '@shared/course_pack.ts';
+import type { LabToolchainId } from '@shared/lab_toolchains.ts';
 import type { CourseFieldError } from '@shared/course_rules.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 
@@ -22,7 +23,7 @@ export const FIELD_LABELS: Record<string, string> = {
   difficultyGuide: '难度指引',
   practiceGuide: '练习方式指引',
   referenceGuide: '参考答案指引',
-  appliesTo: '适用语言',
+  appliesTo: '适用语言和工具链',
   labGuide: 'lab 生成指引',
   rubric: '判卷维度的顺序',
   concepts: '知识点的顺序',
@@ -87,6 +88,7 @@ type RubricDraft = {
 };
 export type CourseDraft = Omit<CoursePack, 'schemaVersion' | 'rubric' | 'appliesTo' | 'labGuide' | 'concepts'> & {
   languages: string[];
+  toolchains: LabToolchainId[];
   rubric: RubricDraft[];
   labGuide: string[];
   concepts: Concept[];
@@ -107,6 +109,7 @@ export const draftOf = (pack: CoursePack): CourseDraft => ({
   practiceGuide: [...pack.practiceGuide],
   referenceGuide: pack.referenceGuide,
   languages: [...(pack.appliesTo?.languages ?? [])],
+  toolchains: [...(pack.appliesTo?.toolchains ?? [])],
   rubric: pack.rubric.map((item) => ({ ...item, examples: (item.examples ?? []).map((entry) => ({ ...entry })) })),
   labGuide: [...(pack.labGuide ?? [])],
   concepts: (pack.concepts ?? []).map((item) => ({ ...item, prerequisites: [...item.prerequisites] })),
@@ -128,7 +131,11 @@ export const packOf = (draft: CourseDraft): CoursePack => {
     referenceGuide: draft.referenceGuide,
     rubric: draft.rubric.map(({ examples, ...item }) => (examples.length ? { ...item, examples: examples.map((entry) => ({ ...entry })) } : item)),
   };
-  if (draft.languages.length) pack.appliesTo = { languages: [...draft.languages] };
+  if (draft.languages.length || draft.toolchains.length)
+    pack.appliesTo = {
+      ...(draft.languages.length ? { languages: [...draft.languages] } : {}),
+      ...(draft.toolchains.length ? { toolchains: [...draft.toolchains] } : {}),
+    };
   if (draft.labGuide.length) pack.labGuide = [...draft.labGuide];
   if (draft.concepts.length) pack.concepts = draft.concepts.map((item) => ({ ...item, prerequisites: [...item.prerequisites] }));
   return pack;
@@ -149,8 +156,8 @@ export const fieldErrorText = (error: CourseFieldError) => {
       return '只能用小写字母、数字、- 和 _，以字母开头，最长 32 个字符。';
     case 'repeat':
       return '和前面的 id 重复了。';
-    case 'dimension':
-      return '请选一个通用维度。';
+    case 'toolchain':
+      return '请选择有效的工具链。';
     case 'version':
       return '要写成 1.0.0 这样的版本号。';
     case 'list':

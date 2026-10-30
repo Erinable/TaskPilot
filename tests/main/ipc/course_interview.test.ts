@@ -47,7 +47,7 @@ test('course: 想学操作系统的进程调度 picks os, plans a path through i
   assert.deepEqual(item.questions, [{ text: '想不想接触多核调度？', answer: '' }]);
   // Tutor saw the form and the os skeleton, never a repository file.
   const interviewCall = h.agentCalls[0];
-  assert.match(interviewCall.prompt, /Environment: macOS，本机 C 编译器/);
+  assert.match(interviewCall.prompt, /Toolchain: c/);
   assert.match(interviewCall.prompt, /- mlfq: /);
   assert.doesNotMatch(interviewCall.prompt, /login-user/);
   assert.equal(h.agentCalls.length, 1, 'no Architect run for a course');
@@ -83,6 +83,32 @@ test('course: 想学操作系统的进程调度 picks os, plans a path through i
   assert.equal((await h.call(CHANNELS.tasksList)).data.filter((task) => task.requirementId === item.id).length, 0);
 });
 
+test('course: Tutor only sees packs compatible with the selected toolchain', async () => {
+  const h = await fixtures.harness({ agent: tutor({ interview: goals.LEXING_CLARIFY }) });
+  const { data } = await h.call(CHANNELS.requirementsCreate, {
+    text: '想学操作系统',
+    course: { ...goals.GOAL_FORM, toolchain: 'rust', environment: 'rust' },
+  });
+  await h.idle();
+  const item = (await h.call(CHANNELS.requirementsGet, data.id)).data;
+  assert.deepEqual(item.course.pick.options, []);
+});
+
+test('course: planning a pack excluded by the form toolchain fails with toolchain_mismatch', async () => {
+  const h = await fixtures.harness({ agent: tutor({ interview: goals.LEXING_CLARIFY }) });
+  const { data } = await h.call(CHANNELS.requirementsCreate, {
+    text: '想学操作系统',
+    course: { ...goals.GOAL_FORM, toolchain: 'rust', environment: 'rust' },
+  });
+  await h.idle();
+  captureExpectedErrors((error) => 'code' in error && error.code === 'toolchain_mismatch');
+  const result = await h.call(CHANNELS.requirementsPlan, data.id, [], { course: 'os' });
+  await h.idle();
+  const item = (await h.call(CHANNELS.requirementsGet, data.id)).data;
+  assert.equal(result.error, undefined);
+  assert.equal(item.error?.code, 'toolchain_mismatch');
+});
+
 test('course: 想学编译原理的词法分析 drafts a pack that validates, saved pending, confirmed, then planned from', async () => {
   const badDraft = { ...goals.LEXING_DRAFT, rubric: [goals.LEXING_DRAFT.rubric[0]] };
   const lexPath = {
@@ -103,9 +129,10 @@ test('course: 想学编译原理的词法分析 drafts a pack that validates, sa
   assert.equal(drafts.length, 2);
   assert.match(drafts[1].prompt, /<errors>\n- rubric: must be a list of 2 to 6 items/);
   const { pack, contentHash } = item.course.draft;
+  assert.match(contentHash, /^[0-9a-f]{64}$/);
   assert.equal(pack.id, 'lexing');
   assert.equal(pack.version, '0.1.0');
-  assert.match(contentHash, /^[0-9a-f]{64}$/);
+  assert.deepEqual(pack.appliesTo?.toolchains, ['c']);
   // A draft is never a file until the learner saves it.
   await assert.rejects(fs.access(path.join(h.configDir, 'courses/lexing.toml')));
 
@@ -152,6 +179,15 @@ test('course: a draft that fails twice fails the run, and a draft never replaces
   await h.idle();
   item = (await h.call(CHANNELS.requirementsGet, item.id)).data;
   assert.equal(item.course.draft.pack.id, 'os-2');
+});
+
+test('course: create keeps the selected toolchain on the stored form', async () => {
+  const h = await fixtures.harness({ agent: tutor({ interview: goals.LEXING_CLARIFY }) });
+  const { data } = await h.call(CHANNELS.requirementsCreate, { text: '想学 Rust', course: { ...goals.GOAL_FORM, toolchain: 'rust', environment: '' } });
+  await h.idle();
+  const item = (await h.call(CHANNELS.requirementsGet, data.id)).data;
+  assert.equal(item.course.form.toolchain, 'rust');
+  assert.equal(item.course.form.environment, '');
 });
 
 test('course: the form is checked, and the project flow is unchanged beside it', async () => {

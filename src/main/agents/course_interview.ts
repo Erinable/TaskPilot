@@ -66,7 +66,8 @@ const goalBlock = ({ goal, form, questions = [] }: GoalInput): string[] => [
   '<form>',
   `Level: ${LEVEL_TEXT[form.level]}`,
   `Target: ${TARGET_TEXT[form.target]}`,
-  `Environment: ${form.environment}`,
+  ...(form.toolchain ? [`Toolchain: ${form.toolchain}`] : []),
+  ...(form.environment ? [`Environment: ${form.environment}`] : []),
   `Weekly time: ${form.weeklyHours} hours`,
   '</form>',
   ...(questions.length

@@ -1,7 +1,7 @@
 // What a fake Tutor answers in the course interview tests: the os pack's
 // scheduling path ("想学操作系统的进程调度") and a drafted lexing pack
 // ("想学编译原理的词法分析"), which the os pack does not cover.
-export const GOAL_FORM = { level: 'basic', target: 'implement', environment: 'macOS，本机 C 编译器', weeklyHours: 4 } as const;
+export const GOAL_FORM = { level: 'basic', target: 'implement', toolchain: 'c', environment: 'macOS，本机 C 编译器', weeklyHours: 4 } as const;
 
 export const SCHEDULING_CLARIFY = {
   title: '进程调度',

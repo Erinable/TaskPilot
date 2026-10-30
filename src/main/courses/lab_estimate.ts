@@ -5,7 +5,7 @@ import * as generator from '../agents/lab_generator.ts';
 import * as verifier from '../agents/lab_verifier.ts';
 import * as labVerify from './lab_verify.ts';
 import { estimateMicros } from '../activity/model_prices.ts';
-import type { LabEstimate } from '../../shared/ipc/requirements.ts';
+import type { LabEstimate, LabToolchainCheck } from '../../shared/ipc/requirements.ts';
 import type { NextLab } from './lab_planning.ts';
 type Price = Parameters<typeof estimateMicros>[0];
 type Bound = 'low' | 'high';
@@ -29,12 +29,14 @@ export const estimateLab = ({
   next,
   model,
   price,
+  toolchain,
   stuck,
 }: {
   request: generator.LabRequest;
   next: NextLab;
   model: string | null;
   price: Price | null;
+  toolchain: LabToolchainCheck;
   stuck: { id: string; title: string }[];
 }): LabEstimate => {
   const promptTokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN) + CLI_OVERHEAD_TOKENS;
@@ -56,5 +58,6 @@ export const estimateLab = ({
     tokens: usage('high'),
     model,
     usd: price ? { low: usd('low'), high: usd('high') } : null,
+    toolchain,
   };
 };
