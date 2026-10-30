@@ -12,6 +12,7 @@ import path from 'node:path';
 import * as generator from '../../src/main/agents/lab_generator.ts';
 import * as verifier from '../../src/main/agents/lab_verifier.ts';
 import * as labVerify from '../../src/main/courses/lab_verify.ts';
+import { sandboxProbe } from '../../src/main/courses/lab_toolchain.ts';
 import * as courses from '../../src/main/courses/courses.ts';
 import { toLabArtifact } from '../../src/main/courses/lab_artifact.ts';
 import { runAgent, runSuite } from '../shared/harness.ts';
@@ -40,9 +41,10 @@ type Run = {
 const selfCheck = (request: generator.LabRequest, lab: generator.GeneratedLab, counted: RunAgent) =>
   labVerify.verifyLab(
     lab,
-    { stage: request.stage, base: labVerify.FIRST_STAGE_BASE },
+    { stage: request.stage, base: labVerify.FIRST_STAGE_BASE, toolchain: request.toolchain, programs: [] },
     {
       grade: labVerify.sandboxGrader(),
+      probe: sandboxProbe(),
       writeMutants: (current) => verifier.writeMutants(request, current, { runAgent: counted }),
       judge: (current) => verifier.judgeConsistency(request, current, { runAgent: counted }),
       repair: (current, failure) => generator.repair(request, current, failure, { runAgent: counted }),
@@ -67,7 +69,7 @@ const runCase = async (testCase: LabCase): Promise<CaseOutcome<Run, never>> => {
   };
   try {
     lab = (await generator.generate(request, { runAgent: counted })).lab;
-    grade = await runLab(await toLabArtifact(lab, request));
+    grade = await runLab(await toLabArtifact(lab, request), request.toolchain);
     if (VERIFY) verify = (await selfCheck(request, lab, counted)).report;
   } catch (caught) {
     const coded = caught as Error & { code?: string };

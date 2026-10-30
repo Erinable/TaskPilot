@@ -22,11 +22,13 @@ test('a lab keeps its files inside the repository and out of TaskPilot files', (
   refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, hidden: { '../x.sh': 'x' } } }, 'private.hidden["../x.sh"]');
 });
 
-test('public tests carry their stage number, and only the first lab must bring build rules', () => {
+test('public tests carry their stage number, and the program builds from starter files', () => {
   refused(FCFS_LAB, 'publicTests["01_fcfs.sh"]', 2);
   refused({ ...FCFS_LAB, publicTests: {} }, 'publicTests');
-  refused({ ...FCFS_LAB, build: null }, 'build');
-  assert.equal(labs.checkLab({ ...RR_LAB, build: null }, 2).build, null);
+  refused({ ...FCFS_LAB, program: 'Bad Name' }, 'program');
+  refused({ ...FCFS_LAB, sources: [] }, 'sources');
+  refused({ ...FCFS_LAB, sources: ['src/missing.c'] }, 'sources[0]');
+  refused({ ...FCFS_LAB, files: { 'src/a b.c': 'x' }, fileScope: ['src/a b.c'], sources: ['src/a b.c'] }, 'sources[0]');
   refused({ ...FCFS_LAB, id: 'FCFS' }, 'id');
   refused({ ...FCFS_LAB, concepts: ['Not An Id'] }, 'concepts');
   refused({ ...FCFS_LAB, private: { ...FCFS_LAB.private, hints: [{ level: 6, text: 'x', code: null }] } }, 'private.hints[0].level');
@@ -37,7 +39,7 @@ test('public tests carry their stage number, and only the first lab must bring b
 
 test("a lab's repository files are what the student sees, never the private parts", () => {
   const files = labs.repositoryFiles(labs.checkLab(RR_LAB, 2), 2);
-  assert.deepEqual(Object.keys(files).sort(), ['labs/02-round-robin/README.md', 'src/rr.c', 'tests/build.mk', 'tests/public/02_rr.sh']);
+  assert.deepEqual(Object.keys(files).sort(), ['labs/02-round-robin/README.md', 'src/rr.c', 'tests/public/02_rr.sh']);
   const text = JSON.stringify(files);
   assert.ok(!text.includes('reference-marker') && !text.includes('hidden-marker'));
 });
@@ -54,11 +56,12 @@ test('labs become a chain of practice packages, each waiting for the stage befor
   assert.equal(second.course, COURSE);
 });
 
-test("a new repository's taskpilot.toml names the pack, the grade step and every lab", () => {
-  const text = labs.projectText('os', [labs.labEntry(FCFS_LAB, 1)]);
+test("a new repository's taskpilot.toml names the pack, the toolchain, the grade step and every lab", () => {
+  const text = labs.projectText('os', 'c', [labs.labEntry(FCFS_LAB, 1)]);
   const project = projectConfig.parseProject(text, PRESET_IDS);
   assert.equal(project.course, 'os');
-  assert.deepEqual(project.labs, [{ id: 'fcfs', stage: 1, dir: 'labs/01-fcfs', concepts: ['fcfs'] }]);
+  assert.equal(project.toolchain, 'c');
+  assert.deepEqual(project.labs, [{ id: 'fcfs', stage: 1, dir: 'labs/01-fcfs', concepts: ['fcfs'], program: 'fcfs', sources: ['src/fcfs.c'] }]);
   assert.equal(project.steps['custom:grade']?.blocking, true);
   assert.equal(project.steps['custom:grade']?.stage, 'submit');
   // A later stage is appended as text, keeping the rest of the file.

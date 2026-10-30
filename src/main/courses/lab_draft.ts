@@ -1,5 +1,7 @@
 // Private lab draft and self-check persistence. These files contain the
-// generated solution and never cross the main-process boundary.
+// generated solution and never cross the main-process boundary. Drafts from
+// before lab toolchains (v1 or unversioned) have no toolchain and no
+// program, so they are refused as lab_outdated: the lab is generated again.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,16 +11,15 @@ import type * as labVerify from './lab_verify.ts';
 import type { LabDraft } from './lab_artifact.ts';
 import { draftPath, verifyPath } from './lab_artifact.ts';
 
-const VERSION = 1;
+const VERSION = 2;
 type VersionedDraft = { version: typeof VERSION } & LabDraft;
-type VersionedReport = { version: typeof VERSION } & labVerify.LabVerifyReport;
+type VersionedReport = { version: number } & labVerify.LabVerifyReport;
 
 const currentDraft = (value: unknown): LabDraft => {
-  if (value && typeof value === 'object' && !Array.isArray(value) && 'version' in value) {
-    const stored = value as VersionedDraft;
-    return { requirementId: stored.requirementId, request: stored.request, lab: stored.lab, costUsd: stored.costUsd };
-  }
-  return value as LabDraft;
+  if (!value || typeof value !== 'object' || !('version' in value) || value.version !== VERSION)
+    return failWith('This lab was generated before lab toolchains; generate it again', 'lab_outdated');
+  const stored = value as VersionedDraft;
+  return { requirementId: stored.requirementId, request: stored.request, lab: stored.lab, costUsd: stored.costUsd };
 };
 
 const currentReport = (value: unknown): labVerify.LabVerifyReport | null => {
@@ -38,7 +39,7 @@ export const writeDraft = async (configDir: string, draft: LabDraft): Promise<vo
 export const readDraft = async (configDir: string, requirementId: string): Promise<LabDraft> => {
   const file = draftPath(configDir, requirementId);
   try {
-    return currentDraft(await readStoredJson(file));
+    return currentDraft(await readStoredJson(file, VERSION));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return failWith('No lab has been generated for this requirement', 'no_lab_draft');
@@ -53,7 +54,7 @@ export const writeReport = async (configDir: string, requirementId: string, repo
 
 export const readReport = async (configDir: string, requirementId: string): Promise<labVerify.LabVerifyReport | null> => {
   try {
-    return currentReport(await readStoredJson(verifyPath(configDir, requirementId)));
+    return currentReport(await readStoredJson(verifyPath(configDir, requirementId), VERSION));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;

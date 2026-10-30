@@ -7,6 +7,7 @@
 // [人工决策-2026-10-26 15:38:21] 课程包按仓库选（taskpilot.toml 的 course，本机 workspace.json 可覆盖，默认 programming），
 // 一期只有内置包和 .taskpilot/courses/<id>.toml；rubric 每项挂到 thinking / writing / style 三个通用维度之一（名字不改），
 // 用于跨领域统计和兼容旧笔记。加载与校验在 ../main/course_file.ts 和 ../main/courses.ts。
+import type { LabToolchainId } from './lab_toolchains.ts';
 
 export const COURSE_SCHEMA_VERSION = 1;
 
@@ -96,8 +97,9 @@ export interface CoursePack {
   // What Tutor marks when grading.
   rubric: RubricItem[];
   // Project languages the pack is written for; only used to warn about a
-  // mismatch, never enforced.
-  appliesTo?: { languages?: string[] };
+  // mismatch, never enforced. Lab toolchains it is written for: the course
+  // interview only offers it for a form with one of them (absent: any).
+  appliesTo?: { languages?: string[]; toolchains?: LabToolchainId[] };
   // What the lab generator is told about labs in this domain, one line each.
   labGuide?: string[];
   // The concept skeleton; at most 200 nodes.

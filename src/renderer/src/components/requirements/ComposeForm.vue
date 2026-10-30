@@ -7,7 +7,8 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import { ERROR_HINTS } from '@/lib/errors.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
-import { ENVIRONMENT_OPTIONS, HOURS_OPTIONS, LEVEL_OPTIONS, MAX_TEXT, TARGET_OPTIONS, countChars } from './requirement_model.ts';
+import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
+import { HOURS_OPTIONS, LEVEL_OPTIONS, MAX_TEXT, TARGET_OPTIONS, countChars } from './requirement_model.ts';
 
 const store = useRequirementsStore();
 const textInput = ref<{ focus: () => void } | null>(null);
@@ -82,22 +83,21 @@ const onSubmit = () => {
             <el-radio-button v-for="option in TARGET_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
           </el-radio-group>
         </div>
+        <div class="setting-row stacked" data-field="toolchain">
+          <span class="setting-label">
+            <strong>实验工具链</strong>
+            <small>生成 lab 前会检查这些工具是否已安装</small>
+          </span>
+          <el-radio-group v-model="store.composeForm.toolchain" aria-label="实验工具链">
+            <el-radio-button v-for="toolchain in LAB_TOOLCHAINS" :key="toolchain" :value="toolchain">{{ TOOLCHAIN_LABELS[toolchain] }}</el-radio-button>
+          </el-radio-group>
+        </div>
         <div class="setting-row stacked" data-field="environment">
           <label class="setting-label" for="reqEnvironment">
-            <strong>环境</strong>
-            <small>lab 会按你的环境出题，可以选，也可以直接输入</small>
+            <strong>环境备注（可选）</strong>
+            <small>补充你的系统或已有配置，不影响工具链选择</small>
           </label>
-          <el-select
-            id="reqEnvironment"
-            v-model="store.composeForm.environment"
-            filterable
-            allow-create
-            default-first-option
-            :reserve-keyword="false"
-            aria-label="环境"
-          >
-            <el-option v-for="option in ENVIRONMENT_OPTIONS" :key="option" :label="option" :value="option" />
-          </el-select>
+          <el-input id="reqEnvironment" v-model="store.composeForm.environment" maxlength="100" aria-label="环境备注（可选）" />
         </div>
         <div class="setting-row stacked" data-field="weeklyHours">
           <span class="setting-label"><strong>每周时间</strong></span>
@@ -169,7 +169,7 @@ const onSubmit = () => {
       </template>
     </div>
     <div class="req-actions">
-      <button class="primary-button" type="submit" :disabled="store.submitting" :aria-busy="store.submitting">
+      <button class="primary-button" type="submit" :disabled="store.submitting || (course && !store.composeForm.toolchain)" :aria-busy="store.submitting">
         <AppIcon :name="store.submitting ? 'spinner' : 'send'" :class="{ spin: store.submitting }" />
         {{ course ? '交给 Tutor' : '交给 Product Lead' }}
       </button>

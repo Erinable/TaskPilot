@@ -3,9 +3,10 @@
 //
 // TaskPilot writes and commits every file itself instead of handing a patch
 // to Coding Agent: tests/, Makefile and taskpilot.toml are paths a Coding
-// Agent patch may not touch (./coding_workspace.ts). Private parts go to the
-// repository's data directory before its packages are published, so a claim
-// always finds its reference.
+// Agent patch may not touch (./coding_workspace.ts). tests/build.mk is
+// rewritten from the repository's toolchain and every lab's program each
+// time a lab is added. Private parts go to the repository's data directory
+// before its packages are published, so a claim always finds its reference.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -18,6 +19,8 @@ import * as courses from './courses.ts';
 import * as projectConfig from '../repository/project_config.ts';
 import { PRESET_IDS } from '../checking/presets/index.ts';
 import { isCourseId } from '../../shared/course_pack.ts';
+import { buildRules } from '../../shared/lab_toolchains.ts';
+import type { LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { RepositoryEntry } from '../repository/repositories.ts';
 
@@ -78,12 +81,14 @@ export const createLabService = (ctx: LabServiceContext) => {
   const createRepository = async ({
     root,
     course,
+    toolchain,
     plan,
     labs: items,
     beforeOpen,
   }: {
     root: string;
     course: string;
+    toolchain: LabToolchainId;
     plan: labs.CoursePlan;
     labs: labs.LabArtifact[];
     beforeOpen?: (entry: RepositoryEntry) => Promise<void>;
@@ -97,6 +102,7 @@ export const createLabService = (ctx: LabServiceContext) => {
     const checked = items.map((lab, index) => ({ lab: labs.checkLab(lab, index + 1), stage: index + 1 }));
     const project = labs.projectText(
       course,
+      toolchain,
       checked.map(({ lab, stage }) => labs.labEntry(lab, stage)),
     );
     projectConfig.parseProject(project, PRESET_IDS);
@@ -104,12 +110,16 @@ export const createLabService = (ctx: LabServiceContext) => {
       '.gitignore': labs.GITIGNORE,
       Makefile: labs.MAKEFILE,
       [labs.GRADE_SCRIPT_PATH]: labs.GRADE_SCRIPT,
+      [labs.BUILD_RULES_PATH]: buildRules(
+        toolchain,
+        checked.map(({ lab }) => lab),
+      ),
       [projectConfig.PROJECT_FILENAME]: project,
       [labs.COURSE_PLAN_PATH]: labs.coursePlanText(plan),
     };
     for (const { lab, stage } of checked)
       for (const [file, content] of Object.entries(labs.repositoryFiles(lab, stage))) {
-        if (file in files && file !== labs.BUILD_RULES_PATH) failWith(`${file} is given twice`, 'invalid_lab', 'files');
+        if (file in files) failWith(`${file} is given twice`, 'invalid_lab', 'files');
         files[file] = content;
       }
     await writeFiles(root, files);
@@ -117,31 +127,38 @@ export const createLabService = (ctx: LabServiceContext) => {
     await gitCommit.commitFiles(root, Object.keys(files), 'TaskPilot: 创建课程实验仓库');
     const entry = await ctx.repositories.add((await ctx.validateRoot(root)).root);
     for (const { lab } of checked) await labs.writePrivate(ctx.repositories.dataDir(entry.id), lab.id, lab.private);
-    logger.debug(`[labs] created repository=${entry.id} course=${course} labs=${checked.length}`);
+    logger.debug(`[labs] created repository=${entry.id} course=${course} toolchain=${toolchain} labs=${checked.length}`);
     await beforeOpen?.(entry);
     await ctx.openRepository(entry.id);
     await publish(checked, null);
     return entry;
   };
 
-  // Adds the next stage to the open lab repository. Its files are new ones
-  // (tests/build.mk may be replaced); taskpilot.toml gets a [[labs]] table
-  // appended, so the student's own edits to it stay.
+  // Adds the next stage to the open lab repository. Its files are new ones;
+  // tests/build.mk is rewritten with every lab's program and taskpilot.toml
+  // gets a [[labs]] table appended, so the student's own edits to it stay.
+  // A repository from before toolchains has no build rules TaskPilot can
+  // write, so it takes no new stage (lab_outdated).
   const addLab = async (artifact: labs.LabArtifact) => {
     const root = ctx.requireRoot();
     const text = await projectConfig.readProjectText(root);
     const project = text === null ? null : projectConfig.parseProject(text, PRESET_IDS);
     if (!text || !project?.course || !project.labs.length) return failWith('This repository is not a course lab repository', 'not_lab_repository');
+    const programs = project.labs.flatMap((entry) => (entry.program && entry.sources ? [{ program: entry.program, sources: entry.sources }] : []));
+    if (!project.toolchain || programs.length !== project.labs.length)
+      return failWith('This lab repository is from before lab toolchains; start a new one', 'lab_outdated');
     const last = project.labs.reduce((latest, lab) => (lab.stage > latest.stage ? lab : latest));
     if (project.labs.some((lab) => lab.id === artifact.id)) failWith(`id: "${artifact.id}" is already a lab here`, 'invalid_lab', 'id');
+    if (programs.some((entry) => entry.program === artifact.program))
+      failWith(`program: "${artifact.program}" is already a lab's program`, 'invalid_lab', 'program');
     const stage = last.stage + 1;
     const lab = labs.checkLab(artifact, stage);
     const files = labs.repositoryFiles(lab, stage);
-    for (const file of Object.keys(files))
-      if (file !== labs.BUILD_RULES_PATH && (await exists(path.join(root, file)))) failWith(`${file} already exists`, 'invalid_lab', 'files');
+    for (const file of Object.keys(files)) if (await exists(path.join(root, file))) failWith(`${file} already exists`, 'invalid_lab', 'files');
     const changed = new Set((await git.status(root)).map((entry) => entry.path));
     for (const file of [projectConfig.PROJECT_FILENAME, labs.BUILD_RULES_PATH])
       if (changed.has(file)) failWith(`${file} has uncommitted changes; commit or undo them first`, 'lab_files_changed', file);
+    files[labs.BUILD_RULES_PATH] = buildRules(project.toolchain, [...programs, lab]);
     files[projectConfig.PROJECT_FILENAME] = `${text}${text.endsWith('\n') ? '' : '\n'}\n${labs.labsText([labs.labEntry(lab, stage)])}`;
     projectConfig.parseProject(files[projectConfig.PROJECT_FILENAME], PRESET_IDS);
     await labs.writePrivate(ctx.repositories.dataDir(), lab.id, lab.private);

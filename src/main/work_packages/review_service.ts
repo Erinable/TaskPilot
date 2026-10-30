@@ -12,6 +12,7 @@ import { agentTransitionOf, toWireState } from '../app/app_context.ts';
 import { runHiddenTests } from '../courses/lab_hidden.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { Grader } from '../courses/lab_verify.ts';
+import type { ToolchainProbe } from '../courses/lab_toolchain.ts';
 import type { BaselineChecks, BaselineChecksStatus } from './work_package_state.ts';
 
 type ReviewServiceContext = Pick<
@@ -46,8 +47,12 @@ const treeState = async (root: string) => {
 
 // `onJudged` runs once QA's verdict is recorded: what follows a review
 // (grading, the next coding round) belongs to other domains. `grader` runs a
-// course lab's hidden tests (./lab_hidden.ts).
-export const createReviewService = (ctx: ReviewServiceContext, { onJudged, grader }: { onJudged: (id: string) => Promise<void>; grader: Grader }) => {
+// course lab's hidden tests (./lab_hidden.ts) after `probe` found the
+// repository's toolchain.
+export const createReviewService = (
+  ctx: ReviewServiceContext,
+  { onJudged, grader, probe }: { onJudged: (id: string) => Promise<void>; grader: Grader; probe: ToolchainProbe },
+) => {
   const { store, backgroundRuns, requireTask } = ctx;
 
   // Starts QA in the background. The renderer polls tasks:get for the
@@ -70,7 +75,7 @@ export const createReviewService = (ctx: ReviewServiceContext, { onJudged, grade
         const profile = await ctx.profile(config);
         // A course lab's hidden tests: one more blocking check, names only.
         const hidden = task.lab
-          ? await runHiddenTests({ root, dataDir: ctx.repositories.dataDir(), labId: task.lab.id, grader, envPath, signal: controller.signal })
+          ? await runHiddenTests({ root, dataDir: ctx.repositories.dataDir(), labId: task.lab.id, grader, probe, envPath, signal: controller.signal })
           : null;
         throwIfCancelled(controller.signal);
         const result = await reviewWorkPackage(task, {

@@ -15,9 +15,6 @@
 // no channel returns it; the requirement carries only counts. Generation
 // spends money, so it only starts from the learner's click after the
 // estimate (requirements:lab-estimate, then requirements:lab-generate).
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
 import { logger } from '../infrastructure/logger.ts';
 import { asAgentError, failWith } from '../infrastructure/coded_error.ts';
 import * as courses from './courses.ts';
@@ -34,6 +31,8 @@ import type { LabDraft } from './lab_artifact.ts';
 import { readDraft as loadDraft, readReport as loadReport, writeDraft, writeReport } from './lab_draft.ts';
 import { estimateLab } from './lab_estimate.ts';
 import { wireLab, verifyState } from './lab_wire.ts';
+import { toolchainMissing } from './lab_toolchain.ts';
+import type { ToolchainProbe } from './lab_toolchain.ts';
 import { loadPrices, priceFor } from '../activity/model_prices.ts';
 import { nextLab, stuckNotes as selectStuckNotes } from './lab_planning.ts';
 import type { AppContext } from '../app/app_context.ts';
@@ -42,6 +41,8 @@ import type { Requirement } from '../requirements/requirement_store.ts';
 import type { RunAgent } from '../runtimes/claude_cli.ts';
 import type { CoursePack } from '../../shared/course_pack.ts';
 import type * as requirementTypes from '../../shared/ipc/requirements.ts';
+import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
+import type { LabEntry } from '../repository/project_config.ts';
 
 type LabGenerationServiceContext = Pick<
   AppContext,
@@ -60,11 +61,16 @@ type LabGenerationServiceContext = Pick<
   | 'store'
 >;
 
-// `grader` runs `make grade` for the self-check; tests replace it, the app
-// uses the offline Seatbelt one.
+// The open lab repository: its labs, the toolchain it is built with and
+// every lab's program, in taskpilot.toml order.
+type LabRepository = { root: string; labs: LabEntry[]; toolchain: LabToolchainId; programs: LabProgram[] };
+
+// `grader` runs `make grade` for the self-check and `probe` checks the
+// toolchain under the same sandbox; tests replace both, the app passes the
+// offline Seatbelt ones (../ipc.ts).
 export const createLabGenerationService = (
   ctx: LabGenerationServiceContext,
-  { grader = labVerify.sandboxGrader(), labService }: { grader?: labVerify.Grader; labService: LabService },
+  { grader, probe, labService }: { grader: labVerify.Grader; probe: ToolchainProbe; labService: LabService },
 ) => {
   const { backgroundRuns } = ctx;
   const requireRequirements = () => ctx.requirements ?? failWith('Requirements are unavailable', 'unsupported');
@@ -87,8 +93,9 @@ export const createLabGenerationService = (
 
   // The open lab repository this path's labs go into, or null before it
   // exists (the next lab is stage 1). A path whose repository is elsewhere
-  // is refused: its labs are generated with that repository open.
-  const labRepository = async (item: Requirement) => {
+  // is refused: its labs are generated with that repository open. One from
+  // before toolchains takes no new stage (lab_outdated).
+  const labRepository = async (item: Requirement): Promise<LabRepository | null> => {
     const repositoryId = item.course?.repositoryId ?? null;
     if (!repositoryId) return null;
     if (ctx.repositories.current?.id !== repositoryId) return failWith('Open the lab repository of this course first', 'not_lab_repository');
@@ -96,19 +103,34 @@ export const createLabGenerationService = (
     const text = await projectConfig.readProjectText(root);
     const project = text === null ? null : projectConfig.parseProject(text, PRESET_IDS);
     if (!project?.labs.length) return failWith('This repository is not a course lab repository', 'not_lab_repository');
-    return { root, labs: project.labs };
+    const programs = project.labs.flatMap((lab) => (lab.program && lab.sources ? [{ program: lab.program, sources: lab.sources }] : []));
+    if (!project.toolchain || programs.length !== project.labs.length)
+      return failWith('This lab repository is from before lab toolchains; start a new one', 'lab_outdated');
+    return { root, labs: project.labs, toolchain: project.toolchain, programs };
   };
 
-  // What the next stage is generated against: the stage number, the labs
-  // and files so far, and the current build rules.
-  const existingOf = async (repository: Awaited<ReturnType<typeof labRepository>>) => {
-    if (!repository) return { stage: 1, existing: { labIds: [], files: [], build: null } };
+  // What the next stage is generated against: the stage number and the
+  // labs, src/ files and programs so far.
+  const existingOf = async (repository: LabRepository | null) => {
+    if (!repository) return { stage: 1, existing: { labIds: [], files: [], programs: [] } };
     const files = await git.workingFiles(repository.root);
-    const build = files.includes(labs.BUILD_RULES_PATH) ? await fs.readFile(path.join(repository.root, labs.BUILD_RULES_PATH), 'utf8') : null;
     return {
       stage: Math.max(...repository.labs.map((lab) => lab.stage)) + 1,
-      existing: { labIds: repository.labs.map((lab) => lab.id), files: files.filter((file) => file.startsWith('src/')), build },
+      existing: {
+        labIds: repository.labs.map((lab) => lab.id),
+        files: files.filter((file) => file.startsWith('src/')),
+        programs: repository.programs.map((entry) => entry.program),
+      },
     };
+  };
+
+  // The form's toolchain; a lab repository's must be the same one.
+  const toolchainOf = (item: Requirement, repository: LabRepository | null) => {
+    const toolchain = item.course?.form?.toolchain;
+    if (!toolchain) return failWith('Choose a lab toolchain: start a new course requirement', 'toolchain_unset', 'toolchain');
+    if (repository && repository.toolchain !== toolchain)
+      return failWith(`The lab repository is built with ${repository.toolchain}, not ${toolchain}`, 'toolchain_mismatch', 'toolchain');
+    return toolchain;
   };
 
   const requestFor = async (id: string, conceptId: string | null) => {
@@ -121,9 +143,10 @@ export const createLabGenerationService = (
       goal: item.course!.plan!.goal,
       concepts: [next.concept],
       difficulty: next.difficulty,
+      toolchain: toolchainOf(item, repository),
       ...(await existingOf(repository)),
     };
-    return { request, next, course: pack.id, root: repository?.root ?? null };
+    return { request, next, course: pack.id, root: repository?.root ?? null, programs: repository?.programs ?? [] };
   };
 
   // ========== Estimate ==========
@@ -136,8 +159,18 @@ export const createLabGenerationService = (
     const config = ctx.getPreferences().agents.tutor;
     const model = config.model || (await ctx.modelCatalog(config.cli, 'analysis').catch(() => null))?.defaultModel || null;
     const price = priceFor(await loadPrices(ctx.configDir), config.cli === 'claude' ? 'anthropic' : null, model);
-    logger.debug(`[lab-gen] estimate requirement=${id} concepts=${request.concepts.map((concept) => concept.id).join(',')} model=${model ?? 'unknown'}`);
-    return estimateLab({ request, next, model, price, stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [] });
+    const toolchain = await probe(request.toolchain, { envPath: (await ctx.commandPath()).path });
+    logger.debug(
+      `[lab-gen] estimate requirement=${id} concepts=${request.concepts.map((concept) => concept.id).join(',')} model=${model ?? 'unknown'} toolchain=${request.toolchain} ready=${toolchain.ready}`,
+    );
+    return estimateLab({
+      request,
+      next,
+      model,
+      price,
+      toolchain,
+      stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [],
+    });
   };
 
   // ========== Generation ==========
@@ -156,37 +189,34 @@ export const createLabGenerationService = (
       envPath,
       signal,
       onProgress,
-      base,
+      target,
     }: {
       runAgent: RunAgent;
       envPath: string | null;
       signal: AbortSignal;
-      base: Record<string, string>;
+      target: labVerify.Target;
       onProgress: (state: Parameters<labVerify.VerifyProgress>[0], lab: generator.GeneratedLab) => Promise<void>;
     },
   ) => {
     const call = { runAgent, envPath, signal };
     let saved = draft;
-    const result = await labVerify.verifyLab(
-      draft.lab,
-      { stage: draft.request.stage, base },
-      {
-        grade: grader,
-        envPath,
-        signal,
-        onProgress: (state) => onProgress(state, saved.lab),
-        writeMutants: (lab) => verifier.writeMutants(draft.request, lab, call),
-        judge: (lab) => verifier.judgeConsistency(draft.request, lab, call),
-        repair: async (lab, failure) => {
-          const repaired = await generator.repair(draft.request, lab, failure, call);
-          await toLabArtifact(repaired.lab, draft.request);
-          saved = { ...saved, lab: repaired.lab, costUsd: saved.costUsd + repaired.costUsd };
-          await saveDraft(saved);
-          logger.debug(`[lab-gen] repaired requirement=${draft.requirementId} parts=${failure.parts.join(',')} costUsd=${repaired.costUsd.toFixed(3)}`);
-          return repaired;
-        },
+    const result = await labVerify.verifyLab(draft.lab, target, {
+      grade: grader,
+      probe,
+      envPath,
+      signal,
+      onProgress: (state) => onProgress(state, saved.lab),
+      writeMutants: (lab) => verifier.writeMutants(draft.request, lab, call),
+      judge: (lab) => verifier.judgeConsistency(draft.request, lab, call),
+      repair: async (lab, failure) => {
+        const repaired = await generator.repair(draft.request, lab, failure, call);
+        await toLabArtifact(repaired.lab, draft.request);
+        saved = { ...saved, lab: repaired.lab, costUsd: saved.costUsd + repaired.costUsd };
+        await saveDraft(saved);
+        logger.debug(`[lab-gen] repaired requirement=${draft.requirementId} parts=${failure.parts.join(',')} costUsd=${repaired.costUsd.toFixed(3)}`);
+        return repaired;
       },
-    );
+    });
     await saveReport(draft.requirementId, result.report);
     return { draft: saved, report: result.report };
   };
@@ -195,7 +225,7 @@ export const createLabGenerationService = (
   // requirement shows its progress and the run is cancelled with
   // requirements:cancel (or by a repository switch).
   const start = async (id: string, conceptId: string | null = null) => {
-    const { request, root } = await requestFor(id, conceptId);
+    const { request, root, programs } = await requestFor(id, conceptId);
     const lab = requireRequirements().get(id).course?.lab;
     // Checked first: a run that just finished may still be leaving the registry.
     if (lab?.status === 'ready' && !lab.placed) return failWith('Write the lab that is ready into the lab repository first', 'lab_not_placed');
@@ -204,9 +234,18 @@ export const createLabGenerationService = (
     // stage is done.
     const last = (await labRepository(requireRequirements().get(id)))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
     if (last && ctx.store.get(labs.packageId(last.id)).status !== 'done') return failWith(`Finish lab ${last.id} first`, 'previous_lab_open');
+    // Nothing is paid for until the toolchain runs under the sandbox.
+    const { path: commandPath } = await ctx.commandPath();
+    const check = await probe(request.toolchain, { envPath: commandPath });
+    if (!check.ready) throw toolchainMissing(check);
     // A later stage is checked on top of the repository as it stands, so
     // the earlier stages' tests run as regression tests.
-    const verifyBase = root ? { ...(await labHidden.workingTree(root, { publicTests: true })), ...labVerify.FIRST_STAGE_BASE } : labVerify.FIRST_STAGE_BASE;
+    const verifyTarget: labVerify.Target = {
+      stage: request.stage,
+      base: root ? { ...(await labHidden.workingTree(root, { publicTests: true })), ...labVerify.FIRST_STAGE_BASE } : labVerify.FIRST_STAGE_BASE,
+      toolchain: request.toolchain,
+      programs,
+    };
     const startedAt = new Date().toISOString();
     const base: requirementTypes.LabGeneration = {
       status: 'running',
@@ -258,7 +297,7 @@ export const createLabGenerationService = (
           runAgent,
           envPath,
           signal: controller.signal,
-          base: verifyBase,
+          target: verifyTarget,
           onProgress: ({ round, phase, rounds }, latest) =>
             progress({ ...current, phase, lab: wireLab(latest), verify: verifyState(round, rounds, spent - generatedCost) }),
         });
@@ -338,6 +377,7 @@ export const createLabGenerationService = (
       await labService.createRepository({
         root,
         course: plan.course.id,
+        toolchain: (await loadDraft(ctx.configDir, id)).request.toolchain,
         plan: coursePlan,
         labs: [built],
         // The repository the interview ran in keeps a pointer to the new one.

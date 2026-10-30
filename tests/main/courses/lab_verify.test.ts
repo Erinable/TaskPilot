@@ -13,14 +13,19 @@ import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { SANDBOX_EXEC_PATH } from '../../../src/main/coding/coding_sandbox.ts';
 import { HIDDEN_NAMES, IDLE_LAB, PUBLIC_NAMES, RR_LAB, RR_MUTANT_EDITS, allTests, graded, mutated } from '../../fixtures/lab_verify.ts';
 import { RR_SPEC } from '../../fixtures/lab_generator.ts';
+import { buildRules } from '../../../src/shared/lab_toolchains.ts';
 import * as requiredTools from '../../fixtures/required_tools.ts';
 import type { GeneratedLab } from '../../../src/main/agents/lab_generator.ts';
 import type { Grader, VerifyDeps } from '../../../src/main/courses/lab_verify.ts';
+import type { ToolchainProbe } from '../../../src/main/courses/lab_toolchain.ts';
 
 const sandboxed = process.platform === 'darwin' && fs.existsSync(SANDBOX_EXEC_PATH);
 const hasRustc = await requiredTools.hasTools('rustc');
 const unbuilt = { built: false, results: {}, output: 'cc: error' };
 const mutant = (description: string) => ({ description, files: [] });
+// A first-stage C lab: TaskPilot's scaffolding, the round-robin program built alone.
+const TARGET: labVerify.Target = { stage: 1, base: labVerify.FIRST_STAGE_BASE, toolchain: 'c', programs: [] };
+const readyProbe: ToolchainProbe = async (toolchain) => ({ id: toolchain, tools: [], ready: true, problem: null });
 
 // ========== reference ==========
 
@@ -40,7 +45,7 @@ test('reference fails on a failing test, a missing one or a broken build, naming
   assert.deepEqual(missing.parts, ['solution', 'publicTests', 'hiddenTests']);
   assert.match(missing.detail.join('\n'), /never report a result/);
   const broken = labVerify.checkReference(unbuilt, RR_LAB);
-  assert.deepEqual(broken.parts, ['build', 'solution']);
+  assert.deepEqual(broken.parts, ['solution']);
   assert.match(broken.detail.join('\n'), /cc: error/);
 });
 
@@ -60,7 +65,7 @@ test('starter fails when it already passes a test, breaks an earlier stage or do
   assert.match(regression.detail[0], /breaks earlier stages' tests: "fcfs from stage 1"/);
   const missing = labVerify.checkStarter(graded({ [PUBLIC_NAMES[0]]: false }), RR_LAB);
   assert.match(missing.detail[0], /never report a result/);
-  assert.deepEqual(labVerify.checkStarter(unbuilt, RR_LAB).parts, ['build', 'starter']);
+  assert.deepEqual(labVerify.checkStarter(unbuilt, RR_LAB).parts, ['starter']);
 });
 
 // ========== mutants ==========
@@ -120,6 +125,7 @@ const PASSING_REFERENCE = (lab: GeneratedLab) =>
   });
 const deps = (overrides: Partial<VerifyDeps> = {}): VerifyDeps => ({
   grade: PASSING_REFERENCE(RR_LAB),
+  probe: readyProbe,
   writeMutants: async () => ({
     mutants: RR_MUTANT_EDITS.map((entry) => ({ description: entry.description, files: [{ path: 'src/rr.c', content: '// MUTANT' }] })),
     costUsd: 0.1,
@@ -131,11 +137,17 @@ const deps = (overrides: Partial<VerifyDeps> = {}): VerifyDeps => ({
 
 test('a lab that passes every check passes in one round, with its cost and no repair', async () => {
   const progress: string[] = [];
+  const builds: string[] = [];
+  const grade: Grader = async (files, options) => {
+    builds.push(`${options.toolchain}:${files['tests/build.mk'].includes('-o build/rr src/rr.c')}`);
+    return PASSING_REFERENCE(RR_LAB)(files, options);
+  };
   const { report } = await labVerify.verifyLab(
     RR_LAB,
-    { stage: 1, base: labVerify.FIRST_STAGE_BASE },
-    deps({ onProgress: async (state) => void progress.push(`${state.round}:${state.phase}`) }),
+    TARGET,
+    deps({ grade, onProgress: async (state) => void progress.push(`${state.round}:${state.phase}`) }),
   );
+  assert.ok(builds.length > 0 && builds.every((build) => build === 'c:true'), 'every run gets the C toolchain and TaskPilot’s build rules');
   assert.equal(report.status, 'passed');
   assert.equal(report.rounds.length, 1);
   assert.deepEqual(report.rounds[0].checks, { reference: true, starter: true, mutants: true, consistency: true });
@@ -155,7 +167,7 @@ test('mutants are skipped while the solution fails its own tests, and the report
   );
   const { report } = await labVerify.verifyLab(
     RR_LAB,
-    { stage: 1, base: labVerify.FIRST_STAGE_BASE },
+    TARGET,
     deps({
       grade: failing,
       writeMutants: async () => {
@@ -184,7 +196,7 @@ test('a repair the generator refuses ends the check as needs_review with the ref
   captureExpectedErrors((error) => error === refusal);
   const { report } = await labVerify.verifyLab(
     RR_LAB,
-    { stage: 1, base: labVerify.FIRST_STAGE_BASE },
+    TARGET,
     deps({
       judge: async () => ({ issues: [{ kind: 'untested_requirement', detail: 'x' }], costUsd: 0.05 }),
       repair: async () => {
@@ -200,7 +212,7 @@ test('a repair the generator refuses ends the check as needs_review with the ref
   await assert.rejects(
     labVerify.verifyLab(
       RR_LAB,
-      { stage: 1, base: labVerify.FIRST_STAGE_BASE },
+      TARGET,
       deps({
         judge: async () => ({ issues: [{ kind: 'untested_requirement', detail: 'x' }], costUsd: 0 }),
         repair: async () => {
@@ -214,13 +226,29 @@ test('a repair the generator refuses ends the check as needs_review with the ref
 
 test('a cancelled check stops between steps', async () => {
   const controller = new AbortController();
-  const grade: Grader = async (files) => {
+  const grade: Grader = async (files, options) => {
     controller.abort();
-    return PASSING_REFERENCE(RR_LAB)(files, {});
+    return PASSING_REFERENCE(RR_LAB)(files, options);
   };
-  await assert.rejects(labVerify.verifyLab(RR_LAB, { stage: 1, base: labVerify.FIRST_STAGE_BASE }, deps({ grade, signal: controller.signal })), {
+  await assert.rejects(labVerify.verifyLab(RR_LAB, TARGET, deps({ grade, signal: controller.signal })), {
     code: 'agent_cancelled',
   });
+});
+
+test('a toolchain missing under the sandbox stops the check before any grade, with no repair', async () => {
+  let graded = 0;
+  const missing: ToolchainProbe = async (toolchain) => ({
+    id: toolchain,
+    tools: [{ command: 'cc', version: null, install: 'xcode-select --install' }],
+    ready: false,
+    problem: null,
+  });
+  const grade: Grader = async () => {
+    graded += 1;
+    return unbuilt;
+  };
+  await assert.rejects(labVerify.verifyLab(RR_LAB, TARGET, deps({ grade, probe: missing })), { code: 'toolchain_missing' });
+  assert.equal(graded, 0);
 });
 
 // ========== in the sandbox ==========
@@ -237,26 +265,23 @@ const realMutants = async () => ({
 test.skipIf(!sandboxed)('the example’s retry path: a surviving mutant and a consistency issue in round 1, a pass in round 2', { tags: ['e2e'] }, async () => {
   const judgements = [[{ kind: 'untested_requirement' as const, detail: '题面没有说清作业运行时新到的作业和被抢占的作业谁先入队，也没有测试' }], []];
   const repairs: { report: string; parts: string[] }[] = [];
-  const { lab, report } = await labVerify.verifyLab(
-    IDLE_LAB,
-    { stage: 1, base: labVerify.FIRST_STAGE_BASE },
-    {
-      grade: labVerify.sandboxGrader(),
-      writeMutants: realMutants,
-      judge: async () => ({ issues: judgements.shift()!, costUsd: 0.05 }),
-      repair: async (previous, failure) => {
-        repairs.push(failure);
-        return {
-          lab: {
-            ...previous,
-            readme: `${previous.readme}\n作业运行时新到的作业先入队，被抢占的作业再回到队尾。\n`,
-            hiddenTests: [...previous.hiddenTests, RR_SPEC.hiddenTests[0]],
-          },
-          costUsd: 0.4,
-        };
-      },
+  const { lab, report } = await labVerify.verifyLab(IDLE_LAB, TARGET, {
+    grade: labVerify.sandboxGrader(),
+    probe: readyProbe,
+    writeMutants: realMutants,
+    judge: async () => ({ issues: judgements.shift()!, costUsd: 0.05 }),
+    repair: async (previous, failure) => {
+      repairs.push(failure);
+      return {
+        lab: {
+          ...previous,
+          readme: `${previous.readme}\n作业运行时新到的作业先入队，被抢占的作业再回到队尾。\n`,
+          hiddenTests: [...previous.hiddenTests, RR_SPEC.hiddenTests[0]],
+        },
+        costUsd: 0.4,
+      };
     },
-  );
+  });
   assert.equal(report.status, 'passed');
   assert.equal(report.rounds.length, 2);
   const [first, second] = report.rounds;
@@ -288,7 +313,10 @@ test.skipIf(!sandboxed)('generated code runs with no network and cannot read the
       '',
     ].join('\n');
     const build = 'build:\n\t@true\n\nclean:\n\t@true\n';
-    const run = await labVerify.sandboxGrader()({ ...labVerify.FIRST_STAGE_BASE, 'tests/build.mk': build, 'tests/public/01_probe.sh': script }, {});
+    const run = await labVerify.sandboxGrader()(
+      { ...labVerify.FIRST_STAGE_BASE, 'tests/build.mk': build, 'tests/public/01_probe.sh': script },
+      { toolchain: 'c' },
+    );
     assert.equal(run.built, true, run.output);
     assert.deepEqual(run.results, { 'home is private': true, 'no network': true, 'empty environment': true });
   } finally {
@@ -297,21 +325,21 @@ test.skipIf(!sandboxed)('generated code runs with no network and cannot read the
 });
 
 // rustup finds its toolchains through RUSTUP_HOME, which the scratch HOME
-// would otherwise hide: every Rust lab then failed to build.
+// would otherwise hide: every Rust lab then failed to build. The build rules
+// are TaskPilot's Rust template.
 test.skipIf(!sandboxed || !hasRustc)('a Rust lab builds with the rustup toolchain under the sandbox', { tags: ['e2e'] }, async () => {
-  const build = 'build:\n\t@mkdir -p build\n\t@rustc --edition 2021 -o build/hello src/main.rs\n\nclean:\n\t@rm -rf build\n';
   const script = '#!/bin/sh\nif [ "$(./build/hello)" = hi ]; then echo "ok - prints hi"; else echo "not ok - prints hi"; fi\n';
   const files = {
     ...labVerify.FIRST_STAGE_BASE,
-    'tests/build.mk': build,
+    'tests/build.mk': buildRules('rust', [{ program: 'hello', sources: ['src/main.rs'] }]),
     'tests/public/01_hello.sh': script,
     'src/main.rs': 'fn main() { println!("hi"); }\n',
   };
-  const run = await labVerify.sandboxGrader()(files, {});
+  const run = await labVerify.sandboxGrader()(files, { toolchain: 'rust' });
   assert.equal(run.built, true, run.output);
   assert.deepEqual(run.results, { 'prints hi': true });
 });
 
 test.skipIf(sandboxed)('without Seatbelt the check refuses to run generated code', async () => {
-  await assert.rejects(labVerify.sandboxGrader()({}, {}), { code: 'sandbox_unavailable' });
+  await assert.rejects(labVerify.sandboxGrader()({}, { toolchain: 'c' }), { code: 'sandbox_unavailable' });
 });

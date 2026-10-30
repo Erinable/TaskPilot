@@ -12,11 +12,18 @@ test('the interview prompt carries the form, the offered packs and their concept
   const prompt = interview.clarifyPrompt({ ...GOAL, courses: [{ ...OS_COURSE, concepts: OS_COURSE.concepts! }] });
   assert.match(prompt, /<goal>\n想学操作系统的进程调度\n<\/goal>/);
   assert.match(prompt, /Level: knows the basics/);
+  assert.match(prompt, /Toolchain: c/);
   assert.match(prompt, /Weekly time: 4 hours/);
   assert.match(prompt, /<course id="os">/);
   assert.match(prompt, /- round-robin: /);
   assert.match(prompt, /At most 3 questions/);
   assert.match(interview.systemPrompt(), /never ask about those again/);
+});
+
+test('interview prompts omit an empty environment note', () => {
+  const prompt = interview.clarifyPrompt({ ...GOAL, form: { ...fixtures.GOAL_FORM, environment: '' }, courses: [] });
+  assert.match(prompt, /Toolchain: c/);
+  assert.doesNotMatch(prompt, /Environment:/);
 });
 
 test('validateClarify() accepts an offered pack or null and at most three questions', () => {

@@ -14,6 +14,8 @@ import * as labs from '../../src/main/courses/labs.ts';
 import { SANDBOX_EXEC_PATH, buildProfile } from '../../src/main/coding/coding_sandbox.ts';
 import type { CheckResult } from '../shared/harness.ts';
 import type { GeneratedLab } from '../../src/main/agents/lab_generator.ts';
+import { buildRules } from '../../src/shared/lab_toolchains.ts';
+import type { LabToolchainId } from '../../src/shared/lab_toolchains.ts';
 
 const run = promisify(execFile);
 const GRADE_TIMEOUT_MS = 120_000;
@@ -44,11 +46,17 @@ const writeAll = async (root: string, files: Record<string, string>) => {
 
 export type LabRun = { starter: Grade; reference: Grade };
 
-// The starter repository, then the reference and hidden tests over it.
-export const runLab = async (artifact: labs.LabArtifact): Promise<LabRun> => {
+// The starter repository, with TaskPilot's build rules for the toolchain,
+// then the reference and hidden tests over it.
+export const runLab = async (artifact: labs.LabArtifact, toolchain: LabToolchainId): Promise<LabRun> => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'tp-eval-lab-')));
   try {
-    await writeAll(root, { Makefile: labs.MAKEFILE, [labs.GRADE_SCRIPT_PATH]: labs.GRADE_SCRIPT, ...labs.repositoryFiles(artifact, 1) });
+    await writeAll(root, {
+      Makefile: labs.MAKEFILE,
+      [labs.GRADE_SCRIPT_PATH]: labs.GRADE_SCRIPT,
+      [labs.BUILD_RULES_PATH]: buildRules(toolchain, [{ program: artifact.program, sources: artifact.sources }]),
+      ...labs.repositoryFiles(artifact, 1),
+    });
     const starter = await grade(root);
     await run('git', ['init', '-q'], { cwd: root });
     await fs.writeFile(path.join(root, '.reference.patch'), artifact.private.reference);

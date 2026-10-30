@@ -207,7 +207,7 @@ test('catalog reads share frozen definitions that callers cannot change', async 
 });
 
 // ========== Course requirements ==========
-const FORM = { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4 } as const;
+const FORM = { level: 'basic', target: 'implement', toolchain: 'c', environment: 'macOS', weeklyHours: 4 } as const;
 const pick = { course: 'os', reason: 'fits', options: [{ id: 'os', title: '操作系统实验' }] };
 const coursePlan: CoursePlan = {
   course: { id: 'os', version: '0.2.0', contentHash: 'h', source: 'builtin' },
@@ -280,4 +280,28 @@ test('a course run interrupted by quitting names Tutor', async () => {
   await store.begin(id, 'clarifying');
   const reloaded = (await newStore(configDir)).store;
   assert.match(reloaded.get(id).error!.message, /Tutor/);
+});
+
+test('load infers an unambiguous legacy course toolchain in the form and plan', async () => {
+  const { store, configDir } = await newStore();
+  const legacyForm = { level: 'basic' as const, target: 'implement' as const, environment: 'macos,rust', weeklyHours: 4 };
+  const { id } = await store.create({ text: '想学 Rust', course: legacyForm });
+  await store.begin(id, 'clarifying');
+  await store.finishCourseClarify(id, { title: 'Rust', summary: 's', questions: [], pick });
+  await store.setCourseChoice(id, { course: 'os' });
+  await store.begin(id, 'planning');
+  await store.finishCoursePlan(
+    id,
+    {
+      ...coursePlan,
+      goal: { kind: 'course', goal: '调度', level: 'basic', target: 'implement', environment: 'macos,rust', weeklyHours: 4, knownConcepts: [] },
+    },
+    [],
+  );
+  const ambiguous = await store.create({ text: '想学多工具', course: { ...legacyForm, environment: 'c,rust' } });
+
+  const reloaded = (await newStore(configDir)).store;
+  assert.equal(reloaded.get(id).course!.form.toolchain, 'rust');
+  assert.equal(reloaded.get(id).course!.plan!.goal.toolchain, 'rust');
+  assert.equal(reloaded.get(ambiguous.id).course!.form.toolchain, undefined);
 });

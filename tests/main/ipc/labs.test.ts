@@ -36,7 +36,7 @@ const emptyFolder = async (shutdown: () => Promise<void> | undefined) => {
 
 const createRepository = async (h, definitions: LabArtifact[] = [FCFS]) => {
   const root = await emptyFolder(h.shutdown);
-  const entry = await h.labs.createRepository({ root, course: 'os', plan: SCHED_PLAN, labs: definitions });
+  const entry = await h.labs.createRepository({ root, course: 'os', toolchain: 'c', plan: SCHED_PLAN, labs: definitions });
   return { root, entry };
 };
 
@@ -283,11 +283,11 @@ test('a lab repository refuses unsafe roots without switching repositories', asy
   const inside = path.join(h.root, 'nested');
   await fs.mkdir(inside);
   assert.equal(
-    await h.labs.createRepository({ root: inside, course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
+    await h.labs.createRepository({ root: inside, course: 'os', toolchain: 'c', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
     'root_in_repository',
   );
   assert.equal(
-    await h.labs.createRepository({ root: 'relative', course: 'os', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
+    await h.labs.createRepository({ root: 'relative', course: 'os', toolchain: 'c', plan: SCHED_PLAN, labs: [FCFS] }).catch((error) => error.code),
     'root_not_absolute',
   );
   assert.equal(h.repositories.list().length, 1);

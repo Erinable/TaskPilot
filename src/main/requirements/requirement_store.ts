@@ -25,6 +25,7 @@ import type { StateChanged } from '../infrastructure/state_changes.ts';
 import { readStoredJson, writeStoredJson } from '../infrastructure/persisted_json.ts';
 import type { Concept } from '../../shared/course_pack.ts';
 import type { CoursePack } from '../../shared/course_pack.ts';
+import { inferToolchain } from '../../shared/lab_toolchains.ts';
 import { JsonWriteQueue } from '../infrastructure/atomic_json_file.ts';
 
 export const REQUIREMENTS_FILENAME = 'requirements.json';
@@ -131,6 +132,20 @@ const fail = (message: string, code: RequirementErrorCode, field?: string): neve
 
 const isStatus = (value: unknown): value is RequirementStatus => STATUSES.includes(value as RequirementStatus);
 
+// Forms and plans saved before toolchains get one when their environment
+// names exactly one; otherwise they stay without and must be redone.
+const withInferredGoal = <Goal extends coursePlan.GoalForm>(goal: Goal): Goal => {
+  if (goal.toolchain) return goal;
+  const toolchain = inferToolchain(goal.environment ?? '');
+  return toolchain ? { ...goal, toolchain } : goal;
+};
+
+const withInferredToolchain = (course: CourseInterview): CourseInterview => ({
+  ...course,
+  form: withInferredGoal(course.form),
+  plan: course.plan ? { ...course.plan, goal: withInferredGoal(course.plan.goal) } : course.plan,
+});
+
 const userText = (value: unknown, field: string, max: number, { optional = false } = {}): string => {
   if ((value === undefined || value === null || value === '') && optional) return '';
   if (typeof value !== 'string') return fail(`${field} must be text`, 'invalid_argument', field);
@@ -210,6 +225,7 @@ export class RequirementStore implements TaskCatalog {
             phase: null,
             error: { code: 'agent_interrupted', message: 'TaskPilot 在生成 lab 时退出了' },
           };
+        if (item.course) item.course = withInferredToolchain(item.course);
         this.#items.set(item.id, item);
       }
     } catch (error) {

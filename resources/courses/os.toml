@@ -31,7 +31,7 @@ practiceGuide = [
   "- reason says in one plain sentence which mechanism the student would understand by writing it.",
 ]
 referenceGuide = "Write the complete solution to this lab step. It is a reference answer for a student, so keep it close to the kernel's existing style and explain non-obvious invariants in short comments."
-appliesTo = { languages = ["c", "rust"] }
+appliesTo = { languages = ["c", "rust"], toolchains = ["c"] }
 labGuide = [
   "A lab is a repository plus tests: a README with the task, starter code with TODOs, public tests under tests/public/ and a make grade target.",
   "With the xv6 toolchain (a riscv64 gcc and qemu) installed, a lab may change xv6 itself and be graded by xv6's own make grade.",

@@ -14,6 +14,7 @@ export const RR_REQUEST: LabRequest = {
     goal: '想学操作系统的进程调度',
     level: 'basic',
     target: 'implement',
+    toolchain: 'c',
     environment: 'macOS，本机 C 编译器',
     weeklyHours: 4,
     knownConcepts: ['process-state'],
@@ -21,7 +22,8 @@ export const RR_REQUEST: LabRequest = {
   concepts: [OS_COURSE.concepts!.find((concept) => concept.id === 'round-robin')!],
   difficulty: 'easy',
   stage: 1,
-  existing: { labIds: [], files: [], build: null },
+  toolchain: 'c',
+  existing: { labIds: [], files: [], programs: [] },
 };
 
 const CHECK = 'check() { if [ "$2" = "$3" ]; then echo "ok - $1"; else echo "not ok - $1"; fi; }';
@@ -36,7 +38,8 @@ export const RR_SPEC = {
   steps: ['读 `labs/01-round-robin/README.md`。', '在 `src/rr.c` 里补全 `rr()`。', '运行 `make grade`。'],
   acceptance: [{ text: '按时间片轮转', test: '两个作业同时到达时轮流运行' }],
   rubricNotes: [{ id: 'mechanism', note: '时间片用完时新到作业要先入队。' }],
-  build: 'CC ?= cc\n\nbuild: build/rr\n\nbuild/%: src/%.c\n\t@mkdir -p build\n\t$(CC) -o $@ $<\n\nclean:\n\trm -rf build\n\n.PHONY: build clean\n',
+  program: 'rr',
+  entry: 'src/rr.c',
   starterFiles: ['src/rr.c'],
   fileScope: ['src/rr.c'],
   publicTests: [

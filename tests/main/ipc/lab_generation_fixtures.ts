@@ -168,7 +168,7 @@ export const gradeOnce = (
 export const ORDER_TEST = {
   file: '01_rr_order.sh',
   names: ['作业运行中到达时的入队顺序'],
-  script: `#!/bin/sh\ncheck "作业运行中到达时的入队顺序" "x" "x"\n`,
+  script: `#!/bin/sh\ncheck "作业运行中到达时的入队顺序" "$(printf '2\\n' | build/rr)" "$(printf '2\\n' | build/rr)"\n`,
 };
 
 export const exampleGrader: Grader = async (files, options) => {
@@ -183,11 +183,12 @@ export const PRIORITY_SPEC = {
   id: 'priority-sched',
   title: '优先级调度',
   acceptance: [{ text: '高优先级先运行', test: '高优先级的作业先运行' }],
-  build: null,
+  program: 'prio',
+  entry: 'src/prio.c',
   starterFiles: ['src/prio.c'],
   fileScope: ['src/prio.c'],
-  publicTests: [{ file: '02_prio.sh', names: ['高优先级的作业先运行'], script: '#!/bin/sh\necho "ok - 高优先级的作业先运行"\n' }],
-  hiddenTests: [{ file: '02_prio_hidden.sh', names: ['同优先级按到达先后'], script: '#!/bin/sh\necho "ok - 同优先级按到达先后"\n' }],
+  publicTests: [{ file: '02_prio.sh', names: ['高优先级的作业先运行'], script: '#!/bin/sh\nbuild/prio </dev/null\necho "ok - 高优先级的作业先运行"\n' }],
+  hiddenTests: [{ file: '02_prio_hidden.sh', names: ['同优先级按到达先后'], script: '#!/bin/sh\nbuild/prio </dev/null\necho "ok - 同优先级按到达先后"\n' }],
 };
 export const PRIORITY_CODE = { ...RR_CODE, starter: [{ path: 'src/prio.c', content: '// TODO\n' }], solution: [{ path: 'src/prio.c', content: '// done\n' }] };
 export const PRIORITY_MUTANTS = {

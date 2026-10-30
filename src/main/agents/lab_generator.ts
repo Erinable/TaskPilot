@@ -1,9 +1,12 @@
 // The lab generator: from the concepts a lab covers, its difficulty, the
 // learner's goal and the course pack's labGuide, it writes one lab of a
 // staged lab repository (../labs.ts) in two calls: first the statement, the
-// build rules and the tests (spec), then the starter code, the solution and
-// the hint ladder (code). A repair call rewrites only the parts a failed
-// self-check names (T5), from the previous lab and the report.
+// program it builds and the tests (spec), then the starter code, the
+// solution and the hint ladder (code). A repair call rewrites only the parts
+// a failed self-check names (T5), from the previous lab and the report.
+// TaskPilot writes tests/build.mk from the lab's toolchain
+// (../../shared/lab_toolchains.ts); the model only names the program and
+// its entry file.
 //
 // [人工决策-2026-10-27 00:36:21] lab 只做"仓库 + 测试"：参考解、隐藏测试、提示梯度留在仓库外。
 //
@@ -19,6 +22,8 @@ import type { RunAgent } from '../runtimes/claude_cli.ts';
 import type { Concept, CoursePack } from '../../shared/course_pack.ts';
 import type { CoursePlan } from '../../shared/course_plan.ts';
 import type { Difficulty } from '../../shared/ipc/packages.ts';
+import { PROGRAM_NAME, TOOLCHAINS } from '../../shared/lab_toolchains.ts';
+import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
 
 // Starter code and the solution live here; tests/, labs/ and the Makefile are TaskPilot's.
 const LAB_SOURCE_DIR = 'src/';
@@ -36,14 +41,16 @@ const PATH_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const TEST_NAME_MAX = 80;
 
 // What a lab is generated for. `concepts` are the pack's (or the plan's
-// `ai:` extras) the lab covers; `existing` is the lab repository so far.
+// `ai:` extras) the lab covers; `existing` is the lab repository so far:
+// its labs, its src/ files and the programs earlier stages build.
 export type LabRequest = {
   course: CoursePack;
   goal: CoursePlan['goal'];
   concepts: Concept[];
   difficulty: Difficulty;
   stage: number;
-  existing: { labIds: string[]; files: string[]; build: string | null };
+  toolchain: LabToolchainId;
+  existing: { labIds: string[]; files: string[]; programs: string[] };
 };
 
 // One test file: its name in tests/public/ (or hidden/), the test names it
@@ -61,7 +68,10 @@ export type LabSpec = {
   acceptance: { text: string; test: string }[];
   // What grading should look for in this lab, under the pack's rubric ids.
   rubricNotes: { id: string; note: string }[];
-  build: string | null;
+  // build/<program> is what this stage's tests run; `entry` is the starter
+  // file holding main (the C sources are every starter .c file).
+  program: string;
+  entry: string;
   starterFiles: string[];
   fileScope: string[];
   publicTests: TestFile[];
@@ -73,9 +83,9 @@ export type GeneratedHint = { level: number; text: string; code: string | null }
 export type LabCode = { starter: SourceFile[]; solution: SourceFile[]; hints: GeneratedHint[] };
 export type GeneratedLab = LabSpec & LabCode;
 
-// The parts a repair may rewrite. The id, the starter file paths and the
-// file scope stay, so the lab keeps its shape across rounds.
-const LAB_PARTS = ['statement', 'build', 'publicTests', 'hiddenTests', 'starter', 'solution', 'hints'] as const;
+// The parts a repair may rewrite. The id, the program, the starter file
+// paths and the file scope stay, so the lab keeps its shape across rounds.
+const LAB_PARTS = ['statement', 'publicTests', 'hiddenTests', 'starter', 'solution', 'hints'] as const;
 export type LabPart = (typeof LAB_PARTS)[number];
 const STATEMENT_KEYS = ['title', 'summary', 'difficultyReason', 'estimateHours', 'readme', 'steps', 'acceptance', 'rubricNotes'] as const;
 
@@ -119,7 +129,7 @@ const contextBlock = (request: LabRequest): string[] => [
   '<learner>',
   `Level: ${request.goal.level}`,
   `Target: ${request.goal.target}`,
-  `Environment: ${request.goal.environment}`,
+  ...(request.goal.environment.trim() ? [`Environment note: ${request.goal.environment}`] : []),
   `Weekly time: ${request.goal.weeklyHours} hours`,
   `Already knows: ${request.goal.knownConcepts.join(', ') || '(nothing marked)'}`,
   '</learner>',
@@ -133,29 +143,25 @@ const contextBlock = (request: LabRequest): string[] => [
 ];
 
 // The scaffolding TaskPilot writes around every lab, so the tests and the
-// build rules fit it.
-const scaffoldLines = (request: LabRequest): string[] => [
-  'The lab repository (TaskPilot writes these; you never do):',
-  '- `Makefile`: `make grade` runs `make clean`, then `make build`, then every stage’s tests: `sh tests/public/<file>` for each file in name order, from the repository root.',
-  '- `tests/build.mk` (yours): the `build` and `clean` targets. Build outputs go under `build/`, which git ignores. Use only the compilers and interpreters the learner’s environment names.',
-  `- Test files are POSIX sh scripts named \`${stagePrefix(request.stage)}<name>.sh\` for this stage. Each prints one line per test, \`ok - <test name>\` or \`not ok - <test name>\`, and exits 0 even when a test fails. A helper like \`check() { if [ "$2" = "$3" ]; then echo "ok - $1"; else echo "not ok - $1"; fi; }\` called as \`check "<test name>" "$(printf '<input>' | build/<program>)" "$(printf '<expected>')"\` is the expected shape.`,
-  '- Hidden tests run the same way, as extra files beside the public ones; their file names must differ from the public ones.',
-  `- Starter code goes under \`${LAB_SOURCE_DIR}\`.`,
-  ...(request.stage > 1
-    ? [
-        `- Earlier stages are already in the repository. Labs so far: ${request.existing.labIds.join(', ')}. Files: ${request.existing.files.join(', ')}.`,
-        '- Their tests keep running, so never change their behaviour. New starter files must be new paths.',
-        ...(request.existing.build
-          ? [
-              '- The current tests/build.mk, which build may replace (keep every target it has) or leave as null:',
-              '<build_mk>',
-              request.existing.build,
-              '</build_mk>',
-            ]
-          : []),
-      ]
-    : []),
-];
+// code fit it.
+const scaffoldLines = (request: LabRequest): string[] => {
+  const toolchain = TOOLCHAINS[request.toolchain];
+  return [
+    `Language: ${toolchain.language}. Every starter file is a ${toolchain.extension} file${request.toolchain === 'c' ? ' or a .h header' : ''}.`,
+    'The lab repository (TaskPilot writes these; you never do):',
+    '- `Makefile`: `make grade` runs `make clean`, then `make build`, then every stage’s tests: `sh tests/public/<file>` for each file in name order, from the repository root.',
+    `- \`tests/build.mk\`: TaskPilot writes it, one program per stage under \`build/\` (which git ignores). This lab’s program is built as ${toolchain.buildLine} Nothing else is installed: no package manager, no network.`,
+    `- Test files are POSIX sh scripts named \`${stagePrefix(request.stage)}<name>.sh\` for this stage. Each runs \`build/<program>\`, prints one line per test, \`ok - <test name>\` or \`not ok - <test name>\`, and exits 0 even when a test fails. A helper like \`check() { if [ "$2" = "$3" ]; then echo "ok - $1"; else echo "not ok - $1"; fi; }\` called as \`check "<test name>" "$(printf '<input>' | build/<program>)" "$(printf '<expected>')"\` is the expected shape.`,
+    '- Hidden tests run the same way, as extra files beside the public ones; their file names must differ from the public ones.',
+    `- Starter code goes under \`${LAB_SOURCE_DIR}\`.`,
+    ...(request.stage > 1
+      ? [
+          `- Earlier stages are already in the repository. Labs so far: ${request.existing.labIds.join(', ')}. Files: ${request.existing.files.join(', ')}. Programs: ${request.existing.programs.join(', ')}.`,
+          '- Their tests keep running, so never change their behaviour. New starter files must be new paths, and this lab’s program a new name.',
+        ]
+      : []),
+  ];
+};
 
 const testRules = [
   'Tests:',
@@ -167,7 +173,7 @@ const testRules = [
 
 export const specPrompt = (request: LabRequest): string =>
   [
-    'Write the statement, the build rules and the tests of one lab. Starter code and the solution come in a second step, so name the starter files here and keep the tests independent of how the solution is written.',
+    'Write the statement, the program and the tests of one lab. Starter code and the solution come in a second step, so name the starter files here and keep the tests independent of how the solution is written.',
     '',
     ...contextBlock(request),
     '',
@@ -180,9 +186,10 @@ export const specPrompt = (request: LabRequest): string =>
     '- readme: the task statement in Markdown: what to build, the exact input and output formats, every rule the tests check (edge cases included), and how to run `make grade`.',
     `- steps: 2 to ${MAX_STEPS} short steps for the learner, naming files in backticks.`,
     `- starterFiles: 1 to ${MAX_STARTER_FILES} paths under ${LAB_SOURCE_DIR}; fileScope: the ones the learner edits.`,
+    `- program: the name of what \`make build\` makes for this lab, build/<program> (lowercase letters, digits or -, starting with a letter, at most 32)${request.existing.programs.length ? `; not one of ${request.existing.programs.join(', ')}` : ''}. Every test file of this lab runs build/<program>.`,
+    `- entry: the starter file holding the program’s main, one of starterFiles, a ${TOOLCHAINS[request.toolchain].extension} file.`,
     `- rubricNotes: 0 to ${MAX_RUBRIC_NOTES} notes for grading this lab, one per rubric id at most: the mistake worth catching under that item here, in one sentence.`,
     ...testRules,
-    ...(request.stage === 1 ? ['- build: the whole tests/build.mk.'] : ['- build: the whole new tests/build.mk, or null to keep the current one.']),
   ].join('\n');
 
 export const codePrompt = (request: LabRequest, spec: LabSpec): string =>
@@ -196,7 +203,8 @@ export const codePrompt = (request: LabRequest, spec: LabSpec): string =>
       {
         id: spec.id,
         readme: spec.readme,
-        build: spec.build ?? request.existing.build,
+        program: spec.program,
+        entry: spec.entry,
         starterFiles: spec.starterFiles,
         fileScope: spec.fileScope,
         publicTests: spec.publicTests,
@@ -208,7 +216,7 @@ export const codePrompt = (request: LabRequest, spec: LabSpec): string =>
     '</lab>',
     '',
     'Fields:',
-    '- starter: one entry per starter file, the whole file. It builds with the build rules and runs; what the learner writes is left as TODO comments in fileScope files, with the parts they do not need to write (input, output, data structures) already done.',
+    `- starter: one entry per starter file, the whole file. It builds as ${TOOLCHAINS[request.toolchain].buildLine} and runs; what the learner writes is left as TODO comments in fileScope files, with the parts they do not need to write (input, output, data structures) already done.`,
     '  Every public test of this stage must fail on the starter, error cases included: a TODO stub that already returns the error a test expects makes that test pass, so stub it with a value no test accepts.',
     '- solution: the whole file for every starter file the solution changes, at the same paths. With it, every public and hidden test passes. Keep it in the starter’s style, with short comments on non-obvious invariants.',
     '- hints: five hints, levels 1 to 5, each one step closer to the answer:',
@@ -219,7 +227,6 @@ export const codePrompt = (request: LabRequest, spec: LabSpec): string =>
 
 const partFields: Record<LabPart, string> = {
   statement: 'title, summary, difficultyReason, estimateHours, readme, steps, acceptance, rubricNotes',
-  build: 'build',
   publicTests: 'publicTests',
   hiddenTests: 'hiddenTests',
   starter: 'starter (same paths as before)',
@@ -301,7 +308,8 @@ const PROPERTIES = {
     maxItems: MAX_RUBRIC_NOTES,
     items: { type: 'object', additionalProperties: false, required: ['id', 'note'], properties: { id: str(32), note: str(300) } },
   },
-  build: { anyOf: [{ type: 'null' }, content(MAX_SCRIPT_BYTES)] },
+  program: { type: 'string', pattern: PROGRAM_NAME.source },
+  entry: str(120),
   starterFiles: { type: 'array', minItems: 1, maxItems: MAX_STARTER_FILES, items: str(120) },
   fileScope: { type: 'array', minItems: 1, maxItems: MAX_STARTER_FILES, items: str(120) },
   publicTests: testsSchema,
@@ -318,13 +326,12 @@ const objectSchema = (keys: readonly (keyof typeof PROPERTIES)[]) => ({
   properties: Object.fromEntries(keys.map((key) => [key, PROPERTIES[key]])),
 });
 
-const SPEC_KEYS = ['id', ...STATEMENT_KEYS, 'build', 'starterFiles', 'fileScope', 'publicTests', 'hiddenTests'] as const;
+const SPEC_KEYS = ['id', ...STATEMENT_KEYS, 'program', 'entry', 'starterFiles', 'fileScope', 'publicTests', 'hiddenTests'] as const;
 const SPEC_SCHEMA = objectSchema(SPEC_KEYS);
 const CODE_SCHEMA = objectSchema(['starter', 'solution', 'hints']);
 
 const PART_KEYS: Record<LabPart, readonly (keyof typeof PROPERTIES)[]> = {
   statement: STATEMENT_KEYS,
-  build: ['build'],
   publicTests: ['publicTests'],
   hiddenTests: ['hiddenTests'],
   starter: ['starter'],
@@ -340,7 +347,7 @@ const fail: (path: string, problem: string) => never = (path, problem) => {
   throw new AgentOutputError(`${path} ${problem}`);
 };
 
-// File contents keep their whitespace; tabs (Makefile recipes) are allowed.
+// File contents keep their whitespace; tabs are allowed.
 const fileText = (value: unknown, path: string, maxBytes: number): string => {
   if (typeof value !== 'string' || !value.trim()) fail(path, 'must be file contents');
   if (Buffer.byteLength(value) > maxBytes) fail(path, `is larger than ${maxBytes} bytes`);
@@ -410,13 +417,27 @@ export const validateHints = (value: unknown): GeneratedHint[] =>
     return { level, text: text(raw.text, `${at}.text`, 1000), code: code !== null && code.split('\n').length <= HINT_CODE_LINES[level] ? code : null };
   });
 
-// tests/build.mk: both targets the Makefile calls.
-const buildRules = (value: unknown, stage: number): string | null => {
-  if (value === null && stage > 1) return null;
-  const rules = fileText(value, 'build', MAX_SCRIPT_BYTES);
-  for (const target of ['build', 'clean']) if (!new RegExp(`^${target}\\s*:`, 'm').test(rules)) fail('build', `must define the ${target} target`);
-  return rules;
+// The program `make build` makes for this lab and the file holding its main.
+const programOf = (raw: Record<string, unknown>, request: LabRequest, starterFiles: string[]) => {
+  if (typeof raw.program !== 'string' || !PROGRAM_NAME.test(raw.program))
+    fail('program', 'must be lowercase letters, digits or -, starting with a letter, at most 32');
+  if (request.existing.programs.includes(raw.program)) fail('program', `"${raw.program}" is already an earlier stage's program`);
+  const entry = sourcePath(raw.entry, 'entry');
+  if (!starterFiles.includes(entry)) fail('entry', `"${entry}" is not a starter file`);
+  const { extension } = TOOLCHAINS[request.toolchain];
+  if (!entry.endsWith(extension)) fail('entry', `must be a ${extension} file`);
+  return { program: raw.program, entry };
 };
+
+// The files a toolchain compiles or runs; C may add .h headers.
+const sourceExtensions = (toolchain: LabToolchainId) => (toolchain === 'c' ? ['.c', '.h'] : [TOOLCHAINS[toolchain].extension]);
+
+// What tests/build.mk builds for a lab: its program from the entry, or
+// every .c starter file for C.
+export const programOfLab = (lab: Pick<LabSpec, 'program' | 'entry' | 'starterFiles'>, toolchain: LabToolchainId): LabProgram => ({
+  program: lab.program,
+  sources: TOOLCHAINS[toolchain].singleSource ? [lab.entry] : lab.starterFiles.filter((file) => file.endsWith('.c')),
+});
 
 const rubricNotes = (value: unknown, rubricIds: string[]) => {
   const notes = list(value ?? [], 'rubricNotes', { max: MAX_RUBRIC_NOTES }).map((item, index) => {
@@ -477,6 +498,10 @@ export const validateSpec = (raw: unknown, request: LabRequest): LabSpec => {
   );
   const taken = starterFiles.find((file) => request.existing.files.includes(file));
   if (taken) fail('starterFiles', `"${taken}" is already in the repository`);
+  const extensions = sourceExtensions(request.toolchain);
+  const foreign = starterFiles.find((file) => !extensions.some((extension) => file.endsWith(extension)));
+  if (foreign) fail('starterFiles', `"${foreign}" must be a ${extensions.join(' or ')} file`);
+  const { program, entry } = programOf(raw, request, starterFiles);
   const fileScope = unique(
     list(raw.fileScope, 'fileScope', { min: 1, max: MAX_STARTER_FILES }).map((file, index) => sourcePath(file, `fileScope[${index}]`)),
     'fileScope',
@@ -484,9 +509,11 @@ export const validateSpec = (raw: unknown, request: LabRequest): LabSpec => {
   const outside = fileScope.find((file) => !starterFiles.includes(file));
   if (outside) fail('fileScope', `"${outside}" is not a starter file`);
   const tests = testsOf(raw, request.stage);
+  const unrun = [...tests.publicTests, ...tests.hiddenTests].find((file) => !file.script.includes(`build/${program}`));
+  if (unrun) fail(`${tests.publicTests.includes(unrun) ? 'publicTests' : 'hiddenTests'}`, `${unrun.file} never runs build/${program}`);
   const publicNames = new Set(tests.publicTests.flatMap((file) => file.names));
   const rubricIds = request.course.rubric.map((item) => item.id);
-  return { id: raw.id, ...statement(raw, publicNames, rubricIds), build: buildRules(raw.build, request.stage), starterFiles, fileScope, ...tests };
+  return { id: raw.id, ...statement(raw, publicNames, rubricIds), program, entry, starterFiles, fileScope, ...tests };
 };
 
 const sources = (value: unknown, path: string, allowed: string[]): SourceFile[] => {
@@ -529,7 +556,8 @@ const mergeRepair = (raw: unknown, previous: GeneratedLab, parts: LabPart[], req
   const keys = partKeys(parts);
   const merged: Record<string, unknown> = { ...previous, ...Object.fromEntries(keys.map((key) => [key, raw[key]])) };
   const others = request.existing.labIds.filter((id) => id !== previous.id);
-  const spec = validateSpec(merged, { ...request, existing: { ...request.existing, labIds: others } });
+  const programs = request.existing.programs.filter((program) => program !== previous.program);
+  const spec = validateSpec(merged, { ...request, existing: { ...request.existing, labIds: others, programs } });
   return checkGenerated({ ...spec, ...validateCode(merged, spec) });
 };
 

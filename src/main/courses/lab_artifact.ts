@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import * as git from '../repository/git.ts';
 import * as labs from './labs.ts';
+import { programOfLab } from '../agents/lab_generator.ts';
 import type * as generator from '../agents/lab_generator.ts';
 import type * as labVerify from './lab_verify.ts';
 
@@ -53,7 +54,7 @@ export const toLabArtifact = async (
       files: Object.fromEntries(lab.starter.map((file) => [file.path, file.content])),
       fileScope: lab.fileScope,
       publicTests: Object.fromEntries(lab.publicTests.map((file) => [file.file, file.script])),
-      build: lab.build,
+      ...programOfLab(lab, request.toolchain),
       private: {
         reference,
         hidden: Object.fromEntries(lab.hiddenTests.map((file) => [file.file, file.script])),

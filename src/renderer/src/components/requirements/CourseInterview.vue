@@ -28,6 +28,7 @@ import * as model from './requirement_model.ts';
 import { PATH_STATUSES, movedPath } from '@shared/course_plan.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
+import { TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import type { PathStatus } from '@shared/course_plan.ts';
 
 const props = defineProps<{ item: requirementTypes.Requirement; course: requirementTypes.CourseInterview }>();
@@ -310,10 +311,40 @@ const verifyProgress = computed(() => {
               预计费用 {{ model.estimateText(estimate) }}，含生成后的自验证。自验证一次通过调用 {{ estimate.calls }} 次模型，要修改时最多
               {{ estimate.maxCalls }} 次。费用只做统计，以实际为准。
             </p>
+            <div class="course-path-note" data-field="toolchain-check">
+              <strong>工具链：{{ TOOLCHAIN_LABELS[estimate.toolchain.id] }}</strong>
+              <span v-if="estimate.toolchain.problem === 'sandbox_unavailable'">自检需要 macOS sandbox，当前无法检查。</span>
+              <ul>
+                <li v-for="tool in estimate.toolchain.tools" :key="tool.command">
+                  <code>{{ tool.command }}</code>
+                  ：{{ tool.version ?? '未找到' }}
+                  <template v-if="!tool.version">
+                    ，安装命令：
+                    <code>{{ tool.install }}</code>
+                  </template>
+                </li>
+              </ul>
+            </div>
             <div class="req-actions">
-              <button class="primary-button" type="button" data-action="generate-lab" :disabled="store.courseBusy" @click="onGenerate">
+              <button
+                class="primary-button"
+                type="button"
+                data-action="generate-lab"
+                :disabled="store.courseBusy || !estimate.toolchain.ready"
+                @click="onGenerate"
+              >
                 <AppIcon name="wand" />
                 确认并生成
+              </button>
+              <button
+                v-if="!estimate.toolchain.ready"
+                class="secondary-button"
+                type="button"
+                data-action="recheck-toolchain"
+                :disabled="store.courseBusy"
+                @click="report(store.loadLabEstimate(item))"
+              >
+                重新检查
               </button>
             </div>
           </template>

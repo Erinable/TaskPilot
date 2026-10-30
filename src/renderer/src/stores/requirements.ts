@@ -75,7 +75,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // ========== Compose ==========
   // What the form asks for: work on the repository, or something to learn.
   const composeKind = ref<requirementTypes.RequirementKind>('project');
-  const composeForm = ref<GoalForm>({ level: 'basic', target: 'implement', environment: model.ENVIRONMENT_OPTIONS[0], weeklyHours: 4 });
+  const composeForm = ref<GoalForm>({ level: 'basic', target: 'implement', environment: '', weeklyHours: 4 });
   const composeTitle = ref('');
   const composeText = ref('');
   const composeStatus = ref<{ text: string; error: boolean }>({ text: '', error: false });

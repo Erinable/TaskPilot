@@ -17,26 +17,29 @@
 //
 // SECURITY: everything run here is code a model wrote. It runs only under
 // the Coding Agent's Seatbelt profile (./coding_sandbox.ts) with the network
-// denied, an empty environment and a scratch folder as its only writable
+// denied, an empty environment but for the lab toolchain's variables
+// (./lab_toolchain.ts) and a scratch folder as its only writable
 // place besides the temporary folders; without Seatbelt the check refuses to
 // run rather than run it unsandboxed. The report's details (test names,
 // mutants, review issues) stay private; the renderer sees pass/fail and counts.
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { logger } from '../infrastructure/logger.ts';
 import { failWith } from '../infrastructure/coded_error.ts';
-import { env } from '../infrastructure/env.ts';
 import * as labs from './labs.ts';
 import * as verification from '../checking/verification.ts';
-import { SANDBOX_EXEC_PATH, buildProfile, toolchainRoots } from '../coding/coding_sandbox.ts';
-import { PRESETS } from '../checking/presets/index.ts';
+import { SANDBOX_EXEC_PATH } from '../coding/coding_sandbox.ts';
+import { sandboxArgs, sandboxAvailable, toolchainMissing } from './lab_toolchain.ts';
+import { buildRules } from '../../shared/lab_toolchains.ts';
+import { programOfLab } from '../agents/lab_generator.ts';
+import type { ToolchainProbe } from './lab_toolchain.ts';
 import { ISSUE_PARTS, MUTANT_COUNT } from '../agents/lab_verifier.ts';
 import type { ConsistencyIssue, Mutant } from '../agents/lab_verifier.ts';
 import type { GeneratedLab, LabPart, SourceFile } from '../agents/lab_generator.ts';
 import type * as requirementTypes from '../../shared/ipc/requirements.ts';
+import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
 
 // The first round and two retries.
 export const MAX_ROUNDS = 3;
@@ -49,7 +52,12 @@ const OUTPUT_TAIL = 2000;
 // One `make grade`: whether it built and finished (make exits 0; test files
 // always do), and each test's result by the name it printed.
 export type GradeRun = { built: boolean; results: Record<string, boolean>; output: string };
-export type Grader = (files: Record<string, string>, options: { signal?: AbortSignal; envPath?: string | null }) => Promise<GradeRun>;
+// `toolchain` picks the variables the sandbox gets (null: a lab repository
+// from before toolchains, every preset's).
+export type Grader = (
+  files: Record<string, string>,
+  options: { signal?: AbortSignal; envPath?: string | null; toolchain: LabToolchainId | null },
+) => Promise<GradeRun>;
 
 // A check's verdict, what it says in the report, and the parts a repair rewrites.
 export type CheckResult = { pass: boolean; detail: string[]; parts: LabPart[] };
@@ -84,39 +92,17 @@ const toGradeRun = (result: verification.RunResult): GradeRun => ({
 });
 
 // Writes `files` into a scratch folder and runs `make grade` there under the
-// Seatbelt profile with the network denied and only PATH, HOME (the scratch
-// folder), TMPDIR, LANG and every preset's toolchain variables set (a lab's
-// language is whatever its build rules compile, so all of them): rustup's
-// toolchains are read where it installed them, caches go in the scratch
-// folder. Refuses where Seatbelt is not available.
+// Seatbelt profile with the network denied, an empty environment but for
+// the toolchain's variables (./lab_toolchain.ts) and the scratch folder as
+// HOME. Refuses where Seatbelt is not available.
 export const sandboxGrader =
   (home = os.homedir()): Grader =>
-  async (files, { signal, envPath }) => {
-    if (process.platform !== 'darwin' || !fs.existsSync(SANDBOX_EXEC_PATH))
-      return failWith('The lab self-check runs generated code only inside the macOS sandbox', 'sandbox_unavailable');
+  async (files, { signal, envPath, toolchain }) => {
+    if (!sandboxAvailable()) return failWith('The lab self-check runs generated code only inside the macOS sandbox', 'sandbox_unavailable');
     const root = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'taskpilot-lab-verify-')));
     try {
       await writeFiles(root, files);
-      const pathValue = envPath || env.path;
-      const readable = [...toolchainRoots(home, pathValue.split(':').filter(Boolean), null), ...PRESETS.flatMap((preset) => preset.sandboxRead(home))];
-      const profile = buildProfile({ home, runDir: root, writable: [], readable, offline: true });
-      const toolchainEnv = Object.entries(Object.assign({}, ...PRESETS.map((preset) => preset.sandboxEnv(root, home)))).map(
-        ([name, value]) => `${name}=${value}`,
-      );
-      // Later assignments win in env(1), so a preset cannot replace these.
-      const args = [
-        '-p',
-        profile,
-        '/usr/bin/env',
-        '-i',
-        ...toolchainEnv,
-        `PATH=${pathValue}`,
-        `HOME=${root}`,
-        `TMPDIR=${os.tmpdir()}`,
-        'LANG=en_US.UTF-8',
-        'make',
-        'grade',
-      ];
+      const args = sandboxArgs({ root, home, envPath, toolchain, command: ['make', 'grade'] });
       const target = { root, commands: { grade: { command: SANDBOX_EXEC_PATH, args } } };
       return toGradeRun(await verification.run(target, 'grade', { signal, timeoutMs: GRADE_TIMEOUT_MS, envPath }));
     } finally {
@@ -126,15 +112,18 @@ export const sandboxGrader =
 
 // ========== The repository a check runs ==========
 
-// What the lab adds on top of `base` (the repository so far: the Makefile
-// and tests/grade.sh for a first lab), with `code` in place of the starter.
-const repository = (lab: GeneratedLab, stage: number, base: Record<string, string>, code: SourceFile[], hidden: boolean) => ({
-  ...base,
-  [`labs/${String(stage).padStart(2, '0')}-${lab.id}/README.md`]: lab.readme,
+// The repository a check runs: `base` (the repository so far; the Makefile
+// and tests/grade.sh for a first lab), the lab with `code` in place of the
+// starter, and tests/build.mk written by TaskPilot for the toolchain and
+// every stage's program, this lab's last.
+export type Target = { stage: number; base: Record<string, string>; toolchain: LabToolchainId; programs: LabProgram[] };
+const repository = (lab: GeneratedLab, target: Target, code: SourceFile[], hidden: boolean) => ({
+  ...target.base,
+  [`labs/${String(target.stage).padStart(2, '0')}-${lab.id}/README.md`]: lab.readme,
   ...Object.fromEntries(lab.starter.map((file) => [file.path, code.find((entry) => entry.path === file.path)?.content ?? file.content])),
   ...Object.fromEntries(lab.publicTests.map((file) => [`${labs.PUBLIC_TESTS_DIR}/${file.file}`, file.script])),
   ...(hidden ? Object.fromEntries(lab.hiddenTests.map((file) => [`${labs.PUBLIC_TESTS_DIR}/${file.file}`, file.script])) : {}),
-  ...(lab.build === null ? {} : { [labs.BUILD_RULES_PATH]: lab.build }),
+  [labs.BUILD_RULES_PATH]: buildRules(target.toolchain, [...target.programs, programOfLab(lab, target.toolchain)]),
 });
 
 const namesOf = (files: GeneratedLab['publicTests']) => files.flatMap((file) => file.names);
@@ -147,8 +136,7 @@ const outputLine = (run: GradeRun) => `make grade output (tail):\n${run.output}`
 // test of this lab is among them. A failing test names the part it is in,
 // beside the solution, since either can be wrong.
 export const checkReference = (run: GradeRun, lab: Pick<GeneratedLab, 'publicTests' | 'hiddenTests'>): CheckResult => {
-  if (!run.built)
-    return { pass: false, detail: ['The solution does not build or `make grade` did not finish.', outputLine(run)], parts: ['build', 'solution'] };
+  if (!run.built) return { pass: false, detail: ['The solution does not build or `make grade` did not finish.', outputLine(run)], parts: ['solution'] };
   const publicNames = namesOf(lab.publicTests);
   const hiddenNames = namesOf(lab.hiddenTests);
   const missing = [...publicNames, ...hiddenNames].filter((name) => !(name in run.results));
@@ -170,8 +158,7 @@ export const checkReference = (run: GradeRun, lab: Pick<GeneratedLab, 'publicTes
 // The starter builds; this stage's public tests all fail; every other test
 // the run reports (the earlier stages') passes.
 export const checkStarter = (run: GradeRun, lab: Pick<GeneratedLab, 'publicTests'>): CheckResult => {
-  if (!run.built)
-    return { pass: false, detail: ['The starter code does not build or `make grade` did not finish.', outputLine(run)], parts: ['build', 'starter'] };
+  if (!run.built) return { pass: false, detail: ['The starter code does not build or `make grade` did not finish.', outputLine(run)], parts: ['starter'] };
   const stageNames = namesOf(lab.publicTests);
   const passing = stageNames.filter((name) => run.results[name] === true);
   const missing = stageNames.filter((name) => !(name in run.results));
@@ -235,6 +222,9 @@ export type VerifyProgress = (state: { round: number; phase: 'verify' | 'repair'
 
 export type VerifyDeps = {
   grade: Grader;
+  // Checked before every round: a toolchain missing under the sandbox
+  // stops the check (toolchain_missing) instead of failing the lab.
+  probe: ToolchainProbe;
   envPath?: string | null;
   signal?: AbortSignal;
   writeMutants: (lab: GeneratedLab) => Promise<{ mutants: Mutant[]; costUsd: number }>;
@@ -249,14 +239,14 @@ const cancelled = (signal?: AbortSignal) => {
 
 // Each mutant over the solution, graded with every test, two at a time so
 // five compilers do not start at once.
-const gradeMutants = async (lab: GeneratedLab, stage: number, base: Record<string, string>, mutants: Mutant[], deps: VerifyDeps) => {
+const gradeMutants = async (lab: GeneratedLab, target: Target, mutants: Mutant[], deps: VerifyDeps) => {
   const solved = lab.starter.map((file) => lab.solution.find((entry) => entry.path === file.path) ?? file);
   const hiddenNames = namesOf(lab.hiddenTests);
   const results: MutantResult[] = [];
   for (let index = 0; index < mutants.length; index += GRADE_PARALLEL) {
     const batch = mutants.slice(index, index + GRADE_PARALLEL).map(async (mutant) => {
       const code = solved.map((file) => mutant.files.find((entry) => entry.path === file.path) ?? file);
-      const run = await deps.grade(repository(lab, stage, base, code, true), { signal: deps.signal, envPath: deps.envPath });
+      const run = await deps.grade(repository(lab, target, code, true), { signal: deps.signal, envPath: deps.envPath, toolchain: target.toolchain });
       return mutantResult(mutant, run, hiddenNames);
     });
     results.push(...(await Promise.all(batch)));
@@ -268,16 +258,14 @@ const gradeMutants = async (lab: GeneratedLab, stage: number, base: Record<strin
 // One round: the two local runs, then the two reviews side by side. The
 // mutants are skipped while the solution itself fails, since mutating a
 // wrong solution measures nothing.
-const runRound = async (lab: GeneratedLab, stage: number, base: Record<string, string>, deps: VerifyDeps, round: number) => {
-  const options = { signal: deps.signal, envPath: deps.envPath };
-  const reference = checkReference(await deps.grade(repository(lab, stage, base, lab.solution, true), options), lab);
+const runRound = async (lab: GeneratedLab, target: Target, deps: VerifyDeps, round: number) => {
+  const options = { signal: deps.signal, envPath: deps.envPath, toolchain: target.toolchain };
+  const reference = checkReference(await deps.grade(repository(lab, target, lab.solution, true), options), lab);
   cancelled(deps.signal);
-  const starter = checkStarter(await deps.grade(repository(lab, stage, base, lab.starter, false), options), lab);
+  const starter = checkStarter(await deps.grade(repository(lab, target, lab.starter, false), options), lab);
   cancelled(deps.signal);
   const [mutantRun, judged] = await Promise.all([
-    reference.pass
-      ? deps.writeMutants(lab).then(async ({ mutants, costUsd }) => ({ results: await gradeMutants(lab, stage, base, mutants, deps), costUsd }))
-      : null,
+    reference.pass ? deps.writeMutants(lab).then(async ({ mutants, costUsd }) => ({ results: await gradeMutants(lab, target, mutants, deps), costUsd })) : null,
     deps.judge(lab),
   ]);
   const mutants = mutantRun ? checkMutants(mutantRun.results) : null;
@@ -321,18 +309,17 @@ const failureReport = (report: RoundReport): string =>
 
 // Runs rounds until one passes or three have run, repairing between them.
 // Returns the lab as it stands after the last repair, and the report.
-export const verifyLab = async (
-  lab: GeneratedLab,
-  { stage, base }: { stage: number; base: Record<string, string> },
-  deps: VerifyDeps,
-): Promise<{ lab: GeneratedLab; report: LabVerifyReport }> => {
+// `programs` are the earlier stages' programs, built beside this lab's.
+export const verifyLab = async (lab: GeneratedLab, target: Target, deps: VerifyDeps): Promise<{ lab: GeneratedLab; report: LabVerifyReport }> => {
   const rounds: RoundReport[] = [];
   let current = lab;
   let costUsd = 0;
   for (let round = 1; ; round += 1) {
     cancelled(deps.signal);
     await deps.onProgress?.({ round, phase: 'verify', rounds });
-    const { pass, report } = await runRound(current, stage, base, deps, round);
+    const check = await deps.probe(target.toolchain, { envPath: deps.envPath, signal: deps.signal });
+    if (!check.ready) throw toolchainMissing(check);
+    const { pass, report } = await runRound(current, target, deps, round);
     rounds.push(report);
     costUsd += report.costUsd;
     logger.debug(`[lab-verify] round=${round} checks=${JSON.stringify(report.checks)} parts=${report.parts.join(',')}`);

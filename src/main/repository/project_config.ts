@@ -4,6 +4,7 @@
 //
 //   preset = "typescript"            # or "none"
 //   course = "programming"           # the course pack (./courses.ts)
+//   toolchain = "c"                  # a lab repository's (../../shared/lab_toolchains.ts)
 //
 //   [steps.lint]
 //   commands = ["npm run lint"]      # one or more, run in order
@@ -25,6 +26,8 @@
 //   stage = 1
 //   dir = "labs/01-round-robin"
 //   concepts = ["round-robin"]
+//   program = "rr"                   # build/rr, made by tests/build.mk
+//   sources = ["src/rr.c"]
 //
 // SECURITY: the file is the repository's, like its package.json scripts,
 // and is read from the working tree whenever steps are needed. A Coding
@@ -39,6 +42,8 @@ import { WorkspaceError } from '../checking/command_line.ts';
 import { CUSTOM_PREFIX, STEP_KINDS, isStepKind } from '../../shared/check_steps.ts';
 import * as stepConfig from '../checking/step_config.ts';
 import { isCourseId } from '../../shared/course_pack.ts';
+import { PROGRAM_NAME, isLabToolchain } from '../../shared/lab_toolchains.ts';
+import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { StepId } from '../../shared/check_steps.ts';
 import type { StepPatch } from '../checking/step_config.ts';
 import type { LooseJson } from '../infrastructure/loose_json.ts';
@@ -51,17 +56,26 @@ const MAX_LABS = 32;
 const MAX_LAB_CONCEPTS = 8;
 
 // One lab of a course lab repository. Stages count from 1 and are unique;
-// `dir` holds the lab's README.
-export type LabEntry = { id: string; stage: number; dir: string; concepts: string[] };
+// `dir` holds the lab's README. `program` / `sources` are what tests/build.mk
+// builds for it; absent in lab repositories from before toolchains.
+export type LabEntry = { id: string; stage: number; dir: string; concepts: string[] } & Partial<LabProgram>;
 
 // The file's validated content. `preset` is null when the file names none
-// ("none" or left out), `course` when it names no course pack. `labs` is
+// ("none" or left out), `course` when it names no course pack, `toolchain`
+// outside a lab repository and in ones from before toolchains. `labs` is
 // empty outside a lab repository, and in files from before labs existed.
-export type ProjectFile = { preset: string | null; course: string | null; labs: LabEntry[]; steps: Partial<Record<StepId, StepPatch>> };
+export type ProjectFile = {
+  preset: string | null;
+  course: string | null;
+  toolchain: LabToolchainId | null;
+  labs: LabEntry[];
+  steps: Partial<Record<StepId, StepPatch>>;
+};
 
 // [人工决策-2026-10-26 15:38:21] 课程包按仓库选：顶层 course 随仓库提交，本机 workspace.json 可覆盖。
-const TOP_KEYS = new Set(['version', 'preset', 'course', 'labs', 'steps', 'custom']);
-const LAB_KEYS = new Set(['id', 'stage', 'dir', 'concepts']);
+const TOP_KEYS = new Set(['version', 'preset', 'course', 'toolchain', 'labs', 'steps', 'custom']);
+const LAB_KEYS = new Set(['id', 'stage', 'dir', 'concepts', 'program', 'sources']);
+const MAX_LAB_SOURCES = 8;
 // Lab ids; concepts are a pack's ids, or `ai:` nodes of the course plan.
 const LAB_ID = /^[a-z][a-z0-9-]{0,39}$/;
 export const isLabId = (value: unknown): value is string => typeof value === 'string' && LAB_ID.test(value);
@@ -148,7 +162,24 @@ const labEntry = (value: unknown, field: string): LabEntry => {
   const concepts = value.concepts ?? [];
   if (!Array.isArray(concepts) || concepts.length > MAX_LAB_CONCEPTS || !concepts.every(isLabConcept))
     stepConfig.stepError(`${field}.concepts`, `must be at most ${MAX_LAB_CONCEPTS} concept ids`, 'invalid_project');
-  return { id: value.id, stage: value.stage, dir, concepts: [...new Set(concepts as string[])] };
+  const entry: LabEntry = { id: value.id, stage: value.stage, dir, concepts: [...new Set(concepts as string[])] };
+  if (value.program === undefined && value.sources === undefined) return entry;
+  if (typeof value.program !== 'string' || !PROGRAM_NAME.test(value.program))
+    stepConfig.stepError(`${field}.program`, 'must be lowercase letters, digits or -, starting with a letter, at most 32', 'invalid_project');
+  if (!Array.isArray(value.sources) || value.sources.length < 1 || value.sources.length > MAX_LAB_SOURCES)
+    stepConfig.stepError(`${field}.sources`, `must list 1 to ${MAX_LAB_SOURCES} files`, 'invalid_project');
+  const sources = (value.sources as unknown[]).map((source, index) => {
+    try {
+      const clean = stepConfig.normalizeRelativePath(source, `${field}.sources[${index}]`);
+      // build.mk names them unquoted, so only plain path characters.
+      return /^src\/[A-Za-z0-9_./-]+$/.test(clean)
+        ? clean
+        : stepConfig.stepError(`${field}.sources[${index}]`, 'must be a plain path under src/', 'invalid_project');
+    } catch (error) {
+      return asProjectError(error);
+    }
+  });
+  return { ...entry, program: value.program as string, sources };
 };
 
 const labEntries = (value: unknown): LabEntry[] => {
@@ -160,8 +191,22 @@ const labEntries = (value: unknown): LabEntry[] => {
     if (labs.findIndex((other) => other.id === lab.id) !== index) stepConfig.stepError(`labs[${index}].id`, `repeats "${lab.id}"`, 'invalid_project');
     if (labs.findIndex((other) => other.stage === lab.stage) !== index)
       stepConfig.stepError(`labs[${index}].stage`, `repeats stage ${lab.stage}`, 'invalid_project');
+    if (lab.program && labs.findIndex((other) => other.program === lab.program) !== index)
+      stepConfig.stepError(`labs[${index}].program`, `repeats the program "${lab.program}"`, 'invalid_project');
   });
   return labs;
+};
+
+// version, preset, course and toolchain. Only the course's form here: which
+// packs exist depends on the repository's files.
+const checkTopFields = (value: LooseJson, presets: readonly string[]) => {
+  if (value.version !== undefined && value.version !== PROJECT_VERSION) stepConfig.stepError('version', `must be ${PROJECT_VERSION}`, 'invalid_project');
+  const preset = value.preset ?? 'none';
+  if (preset !== 'none' && !presets.includes(preset)) stepConfig.stepError('preset', `must be one of ${[...presets, 'none'].join(', ')}`, 'invalid_project');
+  if (value.course !== undefined && !isCourseId(value.course))
+    stepConfig.stepError('course', 'must be a course pack id such as "programming"', 'invalid_project');
+  if (value.toolchain !== undefined && !isLabToolchain(value.toolchain)) stepConfig.stepError('toolchain', 'must be c, rust or python', 'invalid_project');
+  return preset;
 };
 
 // Validates a parsed file. Every error names its field, e.g.
@@ -169,12 +214,7 @@ const labEntries = (value: unknown): LabEntry[] => {
 export const normalizeProject = (value: unknown, presets: readonly string[]): ProjectFile => {
   if (!isTable(value)) return stepConfig.stepError('', 'must be a table', 'invalid_project');
   onlyKeys(value, TOP_KEYS, '');
-  if (value.version !== undefined && value.version !== PROJECT_VERSION) stepConfig.stepError('version', `must be ${PROJECT_VERSION}`, 'invalid_project');
-  const preset = value.preset ?? 'none';
-  if (preset !== 'none' && !presets.includes(preset)) stepConfig.stepError('preset', `must be one of ${[...presets, 'none'].join(', ')}`, 'invalid_project');
-  // Only the form here: which packs exist depends on the repository's files.
-  if (value.course !== undefined && !isCourseId(value.course))
-    stepConfig.stepError('course', 'must be a course pack id such as "programming"', 'invalid_project');
+  const preset = checkTopFields(value, presets);
   const steps: ProjectFile['steps'] = {};
   if (value.steps !== undefined) {
     if (!isTable(value.steps)) stepConfig.stepError('steps', 'must be a table', 'invalid_project');
@@ -193,7 +233,7 @@ export const normalizeProject = (value: unknown, presets: readonly string[]): Pr
       steps[`${CUSTOM_PREFIX}${name}`] = toPatch((value.custom as LooseJson)[name], `custom.${name}`, true);
     }
   }
-  return { preset: preset === 'none' ? null : preset, course: value.course ?? null, labs: labEntries(value.labs), steps };
+  return { preset: preset === 'none' ? null : preset, course: value.course ?? null, toolchain: value.toolchain ?? null, labs: labEntries(value.labs), steps };
 };
 
 // Parses the file's text; a syntax error names its line and column.

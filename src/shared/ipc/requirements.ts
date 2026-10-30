@@ -5,6 +5,7 @@ import type * as packageTypes from './packages.ts';
 import type { AcceptanceCriterion } from './workspace.ts';
 import type { Concept, CoursePack, CourseRef } from '../course_pack.ts';
 import type { CoursePlan, GoalForm } from '../course_plan.ts';
+import type { LabToolchainId } from '../lab_toolchains.ts';
 import { invoke } from './contract.ts';
 import type { Contract } from './contract.ts';
 import type { PathEntry } from '../course_plan.ts';
@@ -90,6 +91,9 @@ export type LabVerify = { round: number; maxRounds: number; rounds: LabVerifyRou
 // the lab just done); `stuck` lists the concept's notes when its labs kept
 // failing at easy, so the learner reviews them or marks the concept skipped
 // (requirements:course-skip) instead of generating it again.
+// `toolchain` is the course's toolchain checked under the self-check's
+// sandbox: each tool's version (null when missing) and how to install it;
+// generating is refused until it is ready.
 export type LabEstimate = {
   concepts: { id: string; label: string }[];
   difficulty: packageTypes.Difficulty;
@@ -100,6 +104,16 @@ export type LabEstimate = {
   tokens: { input: number; output: number };
   model: string | null;
   usd: { low: number; high: number } | null;
+  toolchain: LabToolchainCheck;
+};
+
+// `problem` is sandbox_unavailable when there is no sandbox to check under
+// (the self-check refuses to run without one); `ready` when every tool ran.
+export type LabToolchainCheck = {
+  id: LabToolchainId;
+  tools: { command: string; version: string | null; install: string }[];
+  ready: boolean;
+  problem: 'sandbox_unavailable' | null;
 };
 
 // requirements:course-save-draft: the requirement, now choosing the saved

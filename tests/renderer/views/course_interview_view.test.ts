@@ -8,7 +8,7 @@ import { flushPromises } from '@vue/test-utils';
 import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
-import { courseInterview, coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
+import { LAB_ESTIMATE, courseInterview, coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
 
@@ -42,14 +42,15 @@ describe('course interview', () => {
     const { wrapper, store } = await render();
     await wrapper.get('.req-empty [data-action="learn"]').trigger('click');
     expect(wrapper.find('[data-field="level"]').exists()).toBe(true);
-    await wrapper.find('[data-field="weeklyHours"] input[value="8"]').setValue(true);
+    await wrapper.find('[data-field="toolchain"] input[value="c"]').setValue(true);
+    await wrapper.find('[data-field="weeklyHours"] input[value="8"]').trigger('click');
     await wrapper.find('#reqText').setValue('想学操作系统的进程调度');
     await wrapper.find('form[data-pane="new"]').trigger('submit');
     await flushPromises();
     expect(api.requirements.create).toHaveBeenCalledWith({
       title: '',
       text: '想学操作系统的进程调度',
-      course: { level: 'basic', target: 'implement', environment: 'macOS，本机 C 编译器', weeklyHours: 8 },
+      course: { level: 'basic', target: 'implement', environment: '', weeklyHours: 8, toolchain: 'c' },
     });
     store.stopWatching();
     wrapper.unmount();
@@ -146,6 +147,34 @@ describe('course interview', () => {
     await wrapper.get('[data-action="cancel-lab"]').trigger('click');
     await flushPromises();
     expect(api.requirements.cancel).toHaveBeenCalledWith('r1');
+    store.stopWatching();
+    wrapper.unmount();
+  });
+
+  test('a missing tool shows its install command and keeps generate disabled until a recheck finds it', async () => {
+    const missing: requirementTypes.LabEstimate = {
+      ...LAB_ESTIMATE,
+      toolchain: {
+        ...LAB_ESTIMATE.toolchain,
+        ready: false,
+        tools: [LAB_ESTIMATE.toolchain.tools[0]!, { command: 'make', version: null, install: 'xcode-select --install' }],
+      },
+    };
+    api.requirements.labEstimate.mockResolvedValueOnce({ ok: true, data: missing });
+    state.list = [requirement({ kind: 'course', status: 'published', course: coursePathInterview() })];
+    const { wrapper, store } = await render();
+    await wrapper.get('[data-action="estimate-lab"]').trigger('click');
+    await flushPromises();
+    const makeRow = wrapper.findAll('[data-field="toolchain-check"] li')[1]!;
+    expect(makeRow.text()).toContain('未找到');
+    expect(makeRow.findAll('code').map((code) => code.text())).toEqual(['make', 'xcode-select --install']);
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeDefined();
+
+    await wrapper.get('[data-action="recheck-toolchain"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.labEstimate).toHaveBeenCalledTimes(2);
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('[data-action="recheck-toolchain"]').exists()).toBe(false);
     store.stopWatching();
     wrapper.unmount();
   });

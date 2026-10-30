@@ -9,11 +9,11 @@ const SKELETON = [concept('process-state'), concept('fcfs', ['process-state']), 
 const entry = (conceptId: string, status: plans.PathStatus = 'planned') => ({ conceptId, status });
 
 test('goalFormProblem() names the field of the first problem', () => {
-  const form = { level: 'basic', target: 'implement', environment: 'macOS', weeklyHours: 4 };
+  const form = { level: 'basic', target: 'implement', toolchain: 'c', environment: 'macOS', weeklyHours: 4 };
   assert.equal(plans.goalFormProblem(form), null);
   assert.equal(plans.goalFormProblem({ ...form, level: 'expert' })?.field, 'goal.level');
   assert.equal(plans.goalFormProblem({ ...form, target: 'x' })?.field, 'goal.target');
-  assert.equal(plans.goalFormProblem({ ...form, environment: '  ' })?.field, 'goal.environment');
+  assert.equal(plans.goalFormProblem({ ...form, environment: null })?.field, 'goal.environment');
   assert.equal(plans.goalFormProblem({ ...form, environment: 'a\u0000b' })?.field, 'goal.environment');
   assert.equal(plans.goalFormProblem({ ...form, weeklyHours: 0 })?.field, 'goal.weeklyHours');
   assert.equal(plans.goalFormProblem({ ...form, weeklyHours: 2.5 })?.field, 'goal.weeklyHours');
