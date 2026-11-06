@@ -245,7 +245,7 @@ describe('requirements store', () => {
     expectConsole('error', /IpcError: x/);
     api.requirements.create.mockResolvedValueOnce({ ok: false, error: { code: 'agent_failed', message: 'x' } } as never);
     await store.submitNew();
-    expect(feedback.showToast).toHaveBeenCalledWith('提交失败：智能体运行失败。');
+    expect(feedback.showToast).toHaveBeenCalledWith('提交失败：智能体运行失败：x');
   });
 
   test('publishing reloads the work queue', async () => {

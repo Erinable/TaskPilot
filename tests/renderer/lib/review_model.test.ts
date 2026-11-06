@@ -141,4 +141,6 @@ test('resolutionTitle() and describeErrorInfo() word plain IPC objects', () => {
   assert.equal(model.resolutionTitle(resolution), 'Architect 已重新规划（应你的异议） · 你已撤销');
   assert.equal(describeErrorInfo({ code: 'agent_timeout', message: 'x' }), '智能体超过 3 分钟没有完成，已停止。');
   assert.equal(describeErrorInfo({ code: 'unknown', message: 'raw' }), 'raw');
+  assert.equal(describeErrorInfo({ code: 'agent_failed', message: 'API Error: Connection lost' }), '智能体运行失败：API Error: Connection lost');
+  assert.equal(describeErrorInfo({ code: 'agent_failed', message: '' }), '智能体运行失败。');
 });

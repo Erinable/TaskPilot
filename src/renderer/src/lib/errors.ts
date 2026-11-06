@@ -82,7 +82,11 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   lab_outdated: '这个 lab 创建于工具链切换前，请在新的实验仓库中重新生成。',
 };
 
-export const describeError = (error: unknown) => (error instanceof Error ? (ERROR_HINTS[(error as IpcError).code] ?? error.message) : String(error));
+// agent_failed covers lost connections, logins and quotas alike, so its hint keeps the CLI's own message.
+const hintFor = (code: ErrorCode | undefined, message: string | undefined) =>
+  code === 'agent_failed' && message ? `智能体运行失败：${message}` : code ? ERROR_HINTS[code] : undefined;
+
+export const describeError = (error: unknown) => (error instanceof Error ? (hintFor((error as IpcError).code, error.message) ?? error.message) : String(error));
 
 // Agent errors are stored as plain {code, message} objects, not Error instances.
-export const describeErrorInfo = (error: Partial<ErrorInfo> | null | undefined) => (error?.code ? ERROR_HINTS[error.code] : undefined) ?? error?.message ?? '';
+export const describeErrorInfo = (error: Partial<ErrorInfo> | null | undefined) => hintFor(error?.code, error?.message) ?? error?.message ?? '';

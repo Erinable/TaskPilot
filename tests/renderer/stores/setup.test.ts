@@ -129,7 +129,7 @@ test('a failed action toasts, but a cancelled one stays quiet', async () => {
   const setup = await onSetupPage();
   api.env.plan.mockReturnValueOnce(fail('agent_failed', 'x'));
   expect(await setup.plan()).toBe(false);
-  expect(feedback.showToast).toHaveBeenCalledWith('分析失败：智能体运行失败。', 'error');
+  expect(feedback.showToast).toHaveBeenCalledWith('分析失败：智能体运行失败：x', 'error');
   vi.mocked(feedback.showToast).mockClear();
   api.env.plan.mockReturnValueOnce(fail('agent_cancelled', 'x'));
   await setup.plan();
