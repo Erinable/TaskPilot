@@ -22,6 +22,7 @@ import { modeLabel } from '@/lib/execution_mode.ts';
 import { nextStep } from '@/lib/next_step.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useCodingStore } from '@/stores/coding.ts';
+import { useCommitStore } from '@/stores/commit.ts';
 import { ACTIONS, useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
@@ -30,6 +31,7 @@ const PRIORITY_LABELS: Record<packageTypes.Priority, string> = { high: '高优�
 const app = useAppStore();
 const execution = useExecutionStore();
 const coding = useCodingStore();
+const commit = useCommitStore();
 const now = useNow();
 const backButton = ref<HTMLButtonElement | null>(null);
 
@@ -38,7 +40,13 @@ const actions = computed(() => {
   const allowed = new Set(task.value?.humanTransitions ?? []);
   return ACTIONS.filter((action) => allowed.has(action.name));
 });
-const advice = computed(() => (task.value ? nextStep(task.value) : null));
+// A done package is only delivered once its scope files are in git; until
+// then the header and the advice say it still waits to be saved.
+const unsavedFiles = computed(() =>
+  task.value?.status === 'done' && commit.taskId === task.value.id && commit.preview && !commit.committed ? commit.preview.files.length : null,
+);
+const statusLabel = computed(() => (unsavedFiles.value ? '待保存到 git' : task.value?.status === 'done' ? '已交付' : task.value?.statusLabel));
+const advice = computed(() => (task.value ? nextStep(task.value, unsavedFiles.value) : null));
 // The advised action is the main button; the rest wait under "more". While
 // steps remain, the advice is to write code, so no button leads.
 const leading = computed(() => actions.value.find((action) => action.name === advice.value?.action) ?? null);
@@ -75,7 +83,7 @@ onBeforeUnmount(() => execution.close());
     <template v-if="task">
       <div class="exec-heading">
         <div class="exec-title-row">
-          <span class="status-badge status-pill" :class="task.status">{{ task.statusLabel }}</span>
+          <span class="status-badge status-pill" :class="unsavedFiles ? 'accepting' : task.status" data-status-label>{{ statusLabel }}</span>
           <h1>{{ task.title }}</h1>
         </div>
         <p>{{ task.intro }}</p>

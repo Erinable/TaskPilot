@@ -43,7 +43,14 @@ const pendingAdvice = (task: packageTypes.TaskView): NextStep => {
   return { text: '读一遍下面的步骤和验收条件，准备好了就开始。开始后 TaskPilot 会记下项目当前的样子，用来对比你的改动。', action: 'claim' };
 };
 
-export const nextStep = (task: packageTypes.TaskView): NextStep => {
+const doneAdvice = (unsavedFiles: number | null): NextStep =>
+  unsavedFiles
+    ? { text: `验收通过了，还差一步：在「保存到 git」里提交这 ${unsavedFiles} 个文件，下一个工作包才能从干净的状态开始。`, action: null }
+    : { text: '这个工作包已交付，可以去领下一个了。', action: null };
+
+// unsavedFiles: scope files still uncommitted once the package is done, from
+// the commit preview; null until it has loaded.
+export const nextStep = (task: packageTypes.TaskView, unsavedFiles: number | null = null): NextStep => {
   const total = task.steps.length;
   const done = task.completedSteps.length;
   switch (task.status) {
@@ -74,7 +81,7 @@ export const nextStep = (task: packageTypes.TaskView): NextStep => {
     case 'accepting':
       return { text: 'QA 检查通过了，还有几项需要你亲自确认。看完「QA 审查」里的确认项，没问题就验收。', action: 'accepted' };
     case 'done':
-      return { text: '这个工作包完成了。在「保存到 git」里提交改动，再去领下一个。', action: null };
+      return doneAdvice(unsavedFiles);
     case 'blocked':
       return { text: '这个工作包被标记为阻塞。阻塞的原因解决后，点「解除阻塞」继续。', action: 'unblock' };
     default:

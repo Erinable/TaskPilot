@@ -84,6 +84,7 @@ export const useCommitStore = defineStore('commit', () => {
 
   return {
     // Preview
+    taskId,
     preview,
     message,
     loading,
