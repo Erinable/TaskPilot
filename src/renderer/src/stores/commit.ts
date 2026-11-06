@@ -49,7 +49,8 @@ export const useCommitStore = defineStore('commit', () => {
     const opened = session;
     committing.value = true;
     try {
-      const result = await call(window.taskpilot.commit.create(id, message.value, preview.value.files));
+      // The preview is reactive; IPC's structured clone rejects its proxies.
+      const result = await call(window.taskpilot.commit.create(id, message.value, [...preview.value.files]));
       if (opened !== session) return;
       committed.value = result;
       showToast(`已提交 ${result.files.length} 个文件`);

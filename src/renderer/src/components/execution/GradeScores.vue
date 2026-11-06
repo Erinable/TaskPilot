@@ -11,30 +11,47 @@ const props = defineProps<{ scores: packageTypes.GradeScores; report: packageTyp
 const quality = computed(() => qualityLines(props.scores));
 const levels = computed(() => rubricLevels(props.report, props.rubric));
 const independence = computed(() => independenceLines(props.scores));
+const STEPS = [1, 2, 3, 4];
 </script>
 
 <template>
   <div class="grade-scores" data-scores>
     <section class="grade-score" data-score="quality">
       <h3>
-        质量分
-        <span class="grade-score-value">{{ scores.quality }}</span>
+        <span>质量分</span>
+        <span class="grade-score-value">
+          {{ scores.quality }}
+          <small>/100</small>
+        </span>
       </h3>
       <dl>
         <template v-for="line in quality" :key="line.label">
           <dt>{{ line.label }}</dt>
           <dd>{{ line.value }}</dd>
         </template>
-        <template v-for="line in levels" :key="`level-${line.label}`">
-          <dt class="grade-score-sub">{{ line.label }}</dt>
-          <dd>{{ line.value }}</dd>
-        </template>
       </dl>
+      <div v-if="levels.length" class="grade-levels">
+        <h4>rubric 各项等级</h4>
+        <dl>
+          <template v-for="line in levels" :key="`level-${line.label}`">
+            <dt>{{ line.label }}</dt>
+            <dd>
+              <span class="grade-level-bar" :aria-label="line.value" role="img">
+                <span v-for="step in STEPS" :key="step" class="grade-level-step" :class="{ filled: step <= line.level }" />
+              </span>
+              <span class="grade-level-text">{{ line.value }}</span>
+            </dd>
+          </template>
+        </dl>
+      </div>
     </section>
     <section class="grade-score" data-score="independence">
       <h3>
-        独立完成度
-        <span class="grade-score-value">{{ scores.independence }}</span>
+        <span>独立完成度</span>
+        <span class="grade-score-value">
+          {{ scores.independence }}
+          <small>/100</small>
+        </span>
       </h3>
       <dl>
         <template v-for="line in independence" :key="line.label">
@@ -50,24 +67,42 @@ const independence = computed(() => independenceLines(props.scores));
 <style scoped>
 .grade-scores {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: var(--space-3);
+}
+.grade-score {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--fill);
+  border-radius: var(--radius-md);
 }
 .grade-score h3 {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin: 0 0 var(--space-2);
+  margin: 0;
+  color: var(--text-secondary);
   font-size: var(--text-lg);
+  font-weight: 600;
 }
 .grade-score-value {
-  font-size: 1.5em;
+  color: var(--text);
+  font-size: 2em;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.grade-score-value small {
+  color: var(--text-tertiary);
+  font-size: var(--text-lg);
+  font-weight: 400;
 }
 .grade-score dl {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px var(--space-2);
+  gap: 6px var(--space-3);
   margin: 0;
   font-size: var(--text-lg);
 }
@@ -75,15 +110,44 @@ const independence = computed(() => independenceLines(props.scores));
   color: var(--text-secondary);
 }
 .grade-score dd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-.grade-score-sub {
-  padding-left: 1em;
+.grade-levels {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-soft);
+}
+.grade-levels h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+.grade-level-bar {
+  display: inline-flex;
+  gap: 3px;
+}
+.grade-level-step {
+  width: 18px;
+  height: 6px;
+  background: var(--line-soft);
+  border-radius: 3px;
+}
+.grade-level-step.filled {
+  background: var(--accent);
+}
+.grade-level-text {
+  min-width: 4.5em;
+  color: var(--text-secondary);
+  text-align: right;
 }
 .grade-score-note {
-  margin: var(--space-2) 0 0;
-  color: var(--text-secondary);
+  margin: auto 0 0;
+  color: var(--text-tertiary);
   font-size: var(--text-lg);
 }
 </style>

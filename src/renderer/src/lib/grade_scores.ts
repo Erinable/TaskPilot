@@ -25,9 +25,9 @@ export const independenceLines = ({ signals }: packageTypes.GradeScores): ScoreL
   return lines.length ? lines : [{ label: '没有扣分', value: '−0' }];
 };
 
-// The level of each rubric item, by its label.
-export const rubricLevels = (report: packageTypes.GradeReport, rubric: { id: string; label: string }[]): ScoreLine[] =>
+// The level of each rubric item, by its label; `level` draws its 4-step bar.
+export const rubricLevels = (report: packageTypes.GradeReport, rubric: { id: string; label: string }[]): (ScoreLine & { level: number })[] =>
   rubric.flatMap((item) => {
     const level = report.levels?.[item.id];
-    return level ? [{ label: item.label, value: `${level}/4 级` }] : [];
+    return level ? [{ label: item.label, value: `${level}/4 级`, level }] : [];
   });

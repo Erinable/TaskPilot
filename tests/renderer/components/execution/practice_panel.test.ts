@@ -81,6 +81,9 @@ describe('PracticePanel', () => {
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('先列出输入的几种情况再写代码。');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('src/auth.ts:4');
     expect(wrapper.get('[data-category="style"]').text()).toContain('写全名。');
+    // A comment without a file is about the whole submission.
+    expect(wrapper.get('[data-category="style"] [data-overall]').text()).toBe('整体');
+    expect(wrapper.find('[data-category="thinking"] [data-overall]').exists()).toBe(false);
     expect(wrapper.find('[data-category="writing"]').exists()).toBe(false);
     expect(wrapper.get('[data-reference]').text()).toContain('+export const login = () => true;');
   });
@@ -107,7 +110,8 @@ describe('PracticePanel', () => {
     });
     const groups = wrapper.findAll('[data-category]');
     expect(groups.map((group) => group.attributes('data-category'))).toEqual(['mechanism', 'concept']);
-    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现', '原理']);
+    // Each heading carries its comment count.
+    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现 1', '原理 1']);
     expect(wrapper.get('[data-category="concept"]').text()).toContain('锁拿晚了。');
     await wrapper.get('[data-category="concept"] [data-action="save-note"]').trigger('click');
     await flushPromises();

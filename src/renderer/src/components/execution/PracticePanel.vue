@@ -143,41 +143,50 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
       </div>
 
       <template v-if="grade.report">
-        <p class="practice-summary">{{ grade.report.summary }}</p>
         <!-- Grades from before scores have none; nothing is shown for them. -->
         <GradeScores v-if="grade.scores" :scores="grade.scores" :report="grade.report" :rubric="rubric" />
+        <p class="practice-summary">{{ grade.report.summary }}</p>
         <p v-if="recorded.length" class="practice-mastery" data-field="mastery">
           <span>这次判卷记进了掌握度：</span>
-          <code v-for="conceptId in recorded" :key="conceptId">{{ conceptId }}</code>
+          <code v-for="conceptId in recorded" :key="conceptId" class="tag">{{ conceptId }}</code>
           <button class="link-button" type="button" data-action="open-mastery" @click="openMastery">
             <AppIcon name="target" />
             看掌握度
           </button>
         </p>
-        <div v-if="grade.report.strengths.length" class="practice-group">
-          <h3>做得好的地方</h3>
+        <div v-if="grade.report.strengths.length" class="practice-group practice-strengths">
+          <h3>
+            <AppIcon name="check-circle" />
+            做得好的地方
+          </h3>
           <ul>
             <li v-for="(strength, index) in grade.report.strengths" :key="index">{{ strength }}</li>
           </ul>
         </div>
         <div v-for="group in byCategory" :key="group.category" class="practice-group" :data-category="group.category">
-          <h3>{{ group.label }}</h3>
+          <h3>
+            {{ group.label }}
+            <span class="practice-count">{{ group.comments.length }}</span>
+          </h3>
           <article v-for="(comment, index) in group.comments" :key="index" class="practice-comment">
-            <button v-if="comment.file" class="link-button practice-location" type="button" @click="openWorkspaceFile(comment.file, comment.line)">
-              {{ comment.line ? `${comment.file}:${comment.line}` : comment.file }}
-            </button>
-            <p>
+            <div class="practice-comment-head">
+              <button v-if="comment.file" class="practice-location" type="button" @click="openWorkspaceFile(comment.file, comment.line)">
+                <AppIcon name="file" />
+                {{ comment.line ? `${comment.file}:${comment.line}` : comment.file }}
+              </button>
+              <!-- A comment on the whole submission (no tests added, say) names no file. -->
+              <span v-else class="tag practice-overall" data-overall>整体</span>
               <span v-if="comment.repeated" class="tag practice-repeated" data-repeated>又出现了</span>
-              {{ comment.observation }}
-            </p>
+              <button class="link-button practice-save" type="button" data-action="save-note" :disabled="saved.has(comment)" @click="save(comment)">
+                <AppIcon :name="saved.has(comment) ? 'check' : 'plus'" />
+                {{ saved.has(comment) ? '已存为笔记' : '存为笔记' }}
+              </button>
+            </div>
+            <p>{{ comment.observation }}</p>
             <p class="practice-better">
               <strong>下次可以：</strong>
               {{ comment.betterWay }}
             </p>
-            <button class="link-button practice-save" type="button" data-action="save-note" :disabled="saved.has(comment)" @click="save(comment)">
-              <AppIcon :name="saved.has(comment) ? 'check' : 'plus'" />
-              {{ saved.has(comment) ? '已存为笔记' : '存为笔记' }}
-            </button>
           </article>
         </div>
         <GradeExplanation v-if="grade.withReference && unlocked" :explanation="grade.explanation ?? null" />
@@ -203,8 +212,8 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 .practice-grade {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  margin-top: var(--space-3);
+  gap: var(--space-4);
+  padding: 0 var(--panel-pad) var(--space-4);
 }
 .practice-grade-status {
   display: flex;
@@ -212,6 +221,11 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
   gap: var(--space-2);
   margin: 0;
   color: var(--text-secondary);
+}
+.practice-grade-status time {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 .practice-actions {
   display: flex;
@@ -222,6 +236,13 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 }
 .practice-summary {
   margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--text);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xl);
+  line-height: 1.6;
 }
 .practice-mastery {
   display: flex;
@@ -231,43 +252,96 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
   margin: 0;
   color: var(--text-secondary);
 }
+.practice-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
 .practice-group h3 {
-  margin: 0 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.practice-count {
+  padding: 0 7px;
+  color: var(--text-tertiary);
+  background: var(--fill);
+  border-radius: 999px;
   font-size: var(--text-lg);
+  font-weight: 500;
+}
+.practice-strengths {
+  padding: var(--space-3) var(--space-4);
+  background: var(--success-soft);
+  border-radius: var(--radius-md);
+}
+.practice-strengths h3 {
+  color: var(--success);
 }
 .practice-group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin: 0;
   padding-left: 1.2em;
+  line-height: 1.6;
 }
 .practice-comment {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: var(--space-2) 0;
-  border-top: 1px solid var(--line-soft);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--fill);
+  border-radius: var(--radius-md);
+  line-height: 1.6;
 }
 .practice-comment p {
   margin: 0;
 }
+.practice-comment-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
 .practice-location {
-  align-self: flex-start;
-  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: var(--text-lg) var(--font-mono);
+}
+.practice-location:hover {
+  color: var(--accent-strong);
+}
+.practice-overall {
   font-size: var(--text-lg);
 }
 .practice-better {
+  padding-left: var(--space-3);
   color: var(--text-secondary);
+  border-left: 3px solid var(--success);
+}
+.practice-better strong {
+  color: var(--success);
 }
 .practice-repeated {
-  margin-right: var(--space-1);
   color: var(--warning);
   background: var(--warning-soft);
 }
 .practice-save {
-  align-self: flex-start;
+  margin-left: auto;
   font-size: var(--text-lg);
 }
 .practice-reference {
-  margin-top: var(--space-3);
+  margin: 0 var(--panel-pad) var(--space-4);
 }
 .practice-reference summary {
   cursor: pointer;
