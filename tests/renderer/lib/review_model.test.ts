@@ -144,3 +144,27 @@ test('resolutionTitle() and describeErrorInfo() word plain IPC objects', () => {
   assert.equal(describeErrorInfo({ code: 'agent_failed', message: 'API Error: Connection lost' }), '智能体运行失败：API Error: Connection lost');
   assert.equal(describeErrorInfo({ code: 'agent_failed', message: '' }), '智能体运行失败。');
 });
+
+test('deliverySummary() counts evidence, what is left to judge and the next step', () => {
+  const criterion = (text: string, status: workspaceTypes.CriterionStatus): workspaceTypes.CriterionEvidence => ({
+    text,
+    status,
+    verified: status === 'verified',
+    manual: status === 'manual',
+  });
+  const review = {
+    diff: { files: [{ path: 'a.ts', bytes: 1, untracked: false }], skipped: [], outOfScope: [] },
+    acceptance: [criterion('a', 'verified'), criterion('b', 'verified'), criterion('c', 'manual')],
+    attention: [{ code: 'criterion_manual' as const, index: 2 }],
+  };
+  const accepting = model.deliverySummary(review, 'accepting', null);
+  assert.equal(accepting.done, '改了 1 个文件，QA 审查通过');
+  assert.equal(accepting.evidence, '3 项验收条件中，2 项有测试证据，1 项要你看一下');
+  assert.match(accepting.judge, /有 1 项需要你确认/);
+  assert.match(accepting.next, /点「验收」/);
+  assert.equal(model.deliverySummary(review, 'done', 2).next, '已验收，还差保存 2 个文件到 git');
+  assert.equal(model.deliverySummary(review, 'done', 0).next, '已交付，可以领下一个工作包');
+  const bare = model.deliverySummary({ ...review, acceptance: [], attention: [] }, 'accepting', null);
+  assert.equal(bare.evidence, null);
+  assert.equal(bare.judge, '没有需要你额外确认的项');
+});

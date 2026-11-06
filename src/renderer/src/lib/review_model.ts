@@ -204,3 +204,36 @@ export const diffLineKind = (line: string): DiffLineKind =>
         : line.startsWith('-')
           ? 'del'
           : '';
+
+// ========== Delivery summary ==========
+
+export type DeliverySummary = { done: string; evidence: string | null; judge: string; next: string };
+
+// The four lines above a passed review, so the developer can decide before
+// reading the evidence: what was done, what the tests back, what is left to
+// judge and what happens next. `unsavedFiles` is null until the commit
+// preview has loaded.
+export const deliverySummary = (
+  review: Pick<Extract<packageTypes.Review, { status: 'passed' | 'rejected' }>, 'diff' | 'acceptance' | 'attention'>,
+  status: packageTypes.TaskView['status'],
+  unsavedFiles: number | null,
+): DeliverySummary => {
+  const acceptance = review.acceptance ?? [];
+  const verified = acceptance.filter((criterion) => criterion.status === 'verified').length;
+  const manual = acceptance.length - verified;
+  const attention = review.attention?.length ?? 0;
+  const saving = unsavedFiles ? `保存 ${unsavedFiles} 个文件到 git` : '保存到 git';
+  return {
+    done: `改了 ${review.diff.files.length} 个文件，QA 审查通过`,
+    evidence: acceptance.length ? `${acceptance.length} 项验收条件中，${verified} 项有测试证据${manual ? `，${manual} 项要你看一下` : ''}` : null,
+    judge: attention ? `有 ${attention} 项需要你确认，见下方「需要人工确认」` : '没有需要你额外确认的项',
+    next:
+      status === 'accepting'
+        ? `确认没问题就点「验收」，之后${saving}`
+        : status === 'done'
+          ? unsavedFiles
+            ? `已验收，还差${saving}`
+            : '已交付，可以领下一个工作包'
+          : '你在验收时打回了，改完后重新提交审查',
+  };
+};

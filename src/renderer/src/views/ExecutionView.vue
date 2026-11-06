@@ -42,9 +42,7 @@ const actions = computed(() => {
 });
 // A done package is only delivered once its scope files are in git; until
 // then the header and the advice say it still waits to be saved.
-const unsavedFiles = computed(() =>
-  task.value?.status === 'done' && commit.taskId === task.value.id && commit.preview && !commit.committed ? commit.preview.files.length : null,
-);
+const unsavedFiles = computed(() => (task.value?.status === 'done' ? commit.unsavedFiles(task.value.id) : null));
 const statusLabel = computed(() => (unsavedFiles.value ? '待保存到 git' : task.value?.status === 'done' ? '已交付' : task.value?.statusLabel));
 const advice = computed(() => (task.value ? nextStep(task.value, unsavedFiles.value) : null));
 // The advised action is the main button; the rest wait under "more". While
