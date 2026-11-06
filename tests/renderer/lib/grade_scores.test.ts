@@ -42,6 +42,6 @@ test('rubric levels follow the rubric order and skip items without one', () => {
       { id: 'a', label: 'A' },
       { id: 'b', label: 'B' },
     ]),
-  ).toEqual([{ label: 'B', value: '2/4 级' }]);
+  ).toEqual([{ label: 'B', value: '2/4 级', level: 2 }]);
   expect(rubricLevels({ summary: '', strengths: [], comments: [] }, [{ id: 'a', label: 'A' }])).toEqual([]);
 });
