@@ -118,7 +118,7 @@ watch(
   display: block;
   margin-top: 3px;
   color: var(--warning);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 :global(.agent-model-options .el-select-dropdown__item) {
   height: auto;
@@ -134,6 +134,6 @@ watch(
 .model-option-id {
   display: block;
   color: var(--text-muted);
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
 }
 </style>

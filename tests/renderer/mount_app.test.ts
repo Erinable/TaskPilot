@@ -28,3 +28,10 @@ test('rarely used views load when first opened, not with the app', () => {
     expect(app, view).toContain(`const ${view} = defineAsyncComponent(() => import('./views/${view}.vue'));`);
   }
 });
+
+test('settings loads in its own chunk and mounts only once it has been shown', () => {
+  const app = read('src/renderer/src/App.vue');
+  expect(app).not.toContain('import SettingsView from');
+  expect(app).toContain("const loadSettingsView = () => import('./views/SettingsView.vue');");
+  expect(app).toContain('<SettingsView v-if="settingsMounted" v-show="app.view === \'settings\'" />');
+});

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { describeError } from '@/lib/errors.ts';
@@ -15,6 +15,12 @@ const execution = useExecutionStore();
 const expanded = ref(false);
 // Null until first expanded: the patch is fetched on demand so opening the page stays cheap.
 const lines = ref<{ kind: DiffLineKind; text: string }[] | null>(null);
+// A generated or vendored file can have tens of thousands of lines; rendering
+// all of them stalls the page, so a long patch shows its start until asked.
+const LINE_LIMIT = 2000;
+const showAll = ref(false);
+const shownLines = computed(() => (showAll.value ? (lines.value ?? []) : (lines.value ?? []).slice(0, LINE_LIMIT)));
+const hiddenCount = computed(() => (lines.value?.length ?? 0) - shownLines.value.length);
 
 const load = async () => {
   lines.value = [{ kind: 'meta', text: '加载中…' }];
@@ -63,7 +69,14 @@ const toggle = () => {
       </button>
     </div>
     <div class="diff-body" :hidden="!expanded">
-      <div v-for="(line, index) in lines ?? []" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
+      <div v-for="(line, index) in shownLines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
+      <button v-if="hiddenCount > 0" class="link-button diff-show-all" type="button" @click="showAll = true">还有 {{ hiddenCount }} 行，显示全部</button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.diff-show-all {
+  margin: var(--space-2) 0 0;
+}
+</style>

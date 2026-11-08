@@ -81,31 +81,33 @@ code {
   overflow: hidden;
   pointer-events: none;
 }
+/* Each orb is a radial gradient that fades out on its own, so the backdrop
+ * needs no filter: a blur(70px) on three viewport-sized layers was repainted
+ * on every resize and composited under every glass surface. */
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(70px);
 }
 .orb-a {
-  width: 46vw;
-  height: 46vw;
-  top: -14vw;
-  left: -8vw;
-  background: var(--orb-a);
+  width: 60vw;
+  height: 60vw;
+  top: -21vw;
+  left: -15vw;
+  background: radial-gradient(closest-side, var(--orb-a), transparent);
 }
 .orb-b {
-  width: 40vw;
-  height: 40vw;
-  top: 18vh;
-  right: -12vw;
-  background: var(--orb-b);
+  width: 54vw;
+  height: 54vw;
+  top: calc(18vh - 7vw);
+  right: -19vw;
+  background: radial-gradient(closest-side, var(--orb-b), transparent);
 }
 .orb-c {
-  width: 36vw;
-  height: 36vw;
-  bottom: -16vw;
-  left: 30vw;
-  background: var(--orb-c);
+  width: 50vw;
+  height: 50vw;
+  bottom: -23vw;
+  left: 23vw;
+  background: radial-gradient(closest-side, var(--orb-c), transparent);
 }
 
 /* Glass surfaces */
@@ -455,7 +457,7 @@ code {
   box-shadow: 0 0 0 2px var(--glass-border);
   min-width: 16px;
   padding: 0 4px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   line-height: 16px;
 }
 .side-section-label {
@@ -1584,7 +1586,7 @@ code {
   color: var(--text-tertiary);
   background: var(--fill-hover);
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -3390,7 +3392,8 @@ body.vibrancy {
 body.vibrancy .backdrop {
   display: none;
 }
-body.vibrancy .glass {
+body.vibrancy .glass,
+body.vibrancy .glass-strong {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -3760,6 +3763,13 @@ body.vibrancy .glass {
 .question-card {
   padding: 14px 16px;
   border-radius: var(--radius-lg);
+}
+/* Cards repeated in a list are opaque: one blurred layer per card adds up,
+ * and the card sits on a page that is already glass. */
+.question-card.glass {
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .question-card > .link-button {
   margin-top: 6px;

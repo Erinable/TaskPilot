@@ -318,6 +318,25 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* Narrow windows: compact cards, two per row, so the task list stays on the
+ * first screen instead of below four stacked cards. */
+@media (max-width: 760px) {
+  .metrics-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+  .metric-card {
+    min-height: 0;
+    padding: 10px 12px;
+  }
+  .metric-card .metric-icon,
+  .metric-card .metric-trend {
+    display: none;
+  }
+  .metric-card strong {
+    font-size: var(--text-xl);
+  }
+}
 .queue-tools {
   display: flex;
   gap: var(--space-2);

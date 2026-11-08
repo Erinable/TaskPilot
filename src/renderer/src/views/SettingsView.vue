@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
+
 import AppIcon from '@/components/AppIcon.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
 import { NAV_GROUPS, useSettingsStore } from '@/stores/settings.ts';
@@ -20,6 +22,9 @@ const run = (promise: Promise<unknown>) => {
 // Enter in a text field saves rather than reloading the page.
 const onSubmit = () => run(settings.saveAll());
 const onSearch = (event: Event) => settings.search((event.target as HTMLInputElement).value);
+// The view loads on first open, after settings.open() has tried to focus the
+// nav item, so the first mount focuses it instead.
+onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-page="${settings.activePage}"]`)?.focus());
 </script>
 
 <template>

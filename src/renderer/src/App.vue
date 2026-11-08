@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue';
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import TopBar from './components/TopBar.vue';
 import SideBar from './components/SideBar.vue';
@@ -7,7 +7,6 @@ import SidebarResizer from './components/SidebarResizer.vue';
 import QueueView from './views/QueueView.vue';
 import ExecutionView from './views/ExecutionView.vue';
 import RequirementsView from './views/RequirementsView.vue';
-import SettingsView from './views/SettingsView.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import { useAppStore } from './stores/app.ts';
 import { useTasksStore } from './stores/tasks.ts';
@@ -34,6 +33,11 @@ const CourseView = defineAsyncComponent(() => import('./views/CourseView.vue'));
 const NotesView = defineAsyncComponent(() => import('./views/NotesView.vue'));
 // Draws a mermaid graph, so it loads like the notes page.
 const MasteryView = defineAsyncComponent(() => import('./views/MasteryView.vue'));
+// Settings is opened often but rarely first: it loads in its own chunk and is
+// fetched once the app is idle after startup (see onMounted), so the first
+// open finds it ready.
+const loadSettingsView = () => import('./views/SettingsView.vue');
+const SettingsView = defineAsyncComponent(loadSettingsView);
 
 const app = useAppStore();
 const tasks = useTasksStore();
@@ -42,6 +46,17 @@ const settings = useSettingsStore();
 const execution = useExecutionStore();
 const repositories = useRepositoriesStore();
 const codingActivity = useCodingActivityStore();
+
+// Settings mounts the first time it is shown and then stays mounted (v-show),
+// so unsaved drafts survive leaving it without every page mounting at startup.
+const settingsMounted = ref(app.view === 'settings');
+watch(
+  () => app.view,
+  (view) => {
+    if (view === 'settings') settingsMounted.value = true;
+  },
+  { flush: 'sync' },
+);
 
 // Dialogs (Element Plus) handle their own Escape; these are the page shortcuts.
 const onKeydown = (event: KeyboardEvent) => {
@@ -81,6 +96,7 @@ onMounted(async () => {
       .catch((error) => console.error('Failed to load the default course pack', error)),
   ]);
   hideSplash();
+  requestIdleCallback(() => loadSettingsView().catch((error) => console.error('Failed to load settings', error)));
   if (info && !info.configured) showToast('还没有添加仓库，点顶栏的仓库菜单添加一个。', 'info');
 });
 
@@ -123,8 +139,8 @@ onBeforeUnmount(() => {
           <MasteryView v-else-if="app.view === 'mastery'" />
           <CourseView v-else-if="app.view === 'courses'" />
         </div>
-        <!-- Settings stays mounted so unsaved drafts survive leaving and coming back. -->
-        <SettingsView v-show="app.view === 'settings'" />
+        <!-- Once shown, settings stays mounted so unsaved drafts survive leaving and coming back. -->
+        <SettingsView v-if="settingsMounted" v-show="app.view === 'settings'" />
       </main>
     </div>
   </div>

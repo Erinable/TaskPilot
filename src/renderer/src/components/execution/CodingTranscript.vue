@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 import { businessClock } from '@/lib/time_zone.ts';
 import type * as codingTypes from '@shared/coding_types.ts';
 
@@ -12,16 +14,20 @@ const EVENT_LABELS: Record<codingTypes.CodingEvent['type'], string> = {
   tool: '操作',
   error: '出错',
 };
+
+// A screen reader announces only the newest event, not the whole log each time.
+const latest = computed(() => props.events.at(-1) ?? null);
 </script>
 
 <template>
-  <div class="coding-transcript" aria-live="polite" aria-label="编码 Agent 实时记录">
+  <div class="coding-transcript" role="region" aria-label="编码 Agent 实时记录">
     <div v-if="props.events.length === 0" class="empty-hint">等待编码 Agent 输出…</div>
     <div v-for="event in props.events" :key="event.sequence" class="coding-event">
       <time>{{ businessClock(new Date(event.at)) }}</time>
       <strong :class="event.type">{{ EVENT_LABELS[event.type] }}</strong>
       <span>{{ event.text }}</span>
     </div>
+    <p class="visually-hidden" aria-live="polite">{{ latest ? `${EVENT_LABELS[latest.type]}：${latest.text}` : '' }}</p>
   </div>
 </template>
 

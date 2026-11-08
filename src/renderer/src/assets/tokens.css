@@ -9,7 +9,8 @@
   --text: #16181d;
   --text-secondary: #3f4350;
   --text-muted: #5f6472;
-  --text-tertiary: #8a8f9c;
+  /* At least 4.5:1 on the canvas, for placeholders and hints. */
+  --text-tertiary: #686d7a;
 
   /* Glass surfaces */
   --glass-bg: rgba(255, 255, 255, 0.58);
@@ -85,7 +86,7 @@
     --text: #eef0f6;
     --text-secondary: #c9ccd6;
     --text-muted: #9ea3b2;
-    --text-tertiary: #737888;
+    --text-tertiary: #868b9a;
 
     --glass-bg: rgba(30, 33, 44, 0.52);
     --glass-bg-strong: rgba(34, 37, 50, 0.8);

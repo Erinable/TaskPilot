@@ -68,7 +68,7 @@ onUnmounted(() => {
   <div class="view notes-view notes-blog">
     <header class="blog-header">
       <h1>
-        <a role="link" tabindex="0" data-action="notes-home" @click="run(notes.goIndex())">学习笔记</a>
+        <a role="link" tabindex="0" data-action="notes-home" @click="run(notes.goIndex())" @keydown.enter="run(notes.goIndex())">学习笔记</a>
       </h1>
       <nav class="blog-nav" aria-label="笔记导航">
         <button
@@ -85,7 +85,16 @@ onUnmounted(() => {
         <button class="blog-nav-item" type="button" aria-label="前进" title="前进（⌘]）" :disabled="!notes.canGoForward" @click="run(notes.goForward())">
           <AppIcon name="arrow-right" />
         </button>
-        <a class="blog-nav-item" :class="{ active: notes.route.name === 'index' }" role="link" tabindex="0" @click="run(notes.goIndex())">全部笔记</a>
+        <a
+          class="blog-nav-item"
+          :class="{ active: notes.route.name === 'index' }"
+          role="link"
+          tabindex="0"
+          @click="run(notes.goIndex())"
+          @keydown.enter="run(notes.goIndex())"
+        >
+          全部笔记
+        </a>
         <el-dropdown trigger="click">
           <a class="blog-nav-item" role="button" tabindex="0" aria-label="笔记文件夹">
             <AppIcon name="folder" />
