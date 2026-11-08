@@ -14,6 +14,7 @@ import type { CourseInterviewService } from './course_interview_service.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 import { CONTROL_CHARS } from '../../shared/text_rules.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type RequirementServiceContext = Pick<
   AppContext,
@@ -80,20 +81,21 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     const architectRunner = ctx.runnerFor('architect', { kind: 'requirement', id });
     const productRunner = ctx.runnerFor('product-lead', { kind: 'requirement', id });
     const item = await store.begin(id, step);
-    const controller = backgroundRuns.start({
+    const config = ctx.getConfig();
+    const { root } = config;
+    const info: RunInfo = {
       kind: 'requirement',
       key: id,
       busy: 'requirement',
       agent: () => (store.get(id).phase === 'architect' ? 'architect' : 'product-lead'),
       label: () => store.get(id).title || id,
-    });
-    const config = ctx.getConfig();
-    const { root } = config;
-    const files = await repositoryFiles(root);
-    const { path: envPath } = await ctx.commandPath();
-    const settled = (async () => {
+    };
+    void backgroundRuns.run(info, async (controller) => {
       let outcome: { output: Output; costUsd: number; course: CourseRef } | { error: unknown };
       try {
+        // Inside the try: a failure before the agents start still fails the run.
+        const files = await repositoryFiles(root);
+        const { path: envPath } = await ctx.commandPath();
         const profile = await ctx.profile(config);
         const course = await ctx.course(config);
         let interfaces = item.interfaces?.text ?? null;
@@ -137,8 +139,7 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
           .then(() => record({ kind: 'requirement_finished', requirementId: id, title: store.get(id).title || title, step, costUsd }))
           .catch(fail);
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return item;
   };
 
@@ -186,14 +187,15 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     const runner = ctx.runnerFor('product-lead', { kind: 'requirement', id });
     const started = await store.beginRedo(id, index);
     const plan = item.plan;
-    const controller = backgroundRuns.start({ kind: 'requirement', key: id, busy: 'requirement', agent: () => 'product-lead', label: () => item.title || id });
     const config = ctx.getConfig();
-    const files = await repositoryFiles(config.root);
-    const { path: envPath } = await ctx.commandPath();
     const title = item.title || item.text.slice(0, 40);
-    const settled = (async () => {
+    const info: RunInfo = { kind: 'requirement', key: id, busy: 'requirement', agent: () => 'product-lead', label: () => item.title || id };
+    void backgroundRuns.run(info, async (controller) => {
       let costUsd = 0;
       try {
+        // Inside the try: a failure before Product Lead starts still fails the redo.
+        const files = await repositoryFiles(config.root);
+        const { path: envPath } = await ctx.commandPath();
         const profile = await ctx.profile(config);
         const course = await ctx.course(config);
         throwIfCancelled(controller.signal);
@@ -227,8 +229,7 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
         record({ kind: 'requirement_failed', requirementId: id, title, step: 'planning', code: agentError.code ?? 'unknown' });
         await store.failRedo(id, agentError, costUsd).catch((caught) => logger.error('[requirements] could not record a failed redo', caught));
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return started;
   };
 

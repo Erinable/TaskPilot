@@ -14,6 +14,7 @@ import type { AppContext } from '../app/app_context.ts';
 import type { Grader } from '../courses/lab_verify.ts';
 import type { ToolchainProbe } from '../courses/lab_toolchain.ts';
 import type { BaselineChecks, BaselineChecksStatus } from './work_package_state.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type ReviewServiceContext = Pick<
   AppContext,
@@ -64,9 +65,8 @@ export const createReviewService = (
     const reviewRunner = ctx.runnerFor('qa', { kind: 'package', id });
     const entry = await store.beginReview(id);
     // One in-flight review per work package, so it can be cancelled.
-    const controller = backgroundRuns.start({ kind: 'review', key: id, busy: 'review', agent: () => 'qa', label: ctx.packageLabel(id) });
     const config = ctx.getConfig();
-    const settled = (async () => {
+    void backgroundRuns.run({ kind: 'review', key: id, busy: 'review', agent: () => 'qa', label: ctx.packageLabel(id) }, async (controller) => {
       let outcome: { result: Awaited<ReturnType<typeof reviewWorkPackage>> } | { error: unknown };
       try {
         const { path: envPath } = await ctx.commandPath();
@@ -112,8 +112,7 @@ export const createReviewService = (
           .then(() => onJudged(id))
           .catch((error) => store.failReview(id, error).catch(() => {}));
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return toWireState(entry);
   };
 
@@ -128,8 +127,8 @@ export const createReviewService = (
     const { root } = config;
     const architectRunner = ctx.runnerFor('architect', { kind: 'package', id });
     const entry = await store.beginAdjudication(id);
-    const controller = backgroundRuns.start({ kind: 'adjudication', key: id, busy: 'adjudication', agent: () => 'architect', label: ctx.packageLabel(id) });
-    const settled = (async () => {
+    const info: RunInfo = { kind: 'adjudication', key: id, busy: 'adjudication', agent: () => 'architect', label: ctx.packageLabel(id) };
+    void backgroundRuns.run(info, async (controller) => {
       let outcome: { result: Awaited<ReturnType<typeof adjudicateDeviation>> } | { error: unknown };
       try {
         const { path: envPath } = await ctx.commandPath();
@@ -165,8 +164,7 @@ export const createReviewService = (
           })
           .catch((error) => store.failAdjudication(id, error).catch(() => {}));
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return toWireState(entry);
   };
 
@@ -179,7 +177,6 @@ export const createReviewService = (
     const commit = store.get(id).baseline;
     if (!root || !commit) return;
     backgroundRuns.get('baseline', id)?.abort();
-    const controller = backgroundRuns.start({ kind: 'baseline', key: id, busy: 'baseline', label: ctx.packageLabel(id) });
     const startedAt = new Date().toISOString();
     const record = (status: BaselineChecksStatus, extra: Partial<BaselineChecks> = {}) =>
       store
@@ -194,7 +191,7 @@ export const createReviewService = (
         })
         .catch(() => null);
 
-    const settled = (async () => {
+    return backgroundRuns.run({ kind: 'baseline', key: id, busy: 'baseline', label: ctx.packageLabel(id) }, async (controller) => {
       try {
         // Resolved inside the tracked run, so a switch or shutdown waits for it.
         const checks = submitChecks(await ctx.runnableSteps(config));
@@ -223,12 +220,8 @@ export const createReviewService = (
         await record(same ? 'measured' : 'contaminated', same ? { checks: results } : { reason: 'tree_changed' });
       } catch (error) {
         await record('unavailable', { reason: errorCode(error) ?? 'failed' });
-      } finally {
-        backgroundRuns.finish('baseline', id, controller);
       }
-    })();
-    backgroundRuns.track(settled);
-    return settled;
+    });
   };
 
   return { startReview, startAdjudication, measureBaseline };

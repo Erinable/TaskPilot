@@ -17,6 +17,7 @@ import type { EnvFailure } from '../agents/env_steward.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { SetupAdapter } from '../checking/setup_adapter.ts';
 import type { IpcMainLike } from './handler.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type EnvSession = {
   root: string | null;
@@ -149,27 +150,23 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       };
       ctx.changed('environment');
       const session = env;
-      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', agent: () => 'env-steward', label: () => '环境初始化' });
-      const { path: envPath } = await ctx.commandPath();
-      backgroundRuns.track(
-        (async () => {
-          try {
-            const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
-            Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
-            ctx.changed('environment');
-            // Results only carry over for steps the new plan still runs unchanged.
-            const lines = new Map(envSteps().map((step) => [step.id, formatCommandLine(step)]));
-            for (const id of Object.keys(session.results) as envTypes.EnvStepId[]) {
-              if (session.results[id]?.line !== lines.get(id)) delete session.results[id];
-            }
-          } catch (error) {
-            Object.assign(session, { status: 'failed', error: toFailure(error).error });
-            ctx.changed('environment');
-          } finally {
-            backgroundRuns.finish('environment', '', controller);
+      const info: RunInfo = { kind: 'environment', key: '', busy: 'environment', agent: () => 'env-steward', label: () => '环境初始化' };
+      void backgroundRuns.run(info, async (controller) => {
+        try {
+          const { path: envPath } = await ctx.commandPath();
+          const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
+          Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
+          ctx.changed('environment');
+          // Results only carry over for steps the new plan still runs unchanged.
+          const lines = new Map(envSteps().map((step) => [step.id, formatCommandLine(step)]));
+          for (const id of Object.keys(session.results) as envTypes.EnvStepId[]) {
+            if (session.results[id]?.line !== lines.get(id)) delete session.results[id];
           }
-        })(),
-      );
+        } catch (error) {
+          Object.assign(session, { status: 'failed', error: toFailure(error).error });
+          ctx.changed('environment');
+        }
+      });
       return envView();
     },
 
@@ -193,12 +190,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       if (blocking.length) failWith(`Setup is blocked: ${blocking.join(', ')}`, 'env_blocked');
 
       const session = env;
-      const controller = backgroundRuns.start({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' });
-      session.running = step.id;
-      session.live = { output: '', startedAt: new Date().toISOString() };
-      ctx.changed('environment');
       const line = formatCommandLine(step);
-      const run = (async () => {
+      await backgroundRuns.run({ kind: 'environment', key: '', busy: 'environment', label: () => '环境初始化' }, async (controller) => {
+        session.running = step.id;
+        session.live = { output: '', startedAt: new Date().toISOString() };
+        ctx.changed('environment');
         try {
           const result = await verification.run({ root: session.root, commands: { [step.kind]: { command: step.command, args: step.args } } }, step.kind, {
             signal: controller.signal,
@@ -220,20 +216,15 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             at: new Date().toISOString(),
           };
           ctx.changed('environment');
+        } catch (error) {
+          if (controller.signal.aborted) failWith('Setup step was cancelled', 'agent_cancelled');
+          throw error;
         } finally {
           session.running = null;
           session.live = null;
           ctx.changed('environment');
-          backgroundRuns.finish('environment', '', controller);
         }
-      })();
-      backgroundRuns.track(run.catch(() => {}));
-      try {
-        await run;
-      } catch (error) {
-        if (controller.signal.aborted) failWith('Setup step was cancelled', 'agent_cancelled');
-        throw error;
-      }
+      });
       return envView();
     },
 

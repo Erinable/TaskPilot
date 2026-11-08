@@ -43,6 +43,7 @@ import type { CoursePack } from '../../shared/course_pack.ts';
 import type * as requirementTypes from '../../shared/ipc/requirements.ts';
 import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { LabEntry } from '../repository/project_config.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type LabGenerationServiceContext = Pick<
   AppContext,
@@ -262,7 +263,6 @@ export const createLabGenerationService = (
       placed: false,
     };
     const started = await update(id, base);
-    const controller = backgroundRuns.start({ kind: 'requirement', key: id, busy: 'requirement', agent: () => 'tutor', label: () => started.title || id });
     logger.debug(`[lab-gen] start requirement=${id} concepts=${base.concepts.join(',')} difficulty=${base.difficulty}`);
     let spent = 0;
     let current = base;
@@ -277,7 +277,8 @@ export const createLabGenerationService = (
       spent += result.costUsd ?? 0;
       return result;
     };
-    const settled = (async () => {
+    const info: RunInfo = { kind: 'requirement', key: id, busy: 'requirement', agent: () => 'tutor', label: () => started.title || id };
+    void backgroundRuns.run(info, async (controller) => {
       try {
         const { path: envPath } = await ctx.commandPath();
         const { lab, costUsd } = await generator.generate(request, {
@@ -325,11 +326,8 @@ export const createLabGenerationService = (
           },
           spent,
         ).catch((failure) => logger.error(failure));
-      } finally {
-        backgroundRuns.finish('requirement', id, controller);
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return started;
   };
 

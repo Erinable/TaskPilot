@@ -61,11 +61,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const note = store.get(id);
       if (note.version !== baseVersion) return failWith('The note changed on disk since it was opened', 'note_conflict');
       if (backgroundRuns.has('note-summary', id)) return failWith('A summary of this note is already being written', 'invalid_state');
-      const controller = backgroundRuns.start({ kind: 'note-summary', key: id, busy: 'tutor', agent: () => 'tutor', label: () => '笔记总结', once: true });
-      const { path: envPath } = await ctx.commandPath();
       logger.debug(`[notes] summarize id=${id} length=${note.body.length}`);
-      const run = (async () => {
-        try {
+      return backgroundRuns.run(
+        { kind: 'note-summary', key: id, busy: 'tutor', agent: () => 'tutor', label: () => '笔记总结', once: true },
+        async (controller) => {
+          const { path: envPath } = await ctx.commandPath();
           const { output } = await ctx.runnerFor('tutor')({
             prompt: noteSummary.summaryPrompt(note),
             systemPrompt: noteSummary.SUMMARY_SYSTEM_PROMPT,
@@ -74,13 +74,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             signal: controller.signal,
           });
           throwIfCancelled(controller.signal);
-          return await store.setSummary(id, noteSummary.validateSummary(output), baseVersion);
-        } finally {
-          backgroundRuns.finish('note-summary', id, controller);
-        }
-      })();
-      backgroundRuns.track(run);
-      return run;
+          return store.setSummary(id, noteSummary.validateSummary(output), baseVersion);
+        },
+      );
     },
 
     pickDirectory: async (): Promise<string | null> => {
