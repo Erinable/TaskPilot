@@ -1,6 +1,7 @@
 /** @module-tag integration */
-import { test } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir } from '../../fixtures/temp_dir.ts';
@@ -113,4 +114,62 @@ test('enforces binary, per-file, count, and total limits', async () => {
     ['a.ts', 'b.ts', 'd.ts'],
   );
   assert.deepEqual(reasons(result), { 'img.png': 'binary', 'big.ts': 'too_large', 'c.ts': 'budget' });
+});
+
+// A `git` on PATH that logs each invocation's arguments, then runs the real one.
+const countGit = async () => {
+  const bin = await tempDir('taskpilot-git-bin-');
+  const log = path.join(bin, 'calls.log');
+  const real = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  await fs.writeFile(path.join(bin, 'git'), `#!/bin/sh\necho "$*" >> '${log}'\nexec '${real}' "$@"\n`, { mode: 0o755 });
+  vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`);
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  return async () => (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean);
+};
+
+test('reads many files with one ls-files, one batch-check and one batch process', async () => {
+  const files = Object.fromEntries(Array.from({ length: 8 }, (_unused, index) => [`src/f${index}.ts`, `export const f${index} = ${index};\n`]));
+  const root = await repo({ ...files, 'big.ts': 'x'.repeat(500), '.env': 'KEY=1' });
+  const calls = await countGit();
+  const result = await readTracked(root, ['.env', 'big.ts', ...Object.keys(files), 'missing.ts'], { maxFileBytes: 200, maxFiles: 6 });
+  assert.deepEqual(
+    result.files.map((file) => [file.path, file.content]),
+    Object.entries(files).slice(0, 6),
+  );
+  assert.deepEqual(result.skipped, [
+    { path: '.env', reason: 'secret' },
+    { path: 'big.ts', reason: 'too_large' },
+    { path: 'src/f6.ts', reason: 'file_limit' },
+    { path: 'src/f7.ts', reason: 'file_limit' },
+    { path: 'missing.ts', reason: 'not_tracked' },
+  ]);
+  assert.deepEqual((await calls()).map((line) => line.split(' ').slice(0, 2).join(' ')).sort(), [
+    'cat-file --batch',
+    'cat-file --batch-check=%(objectname)',
+    'ls-files -s',
+  ]);
+});
+
+test('starts no cat-file process when nothing requested can be read', async () => {
+  const root = await repo({ '.env': 'KEY=1' });
+  const calls = await countGit();
+  const result = await readTracked(root, ['.env', 'nope.ts']);
+  assert.deepEqual(result.files, []);
+  assert.deepEqual(await calls(), ['ls-files -s -z']);
+});
+
+test('reads identical blobs at two paths and a binary one among text files', async () => {
+  const root = await repo({ 'a.ts': 'same\n', 'b.ts': 'same\n', 'img.bin': Buffer.from([1, 0, 2]), 'c.ts': 'last\n' });
+  const result = await readTracked(root, ['a.ts', 'img.bin', 'b.ts', 'c.ts']);
+  assert.deepEqual(
+    result.files.map((file) => [file.path, file.content, file.bytes]),
+    [
+      ['a.ts', 'same\n', 5],
+      ['b.ts', 'same\n', 5],
+      ['c.ts', 'last\n', 5],
+    ],
+  );
+  assert.deepEqual(result.skipped, [{ path: 'img.bin', reason: 'binary' }]);
 });

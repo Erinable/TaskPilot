@@ -1,8 +1,8 @@
 import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
-import { readFile, stat, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, stat, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { createLogger } from '../../../src/main/infrastructure/logger.ts';
+import { createLogger, MAX_LOG_BYTES } from '../../../src/main/infrastructure/logger.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 
 test('filters levels and preserves write order', async () => {
@@ -67,4 +67,34 @@ test('an unwritable log path cannot fail business callers or overwrite the block
   );
   assert.ok(errors[0].message.includes(path.join(blocked, 'taskpilot.log')));
   assert.ok(errors[1].message.includes(path.join(blocked, 'nested')));
+});
+
+test('initialize() rotates a log above the size cap, keeping three old logs at 0600', async () => {
+  const dir = await tempDir('taskpilot-log-');
+  const file = path.join(dir, 'taskpilot.log');
+  await writeFile(file, 'x'.repeat(MAX_LOG_BYTES + 1), { mode: 0o644 });
+  for (const index of [1, 2, 3]) await writeFile(`${file}.${index}`, `old ${index}`);
+  const logger = createLogger({ sink: () => {} });
+  await logger.initialize(dir);
+  logger.info('fresh');
+  await logger.flush();
+  assert.match(await readFile(file, 'utf8'), /\[info\] fresh/);
+  assert.equal((await stat(`${file}.1`)).size, MAX_LOG_BYTES + 1);
+  assert.equal((await stat(`${file}.1`)).mode & 0o777, 0o600);
+  assert.equal(await readFile(`${file}.2`, 'utf8'), 'old 1');
+  assert.equal(await readFile(`${file}.3`, 'utf8'), 'old 2');
+  assert.deepEqual((await readdir(dir)).sort(), ['taskpilot.log', 'taskpilot.log.1', 'taskpilot.log.2', 'taskpilot.log.3']);
+  assert.equal((await stat(file)).mode & 0o777, 0o600);
+});
+
+test('initialize() keeps a log at or below the size cap in place', async () => {
+  const dir = await tempDir('taskpilot-log-');
+  const file = path.join(dir, 'taskpilot.log');
+  await writeFile(file, 'earlier\n');
+  const logger = createLogger({ sink: () => {} });
+  await logger.initialize(dir);
+  logger.info('later');
+  await logger.flush();
+  assert.match(await readFile(file, 'utf8'), /^earlier\n.*later/s);
+  assert.deepEqual(await readdir(dir), ['taskpilot.log']);
 });

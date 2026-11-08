@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 
 import { env, processEnv } from './env.ts';
+import { normalizeErrorCode, type ErrorCode } from '../../shared/error_codes.ts';
 
 export const MARKER = '__TASKPILOT_PATH__';
 const TIMEOUT_MS = 5000;
@@ -26,7 +27,6 @@ export type RunFile = (
   callback: (error: (Error & { killed?: boolean }) | null, stdout?: string | Buffer) => void,
 ) => unknown;
 
-import { normalizeErrorCode, type ErrorCode } from '../../shared/error_codes.ts';
 export interface ResolvedPath {
   source: 'inherit' | 'login-shell';
   path: string;

@@ -26,8 +26,7 @@ import * as markdown from '../../shared/note_markdown.ts';
 import { writeFileAtomic } from '../infrastructure/atomic_json_file.ts';
 import type * as noteTypes from '../../shared/ipc/notes.ts';
 import type { GradeCategory } from '../../shared/ipc/packages.ts';
-import { NoteError, fail, validateNote, title, fileName, render, editedFields, changedFields, toEntry, type Entry } from './note_file.ts';
-import { body, summary } from './note_file.ts';
+import * as noteFile from './note_file.ts';
 import { readStoredJson, writeStoredJson } from '../infrastructure/persisted_json.ts';
 import type { StateChanged } from '../infrastructure/state_changes.ts';
 
@@ -66,7 +65,7 @@ export class NoteStore {
   #custom = false;
   // A chosen folder that could not be opened at startup.
   #unavailable: string | null = null;
-  #entries = new Map<string, Entry>();
+  #entries = new Map<string, noteFile.Entry>();
   #truncated = false;
   #revision = 0;
   #writes: Promise<unknown> = Promise.resolve();
@@ -149,7 +148,7 @@ export class NoteStore {
     const target = directory ? path.resolve(directory) : path.join(this.#configDir, DEFAULT_DIRNAME);
     if (directory) {
       const stat = await fs.stat(target).catch(() => null);
-      if (!stat?.isDirectory()) throw new NoteError('The notes folder does not exist', 'notes_directory_invalid', 'directory');
+      if (!stat?.isDirectory()) throw new noteFile.NoteError('The notes folder does not exist', 'notes_directory_invalid', 'directory');
     } else {
       await fs.mkdir(target, { recursive: true });
     }
@@ -183,7 +182,7 @@ export class NoteStore {
 
   get(id: string): noteTypes.Note {
     const entry = this.#entries.get(id);
-    if (!entry) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
+    if (!entry) throw new noteFile.NoteError(`Unknown note: ${id}`, 'unknown_note');
     return { ...structuredClone(entry.meta), body: entry.body };
   }
 
@@ -199,12 +198,12 @@ export class NoteStore {
   // autoRename: a taken title gets " 2", " 3"… instead of being refused.
   create(raw: unknown, { autoRename = false } = {}): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
-      const input = validateNote(raw);
-      if (this.#entries.size >= MAX_NOTES) throw new NoteError(`At most ${MAX_NOTES} notes`, 'notes_full');
+      const input = noteFile.validateNote(raw);
+      if (this.#entries.size >= MAX_NOTES) throw new noteFile.NoteError(`At most ${MAX_NOTES} notes`, 'notes_full');
       const noteTitle = autoRename ? this.#freeTitle(input.title) : input.title;
-      if (this.#taken(noteTitle)) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
-      const content = render(null, input.body, { ...input, created: this.#now().toISOString() });
-      const id = fileName(noteTitle);
+      if (this.#taken(noteTitle)) throw new noteFile.NoteError('A note with this title already exists', 'note_exists', 'title');
+      const content = noteFile.render(null, input.body, { ...input, created: this.#now().toISOString() });
+      const id = noteFile.fileName(noteTitle);
       await this.#writeFile(id, content, { exclusive: true });
       await this.#reread(id);
       logger.debug(`[notes] create id=${id}`);
@@ -216,24 +215,24 @@ export class NoteStore {
   // the file and, when asked, points [[old title]] in other notes at the new one.
   update(id: string, raw: unknown): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('An edit must be an object', 'note');
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) noteFile.fail('An edit must be an object', 'note');
       const input = raw as Record<string, unknown>;
-      if (typeof input.baseVersion !== 'string') fail('baseVersion is required', 'baseVersion');
-      const nextTitle = title(input.title);
-      const nextBody = body(input.body);
-      const edited = editedFields(input);
+      if (typeof input.baseVersion !== 'string') noteFile.fail('baseVersion is required', 'baseVersion');
+      const nextTitle = noteFile.title(input.title);
+      const nextBody = noteFile.body(input.body);
+      const edited = noteFile.editedFields(input);
       const current = await this.#fresh(id);
-      const fields = changedFields(edited, current.meta);
+      const fields = noteFile.changedFields(edited, current.meta);
       if (current.meta.frontmatterError)
-        throw new NoteError('The frontmatter of this note is not valid YAML; fix it in another editor first', 'frontmatter_invalid');
+        throw new noteFile.NoteError('The frontmatter of this note is not valid YAML; fix it in another editor first', 'frontmatter_invalid');
       if (current.meta.version !== input.baseVersion && input.force !== true)
-        throw new NoteError('The note changed on disk since it was opened', 'note_conflict');
+        throw new noteFile.NoteError('The note changed on disk since it was opened', 'note_conflict');
       const renamed = nextTitle !== current.meta.title;
       // Only the case changes: on a case-insensitive disk that is the same file.
       const caseOnly = renamed && markdown.titleKey(nextTitle) === markdown.titleKey(current.meta.title);
-      if (renamed && !caseOnly && this.#taken(nextTitle)) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
-      const content = render(current.doc, nextBody, fields);
-      const nextId = fileName(nextTitle);
+      if (renamed && !caseOnly && this.#taken(nextTitle)) throw new noteFile.NoteError('A note with this title already exists', 'note_exists', 'title');
+      const content = noteFile.render(current.doc, nextBody, fields);
+      const nextId = noteFile.fileName(nextTitle);
       if (renamed && !caseOnly) {
         await this.#writeFile(nextId, content, { exclusive: true });
         await fs.unlink(this.#path(id));
@@ -253,9 +252,9 @@ export class NoteStore {
   setSummary(id: string, value: string, baseVersion: string): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
       const current = await this.#fresh(id);
-      if (current.meta.frontmatterError) throw new NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
-      if (current.meta.version !== baseVersion) throw new NoteError('The note changed on disk since it was opened', 'note_conflict');
-      const content = render(current.doc, current.body, { summary: summary(value) });
+      if (current.meta.frontmatterError) throw new noteFile.NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
+      if (current.meta.version !== baseVersion) throw new noteFile.NoteError('The note changed on disk since it was opened', 'note_conflict');
+      const content = noteFile.render(current.doc, current.body, { summary: noteFile.summary(value) });
       await this.#writeFile(id, content);
       await this.#reread(id);
       return { revision: this.#revision, note: this.get(id), relinked: 0 };
@@ -304,16 +303,16 @@ export class NoteStore {
   // see half a note. exclusive: refuse when the file already exists.
   async #writeFile(id: string, content: string, { exclusive = false } = {}) {
     const target = this.#path(id);
-    if (exclusive && (await fs.stat(target).catch(() => null))) throw new NoteError('A note with this title already exists', 'note_exists', 'title');
+    if (exclusive && (await fs.stat(target).catch(() => null))) throw new noteFile.NoteError('A note with this title already exists', 'note_exists', 'title');
     await writeFileAtomic(target, content, { tmp: path.join(this.#directory, `.${randomUUID()}.tmp`) });
   }
 
   // The note as it is on disk now, for checks that must not trust the cache.
-  async #fresh(id: string): Promise<Entry> {
+  async #fresh(id: string): Promise<noteFile.Entry> {
     this.get(id);
     await this.#reread(id);
     const entry = this.#entries.get(id);
-    if (!entry) throw new NoteError(`Unknown note: ${id}`, 'unknown_note');
+    if (!entry) throw new noteFile.NoteError(`Unknown note: ${id}`, 'unknown_note');
     return entry;
   }
 
@@ -333,7 +332,7 @@ export class NoteStore {
       this.#truncated = true;
       return false;
     }
-    const entry = toEntry(id, raw, stat);
+    const entry = noteFile.toEntry(id, raw, stat);
     if (before && before.meta.version === entry.meta.version && before.meta.updatedAt === entry.meta.updatedAt) return false;
     this.#entries.set(id, entry);
     this.#revision += 1;
@@ -373,7 +372,7 @@ export class NoteStore {
       const batch = await Promise.all(
         chosen.slice(start, start + slice).map(async (item) => ({ item, raw: await fs.readFile(this.#path(item.name), 'utf8').catch(() => null) })),
       );
-      for (const { item, raw } of batch) if (raw !== null) this.#entries.set(item.name, toEntry(item.name, raw, item.stat!));
+      for (const { item, raw } of batch) if (raw !== null) this.#entries.set(item.name, noteFile.toEntry(item.name, raw, item.stat!));
     }
     this.#revision += 1;
   }

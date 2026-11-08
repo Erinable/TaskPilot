@@ -1,7 +1,7 @@
 // Reads repository files for an agent, within a fixed boundary.
 //
 // SECURITY: this is the only place agent-bound file contents come from.
-//   - Contents are read from git's index blobs (`git cat-file blob <sha>`),
+//   - Contents are read from git's index blobs (`git cat-file --batch`),
 //     never from the filesystem. Only tracked files can be read, a symlink
 //     yields its target path rather than the target's contents, and nothing
 //     outside the repository is reachable.
@@ -10,7 +10,11 @@
 //   - Binary files, oversized files, and totals past the budget are skipped.
 // Every skip is reported back so the caller (and the user) can see what the
 // agent did not get.
-import { execFile } from 'node:child_process';
+//
+// A call runs three git processes however many files it reads: ls-files,
+// one `cat-file --batch-check` for every size, one `cat-file --batch` that
+// returns the contents of the files the limits let through, one at a time.
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 
@@ -75,6 +79,76 @@ const git = async (root: string, args: string[]): Promise<Buffer> => {
   return stdout;
 };
 
+// Sizes of `shas` in one `git cat-file --batch-check`; a missing object is absent.
+const blobSizes = async (root: string, shas: string[]): Promise<Map<string, number>> => {
+  const sizes = new Map<string, number>();
+  if (!shas.length) return sizes;
+  const { promise, resolve, reject } = Promise.withResolvers<string>();
+  const child = spawn('git', ['cat-file', '--batch-check=%(objectname) %(objectsize)'], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  const chunks: Buffer[] = [];
+  child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+  child.stdin.on('error', () => {});
+  child.on('error', reject);
+  child.on('close', (code) =>
+    code === 0 ? resolve(Buffer.concat(chunks).toString('utf8')) : reject(new Error(`git cat-file --batch-check failed with ${code}`)),
+  );
+  child.stdin.end(`${shas.join('\n')}\n`);
+  for (const line of (await promise).split('\n')) {
+    const [sha, size] = line.split(' ');
+    if (sha && /^\d+$/.test(size ?? '')) sizes.set(sha, Number(size));
+  }
+  return sizes;
+};
+
+// One `git cat-file --batch` process answering blob requests in order.
+// Each answer is "<sha> <type> <size>\n<content>\n", or "<sha> missing\n".
+const blobReader = (root: string) => {
+  const child = spawn('git', ['cat-file', '--batch'], { cwd: root, stdio: ['pipe', 'pipe', 'ignore'] });
+  let buffered = Buffer.alloc(0);
+  let failure: Error | null = null;
+  const waiting: { resolve: (blob: Buffer | null) => void; reject: (error: Error) => void }[] = [];
+  const drain = () => {
+    while (waiting.length) {
+      const newline = buffered.indexOf(0x0a);
+      if (newline < 0) return;
+      const header = buffered.subarray(0, newline).toString('utf8').split(' ');
+      if (header[1] === 'missing') {
+        buffered = buffered.subarray(newline + 1);
+        (waiting.shift() as (typeof waiting)[number]).resolve(null);
+        continue;
+      }
+      const size = Number(header[2]);
+      if (buffered.length < newline + 1 + size + 1) return;
+      const blob = Buffer.from(buffered.subarray(newline + 1, newline + 1 + size));
+      buffered = buffered.subarray(newline + 1 + size + 1);
+      (waiting.shift() as (typeof waiting)[number]).resolve(blob);
+    }
+  };
+  const fail = (error: Error) => {
+    failure ??= error;
+    for (const entry of waiting.splice(0)) entry.reject(failure);
+  };
+  child.stdout.on('data', (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    drain();
+  });
+  child.stdin.on('error', () => {});
+  child.on('error', fail);
+  child.on('close', (code) => fail(new Error(`git cat-file --batch exited with ${code}`)));
+  return {
+    read: (sha: string): Promise<Buffer | null> => {
+      if (failure) return Promise.reject(failure);
+      const { promise, resolve, reject } = Promise.withResolvers<Buffer | null>();
+      waiting.push({ resolve, reject });
+      child.stdin.write(`${sha}\n`);
+      return promise;
+    },
+    close: () => {
+      child.stdin.end();
+    },
+  };
+};
+
 // Index entries for tracked files: path → { sha, mode }. Mode 120000 is a
 // symlink, 160000 a submodule; neither has readable contents here.
 export const indexEntries = async (root: string): Promise<Map<string, IndexEntry>> => {
@@ -91,6 +165,13 @@ export const indexEntries = async (root: string): Promise<Map<string, IndexEntry
   return entries;
 };
 
+// Why a requested path is refused before git is asked for its blob, or null.
+const refusal = (candidate: string, entry: IndexEntry | undefined): ReadSkipReason | null => {
+  if (!entry) return 'not_tracked';
+  if (looksSecret(candidate)) return 'secret';
+  return entry.mode === '120000' || entry.mode === '160000' ? 'not_a_file' : null;
+};
+
 // root: repository root (already validated as a git repo)
 // requested: relative paths, in priority order
 export const readTracked = async (root: string, requested: unknown[], limits: Partial<ReadLimits> = {}): Promise<TrackedRead> => {
@@ -101,45 +182,51 @@ export const readTracked = async (root: string, requested: unknown[], limits: Pa
   let total = 0;
   const seen = new Set<string>();
 
+  // Paths, secrets and links are judged before git is asked for anything.
+  const candidates: { path: string; sha: string }[] = [];
   for (const candidate of requested) {
     if (typeof candidate !== 'string' || seen.has(candidate)) continue;
     seen.add(candidate);
-    const skip = (reason: ReadSkipReason) => skipped.push({ path: candidate, reason });
     const entry = entries.get(candidate);
-    if (!entry) {
-      skip('not_tracked');
-      continue;
-    }
-    if (looksSecret(candidate)) {
-      skip('secret');
-      continue;
-    }
-    if (entry.mode === '120000' || entry.mode === '160000') {
-      skip('not_a_file');
-      continue;
-    }
-    if (files.length >= maxFiles) {
-      skip('file_limit');
-      continue;
-    }
-
-    const size = Number((await git(root, ['cat-file', '-s', entry.sha])).toString().trim());
-    if (size > maxFileBytes) {
-      skip('too_large');
-      continue;
-    }
-    if (total + size > maxTotalBytes) {
-      skip('budget');
-      continue;
-    }
-
-    const blob = await git(root, ['cat-file', 'blob', entry.sha]);
-    if (looksBinary(blob)) {
-      skip('binary');
-      continue;
-    }
-    total += blob.length;
-    files.push({ path: candidate, sha: entry.sha, content: blob.toString('utf8'), bytes: blob.length });
+    const reason = refusal(candidate, entry);
+    candidates.push({ path: candidate, sha: reason ? '' : (entry as IndexEntry).sha });
+    if (reason) skipped.push({ path: candidate, reason });
   }
+  const sizes = await blobSizes(root, [...new Set(candidates.filter((item) => item.sha).map((item) => item.sha))]);
+  let reader: ReturnType<typeof blobReader> | null = null;
+  try {
+    for (const { path: candidate, sha } of candidates) {
+      if (!sha) continue;
+      const skip = (reason: ReadSkipReason) => skipped.push({ path: candidate, reason });
+      if (files.length >= maxFiles) {
+        skip('file_limit');
+        continue;
+      }
+      const size = sizes.get(sha);
+      if (size === undefined) throw new Error(`git has no blob ${sha} for ${candidate}`);
+      if (size > maxFileBytes) {
+        skip('too_large');
+        continue;
+      }
+      if (total + size > maxTotalBytes) {
+        skip('budget');
+        continue;
+      }
+      reader ??= blobReader(root);
+      const blob = await reader.read(sha);
+      if (!blob) throw new Error(`git has no blob ${sha} for ${candidate}`);
+      if (looksBinary(blob)) {
+        skip('binary');
+        continue;
+      }
+      total += blob.length;
+      files.push({ path: candidate, sha, content: blob.toString('utf8'), bytes: blob.length });
+    }
+  } finally {
+    reader?.close();
+  }
+  // Skips are reported in the order the paths were requested.
+  const order = new Map(candidates.map((item, index) => [item.path, index]));
+  skipped.sort((left, right) => (order.get(left.path) as number) - (order.get(right.path) as number));
   return { files, skipped };
 };

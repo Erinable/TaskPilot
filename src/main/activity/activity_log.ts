@@ -57,6 +57,9 @@ export class ActivityLog {
   // kept current by every append that lands.
   #summary: ActivitySummary | null = null;
   #building: Promise<ActivitySummary> | null = null;
+  // Day files whose lines were checked for a newer storageVersion since the
+  // log was opened; later appends to them skip the reread.
+  #checkedDays = new Set<string>();
 
   setOnChanged(listener: StateChanged): void {
     this.#onChanged = listener;
@@ -91,6 +94,7 @@ export class ActivityLog {
     this.#dir = path.join(configDir, EVENTS_DIRNAME);
     this.#summary = null;
     this.#building = null;
+    this.#checkedDays.clear();
     return this;
   }
 
@@ -98,10 +102,16 @@ export class ActivityLog {
   append(event: LoggedEvent): Promise<void> {
     const at = this.#now();
     const record: LoggedRecord = { storageVersion: 1, ...event, at: at.toISOString() };
-    const file = path.join(this.#dir, `${businessDay(at, this.#timeZone)}.jsonl`);
+    const day = businessDay(at, this.#timeZone);
+    const file = path.join(this.#dir, `${day}.jsonl`);
     const write = this.#writes.then(async () => {
       await fs.mkdir(this.#dir, { recursive: true });
-      await this.#readDay(businessDay(at, this.#timeZone));
+      // A day file holding a newer storageVersion refuses the append; it is
+      // read once per day, then this process's own lines keep it current.
+      if (!this.#checkedDays.has(day)) {
+        await this.#readDay(day);
+        this.#checkedDays.add(day);
+      }
       await fs.appendFile(file, `${JSON.stringify(record)}\n`);
       this.#summary?.add(record);
       this.#notify();
@@ -156,6 +166,13 @@ export class ActivityLog {
   async overview(estimate?: EstimateRow): Promise<OverviewSummary> {
     const summary = await (this.#building ??= this.#build());
     return summary.read(recentDays(this.#now(), this.#timeZone, RETENTION_DAYS), estimate);
+  }
+
+  // The window's spend records, oldest first, from the same in-memory summary:
+  // the cost page and the price sync read no day files once it is built.
+  async costRecords(): Promise<LoggedRecord[]> {
+    const summary = await (this.#building ??= this.#build());
+    return summary.costRecords(recentDays(this.#now(), this.#timeZone, RETENTION_DAYS));
   }
 
   // Reads the window once, queued behind the appends so far: every append

@@ -68,3 +68,11 @@ test('reads prioritized files first and enforces size limits', async () => {
   const budget = await collectChanges(root, baseline, { limits: { maxTotalBytes: 400 } });
   assert.deepEqual(budget.skipped, [{ path: 'big.js', reason: 'budget' }]);
 });
+
+test('an untracked file past the line-count cap is skipped as too large without a diff', async () => {
+  const { root, baseline } = await repo();
+  const changes = [{ path: 'huge.log', added: 0, removed: 0, binary: false, untracked: true, tooLarge: true }];
+  const { files, skipped } = await collectChanges(root, baseline, { changes });
+  assert.deepEqual(files, []);
+  assert.deepEqual(skipped, [{ path: 'huge.log', reason: 'too_large' }]);
+});

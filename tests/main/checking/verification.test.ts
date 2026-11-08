@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir } from '../../fixtures/temp_dir.ts';
+import { until } from '../../fixtures/until.ts';
 import * as verification from '../../../src/main/checking/verification.ts';
 import * as checkOutput from '../../../src/main/checking/check_output.ts';
 import type { CheckStep } from '../../../src/main/checking/step_config.ts';
@@ -306,4 +307,84 @@ test('run() streams output as it arrives', async () => {
   const chunks: string[] = [];
   await verification.run(config, 'test', { onOutput: (chunk) => chunks.push(chunk) });
   assert.match(chunks.join(''), /first[\s\S]*second|second[\s\S]*first/);
+});
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// The shell prints its background `sleep`'s pid, then waits on it, so only
+// killing the whole process group ends the command in time.
+const grandchild = { command: '/bin/sh', args: ['-c', 'sleep 30 & echo "grandchild=$!"; wait'] };
+const grandchildPid = (output: string) => Number(/grandchild=(\d+)/.exec(output)?.[1]);
+
+test('run() stops a timed-out command together with the processes it started', { tags: ['integration'] }, async () => {
+  const config = await workspaceWith({ test: grandchild });
+  const result = await verification.run(config, 'test', { timeoutMs: 300 });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.summary.ok, false);
+  const pid = grandchildPid(result.output);
+  assert.ok(pid > 0, result.output);
+  await until(
+    () => alive(pid),
+    (running) => !running,
+    'grandchild sleep stopped',
+  );
+});
+
+test('run() rejects with AbortError on cancel and stops the processes the command started', { tags: ['integration'] }, async () => {
+  const config = await workspaceWith({ test: grandchild });
+  const controller = new AbortController();
+  let output = '';
+  const running = verification.run(config, 'test', {
+    signal: controller.signal,
+    onOutput: (chunk) => {
+      output += chunk;
+      if (/grandchild=\d+\n/.test(output)) controller.abort();
+    },
+  });
+  await assert.rejects(running, { name: 'AbortError' });
+  const pid = grandchildPid(output);
+  await until(
+    () => alive(pid),
+    (stillRunning) => !stillRunning,
+    'grandchild sleep stopped',
+  );
+});
+
+test('run() kills a command that ignores SIGTERM once the grace period ends', { tags: ['integration'] }, async () => {
+  const config = await workspaceWith({
+    test: { command: process.execPath, args: ['-e', "process.on('SIGTERM', () => {}); console.log(`ready=${process.pid}`); setInterval(() => {}, 1000)"] },
+  });
+  const controller = new AbortController();
+  let output = '';
+  const running = verification.run(config, 'test', {
+    signal: controller.signal,
+    onOutput: (chunk) => {
+      output += chunk;
+      if (/ready=\d+\n/.test(output)) controller.abort();
+    },
+  });
+  // The leader survives SIGTERM, so the run only ends after SIGKILL.
+  await assert.rejects(running, { name: 'AbortError' });
+  const pid = Number(/ready=(\d+)/.exec(output)?.[1]);
+  assert.equal(alive(pid), false);
+});
+
+test('run() keeps at most MAX_BUFFER bytes of output and stops a command that floods it', { tags: ['integration'] }, async () => {
+  const config = await workspaceWith({
+    test: {
+      command: process.execPath,
+      args: ['-e', "const line = 'x'.repeat(65536); const write = () => { while (process.stdout.write(line)); }; process.stdout.on('drain', write); write()"],
+    },
+  });
+  const result = await verification.run(config, 'test', { timeoutMs: 20_000 });
+  assert.equal(result.timedOut, false);
+  assert.equal(result.summary.ok, false);
+  assert.ok(result.output.length <= 20 * 1024 * 1024);
 });

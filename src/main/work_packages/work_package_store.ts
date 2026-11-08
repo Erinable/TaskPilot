@@ -6,6 +6,7 @@
 // Persisted to disk so closing the app does not lose half-finished work.
 import fs from 'node:fs/promises';
 import path from 'node:path';
+
 import { logger } from '../infrastructure/logger.ts';
 import * as status from './work_package_status.ts';
 import { readStoredJson, writeStoredJson } from '../infrastructure/persisted_json.ts';
@@ -14,6 +15,12 @@ import type { CodingRun } from '../../shared/coding_types.ts';
 import type { ErrorCode } from '../../shared/error_codes.ts';
 import type { StateChanged } from '../infrastructure/state_changes.ts';
 import * as packageState from './work_package_state.ts';
+import type { TaskDefinition } from './tasks.ts';
+import type { ExecutionMode, Grade, ReferenceRun } from '../../shared/ipc/packages.ts';
+import type { HintUse } from '../../shared/hint_ladder.ts';
+import { JsonWriteQueue } from '../infrastructure/atomic_json_file.ts';
+import type { TaskRevisionDefinition } from './tasks.ts';
+
 type WorkPackageState = packageState.WorkPackageState;
 type StoreTask = packageState.StoreTask;
 type Deviation = packageState.Deviation;
@@ -35,11 +42,7 @@ const {
   revertReplan,
   StoreError,
 } = packageState;
-import type { TaskDefinition } from './tasks.ts';
-import type { ExecutionMode, Grade, ReferenceRun } from '../../shared/ipc/packages.ts';
-import type { HintUse } from '../../shared/hint_ladder.ts';
-import { JsonWriteQueue } from '../infrastructure/atomic_json_file.ts';
-import type { TaskRevisionDefinition } from './tasks.ts';
+
 export const STATE_FILENAME = 'work-packages.json';
 
 export class WorkPackageStore {

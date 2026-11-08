@@ -2,10 +2,11 @@
 // execution page can show.
 //
 // SECURITY: commands come from the effective steps only (see
-// ./effective_steps.ts), run through execFile with an argument array, and
-// never touch a shell.
+// ./effective_steps.ts), run through spawn with an argument array, and
+// never touch a shell. Each command leads its own process group, so a timeout
+// or a cancel stops everything it started, not just the direct child.
 import path from 'node:path';
-import { execFile, type ChildProcess, type ExecFileException, type ExecFileOptions } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 import { processEnv } from '../infrastructure/env.ts';
 import * as testReport from './test_report.ts';
@@ -19,6 +20,8 @@ import type { AcceptanceCriterion } from '../work_packages/tasks.ts';
 
 export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_BUFFER = 20 * 1024 * 1024;
+// How long a stopped command's group gets after SIGTERM before SIGKILL.
+export const KILL_GRACE_MS = 2000;
 
 export interface RunSummary {
   total: number;
@@ -103,20 +106,89 @@ export const summarize = (results: Pick<TestResult, 'passed' | 'skipped' | 'todo
 };
 
 interface Spawned {
-  error: ExecFileException | null;
+  // Set when the command could not start (ENOENT for a missing executable).
+  error: NodeJS.ErrnoException | null;
+  exitCode: number | null;
+  timedOut: boolean;
+  aborted: boolean;
   stdout: string;
   stderr: string;
 }
 
-const spawn = (command: string, args: string[], options: ExecFileOptions & { onSpawn?: (child: ChildProcess) => void }) =>
+type SpawnOptions = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onOutput?: (chunk: string) => void;
+};
+
+const abortError = () => Object.assign(new Error('The operation was aborted'), { name: 'AbortError', code: 'ABORT_ERR' });
+
+// Runs one command in its own process group and collects stdout and stderr,
+// at most MAX_BUFFER bytes together. A timeout, a cancel or too much output
+// stops the whole group: SIGTERM, then SIGKILL once KILL_GRACE_MS has passed.
+const runCommand = (command: string, args: string[], { cwd, env, timeoutMs, signal, onOutput }: SpawnOptions) =>
   new Promise<Spawned>((resolve) => {
-    const child = execFile(command, args, { ...options, encoding: 'utf8' }, (error, stdout, stderr) => {
-      resolve({ error, stdout, stderr });
-    });
+    const result: Spawned = { error: null, exitCode: null, timedOut: false, aborted: false, stdout: '', stderr: '' };
+    if (signal?.aborted) return resolve({ ...result, aborted: true });
+    const groups = process.platform !== 'win32';
+    const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: groups });
+    const chunks = { stdout: [] as Buffer[], stderr: [] as Buffer[] };
+    let bytes = 0;
+    let killTimer: NodeJS.Timeout | undefined;
+    const kill = (sig: NodeJS.Signals) => {
+      try {
+        if (groups && child.pid) process.kill(-child.pid, sig);
+        else child.kill(sig);
+      } catch {
+        // The group is already gone.
+      }
+    };
+    const stop = () => {
+      if (killTimer) return;
+      kill('SIGTERM');
+      killTimer = setTimeout(() => kill('SIGKILL'), KILL_GRACE_MS);
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          result.timedOut = true;
+          stop();
+        }, timeoutMs)
+      : undefined;
+    const onAbort = () => {
+      result.aborted = true;
+      stop();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const collect = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+      onOutput?.(String(chunk));
+      if (bytes >= MAX_BUFFER) return;
+      const kept = chunk.subarray(0, MAX_BUFFER - bytes);
+      chunks[stream].push(kept);
+      bytes += kept.length;
+      // Past the cap the command is stopped, as execFile's maxBuffer did.
+      if (bytes >= MAX_BUFFER) stop();
+    };
+    child.stdout.on('data', collect('stdout'));
+    child.stderr.on('data', collect('stderr'));
     // Checks are never interactive. Without an end of input, a command that
     // reads stdin (a prompt, a watch mode, `cat`) would wait forever.
-    child.stdin?.end();
-    options.onSpawn?.(child);
+    child.stdin.on('error', () => {});
+    child.stdin.end();
+    let settled = false;
+    const finish = (update: Partial<Spawned>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // The leader is gone, but a pending SIGKILL still reaches whatever it
+      // left behind in the group once the grace period ends.
+      killTimer?.unref();
+      signal?.removeEventListener('abort', onAbort);
+      resolve({ ...result, ...update, stdout: Buffer.concat(chunks.stdout).toString('utf8'), stderr: Buffer.concat(chunks.stderr).toString('utf8') });
+    };
+    child.on('error', (error: NodeJS.ErrnoException) => finish({ error }));
+    child.on('close', (code: number | null) => finish({ exitCode: code }));
   });
 
 // Runs {command, args} in `root`; shared by run() and runStep().
@@ -127,16 +199,17 @@ const execute = async (
   { signal, timeoutMs, envPath, onOutput, env = {} }: RunOptions & { env?: Record<string, string> },
 ): Promise<CommandOutcome & { stdout: string }> => {
   const startedAt = Date.now();
-  const { error, stdout, stderr } = await spawn(entry.command, entry.args, {
-    onSpawn: onOutput
-      ? (child) => {
-          child.stdout?.on('data', (chunk) => onOutput(String(chunk)));
-          child.stderr?.on('data', (chunk) => onOutput(String(chunk)));
-        }
-      : undefined,
+  const {
+    error,
+    exitCode: code,
+    timedOut,
+    aborted,
+    stdout,
+    stderr,
+  } = await runCommand(entry.command, entry.args, {
+    onOutput,
     cwd: root,
-    maxBuffer: MAX_BUFFER,
-    timeout: timeoutMs,
+    timeoutMs,
     signal,
     // A test runner that inherits a TTY may emit colour codes; ask it not to.
     // Cargo lets an inherited CARGO_TERM_COLOR=always beat NO_COLOR, which
@@ -150,12 +223,12 @@ const execute = async (
   if (error?.code === 'ENOENT') {
     throw new VerificationError(`Executable not found: ${entry.command}`, 'command_missing');
   }
-  if (error?.name === 'AbortError') throw error;
+  if (aborted) throw abortError();
 
   const output = `${stdout}${stderr}`;
-  const timedOut = error?.killed === true && error?.signal === 'SIGTERM';
-  // execFile reports a non-zero exit through error.code (a number).
-  const exitCode = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+  // A command that could not start or was ended by a signal (a timeout, too
+  // much output) has no exit code and counts as failed.
+  const exitCode = error ? 1 : (code ?? 1);
   return {
     kind,
     command: `${entry.command} ${entry.args.join(' ')}`.trim(),
