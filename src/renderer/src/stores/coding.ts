@@ -115,13 +115,21 @@ export const useCodingStore = defineStore('coding', () => {
   };
 
   // Follows the selected package; selecting another bumps the generation.
+  // Transcript events arrive as 'coding'-only changes and only add events;
+  // the package itself is read again only after a 'packages' change.
+  let packageStale = false;
   const watcher = createStateWatcher({
     name: 'coding',
     domains: ['coding', 'packages'],
+    onChange: (change) => {
+      if (change.domains.includes('packages')) packageStale = true;
+    },
     read: async () => {
       const id = selectedId.value;
       const token = generation;
       if (!id || !sameSelection(id, token)) return;
+      const rereadPackage = packageStale;
+      packageStale = false;
       eventsLoading.value = true;
       try {
         const page = await call(window.taskpilot.coding.events(id, eventCursor.value));
@@ -130,6 +138,7 @@ export const useCodingStore = defineStore('coding', () => {
           events.value = [...events.value, ...page.events].slice(-200);
           eventCursor.value = page.next;
         }
+        if (!rereadPackage) return;
         const task = await call(window.taskpilot.coding.get(id));
         if (!adopt(task, id, token)) return;
         if (task.codingRun && task.codingRun.id !== roundId) {
@@ -140,7 +149,10 @@ export const useCodingStore = defineStore('coding', () => {
         }
         if (task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
       } catch (cause) {
-        if (sameSelection(id, token)) error.value = `刷新编码进度失败：${describeError(cause)}`;
+        if (sameSelection(id, token)) {
+          packageStale ||= rereadPackage;
+          error.value = `刷新编码进度失败：${describeError(cause)}`;
+        }
       } finally {
         if (sameSelection(id, token)) eventsLoading.value = false;
       }
@@ -148,8 +160,10 @@ export const useCodingStore = defineStore('coding', () => {
   });
 
   const stopWatching = () => watcher.stop();
+  // Subscribes and reads once: the transcript so far and the package.
   const startWatching = () => {
     watcher.stop();
+    packageStale = true;
     watcher.start().catch((error) => console.error(error));
   };
 

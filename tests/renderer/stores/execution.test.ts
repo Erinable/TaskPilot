@@ -6,11 +6,12 @@ import { flushPromises } from '@vue/test-utils';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
+import { useNotificationsStore } from '../../../src/renderer/src/stores/notifications.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
-import { fail } from '../ipc_fakes.ts';
+import { fail, ok } from '../ipc_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -51,7 +52,8 @@ describe('execution store', () => {
     expect(feedback.showToast).toHaveBeenCalledWith('打开工作包失败：没有这个工作包');
   });
 
-  test('a transition calls IPC, then reloads the package and the queue', async () => {
+  test('a transition calls IPC, then reloads the package into its queue entry', async () => {
+    useTasksStore().tasks = [taskView(), taskView({ id: 't2' })];
     const execution = useExecutionStore();
     await execution.open('t1');
     api.tasks.get.mockClear();
@@ -59,7 +61,12 @@ describe('execution store', () => {
     await execution.runTransition('submit_for_review');
     expect(api.packages.transition).toHaveBeenCalledWith('t1', 'submit_for_review');
 
-    expect(useTasksStore().tasks).toHaveLength(1);
+    // The rest of the queue follows the 'packages' change, read by the notification center.
+    expect(api.tasks.list).not.toHaveBeenCalled();
+    expect(useTasksStore().tasks.map((task) => [task.id, task.status])).toEqual([
+      ['t1', 'in_review'],
+      ['t2', 'in_progress'],
+    ]);
     expect(execution.current?.status).toBe('in_review');
     expect(feedback.showToast).toHaveBeenCalledWith('已提交，QA 正在审查。');
   });
@@ -150,6 +157,30 @@ describe('execution store', () => {
     api.emitState({ repositoryId: 'other-repo', domains: ['packages'] });
     await Promise.resolve();
     expect(api.tasks.get).not.toHaveBeenCalled();
+  });
+
+  test('one packages change reads the open package once and the queue once, in place', async () => {
+    useTasksStore().tasks = [taskView(), taskView({ id: 't2' })];
+    api.requirements.list.mockImplementation(() => ok([]));
+    const notifications = useNotificationsStore();
+    notifications.start();
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    await flushPromises();
+    api.tasks.get.mockClear();
+    api.tasks.list.mockClear();
+    api.diff.stat.mockClear();
+    api.requirements.list.mockClear();
+
+    current.task = taskView({ completedSteps: [0] });
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    await flushPromises();
+    expect(api.tasks.get).toHaveBeenCalledTimes(1);
+    expect(api.diff.stat).toHaveBeenCalledTimes(1);
+    expect(api.tasks.list).toHaveBeenCalledTimes(1);
+    expect(api.requirements.list).not.toHaveBeenCalled();
+    expect(execution.current?.completedSteps).toEqual([0]);
+    notifications.stop();
   });
 
   test('close() unsubscribes from state events', async () => {

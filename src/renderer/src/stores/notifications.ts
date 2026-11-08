@@ -69,19 +69,33 @@ export const useNotificationsStore = defineStore('notifications', () => {
   };
 
   // ========== Refresh ==========
-  // A failed queue reload skips pruning. requirements.refreshList() logs its
-  // ========== Refresh ==========
+  // This watcher is the one place that reloads the whole queue on a state
+  // change; the execution view only puts its own package in it. Every event
+  // reloads the queue (publishing a requirement adds packages), but the
+  // requirement list only on a 'requirements' change or a full refresh,
+  // since a 'packages' change never touches it. A failed queue reload skips
+  // pruning; requirements.refreshList() logs its own failures.
+  let requirementsStale = true;
   const watcher = createStateWatcher({
     name: 'notifications',
     domains: ['packages', 'requirements'],
+    onChange: (change) => {
+      if (change.domains.includes('requirements')) requirementsStale = true;
+    },
     read: async (isCurrent) => {
-      await Promise.all([tasks.reloadQueue(), requirements.refreshList()]);
+      const reloadRequirements = requirementsStale;
+      requirementsStale = false;
+      await Promise.all([tasks.reloadQueue(), reloadRequirements && requirements.refreshList()]);
       if (isCurrent()) pruneRead();
     },
   });
 
-  const refresh = () => watcher.refresh().catch((error) => console.error('[notifications] refresh failed', error));
+  const refresh = () => {
+    requirementsStale = true;
+    return watcher.refresh().catch((error) => console.error('[notifications] refresh failed', error));
+  };
   const start = () => {
+    requirementsStale = true;
     watcher.start().catch((error) => console.error(error));
   };
   const stop = () => watcher.stop();

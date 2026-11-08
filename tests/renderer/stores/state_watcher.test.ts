@@ -109,3 +109,16 @@ test('a failed read is logged and the next event still reads', async () => {
   expect(read).toHaveBeenCalledTimes(2);
   watcher.stop();
 });
+
+test('onChange receives the matching event before the read', async () => {
+  const seen: string[][] = [];
+  const read = vi.fn(async () => undefined);
+  const watcher = createStateWatcher({ name: 'test', domains: ['coding'], initialRead: false, read, onChange: (change) => seen.push(change.domains) });
+  await watcher.start();
+  api.emitState({ repositoryId: 'repo-a', domains: ['notes'] });
+  api.emitState({ repositoryId: 'repo-a', domains: ['coding', 'activity'] });
+  expect(seen).toEqual([['coding', 'activity']]);
+  await flushPromises();
+  expect(read).toHaveBeenCalledTimes(1);
+  watcher.stop();
+});

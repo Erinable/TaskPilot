@@ -124,8 +124,47 @@ describe('notifications store', () => {
     expect(api.tasks.list).toHaveBeenCalledTimes(1);
     store.stop();
     api.tasks.list.mockClear();
+    api.requirements.list.mockClear();
     api.emitState({ repositoryId: null, domains: ['packages'] });
     await Promise.resolve();
     expect(api.tasks.list).not.toHaveBeenCalled();
+  });
+
+  test('a packages change reloads the queue alone; a requirements change reloads both', async () => {
+    const store = useNotificationsStore();
+    store.start();
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalledTimes(1);
+    expect(api.requirements.list).toHaveBeenCalledTimes(1);
+
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalledTimes(2);
+    expect(api.requirements.list).toHaveBeenCalledTimes(1);
+
+    // Publishing a requirement adds packages, so the queue follows it too.
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalledTimes(3);
+    expect(api.requirements.list).toHaveBeenCalledTimes(2);
+
+    // An explicit refresh reads both again.
+    await store.refresh();
+    expect(api.tasks.list).toHaveBeenCalledTimes(4);
+    expect(api.requirements.list).toHaveBeenCalledTimes(3);
+  });
+
+  test('a requirements change during a packages read is still read', async () => {
+    const store = useNotificationsStore();
+    store.start();
+    await flushPromises();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof window.taskpilot.tasks.list>>>();
+    api.tasks.list.mockReturnValueOnce(held.promise);
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    held.resolve({ ok: true, data: [] });
+    await flushPromises();
+    expect(api.tasks.list).toHaveBeenCalledTimes(3);
+    expect(api.requirements.list).toHaveBeenCalledTimes(2);
   });
 });

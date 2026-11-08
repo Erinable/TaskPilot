@@ -20,15 +20,35 @@ export const useCodingActivityStore = defineStore('codingActivity', () => {
   const repositories = useRepositoryIdentityStore();
   const runs = ref<TrackedCoding[]>([]);
 
+  // A package's phase is read from its state, which only a 'packages' change
+  // moves. A 'coding'-only change (a transcript event, a run registering or
+  // finishing) re-reads just the packages that joined or left the active
+  // list; the others keep the phase they had.
+  let packagesStale = true;
   const watcher = createStateWatcher({
     name: 'coding-activity',
     domains: ['coding', 'packages'],
+    onChange: (change) => {
+      if (change.domains.includes('packages')) packagesStale = true;
+    },
     read: async (isCurrent) => {
-      const active = await call(window.taskpilot.coding.active());
+      const rereadAll = packagesStale;
+      packagesStale = false;
+      const active = await call(window.taskpilot.coding.active()).catch((error: unknown) => {
+        packagesStale ||= rereadAll;
+        throw error;
+      });
       if (!isCurrent()) return;
-      const ids = [...new Set([...active.map((entry) => entry.packageId), ...runs.value.map((entry) => entry.packageId)])];
+      const activeIds = new Set(active.map((entry) => entry.packageId));
+      const tracked = new Map(runs.value.map((entry) => [entry.packageId, entry]));
+      const ids = [...new Set([...activeIds, ...tracked.keys()])];
       const next: TrackedCoding[] = [];
       for (const packageId of ids) {
+        const kept = tracked.get(packageId);
+        if (!rereadAll && kept && activeIds.has(packageId)) {
+          next.push(kept);
+          continue;
+        }
         let task;
         try {
           task = await call(window.taskpilot.coding.get(packageId));
@@ -42,7 +62,7 @@ export const useCodingActivityStore = defineStore('codingActivity', () => {
           next.push({ ...phase, packageId, title: task.title });
           continue;
         }
-        if (!runs.value.some((entry) => entry.packageId === packageId)) continue;
+        if (!kept) continue;
         const outcome = codingOutcome(task);
         if (!outcome || (outcome.qa && execution.current?.id === packageId)) continue;
         announceAgent(outcome.text, outcome.tone, () => execution.open(packageId).catch((error) => console.error(error)));
@@ -51,8 +71,12 @@ export const useCodingActivityStore = defineStore('codingActivity', () => {
     },
   });
 
-  const refresh = () => watcher.refresh();
+  const refresh = () => {
+    packagesStale = true;
+    return watcher.refresh();
+  };
   const start = () => {
+    packagesStale = true;
     watcher.stop();
     watcher.start().catch((error) => console.error(error));
   };
@@ -62,6 +86,7 @@ export const useCodingActivityStore = defineStore('codingActivity', () => {
     () => repositories.currentId,
     () => {
       runs.value = [];
+      packagesStale = true;
       if (watcher.active()) start();
       else stop();
     },
