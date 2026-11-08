@@ -108,7 +108,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
     report: async (rawDays): Promise<activityTypes.CostReport> => {
       const activity = requireActivity();
       if (rawDays !== 7 && rawDays !== 30 && rawDays !== 90) failWith('days must be 7, 30 or 90', 'invalid_argument', 'days');
-      const [records, rollup, table] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup(), currentPrices()]);
+      const [records, rollup, table] = await Promise.all([activity.costRecords(), activity.rollup(), currentPrices()]);
       return buildCostReport({
         days: rawDays as activityTypes.CostRange,
         records,
@@ -123,7 +123,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
 
     syncPrices: async (): Promise<{ syncedAt: string }> => {
       const activity = requireActivity();
-      const [records, rollup] = await Promise.all([activity.window(RETENTION_DAYS), activity.rollup()]);
+      const [records, rollup] = await Promise.all([activity.costRecords(), activity.rollup()]);
       // Exact prices are kept only for providers TaskPilot has actually used.
       const providers = new Set(
         [

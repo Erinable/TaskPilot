@@ -1,7 +1,8 @@
 // What the activity overview shows, kept in memory: the feed's newest events,
 // the queue's metrics, each team member's newest events and the week's spend.
 // ActivityLog builds one from the retention window and adds every append to
-// it, so the overview's poll never reads the day files.
+// it, so the overview's poll never reads the day files. It also keeps the
+// window's raw spend records for the cost page and the price sync.
 //
 // Entries keep their business day and are judged against the window when
 // read, so a summary built yesterday answers like one built today. Entries
@@ -75,6 +76,8 @@ export class ActivitySummary {
   #claims = new Map<string, { at: number; day: string }>();
   #done: Done[] = [];
   #spend = new Map<string, SpendRow>();
+  // Every spend record in the window with its business day, oldest first.
+  #costRecords: { day: string; record: AgentCostEvent & { at: string } }[] = [];
   // Newest first.
   #feed: activityTypes.ActivityRecord[] = [];
   #teamRecent = emptyByAgent<activityTypes.ActivityRecord[]>(() => []);
@@ -101,6 +104,15 @@ export class ActivitySummary {
     if (record.to === 'done') this.#done.push({ day: this.#dayOf(record.at), at: Date.parse(record.at), claim: this.#claims.get(record.packageId) ?? null });
   }
 
+  // The spend records of `window` (business days, newest first), oldest
+  // first: what ActivityLog.window() holds of kind agent_cost.
+  costRecords(window: string[]): (AgentCostEvent & { at: string })[] {
+    const oldest = window.at(-1) as string;
+    this.#costRecords = this.#costRecords.filter((entry) => entry.day >= oldest);
+    const inWindow = new Set(window);
+    return this.#costRecords.filter((entry) => inWindow.has(entry.day)).map((entry) => entry.record);
+  }
+
   // `window` is the retention window's business days, newest first.
   read(window: string[], estimate: EstimateRow = () => null): OverviewSummary {
     const oldest = window.at(-1) as string;
@@ -119,7 +131,9 @@ export class ActivitySummary {
 
   #addCost(record: AgentCostEvent & { at: string }): void {
     const call = record.call;
-    const identity = { day: this.#dayOf(record.at), agent: record.agent, cli: call?.cli ?? null, provider: call?.provider ?? null, model: call?.model ?? null };
+    const day = this.#dayOf(record.at);
+    this.#costRecords.push({ day, record });
+    const identity = { day, agent: record.agent, cli: call?.cli ?? null, provider: call?.provider ?? null, model: call?.model ?? null };
     const key = keyOf(identity);
     let row = this.#spend.get(key);
     if (!row) {
@@ -136,6 +150,7 @@ export class ActivitySummary {
   #evict(oldest: string, metricsOldest: string): void {
     for (const [packageId, claim] of this.#claims) if (claim.day < oldest) this.#claims.delete(packageId);
     for (const [key, row] of this.#spend) if (row.day < oldest) this.#spend.delete(key);
+    this.#costRecords = this.#costRecords.filter((entry) => entry.day >= oldest);
     this.#done = this.#done.filter((done) => done.day >= metricsOldest);
   }
 

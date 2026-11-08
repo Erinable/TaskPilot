@@ -15,6 +15,7 @@ import type * as releaseTypes from '../../shared/ipc/release.ts';
 import type { ReleasePackage } from '../agents/pipeline.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { ReleaseStore } from './release_store.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type ReleaseServiceContext = Pick<
   AppContext,
@@ -148,47 +149,46 @@ export const createReleaseService = (ctx: ReleaseServiceContext): ReleaseService
     if (startCommit === endCommit) failWith('There are no commits since the start point', 'release_no_changes');
     const packages = unreleasedPackages(store);
     await store.begin({ startCommit, endCommit });
-    const controller = backgroundRuns.start({ kind: 'release', key: '', busy: 'release', agent: () => 'release-manager', label: () => null });
-    const { path: envPath } = await ctx.commandPath();
-    const readVersion = presets.versionReaderOf((await ctx.profile())?.languages.map((language) => language.id) ?? []);
-    backgroundRuns.track(
-      (async () => {
-        let outcome: { result: Awaited<ReturnType<typeof planRelease>> } | { error: unknown };
-        try {
-          const result = await planRelease({
-            root,
-            startCommit,
-            startLabel,
-            endCommit,
-            packages,
-            readVersion,
-            runAgent: releaseRunner,
-            envPath,
-            signal: controller.signal,
-          });
-          throwIfCancelled(controller.signal);
-          outcome = { result };
-        } catch (error) {
-          outcome = { error: controller.signal.aborted ? Object.assign(new Error('Release Manager was cancelled'), { code: 'agent_cancelled' }) : error };
-        }
-        backgroundRuns.finish('release', '', controller);
-        if ('error' in outcome) {
-          await store.failRun(asAgentError(outcome.error)).catch((error) => logger.error('[release] failRun failed', error));
-          return;
-        }
-        const { input, plan, costUsd } = outcome.result;
-        const summary: releaseTypes.ReleaseInputSummary = {
-          commitCount: input.commits.length,
-          commitsTruncated: input.commitsTruncated,
-          fileCount: input.files.length,
-          filesTruncated: input.filesTruncated,
-          packageIds: input.packages.map((item) => item.id),
-        };
-        await store
-          .complete(plan, summary, costUsd)
-          .catch((error) => store.failRun(asAgentError(error)).catch((failure) => logger.error('[release] failRun failed', failure)));
-      })(),
-    );
+    const info: RunInfo = { kind: 'release', key: '', busy: 'release', agent: () => 'release-manager', label: () => null };
+    void backgroundRuns.run(info, async (controller) => {
+      let outcome: { result: Awaited<ReturnType<typeof planRelease>> } | { error: unknown };
+      try {
+        // Inside the try: a failure before Release Manager starts still fails the draft.
+        const { path: envPath } = await ctx.commandPath();
+        const readVersion = presets.versionReaderOf((await ctx.profile())?.languages.map((language) => language.id) ?? []);
+        const result = await planRelease({
+          root,
+          startCommit,
+          startLabel,
+          endCommit,
+          packages,
+          readVersion,
+          runAgent: releaseRunner,
+          envPath,
+          signal: controller.signal,
+        });
+        throwIfCancelled(controller.signal);
+        outcome = { result };
+      } catch (error) {
+        outcome = { error: controller.signal.aborted ? Object.assign(new Error('Release Manager was cancelled'), { code: 'agent_cancelled' }) : error };
+      }
+      backgroundRuns.finish('release', '', controller);
+      if ('error' in outcome) {
+        await store.failRun(asAgentError(outcome.error)).catch((error) => logger.error('[release] failRun failed', error));
+        return;
+      }
+      const { input, plan, costUsd } = outcome.result;
+      const summary: releaseTypes.ReleaseInputSummary = {
+        commitCount: input.commits.length,
+        commitsTruncated: input.commitsTruncated,
+        fileCount: input.files.length,
+        filesTruncated: input.filesTruncated,
+        packageIds: input.packages.map((item) => item.id),
+      };
+      await store
+        .complete(plan, summary, costUsd)
+        .catch((error) => store.failRun(asAgentError(error)).catch((failure) => logger.error('[release] failRun failed', failure)));
+    });
     return getState();
   };
   const writeNotes = async (requested: string): Promise<releaseTypes.ReleaseWriteResult> => {

@@ -81,6 +81,10 @@ export interface RequirementQuestion {
   answer: string;
 }
 
+// Redoing one package of the plan under review: running, or failed with the
+// plan untouched. The requirement stays in reviewing throughout.
+export type PackageRedoState = { index: number; status: 'running' | 'failed'; error: ErrorInfo | null };
+
 // Architect's interface summary for a requirement, or why there isn't one.
 export interface RequirementInterfaces {
   summary: InterfaceSummary | null;
@@ -108,6 +112,8 @@ export interface Requirement {
   costUsd: number;
   createdAt: string;
   updatedAt: string;
+  // Absent or null unless a package of the plan is being or failed to be redone.
+  redo?: PackageRedoState | null;
   // Course requirements only.
   course?: CourseInterview;
 }
@@ -131,6 +137,25 @@ const fail = (message: string, code: RequirementErrorCode, field?: string): neve
 };
 
 const isStatus = (value: unknown): value is RequirementStatus => STATUSES.includes(value as RequirementStatus);
+
+// A run in flight when TaskPilot quit loads as failed, so it can be retried.
+const interruptRuns = (item: Requirement) => {
+  if (item.status === 'clarifying' || item.status === 'planning') {
+    item.failedStep = item.status;
+    item.phase = null;
+    item.status = 'failed';
+    item.error = { code: 'agent_interrupted', message: `TaskPilot 在 ${item.kind === 'course' ? 'Tutor' : 'Product Lead'} 运行时退出了` };
+  }
+  if (item.redo?.status === 'running')
+    item.redo = { ...item.redo, status: 'failed', error: { code: 'agent_interrupted', message: 'TaskPilot 在 Product Lead 重做工作包时退出了' } };
+  if (item.course?.lab?.status === 'running')
+    item.course.lab = {
+      ...item.course.lab,
+      status: 'failed',
+      phase: null,
+      error: { code: 'agent_interrupted', message: 'TaskPilot 在生成 lab 时退出了' },
+    };
+};
 
 // Forms and plans saved before toolchains get one when their environment
 // names exactly one; otherwise they stay without and must be redone.
@@ -212,19 +237,7 @@ export class RequirementStore implements TaskCatalog {
       const items = Array.isArray(saved) ? saved : (saved as { items?: unknown } | null)?.items;
       for (const item of (Array.isArray(items) ? items : []) as Requirement[]) {
         if (typeof item?.id !== 'string' || !isStatus(item.status)) continue;
-        if (item.status === 'clarifying' || item.status === 'planning') {
-          item.failedStep = item.status;
-          item.phase = null;
-          item.status = 'failed';
-          item.error = { code: 'agent_interrupted', message: `TaskPilot 在 ${item.kind === 'course' ? 'Tutor' : 'Product Lead'} 运行时退出了` };
-        }
-        if (item.course?.lab?.status === 'running')
-          item.course.lab = {
-            ...item.course.lab,
-            status: 'failed',
-            phase: null,
-            error: { code: 'agent_interrupted', message: 'TaskPilot 在生成 lab 时退出了' },
-          };
+        interruptRuns(item);
         if (item.course) item.course = withInferredToolchain(item.course);
         this.#items.set(item.id, item);
       }
@@ -257,6 +270,10 @@ export class RequirementStore implements TaskCatalog {
 
   #expect(item: Requirement, statuses: RequirementStatus[]) {
     if (!statuses.includes(item.status)) fail(`Requirement is ${item.status}`, 'invalid_state');
+  }
+
+  #expectNoRedo(item: Requirement) {
+    if (item.redo?.status === 'running') fail('A package is being redone', 'invalid_state');
   }
 
   async #update(id: string, changes: Partial<Requirement>): Promise<Requirement> {
@@ -310,10 +327,11 @@ export class RequirementStore implements TaskCatalog {
     const item = this.#mustGet(id);
     const allowed: RequirementStatus[] = step === 'clarifying' ? ['draft', 'answering', 'failed'] : ['answering', 'reviewing', 'failed'];
     this.#expect(item, allowed);
+    this.#expectNoRedo(item);
     if (item.status === 'failed' && step === 'planning' && item.failedStep === 'clarifying') {
       fail('Clarification has not finished', 'invalid_state');
     }
-    return this.#update(id, { status: step, error: null, failedStep: null });
+    return this.#update(id, { status: step, error: null, failedStep: null, redo: null });
   }
 
   // Which agent is working during a run, for the progress display.
@@ -458,6 +476,32 @@ export class RequirementStore implements TaskCatalog {
     return this.#update(id, { status: 'reviewing', phase: null, plan, costUsd: item.costUsd + (costUsd ?? 0) });
   }
 
+  // Starts redoing package `index` of the plan under review. Refuses while
+  // another redo runs.
+  async beginRedo(id: string, index: number): Promise<Requirement> {
+    const item = this.#mustGet(id);
+    this.#expect(item, ['reviewing']);
+    if (item.redo?.status === 'running') fail('A package is already being redone', 'invalid_state');
+    if (!item.plan || !Number.isInteger(index) || index < 0 || index >= item.plan.packages.length)
+      fail('No such package in the plan', 'invalid_argument', 'index');
+    return this.#update(id, { redo: { index, status: 'running', error: null } });
+  }
+
+  async finishRedo(id: string, plan: Plan, costUsd: number | null = 0): Promise<Requirement> {
+    const item = this.#mustGet(id);
+    this.#expect(item, ['reviewing']);
+    return this.#update(id, { plan, redo: null, costUsd: item.costUsd + (costUsd ?? 0) });
+  }
+
+  async failRedo(id: string, error: { code?: ErrorCode; message: string }, costUsd: number | null = 0): Promise<Requirement> {
+    const item = this.#mustGet(id);
+    if (item.redo?.status !== 'running') return structuredClone(item);
+    return this.#update(id, {
+      redo: { ...item.redo, status: 'failed', error: { code: error.code ?? 'agent_failed', message: error.message } },
+      costUsd: item.costUsd + (costUsd ?? 0),
+    });
+  }
+
   async failRun(id: string, step: RequirementStep, error: { code?: ErrorCode; message: string }): Promise<Requirement> {
     this.#mustGet(id);
     return this.#update(id, {
@@ -472,6 +516,7 @@ export class RequirementStore implements TaskCatalog {
   async setAnswers(id: string, answers: unknown): Promise<Requirement> {
     const item = this.#mustGet(id);
     this.#expect(item, ['answering', 'reviewing']);
+    this.#expectNoRedo(item);
     if (!Array.isArray(answers) || answers.length !== item.questions.length) {
       return fail('Answers must match the questions', 'invalid_argument', 'answers');
     }
@@ -479,14 +524,15 @@ export class RequirementStore implements TaskCatalog {
     // Editing answers after a plan exists sends the user back to answering.
     const reviewed = item.status === 'reviewing';
     const course = item.course && reviewed ? { course: { ...item.course, plan: null, pathConcepts: [], draft: null } } : {};
-    return this.#update(id, { questions, status: 'answering', plan: reviewed ? null : item.plan, ...course });
+    return this.#update(id, { questions, status: 'answering', plan: reviewed ? null : item.plan, redo: null, ...course });
   }
 
   // Stores the published task definitions and closes the requirement.
   async publish(id: string, definitions: TaskDefinition[]): Promise<Requirement> {
     const item = this.#mustGet(id);
     this.#expect(item, ['reviewing']);
-    const published = await this.#update(id, { status: 'published', packages: definitions });
+    this.#expectNoRedo(item);
+    const published = await this.#update(id, { status: 'published', packages: definitions, redo: null });
     this.#rebuildCatalog();
     return published;
   }
@@ -527,6 +573,7 @@ export class RequirementStore implements TaskCatalog {
   async remove(id: string): Promise<void> {
     const item = this.#mustGet(id);
     if (item.status === 'clarifying' || item.status === 'planning') fail('Wait for Product Lead to finish', 'invalid_state');
+    this.#expectNoRedo(item);
     this.#items.delete(id);
     this.#rebuildCatalog();
     await this.#persist();

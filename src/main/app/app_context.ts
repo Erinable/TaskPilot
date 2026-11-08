@@ -30,20 +30,21 @@ import type { AgentId } from '../../shared/agent_runtime.ts';
 import type * as activityTypes from '../../shared/ipc/activity.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type * as requirementTypes from '../../shared/ipc/requirements.ts';
-import type * as workspace from '../repository/workspace.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { ActivityLog, LoggedEvent } from '../activity/activity_log.ts';
 import { createStateChangeEmitter } from '../infrastructure/state_changes.ts';
 import type { StateChange, StateDomain } from '../../shared/ipc/state.ts';
-import type { WorkPackageStore } from '../work_packages/work_package_store.ts';
-import type { Requirement, RequirementStore } from '../requirements/requirement_store.ts';
-import type { ReleaseStore } from '../release/release_store.ts';
-import type { TutorStore } from '../work_packages/tutor_store.ts';
+import type { Requirement } from '../requirements/requirement_store.ts';
 import type { NoteStore } from '../notes/note_store.ts';
 import type { MasteryStore } from '../courses/mastery_store.ts';
 import type { RepositoryRegistry } from '../repository/repositories.ts';
 import type { TaskDefinition } from '../work_packages/tasks.ts';
 import * as cliSignIn from '../runtimes/cli_sign_in.ts';
+import * as workspace from '../repository/workspace.ts';
+import { WorkPackageStore } from '../work_packages/work_package_store.ts';
+import { RequirementStore } from '../requirements/requirement_store.ts';
+import { ReleaseStore } from '../release/release_store.ts';
+import { TutorStore } from '../work_packages/tutor_store.ts';
 
 type RunAgent = claudeCli.RunAgent;
 
@@ -419,18 +420,46 @@ export const createAppContext = (deps: AppDeps) => {
   // Order matters: requirements must be open (their published packages are
   // the catalog) before the work package store loads, or saved progress is
   // dropped as unknown ids.
-  const openRepository = async (id: string) => {
-    await cancelAll();
-    await flushStores();
-    await repositories.open(id);
-    const dir = repositories.dataDir();
-    setConfig(await repositories.loadConfig());
+  // A switch is all or nothing: the new repository's files are read with
+  // scratch stores first, so one that cannot be opened (an unsupported
+  // version, a broken file) is refused before anything changes. Should the
+  // commit still fail, the previous repository is reopened and the error rethrown.
+  const rebind = async (dir: string) => {
     await requirements?.open(dir);
     await store.open(dir, catalog.listTasks());
     await releases?.open(dir);
     await activity?.open(dir);
     await tutor?.open(dir);
+  };
+  const openRepository = async (id: string) => {
+    if (!repositories.get(id)) failWith(`Unknown repository: ${id}`, 'unknown_repository');
+    const dir = repositories.dataDir(id);
+    await workspace.load(dir);
+    const scratch = requirements ? await new RequirementStore(dir).load() : null;
+    await new WorkPackageStore(dir).load(scratch?.listTasks() ?? []);
+    if (releases) await new ReleaseStore(dir).load();
+    if (tutor) await new TutorStore(dir).load();
+
+    await cancelAll();
+    await flushStores();
+    const previous = repositories.current?.id ?? null;
+    const previousConfig = getConfig();
+    try {
+      await repositories.open(id);
+      setConfig(await repositories.loadConfig());
+      await rebind(repositories.dataDir());
+    } catch (error) {
+      logger.error(`[repositories] switch to ${id} failed; reopening the previous repository`, error);
+      if (previous) {
+        await repositories.open(previous).catch((failure) => logger.error('[repositories] could not reopen the previous repository', failure));
+        setConfig(previousConfig);
+        await rebind(repositories.dataDir()).catch((failure) => logger.error('[repositories] could not reload the previous repository', failure));
+      }
+      changed('workspace', 'courses', 'packages', 'requirements', 'release', 'tutor', 'activity');
+      throw error;
+    }
     activity?.prune().catch((error) => logger.error('[activity] prune failed', error));
+    repositoryOpened();
     changed('workspace', 'courses', 'packages', 'requirements', 'release', 'tutor', 'activity');
     logger.debug(`[repositories] switched id=${id} packages=${catalog.listTasks().length}`);
   };

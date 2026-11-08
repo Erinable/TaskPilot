@@ -6,6 +6,8 @@ import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositor
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { useActivityFeedStore } from '../../../src/renderer/src/stores/activity_feed.ts';
 import { useCommitStore } from '../../../src/renderer/src/stores/commit.ts';
+import { useCostsStore } from '../../../src/renderer/src/stores/costs.ts';
+import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useEngineeringMapStore } from '../../../src/renderer/src/stores/engineering_map.ts';
 import { useOnboardingStore } from '../../../src/renderer/src/stores/onboarding.ts';
 import { useTutorStore } from '../../../src/renderer/src/stores/tutor.ts';
@@ -120,6 +122,24 @@ describe('repositories store', () => {
     expect(onboarding.agent).toBeNull();
     expect(onboarding.testCommand).toBeNull();
     expect(tutor.stateOf('p1', 0)).toBeNull();
+  });
+
+  test('switching drops the old cost report and the open requirement, and stops their state events', async () => {
+    api.costs.report.mockImplementation((days) => ok({ days } as activityTypes.CostReport));
+    const costs = useCostsStore();
+    await costs.enter();
+    const requirements = useRequirementsStore();
+    requirements.selectedId = 'old';
+    requirements.pane = 'detail';
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.switchTo('b')).toBe(true);
+    expect(costs.report).toBeNull();
+    expect(requirements.selectedId).toBeNull();
+    expect(requirements.pane).toBeNull();
+    const reads = api.costs.report.mock.calls.length;
+    api.emitState({ repositoryId: 'b', domains: ['activity'] });
+    expect(api.costs.report).toHaveBeenCalledTimes(reads);
   });
 
   test('an answer for the old repository that lands after the switch is dropped', async () => {

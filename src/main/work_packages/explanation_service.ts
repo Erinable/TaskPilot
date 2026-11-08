@@ -106,8 +106,7 @@ export const createExplanationService = (ctx: ExplanationServiceContext) => {
     call: (signal: AbortSignal) => Promise<{ output: unknown; costUsd: number | null }>,
     apply: (output: unknown) => Partial<Explanation>,
   ) => {
-    const controller = backgroundRuns.start({ kind: 'explain', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) });
-    const settled = (async () => {
+    void backgroundRuns.run({ kind: 'explain', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) }, async (controller) => {
       let next: Explanation;
       try {
         const { output, costUsd } = await call(controller.signal);
@@ -122,13 +121,11 @@ export const createExplanationService = (ctx: ExplanationServiceContext) => {
           status: 'failed',
           error: cancelled ? { code: 'agent_cancelled', message: 'Tutor was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
         };
-      } finally {
-        backgroundRuns.finish('explain', id, controller);
       }
-      const written = await save(id, gradeId, next);
+      backgroundRuns.finish('explain', id, controller);
+      const written = await save(id, gradeId, next).catch((error) => void logger.error('[explain] could not record the outcome', error));
       logger.debug(`[explain] ${from.status} done package=${id} status=${next.status} kept=${Boolean(written)}`);
-    })();
-    backgroundRuns.track(settled);
+    });
   };
 
   // Tutor picks the differences. Allowed once the reference may be read;

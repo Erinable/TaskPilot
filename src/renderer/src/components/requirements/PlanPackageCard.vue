@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// One proposed work package in Product Lead's plan.
+// One proposed work package in Product Lead's plan. While the plan is under
+// review it carries the redo form (PlanPackageRedo.vue).
 import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
@@ -7,10 +8,18 @@ import DifficultyChip from '@/components/DifficultyChip.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { modeLabel } from '@/lib/execution_mode.ts';
 import { PRIORITY_LABELS } from './requirement_model.ts';
+import PlanPackageRedo from './PlanPackageRedo.vue';
+import type { RedoView } from './PlanPackageRedo.vue';
 import type { IconName } from '@/lib/icons.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 
-const props = defineProps<{ pkg: requirementTypes.PlanPackage; index: number }>();
+const props = defineProps<{
+  pkg: requirementTypes.PlanPackage;
+  index: number;
+  // Set while the plan is under review; absent on a published plan.
+  redo?: RedoView;
+}>();
+const emit = defineEmits<{ redo: [comment: string, done: (started: boolean) => void] }>();
 
 // The module tag first, then the rest without repeating it.
 const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) => tag !== props.pkg.module)]);
@@ -28,6 +37,10 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
         <p v-if="pkg.dependsOn?.length" class="plan-depends">
           <AppIcon name="clock" />
           {{ `先完成工作包 ${pkg.dependsOn.join('、')} 才能开始` }}
+        </p>
+        <p v-if="redo?.staleDependencies.length" class="plan-stale" data-plan-stale>
+          <AppIcon name="alert" />
+          {{ `它依赖的工作包 ${redo.staleDependencies.join('、')} 重做过，这个包的步骤可能要跟着调整` }}
         </p>
       </div>
       <div class="plan-package-meta">
@@ -78,6 +91,7 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
         </li>
       </ul>
     </div>
+    <PlanPackageRedo v-if="redo" :index="index" :redo="redo" @redo="(comment, done) => emit('redo', comment, done)" />
   </article>
 </template>
 
@@ -99,6 +113,15 @@ const tags = computed(() => [props.pkg.module, ...props.pkg.tags.filter((tag) =>
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
+.plan-stale {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin-top: var(--space-1);
+  color: var(--warning);
+  font-size: var(--text-xs);
+}
+.plan-stale .icon,
 .plan-depends .icon {
   width: 12px;
   height: 12px;

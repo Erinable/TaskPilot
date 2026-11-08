@@ -217,17 +217,13 @@ export const createTutorService = (ctx: TutorServiceContext) => {
       if (level > opened) await record(target, saved);
       return state(target);
     }
-    const controller = backgroundRuns.start({ kind: 'tutor', key, busy: 'tutor', agent: () => 'tutor', label: ctx.packageLabel(task.id) });
     failures.delete(key);
     pendingLevels.set(key, level);
     logger.debug(`[tutor] ask package=${task.id} step=${stepIndex} level=${level}`);
-    backgroundRuns.track(
+    void backgroundRuns.run({ kind: 'tutor', key, busy: 'tutor', agent: () => 'tutor', label: ctx.packageLabel(task.id) }, (controller) =>
       run(target, level, controller)
         .catch((error) => logger.error('[tutor] could not save the answer', error))
-        .finally(() => {
-          pendingLevels.delete(key);
-          backgroundRuns.finish('tutor', key, controller);
-        }),
+        .finally(() => pendingLevels.delete(key)),
     );
     return state(target);
   };

@@ -5,6 +5,8 @@ import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import type { IconName } from '@/lib/icons.ts';
+import * as reviewModel from '@/lib/review_model.ts';
+import { useCommitStore } from '@/stores/commit.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import ReviewResult from './ReviewResult.vue';
@@ -12,6 +14,7 @@ import ReviewResult from './ReviewResult.vue';
 const props = defineProps<{ task: packageTypes.TaskView; review: packageTypes.Review }>();
 
 const execution = useExecutionStore();
+const commit = useCommitStore();
 
 const view = computed((): { hint: string; tone: string; icon: IconName } => {
   const review = props.review;
@@ -29,6 +32,9 @@ const view = computed((): { hint: string; tone: string; icon: IconName } => {
   return { hint: '未通过，已退回给你修改。修改后可再次提交审查。', tone: 'danger', icon: 'x-circle' };
 });
 const outcome = computed(() => (props.review.status === 'passed' || props.review.status === 'rejected' ? props.review : null));
+const summary = computed(() =>
+  props.review.status === 'passed' ? reviewModel.deliverySummary(props.review, props.task.status, commit.unsavedFiles(props.task.id)) : null,
+);
 // Retry is only possible while the package still waits in review.
 const canRetry = computed(() => props.review.status === 'failed' && props.task.status === 'in_review');
 
@@ -58,6 +64,26 @@ const run = (action: 'cancel' | 'retry') => {
         </button>
       </div>
     </div>
-    <div class="review-body"><ReviewResult v-if="outcome" :task="task" :review="outcome" /></div>
+    <div class="review-body">
+      <dl v-if="summary" class="delivery-summary" data-delivery-summary>
+        <div>
+          <dt>完成了什么</dt>
+          <dd>{{ summary.done }}</dd>
+        </div>
+        <div v-if="summary.evidence">
+          <dt>证据</dt>
+          <dd>{{ summary.evidence }}</dd>
+        </div>
+        <div>
+          <dt>要你判断</dt>
+          <dd>{{ summary.judge }}</dd>
+        </div>
+        <div>
+          <dt>下一步</dt>
+          <dd>{{ summary.next }}</dd>
+        </div>
+      </dl>
+      <ReviewResult v-if="outcome" :task="task" :review="outcome" />
+    </div>
   </section>
 </template>

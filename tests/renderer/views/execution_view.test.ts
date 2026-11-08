@@ -182,12 +182,45 @@ describe('ExecutionView', () => {
     const panel = wrapper.get('[data-panel="commit"]');
     expect(panel.findAll('.commit-files code').map((node) => node.text())).toEqual(['src/auth.ts']);
     expect(panel.get('.commit-skipped').text()).toContain('notes.md');
+    expect(wrapper.get('[data-status-label]').text()).toBe('待保存到 git');
+    expect(wrapper.get('[data-next-step]').text()).toContain('提交这 1 个文件');
     expect((panel.get('#commitMessage').element as HTMLTextAreaElement).value).toBe('邮箱登录\n\nTaskPilot 工作包 t1');
     await panel.get('#commitMessage').setValue('登录：支持邮箱');
     await panel.get('.commit-actions button').trigger('click');
     await flushPromises();
     expect(api.commit.create).toHaveBeenCalledWith('t1', '登录：支持邮箱', ['src/auth.ts']);
     expect(wrapper.get('.commit-done').text()).toContain('c0ffee12');
+    expect(wrapper.get('[data-status-label]').text()).toBe('已交付');
+    wrapper.unmount();
+  });
+  test('a passed review opens with a delivery summary that follows the commit', async () => {
+    current.task = taskView({
+      status: 'done',
+      statusLabel: '已完成',
+      acceptance: [{ text: '邮箱可登录', test: 'login works' }],
+      review: {
+        status: 'passed',
+        error: null,
+        startedAt: '',
+        finishedAt: null,
+        reasons: [],
+        attention: [],
+        checks: [],
+        verification: null,
+        acceptance: [{ text: '邮箱可登录', test: 'login works', status: 'verified', verified: true, manual: false }],
+        report: null,
+        diff: { files: [{ path: 'src/auth.ts', bytes: 10, untracked: false }], skipped: [], outOfScope: [] },
+        costUsd: 0,
+        humanVerdict: 'accepted',
+      },
+    });
+    const { wrapper } = await mountOpen();
+    const summary = wrapper.get('[data-delivery-summary]');
+    expect(summary.text()).toContain('1 项验收条件中，1 项有测试证据');
+    expect(summary.text()).toContain('还差保存 1 个文件到 git');
+    await wrapper.get('.commit-actions button').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-delivery-summary]').text()).toContain('已交付');
     wrapper.unmount();
   });
   test('a package still in progress has no commit panel', async () => {
@@ -202,6 +235,7 @@ describe('ExecutionView', () => {
     const { wrapper } = await mountOpen();
     expect(wrapper.get('[data-empty="commit"]').text()).toContain('没有未提交的改动');
     expect(wrapper.find('.commit-actions').exists()).toBe(false);
+    expect(wrapper.get('[data-status-label]').text()).toBe('已交付');
     wrapper.unmount();
   });
 

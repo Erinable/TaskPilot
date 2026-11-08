@@ -71,6 +71,9 @@ export interface PlanPackage {
   // Concept ids of the pack's skeleton the package practises; absent when
   // the pack has no skeleton or none fit.
   concepts?: string[];
+  // How many single-package redos ago it was written: absent on packages of
+  // the original plan, 1 for the first redo in the plan and so on.
+  revision?: number;
 }
 
 export interface Plan {
@@ -158,12 +161,13 @@ export const planPrompt = ({
   linkTests,
   profile,
   course,
-}: RequirementInput & { questions?: ClarifyQuestion[] | null; linkTests: boolean; course: CoursePack }): string => {
+  redo,
+}: RequirementInput & { questions?: ClarifyQuestion[] | null; linkTests: boolean; course: CoursePack; redo?: PackageRedo }): string => {
   const qa = (questions ?? [])
     .map((q, i) => `Q${i + 1}: ${q.text}\nA${i + 1}: ${q.answer?.trim() || '(not answered; choose a sensible default and say so in the summary)'}`)
     .join('\n\n');
   return [
-    'Plan the work for the requirement below as work packages.',
+    redo ? redoTask(redo) : 'Plan the work for the requirement below as work packages.',
     '',
     'Sizing:',
     '- Use as few packages as the work allows. A change touching a few related files is one package. Split only where a package would exceed about 4 hours, or where parts can be reviewed and merged independently.',
@@ -210,10 +214,51 @@ export const planPrompt = ({
     '</repository_files>',
     ...interfaceBlock(interfaces),
     ...profileBlock(profile, PROFILE_SECTIONS),
+    ...(redo ? redoBlocks(redo) : []),
   ]
     .filter((line) => line !== null)
     .join('\n');
 };
+
+// Redoing one package of a plan under review: the plan as it stands, which
+// package (0-based index) and the developer's feedback on it.
+export type PackageRedo = { plan: Plan; index: number; comment: string };
+
+const escapeTags = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const redoTask = ({ index }: PackageRedo): string => {
+  const number = index + 1;
+  return [
+    `Redo work package ${number} of the plan in <current_plan>, following the developer's feedback in <feedback>. The rules below still apply.`,
+    `- Return exactly one package, the new package ${number}, and the whole plan's summary updated for the change. The other packages stay exactly as they are; do not return them.`,
+    number > 1
+      ? `- Its dependsOn may list only packages 1 to ${number - 1}. Later packages keep their dependencies on it, so keep what they rely on unless the feedback says otherwise.`
+      : '- It is the first package, so its dependsOn is empty. Later packages keep their dependencies on it, so keep what they rely on unless the feedback says otherwise.',
+    '- Test names must not repeat a test name of another package.',
+  ].join('\n');
+};
+
+const redoBlocks = ({ plan, index, comment }: PackageRedo): (string | null)[] => [
+  '',
+  '<current_plan>',
+  `Summary: ${escapeTags(plan.summary)}`,
+  ...plan.packages.flatMap((pkg, position) => [
+    '',
+    `Package ${position + 1}${position === index ? ' (to redo)' : ''}: ${escapeTags(pkg.title)}`,
+    `Description: ${escapeTags(pkg.description)}`,
+    pkg.dependsOn?.length ? `Depends on: ${pkg.dependsOn.join(', ')}` : null,
+    'Steps:',
+    ...pkg.steps.map((step) => `- ${escapeTags(step)}`),
+    `Files: ${pkg.fileScope.map(escapeTags).join(', ')}`,
+    'Acceptance:',
+    ...pkg.acceptance.map((criterion) => `- ${escapeTags(criterion.text)}${criterion.test ? ` (test: ${escapeTags(criterion.test)})` : ''}`),
+  ]),
+  '</current_plan>',
+  '',
+  '<feedback>',
+  escapeTags(comment),
+  '</feedback>',
+];
 
 // [人工决策-2026-10-27 00:36:21] 项目任务也挂知识点：只能从当前课程包骨架里选 0–3 个，宁可不打也不乱打。
 // A pack without a skeleton (programming) adds nothing, so its prompt stays the same.
@@ -325,6 +370,17 @@ export const planSchema = (course: Pick<CoursePack, 'concepts'>) => {
   };
 };
 
+// One redone package and the updated summary, in the shape planSchema() gives a package.
+export const redoSchema = (course: Pick<CoursePack, 'concepts'>) => {
+  const plan = planSchema(course);
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['summary', 'package'],
+    properties: { summary: plan.properties.summary, package: plan.properties.packages.items },
+  };
+};
+
 // A package's difficulty: a level from the allowlist and a short reason.
 const recommendedMode = (value: unknown, path: string): ModeRecommendation => {
   if (!isObject(value)) fail(path, 'is not an object');
@@ -358,40 +414,71 @@ const packageConcepts = (value: unknown, allowed: ReadonlySet<string>): string[]
 // linkTests as for planPrompt(): when false, test names the model added anyway
 // are dropped, so no criterion waits for a test that will never run.
 // concepts: the ids a package may be tagged with; none without a skeleton.
-export const validatePlan = (raw: unknown, { linkTests, concepts = [] }: { linkTests: boolean; concepts?: string[] }): Plan => {
+type PlanRules = { linkTests: boolean; concepts?: string[] };
+
+// One package at position `index` (0-based), reported under `at`.
+const validatePackage = (pkg: unknown, index: number, at: string, linkTests: boolean, allowed: ReadonlySet<string>): PlanPackage => {
+  if (!isObject(pkg)) fail(at, 'is not an object');
+  const hours = pkg.estimateHours;
+  if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0.25 || hours > 16) fail(`${at}.estimateHours`, 'must be between 0.25 and 16');
+  const fileScope = [...new Set(list(pkg.fileScope, `${at}.fileScope`, { min: 1, max: 15 }).map((p, j) => scopePath(p, `${at}.fileScope[${j}]`)))];
+  const tagged = packageConcepts(pkg.concepts, allowed);
+  return {
+    title: text(pkg.title, `${at}.title`, 60),
+    description: text(pkg.description, `${at}.description`, 120),
+    module: text(pkg.module, `${at}.module`, 30),
+    tags: list(pkg.tags, `${at}.tags`, { min: 1, max: 4 }).map((t, j) => text(t, `${at}.tags[${j}]`, 20)),
+    priority: oneOf(pkg.priority, PRIORITIES, `${at}.priority`),
+    estimateHours: hours,
+    icon: oneOf(pkg.icon, PACKAGE_ICONS, `${at}.icon`),
+    steps: list(pkg.steps, `${at}.steps`, { min: 1, max: 10 }).map((s, j) => text(s, `${at}.steps[${j}]`, 300)),
+    fileScope,
+    acceptance: list(pkg.acceptance, `${at}.acceptance`, { min: 1, max: 8 }).map((a, j) => {
+      if (!isObject(a)) fail(`${at}.acceptance[${j}]`, 'is not an object');
+      const criterion: AcceptanceCriterion = { text: text(a.text, `${at}.acceptance[${j}].text`, 200) };
+      const testName = optionalText(a.test, `${at}.acceptance[${j}].test`, 120);
+      if (testName && linkTests) criterion.test = testName;
+      return criterion;
+    }),
+    difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
+    recommendedMode: recommendedMode(pkg.mode, `${at}.mode`),
+    dependsOn: dependencies(pkg.dependsOn, index, `${at}.dependsOn`),
+    ...(tagged.length ? { concepts: tagged } : {}),
+  };
+};
+
+// The developer matches a criterion to one test result by name, so a name
+// two criteria share could never tell them apart.
+const uniqueTests = (packages: PlanPackage[]) => {
+  const seen = new Set<string>();
+  packages.forEach((pkg, i) =>
+    pkg.acceptance.forEach((criterion, j) => {
+      if (!criterion.test) return;
+      if (seen.has(criterion.test)) fail(`packages[${i}].acceptance[${j}].test`, 'repeats a test name of the plan');
+      seen.add(criterion.test);
+    }),
+  );
+};
+
+export const validatePlan = (raw: unknown, { linkTests, concepts = [] }: PlanRules): Plan => {
   const allowed = new Set(concepts);
   if (!isObject(raw)) fail('output', 'is not an object');
-  const packages = list(raw.packages, 'packages', { min: 1, max: MAX_PACKAGES }).map((pkg, i) => {
-    const at = `packages[${i}]`;
-    if (!isObject(pkg)) fail(at, 'is not an object');
-    const hours = pkg.estimateHours;
-    if (typeof hours !== 'number' || !Number.isFinite(hours) || hours < 0.25 || hours > 16) fail(`${at}.estimateHours`, 'must be between 0.25 and 16');
-    const fileScope = [...new Set(list(pkg.fileScope, `${at}.fileScope`, { min: 1, max: 15 }).map((p, j) => scopePath(p, `${at}.fileScope[${j}]`)))];
-    const tagged = packageConcepts(pkg.concepts, allowed);
-    return {
-      title: text(pkg.title, `${at}.title`, 60),
-      description: text(pkg.description, `${at}.description`, 120),
-      module: text(pkg.module, `${at}.module`, 30),
-      tags: list(pkg.tags, `${at}.tags`, { min: 1, max: 4 }).map((t, j) => text(t, `${at}.tags[${j}]`, 20)),
-      priority: oneOf(pkg.priority, PRIORITIES, `${at}.priority`),
-      estimateHours: hours,
-      icon: oneOf(pkg.icon, PACKAGE_ICONS, `${at}.icon`),
-      steps: list(pkg.steps, `${at}.steps`, { min: 1, max: 10 }).map((s, j) => text(s, `${at}.steps[${j}]`, 300)),
-      fileScope,
-      acceptance: list(pkg.acceptance, `${at}.acceptance`, { min: 1, max: 8 }).map((a, j) => {
-        if (!isObject(a)) fail(`${at}.acceptance[${j}]`, 'is not an object');
-        const criterion: AcceptanceCriterion = { text: text(a.text, `${at}.acceptance[${j}].text`, 200) };
-        const testName = optionalText(a.test, `${at}.acceptance[${j}].test`, 120);
-        if (testName && linkTests) criterion.test = testName;
-        return criterion;
-      }),
-      difficulty: difficulty(pkg.difficulty, `${at}.difficulty`),
-      recommendedMode: recommendedMode(pkg.mode, `${at}.mode`),
-      dependsOn: dependencies(pkg.dependsOn, i, `${at}.dependsOn`),
-      ...(tagged.length ? { concepts: tagged } : {}),
-    };
-  });
+  const packages = list(raw.packages, 'packages', { min: 1, max: MAX_PACKAGES }).map((pkg, i) => validatePackage(pkg, i, `packages[${i}]`, linkTests, allowed));
+  uniqueTests(packages);
   return { summary: text(raw.summary, 'summary', 800), packages };
+};
+
+// [人工决策-2026-11-06 21:00:24] 计划发布前可以只重做一个工作包：模型只返回这一个包和更新后的总述，其余包原样保留；
+// 新包的依赖仍只能指向前面的包，后面依赖它的包不动，只在页面上提示可能要跟着重做；测试名全计划不能重复，重复就报错不改名。
+// The plan with package `redo.index` replaced by the model's redo; the
+// package is marked with the plan's next revision number.
+export const validateRedo = (raw: unknown, { plan, index }: Pick<PackageRedo, 'plan' | 'index'>, { linkTests, concepts = [] }: PlanRules): Plan => {
+  if (!isObject(raw)) fail('output', 'is not an object');
+  const redone = validatePackage(raw.package, index, 'package', linkTests, new Set(concepts));
+  const revision = Math.max(0, ...plan.packages.map((pkg) => pkg.revision ?? 0)) + 1;
+  const packages = plan.packages.map((pkg, i) => (i === index ? { ...redone, revision } : pkg));
+  uniqueTests(packages);
+  return { ...plan, summary: text(raw.summary, 'summary', 800), packages };
 };
 
 // A package may depend only on packages before it, so a plan never has a

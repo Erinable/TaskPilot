@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -116,4 +116,34 @@ test('future private lab manifests refuse reads and replacement before deleting 
   await assert.rejects(writePrivate(dir, 'one', { reference: 'replacement', hidden: {}, hints: [], verify: null }), { code: 'unsupported_version' });
   assert.equal(await fs.readFile(file, 'utf8'), before);
   assert.equal(await fs.readFile(path.join(privateDir, 'reference.patch'), 'utf8'), 'private original');
+});
+
+test('a path is checked once: a second write does not reread the file', async () => {
+  const file = path.join(await directory(), 'state.json');
+  await fs.writeFile(file, JSON.stringify({ version: 1, items: [] }));
+  const reads = vi.spyOn(fs, 'readFile');
+  onTestFinished(() => reads.mockRestore());
+  await writeStoredJson(file, { version: 1, items: ['first'] });
+  await writeStoredJson(file, { version: 1, items: ['second'] });
+  assert.equal(reads.mock.calls.filter(([target]) => target === file).length, 1);
+  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { version: 1, items: ['second'] });
+});
+
+test('a path read by a load is not reread by the following write', async () => {
+  const file = path.join(await directory(), 'state.json');
+  await fs.writeFile(file, JSON.stringify({ version: 1, items: [] }));
+  await readStoredJson(file);
+  const reads = vi.spyOn(fs, 'readFile');
+  onTestFinished(() => reads.mockRestore());
+  await writeStoredJson(file, { version: 1, items: ['saved'] });
+  assert.equal(reads.mock.calls.filter(([target]) => target === file).length, 0);
+});
+
+test('a refused write is not remembered, so the next write checks again', async () => {
+  const file = path.join(await directory(), 'state.json');
+  const before = JSON.stringify({ version: 2, payload: 'keep' });
+  await fs.writeFile(file, before);
+  await assert.rejects(writeStoredJson(file, { version: 1 }), { code: 'unsupported_version' });
+  await assert.rejects(writeStoredJson(file, { version: 1 }), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(file, 'utf8'), before);
 });

@@ -118,3 +118,81 @@ test('requirements: planning reads the course pack in use and snapshots it onto 
   const generated = (await call(CHANNELS.tasksList)).data.find((task) => task.requirementId === item.id);
   assert.deepEqual(generated.course, ref);
 });
+
+test('requirements: redoing one package replaces only it, records the cost and keeps publish waiting', async () => {
+  const second = { ...fixtures.PLAN_OUTPUT.packages[0], title: '登录锁定', dependsOn: [1], acceptance: [{ text: '锁定', test: 'locks out' }] };
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const fake = fixtures.fakeAgent({ plan: { ...fixtures.PLAN_OUTPUT, packages: [fixtures.PLAN_OUTPUT.packages[0], second] } });
+  const agent: fixtures.FakeAgent = async (options) => {
+    if (fixtures.stepOf(options.schema) === 'redo') await held;
+    return fake(options);
+  };
+  const { call, agentCalls } = await fixtures.harness({ agent });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  const planned = await fixtures.settle(call, data.id);
+
+  assert.equal((await call(CHANNELS.requirementsRedoPackage, data.id, 0, '  ')).error.code, 'required');
+  assert.equal((await call(CHANNELS.requirementsRedoPackage, data.id, 2, '太大')).error.code, 'invalid_argument');
+  const started = await call(CHANNELS.requirementsRedoPackage, data.id, 0, '范围太大，只做登录');
+  assert.deepEqual(started.data.redo, { index: 0, status: 'running', error: null });
+  assert.equal(started.data.status, 'reviewing');
+  // While it runs nothing else can change the plan.
+  assert.equal((await call(CHANNELS.requirementsPublish, data.id)).error.code, 'invalid_state');
+  assert.equal((await call(CHANNELS.requirementsRedoPackage, data.id, 1, '再改')).error.code, 'invalid_state');
+  release();
+
+  const item = await fixtures.settle(call, data.id);
+  assert.equal(item.redo, null);
+  assert.equal(item.plan.summary, '重做后的计划。');
+  assert.equal(item.plan.packages[0].title, '只做登录');
+  assert.equal(item.plan.packages[0].revision, 1);
+  assert.deepEqual(item.plan.packages[1], planned.plan.packages[1], 'the other package is untouched');
+  assert.ok(item.costUsd > planned.costUsd);
+  const redoCall = fixtures.callFor(agentCalls, 'redo');
+  assert.match(redoCall.prompt, /Redo work package 1 of the plan/);
+  assert.match(redoCall.prompt, /Package 1 \(to redo\): 实现登录接口/);
+  assert.match(redoCall.prompt, /<feedback>\n范围太大，只做登录\n<\/feedback>/);
+
+  const published = await call(CHANNELS.requirementsPublish, data.id);
+  assert.equal(published.data.packages[0].title, '只做登录');
+});
+
+test('requirements: a failed or cancelled redo keeps the plan as it was', async () => {
+  const agent: fixtures.FakeAgent = (options) =>
+    fixtures.stepOf(options.schema) === 'redo'
+      ? new Promise((_resolve, reject) => {
+          const cancelled = () => reject(Object.assign(new Error('cancelled'), { code: 'agent_cancelled' }));
+          if (options.signal!.aborted) cancelled();
+          options.signal!.addEventListener('abort', cancelled);
+        })
+      : fixtures.fakeAgent()(options);
+  const { call } = await fixtures.harness({ agent });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  const planned = await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsRedoPackage, data.id, 0, '只做登录');
+  assert.equal((await call(CHANNELS.requirementsCancel, data.id)).data, true);
+  const item = await fixtures.settle(call, data.id);
+  assert.equal(item.status, 'reviewing');
+  assert.equal(item.redo.status, 'failed');
+  assert.equal(item.redo.error.code, 'agent_cancelled');
+  assert.deepEqual(item.plan, planned.plan);
+  // A failed redo does not hold the plan back.
+  assert.equal((await call(CHANNELS.requirementsPublish, data.id)).data.status, 'published');
+});
+
+test('requirements: a redo whose output does not validate fails with the plan untouched', async () => {
+  const { call } = await fixtures.harness({ agent: fixtures.fakeAgent({ redo: { summary: 's', package: { title: '' } } }) });
+  const { data } = await call(CHANNELS.requirementsCreate, { text: '用户可以用邮箱登录' });
+  await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  const planned = await fixtures.settle(call, data.id);
+  await call(CHANNELS.requirementsRedoPackage, data.id, 0, '只做登录');
+  const item = await fixtures.settle(call, data.id);
+  assert.equal(item.redo.error.code, 'agent_bad_output');
+  assert.deepEqual(item.plan, planned.plan);
+});

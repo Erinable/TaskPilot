@@ -225,6 +225,23 @@ export const useRequirementsStore = defineStore('requirements', () => {
     }
   };
 
+  // Resolves false when the redo could not start, so the form keeps the comment.
+  const redoPackage = async (item: requirementTypes.Requirement, index: number, comment: string) => {
+    const token = watcher.session();
+    try {
+      const next = await call(window.taskpilot.requirements.redoPackage(item.id, index, comment));
+      if (token !== watcher.session()) return true;
+      upsert(next);
+      renderDetail(next);
+      startWatching();
+      return true;
+    } catch (error) {
+      console.error(error);
+      showToast(`重做失败：${describeError(error)}`);
+      return false;
+    }
+  };
+
   const cancelRun = async (item: requirementTypes.Requirement) => {
     try {
       await call(window.taskpilot.requirements.cancel(item.id));
@@ -268,7 +285,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (lab.status === 'failed' && lab.error?.code !== 'agent_cancelled') announceAgent(`生成 lab 失败：${describeErrorInfo(lab.error)}`);
   };
 
-  const announce = (item: requirementTypes.Requirement) => {
+  const announceRedo = (redo: requirementTypes.PackageRedoState | null) => {
+    if (!redo) announceAgent('工作包重做好了，请确认。', 'info');
+    else if (redo.error?.code !== 'agent_cancelled') announceAgent(`重做工作包 ${redo.index + 1} 失败：${describeErrorInfo(redo.error)}`);
+  };
+
+  // wasRedoing: a package of it was being redone before this refresh.
+  const announce = (item: requirementTypes.Requirement, wasRedoing: boolean) => {
     if (model.isCourse(item)) {
       if (item.course?.lab && item.status === 'published') return announceLab(item.course.lab);
       if (item.status === 'answering') announceAgent('Tutor 看完了你的目标，等你选课程包。', 'info');
@@ -277,24 +300,26 @@ export const useRequirementsStore = defineStore('requirements', () => {
       else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Tutor 运行失败：${describeErrorInfo(item.error)}`);
       return;
     }
+    if (wasRedoing) return announceRedo(item.redo ?? null);
     if (item.status === 'answering') announceAgent('Product Lead 提出了澄清问题，等你回答。', 'info');
     else if (item.status === 'reviewing') announceAgent('工作包拆解完成，请确认。', 'info');
     else if (item.status === 'failed' && item.error?.code !== 'agent_cancelled') announceAgent(`Product Lead 运行失败：${describeErrorInfo(item.error)}`);
   };
 
   const stateKey = (item: requirementTypes.Requirement) =>
-    `${item.status}:${item.phase ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
+    `${item.status}:${item.phase ?? ''}:${item.redo?.status ?? ''}:${item.course?.lab ? `${item.course.lab.status}:${item.course.lab.phase ?? ''}` : ''}`;
   const watcher = createStateWatcher({
     name: 'requirements',
     domains: ['requirements'],
     read: async (isCurrent) => {
       const before = new Map(items.value.map((item) => [item.id, stateKey(item)]));
+      const redoing = new Set(items.value.filter((item) => item.redo?.status === 'running').map((item) => item.id));
       await refreshList();
       if (!isCurrent()) return;
       const open = items.value.find((item) => item.id === selectedId.value);
       if (open && !composing.value && useAppStore().view === 'requirements' && before.get(open.id) !== stateKey(open)) {
         renderDetail(open);
-        if (!model.isRunning(open) && open.course?.lab?.status !== 'running') announce(open);
+        if (!model.isRunning(open) && open.course?.lab?.status !== 'running' && open.redo?.status !== 'running') announce(open, redoing.has(open.id));
       }
     },
   });
@@ -306,11 +331,32 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   const stopWatching = () => watcher.stop();
 
+  // ========== Repository switch ==========
+  // Set by reset(): the view reopens itself when it remounts after a switch.
+  let reopen = false;
+
+  // Drops what was shown for the old repository; answers still in flight
+  // for it are discarded through the watcher session and contextGeneration.
+  const reset = () => {
+    watcher.stop();
+    contextGeneration += 1;
+    items.value = [];
+    selectedId.value = null;
+    current.value = null;
+    pane.value = null;
+    composing.value = false;
+    composeContext.value = null;
+    composeStatus.value = { text: '', error: false };
+    composeInvalid.value = false;
+    reopen = true;
+  };
+
   // ========== Navigation ==========
   // `compose: 'course'` opens the "我想学…" form.
   const open = async ({ compose = false, id = null }: { compose?: boolean | requirementTypes.RequirementKind; id?: string | null } = {}) => {
     const app = useAppStore();
     if (!(await app.navigate('requirements'))) return;
+    reopen = false;
     await refreshList();
     const target = id ?? selectedId.value;
     if (compose) startCompose(compose === true ? 'project' : compose);
@@ -318,6 +364,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (items.value.length) select(items.value[0].id);
     else pane.value = 'empty';
     startWatching();
+  };
+
+  // The view mounted: after a reset nothing is shown, so it opens again.
+  const enter = async () => {
+    if (reopen) await open();
   };
 
   // Loads counts for the sidebar badge on startup, without opening the view.
@@ -358,6 +409,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     runStep,
     editAnswers,
     publishPlan,
+    redoPackage,
     cancelRun,
     removeRequirement,
     showQueue,
@@ -376,6 +428,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     // State events
     startWatching,
     stopWatching,
+    // Repository switch
+    reset,
+    enter,
     // Navigation
     open,
     init,

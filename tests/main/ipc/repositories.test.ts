@@ -1,6 +1,6 @@
 /** @module-tag integration */
 // IPC channels of the repositories domain (src/main/ipc/repositories.ts).
-import { test, onTestFinished } from 'vitest';
+import { test, onTestFinished, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -11,6 +11,8 @@ import * as git from '../../../src/main/repository/git.ts';
 import * as fixtures from './harness.ts';
 import { until } from '../../fixtures/until.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
+import { STATE_FILENAME } from '../../../src/main/work_packages/work_package_store.ts';
 
 test.each([
   ['/definitely/not/here', 'root_not_found'],
@@ -168,4 +170,56 @@ test('repositories: a switch drops the coding events and tutor failures of the r
   assert.equal((await call(CHANNELS.codingGet, 'auth-edge-tests')).data.codingRun?.status, 'ready');
   assert.deepEqual((await call(CHANNELS.codingEvents, 'auth-edge-tests', -1)).data.events, []);
   assert.equal((await call(CHANNELS.tutorGet, 'auth-edge-tests', 0)).data.status, 'idle');
+});
+
+test('repositories: a repository whose files cannot be read is refused and the open one stays as it was', async () => {
+  const h = await fixtures.harness();
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  const first = (await h.call(CHANNELS.repositoriesList)).data.current;
+  const other = (await h.call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), false)).data.repositories.find((entry) => !entry.current);
+  const otherDir = h.repositories.dataDir(other.id);
+  await fs.mkdir(otherDir, { recursive: true });
+  await fs.writeFile(path.join(otherDir, STATE_FILENAME), JSON.stringify({ version: 99, state: {} }));
+
+  const refused = await h.call(CHANNELS.repositoriesSwitch, other.id);
+  assert.equal(refused.error.code, 'unsupported_version');
+  assert.equal(h.repositories.current?.id, first);
+  assert.equal(await fs.realpath((await h.call(CHANNELS.workspaceInfo)).data.root), await fs.realpath(h.root));
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'in_progress');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(otherDir, STATE_FILENAME), 'utf8')), { version: 99, state: {} }, 'the newer file is untouched');
+});
+
+test('repositories: a switch failing while the stores reopen goes back to the previous repository', async () => {
+  const logged = expectConsole('error', /switch to .* failed; reopening the previous repository/);
+  const h = await fixtures.harness();
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  const first = (await h.call(CHANNELS.repositoriesList)).data.current;
+  const other = (await h.call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), false)).data.repositories.find((entry) => !entry.current);
+  vi.spyOn(h.store, 'open').mockRejectedValueOnce(Object.assign(new Error('disk gone'), { code: 'unknown' }));
+
+  assert.equal((await h.call(CHANNELS.repositoriesSwitch, other.id)).ok, false);
+  assert.equal(logged.length, 1);
+  assert.equal(h.repositories.current?.id, first);
+  assert.equal(await fs.realpath(h.getConfig().root!), await fs.realpath(h.root));
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'in_progress', 'the previous repository is loaded again');
+  assert.deepEqual(
+    (await h.call(CHANNELS.requirementsList)).data.map((item) => item.text),
+    [SAMPLE_REQUIREMENT.text],
+  );
+});
+
+test('repositories: a switch resets the Environment Steward session made for the repository it leaves', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  await h.call(CHANNELS.envPlan);
+  await h.idle();
+  const planned = (await h.call(CHANNELS.envGet)).data;
+  assert.notEqual(planned.status, 'idle');
+  assert.equal(planned.root, h.root);
+
+  await h.call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), true);
+  const reset = (await h.call(CHANNELS.envGet)).data;
+  assert.equal(reset.status, 'idle');
+  assert.equal(reset.root, null);
+  assert.equal(reset.plan, null);
+  assert.deepEqual(reset.steps, []);
 });

@@ -1,22 +1,28 @@
 // The one way TaskPilot replaces a file on disk: written whole to a temp file,
 // then renamed over the target, so a crash mid-write leaves the previous file.
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 type AtomicOptions = { tmp?: string; mode?: number };
 
-// tmp defaults to `<file>.tmp`; callers that may write the same file at once
-// pass a unique one, or go through a JsonWriteQueue.
-export const writeFileAtomic = async (file: string, content: string, { tmp = `${file}.tmp`, mode }: AtomicOptions = {}) => {
-  await fs.writeFile(tmp, content, mode === undefined ? undefined : { mode });
-  await fs.rename(tmp, file);
+// tmp defaults to a unique `<file>.<uuid>.tmp` beside the target, so writers
+// that replace the same file at once never share a temp file; the last rename
+// wins. A failed write removes its temp file.
+export const writeFileAtomic = async (file: string, content: string, { tmp = `${file}.${randomUUID()}.tmp`, mode }: AtomicOptions = {}) => {
+  try {
+    await fs.writeFile(tmp, content, mode === undefined ? undefined : { mode });
+    await fs.rename(tmp, file);
+  } catch (error) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
 };
 
 export const jsonText = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
-// Writes a store's JSON file one at a time. Without the chain, a background
-// run saving at the same moment as a user edit would share the temp file and
-// one rename would fail.
+// Writes a store's JSON file one at a time, so a background run saving at the
+// same moment as a user edit lands in order and the file ends as the latest.
 export class JsonWriteQueue {
   #writes: Promise<void> = Promise.resolve();
 

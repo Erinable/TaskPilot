@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import { useCodingActivityStore } from '../../../src/renderer/src/stores/coding_activity.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
@@ -61,4 +62,37 @@ test('QA results for the open package are left to the execution page', async () 
   api.coding.active.mockReturnValue(Promise.resolve({ ok: true, data: [] }) as never);
   await store.refresh();
   expect(feedback.announceAgent).not.toHaveBeenCalled();
+});
+
+test('coding-only events re-read only packages that join or leave the active list', async () => {
+  const store = useCodingActivityStore();
+  store.start();
+  await flushPromises();
+  expect(api.coding.get).toHaveBeenCalledTimes(1);
+  api.coding.get.mockClear();
+
+  // Transcript events: the run is still active, so its phase stands.
+  api.emitState({ repositoryId: null, domains: ['coding'] });
+  api.emitState({ repositoryId: null, domains: ['coding', 'activity'] });
+  await flushPromises();
+  expect(api.coding.active).toHaveBeenCalledTimes(3);
+  expect(api.coding.get).not.toHaveBeenCalled();
+  expect(store.runs).toHaveLength(1);
+
+  // A package write can change the phase: every tracked package is read.
+  current.task = { ...current.task, codingRun: codingRun({ status: 'checking', startedAt: '2026-10-15T00:00:00.000Z' }) };
+  api.emitState({ repositoryId: null, domains: ['packages'] });
+  await flushPromises();
+  expect(api.coding.get).toHaveBeenCalledTimes(1);
+  expect(store.runs[0].label).toBe('第 1 轮编码中');
+
+  // The run left the active list: it is read once and announced.
+  current.task = { ...current.task, codingRun: codingRun() };
+  api.coding.active.mockReturnValue(Promise.resolve({ ok: true, data: [] }) as never);
+  api.emitState({ repositoryId: null, domains: ['coding'] });
+  await flushPromises();
+  expect(api.coding.get).toHaveBeenCalledTimes(2);
+  expect(store.runs).toEqual([]);
+  expect(feedback.announceAgent).toHaveBeenCalledTimes(1);
+  store.stop();
 });

@@ -41,6 +41,10 @@ export const useCommitStore = defineStore('commit', () => {
   const committing = ref(false);
   const committed = ref<commitTypes.CommitResult | null>(null);
 
+  // Scope files still waiting for a commit, for the package the panel shows;
+  // null until its preview has loaded.
+  const unsavedFiles = (id: string) => (taskId.value === id && preview.value && !committed.value ? preview.value.files.length : null);
+
   const canCommit = computed(() => Boolean(preview.value?.files.length) && message.value.trim().length > 0 && !committing.value);
 
   const commit = async () => {
@@ -93,6 +97,7 @@ export const useCommitStore = defineStore('commit', () => {
     committing,
     committed,
     canCommit,
+    unsavedFiles,
     commit,
     // Lifecycle
     reset,

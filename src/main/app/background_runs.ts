@@ -64,6 +64,24 @@ export class BackgroundRuns {
     return controller;
   }
 
+  // Starts a run, tracks `body` and finishes the run however `body` settles,
+  // so a failure anywhere in it can never leave the entry registered. `body`
+  // may finish the run itself earlier (finish only drops its own entry once).
+  // The returned promise is tracked: a caller that does not await it loses
+  // nothing, but `body` must record its own failures.
+  run<T>(info: RunInfo, body: (controller: AbortController) => Promise<T>): Promise<T> {
+    const controller = this.start(info);
+    const settled = (async () => {
+      try {
+        return await body(controller);
+      } finally {
+        this.finish(info.kind, info.key, controller);
+      }
+    })();
+    this.track(settled);
+    return settled;
+  }
+
   get(kind: RunKind, key: string): AbortController | undefined {
     return this.#entries.get(entryKey(kind, key))?.controller;
   }

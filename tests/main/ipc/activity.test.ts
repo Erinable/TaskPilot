@@ -1,10 +1,12 @@
 /** @module-tag integration */
 // IPC channels of the activity domain (src/main/ipc/activity.ts).
-import { test } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { RETENTION_DAYS } from '../../../src/main/activity/activity_log.ts';
+import { buildCostReport } from '../../../src/main/activity/cost_report.ts';
 
 test('activity: the requirement flow and a claim are recorded, newest first', async () => {
   const { call } = await fixtures.harness({ agent: fixtures.fakeAgent() });
@@ -70,4 +72,33 @@ test('activity: team status reports busy agents and CLI availability', async () 
   const settled = (await call(CHANNELS.activityOverview)).data.team;
   assert.deepEqual(settled.busy, []);
   assert.deepEqual(settled.work, []);
+});
+
+test('costs: the report is served from memory and matches one built from the day files', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  await h.activity.append({ kind: 'agent_cost', agent: 'qa', costUsd: 0.25, subject: { kind: 'requirement', id: 'r1' } });
+  await h.call(CHANNELS.costsReport, 30);
+  const windowReads = vi.spyOn(h.activity, 'window');
+  onTestFinished(() => windowReads.mockRestore());
+  await h.activity.append({ kind: 'agent_cost', agent: 'architect', costUsd: 0.5, subject: { kind: 'requirement', id: 'r1' } });
+  const report = (await h.call(CHANNELS.costsReport, 30)).data;
+  assert.equal(windowReads.mock.calls.length, 0);
+  windowReads.mockRestore();
+  const expected = buildCostReport({
+    days: 30,
+    records: await h.activity.window(RETENTION_DAYS),
+    rollup: await h.activity.rollup(),
+    prices: null,
+    now: new Date(),
+    timeZone: h.activity.timeZone,
+    titleOf: (_kind, id) => id,
+  });
+  assert.deepEqual(report.total, expected.total);
+  assert.deepEqual(report.byAgent, expected.byAgent);
+  assert.deepEqual(report.byDay, expected.byDay);
+  assert.deepEqual(
+    report.bySubject.map((row) => [row.id, row.actualUsd]),
+    expected.bySubject.map((row) => [row.id, row.actualUsd]),
+  );
+  assert.ok(Math.abs(report.total.actualUsd - 0.75) < 1e-9);
 });

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '@/lib/feedback.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
@@ -93,4 +94,46 @@ test('the default pack is asked for once and kept across a reset', async () => {
   courses.reset();
   expect(api.courses.default).toHaveBeenCalledTimes(1);
   expect(courses.defaultPack?.id).toBe('programming');
+});
+
+test('an older list answer that lands after a newer one or a reset is dropped', async () => {
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.list>>>();
+  api.courses.list.mockReturnValueOnce(held.promise);
+  const courses = useCoursesStore();
+  const first = courses.load();
+  const newer = courseList({ userDir: '/newer' });
+  api.courses.list.mockReturnValueOnce(ok(newer));
+  await courses.load();
+  held.resolve({ ok: true, data: courseList({ userDir: '/older' }) });
+  await first;
+  expect(courses.list?.userDir).toBe('/newer');
+  expect(courses.loading).toBe(false);
+
+  const late = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.list>>>();
+  api.courses.list.mockReturnValueOnce(late.promise);
+  const loading = courses.load();
+  courses.reset();
+  late.resolve({ ok: true, data: courseList({ userDir: '/old-repo' }) });
+  await loading;
+  expect(courses.list).toBeNull();
+  expect(courses.loading).toBe(false);
+});
+
+test('while entered, a courses or workspace change reloads the list and the pack shown; leaving stops it', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  await courses.enter(true);
+  expect(api.courses.list).toHaveBeenCalledTimes(1);
+  api.emitState({ repositoryId: null, domains: ['courses'] });
+  await flushPromises();
+  expect(api.courses.list).toHaveBeenCalledTimes(2);
+  expect(api.courses.preview).toHaveBeenCalledTimes(2);
+  api.emitState({ repositoryId: null, domains: ['workspace'] });
+  await flushPromises();
+  expect(api.courses.list).toHaveBeenCalledTimes(3);
+  api.emitState({ repositoryId: null, domains: ['tutor'] });
+  courses.leave();
+  api.emitState({ repositoryId: null, domains: ['courses'] });
+  await flushPromises();
+  expect(api.courses.list).toHaveBeenCalledTimes(3);
 });

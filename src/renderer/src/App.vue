@@ -8,12 +8,6 @@ import QueueView from './views/QueueView.vue';
 import ExecutionView from './views/ExecutionView.vue';
 import RequirementsView from './views/RequirementsView.vue';
 import SettingsView from './views/SettingsView.vue';
-import MapView from './views/MapView.vue';
-import ActivityView from './views/ActivityView.vue';
-import ReleaseView from './views/ReleaseView.vue';
-import TeamView from './views/TeamView.vue';
-import CostView from './views/CostView.vue';
-import CourseView from './views/CourseView.vue';
 import CommandPalette from './components/CommandPalette.vue';
 import { useAppStore } from './stores/app.ts';
 import { useTasksStore } from './stores/tasks.ts';
@@ -28,6 +22,14 @@ import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
 import { hideSplash } from './lib/splash.ts';
 
+// Views most sessions never open load when first shown, keeping them out of
+// the startup bundle.
+const MapView = defineAsyncComponent(() => import('./views/MapView.vue'));
+const ActivityView = defineAsyncComponent(() => import('./views/ActivityView.vue'));
+const ReleaseView = defineAsyncComponent(() => import('./views/ReleaseView.vue'));
+const TeamView = defineAsyncComponent(() => import('./views/TeamView.vue'));
+const CostView = defineAsyncComponent(() => import('./views/CostView.vue'));
+const CourseView = defineAsyncComponent(() => import('./views/CourseView.vue'));
 // Notes bring KaTeX and syntax highlighting; they load when first opened.
 const NotesView = defineAsyncComponent(() => import('./views/NotesView.vue'));
 // Draws a mermaid graph, so it loads like the notes page.

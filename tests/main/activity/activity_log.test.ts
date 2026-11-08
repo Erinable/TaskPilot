@@ -1,4 +1,4 @@
-import { test } from 'vitest';
+import { onTestFinished, test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -143,10 +143,14 @@ test('prune() writes the rollup through a temp file and keeps the day files when
   const previous = JSON.stringify({ version: 1, rows: [] });
   await fs.writeFile(path.join(events, ROLLUP_FILENAME), previous);
   await fs.writeFile(path.join(events, '2026-09-01.jsonl'), JSON.stringify({ kind: 'agent_cost', agent: 'qa', costUsd: 0.2, at: '2026-09-01T03:00:00Z' }));
-  // A directory where the temp file goes makes the rollup write fail.
-  await fs.mkdir(path.join(events, `${ROLLUP_FILENAME}.tmp`));
+  // A read-only events folder makes the rollup's temp file write fail.
+  await fs.chmod(events, 0o500);
   const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => new Date('2026-10-13T02:00:00Z') });
-  await assert.rejects(() => log.prune());
+  try {
+    await assert.rejects(() => log.prune());
+  } finally {
+    await fs.chmod(events, 0o700);
+  }
   assert.equal(await fs.readFile(path.join(events, ROLLUP_FILENAME), 'utf8'), previous);
   assert.equal((await fs.readdir(events)).includes('2026-09-01.jsonl'), true);
 });
@@ -199,4 +203,61 @@ test('agent spend is stored with the events but kept out of the feed', async () 
     (await log.window(7)).map((record) => record.kind),
     ['requirement_created', 'agent_cost'],
   );
+});
+
+test('append() checks a day file once per open, not on every append', async () => {
+  const dir = await tempDir('taskpilot-activity-');
+  const now = new Date('2026-10-07T02:00:00Z');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  const file = path.join(dir, EVENTS_DIRNAME, '2026-10-07.jsonl');
+  const reads = vi.spyOn(fs, 'readFile');
+  onTestFinished(() => reads.mockRestore());
+  const readsOfDay = () => reads.mock.calls.filter(([target]) => target === file).length;
+  for (const id of ['a', 'b', 'c']) await log.append({ kind: 'requirement_created', requirementId: id, title: id });
+  assert.equal(readsOfDay(), 1);
+  // Reopening (a repository switch) checks the day again.
+  await log.open(dir);
+  await log.append({ kind: 'requirement_created', requirementId: 'd', title: 'd' });
+  assert.equal(readsOfDay(), 2);
+  assert.equal((await fs.readFile(file, 'utf8')).trim().split('\n').length, 4);
+});
+
+test('append() after a reopen still refuses a day file that holds a newer storageVersion', async () => {
+  const dir = await tempDir('taskpilot-activity-');
+  const other = await tempDir('taskpilot-activity-');
+  const now = new Date('2026-10-07T02:00:00Z');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  await log.append({ kind: 'requirement_created', requirementId: 'a', title: 'a' });
+  const future = JSON.stringify({ storageVersion: 2, kind: 'requirement_created', requirementId: 'x', title: 'x', at: now.toISOString() }) + '\n';
+  await fs.mkdir(path.join(other, EVENTS_DIRNAME));
+  await fs.writeFile(path.join(other, EVENTS_DIRNAME, '2026-10-07.jsonl'), future);
+  await log.open(other);
+  await assert.rejects(log.append({ kind: 'requirement_created', requirementId: 'b', title: 'b' }), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(path.join(other, EVENTS_DIRNAME, '2026-10-07.jsonl'), 'utf8'), future);
+});
+
+test('costRecords() matches the spend records window() reads and is kept current without rereading', async () => {
+  const dir = await tempDir('taskpilot-activity-');
+  let now = new Date('2026-10-01T02:00:00Z');
+  const log = new ActivityLog(dir, { timeZone: SHANGHAI, now: () => now });
+  await log.append({ kind: 'agent_cost', agent: 'qa', costUsd: 0.1 });
+  await log.append({ kind: 'requirement_created', requirementId: 'a', title: 'a' });
+  now = new Date('2026-10-05T02:00:00Z');
+  await log.append({ kind: 'agent_cost', agent: 'architect', costUsd: 0.2, subject: { kind: 'requirement', id: 'a' } });
+  const fromFiles = async () => (await log.window(RETENTION_DAYS)).filter((record) => record.kind === 'agent_cost');
+  assert.deepEqual(await log.costRecords(), await fromFiles());
+  const windowReads = vi.spyOn(log, 'window');
+  onTestFinished(() => windowReads.mockRestore());
+  await log.append({ kind: 'agent_cost', agent: 'tutor', costUsd: 0.3 });
+  const current = await log.costRecords();
+  assert.equal(windowReads.mock.calls.length, 0);
+  windowReads.mockRestore();
+  assert.deepEqual(current, await fromFiles());
+  // A day that leaves the retention window leaves both.
+  now = new Date(Date.parse('2026-10-01T02:00:00Z') + RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  assert.deepEqual(
+    (await log.costRecords()).map((record) => record.kind === 'agent_cost' && record.agent),
+    ['architect', 'tutor'],
+  );
+  assert.deepEqual(await log.costRecords(), await fromFiles());
 });

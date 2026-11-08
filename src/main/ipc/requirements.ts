@@ -55,6 +55,11 @@ export const register = (
     plan: async (id, answers, choice): Promise<requirementTypes.Requirement> =>
       toWireRequirement(await requirementService.plan(requireString(id, 'id'), answers, choice)),
 
+    redoPackage: async (id, index, comment): Promise<requirementTypes.Requirement> => {
+      if (typeof index !== 'number' || !Number.isInteger(index)) failWith('index must be an integer', 'invalid_argument', 'index');
+      return toWireRequirement(await requirementService.redoPackage(requireString(id, 'id'), index, comment));
+    },
+
     cancel: (id): boolean => requirementService.cancel(requireString(id, 'id')),
 
     publish: async (id): Promise<requirementTypes.Requirement> => toWireRequirement(await requirementService.publish(requireString(id, 'id'))),

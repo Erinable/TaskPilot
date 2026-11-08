@@ -23,3 +23,15 @@ test('a queue response from before repository reset cannot replace the new queue
   await previousRead;
   expect(store.tasks.map((task) => task.id)).toEqual(['new-repository-task']);
 });
+
+test('adoptTask replaces one queue entry in place and adds nothing it does not list', () => {
+  installApi({ task: taskView() });
+  const store = useTasksStore();
+  store.tasks = [taskView(), taskView({ id: 't2' })];
+  store.adoptTask(taskView({ status: 'in_review' }));
+  store.adoptTask(taskView({ id: 'unlisted' }));
+  expect(store.tasks.map((task) => [task.id, task.status])).toEqual([
+    ['t1', 'in_review'],
+    ['t2', 'in_progress'],
+  ]);
+});

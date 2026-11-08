@@ -77,3 +77,39 @@ test('finish drops a run only for the controller that started it', () => {
   assert.equal(runs.has('baseline', 'pkg'), false);
   assert.deepEqual(runs.keys('baseline'), []);
 });
+
+test('run finishes its entry however the body settles, and is tracked until then', async () => {
+  const runs = new BackgroundRuns();
+  const info = { kind: 'reference', key: 'pkg', busy: 'reference', label: () => 'pkg' } as const;
+  let release!: () => void;
+  const held = runs.run(info, () => new Promise<string>((resolve) => (release = () => resolve('done'))));
+  assert.equal(runs.has('reference', 'pkg'), true);
+  release();
+  await runs.idle();
+  assert.equal(await held, 'done');
+  assert.equal(runs.has('reference', 'pkg'), false);
+
+  // A body that throws before any try of its own still drops the entry.
+  const failed = runs.run(info, async () => {
+    throw new Error('sandbox broke');
+  });
+  await assert.rejects(failed, /sandbox broke/);
+  assert.equal(runs.has('reference', 'pkg'), false);
+  assert.deepEqual(runs.busy(), []);
+});
+
+test('run hands the body its controller and leaves a newer run of the same key registered', async () => {
+  const runs = new BackgroundRuns();
+  const info = { kind: 'grade', key: 'pkg', busy: 'grade', label: () => 'pkg' } as const;
+  let first!: AbortController;
+  let finishFirst!: () => void;
+  const older = runs.run(info, (controller) => {
+    first = controller;
+    return new Promise<void>((resolve) => (finishFirst = resolve));
+  });
+  const newer = runs.start(info);
+  finishFirst();
+  await older;
+  assert.notEqual(first, newer);
+  assert.equal(runs.get('grade', 'pkg'), newer);
+});

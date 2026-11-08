@@ -13,6 +13,7 @@ import { computed, ref } from 'vue';
 import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
+import { createStateWatcher } from './state_watcher.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -25,21 +26,30 @@ export const useCoursesStore = defineStore('courses', () => {
   const list = ref<courseTypes.CourseList | null>(null);
   const loading = ref(false);
   const current = computed(() => list.value?.current ?? null);
+  // Bumped by every list read and by reset(): only the latest answer applies.
+  let listGeneration = 0;
 
   const load = async () => {
+    const token = ++listGeneration;
     loading.value = true;
     try {
-      list.value = await call(window.taskpilot.courses.list());
+      const next = await call(window.taskpilot.courses.list());
+      if (token === listGeneration) list.value = next;
     } catch (error) {
+      if (token !== listGeneration) return;
       console.error(error);
       showToast(`读取课程包失败：${describeError(error)}`);
     } finally {
-      loading.value = false;
+      if (token === listGeneration) loading.value = false;
     }
   };
 
   const reset = () => {
+    watcher.stop();
+    listGeneration += 1;
+    viewGeneration += 1;
     list.value = null;
+    loading.value = false;
     viewed.value = null;
     closePreview();
   };
@@ -156,11 +166,15 @@ export const useCoursesStore = defineStore('courses', () => {
   // ========== Course view ==========
   // The pack the 课程 view shows on the right.
   const viewed = ref<courseTypes.CoursePreview | null>(null);
+  let viewGeneration = 0;
 
   const view = async (id: string) => {
+    const token = ++viewGeneration;
     try {
-      viewed.value = await call(window.taskpilot.courses.preview(id));
+      const next = await call(window.taskpilot.courses.preview(id));
+      if (token === viewGeneration) viewed.value = next;
     } catch (error) {
+      if (token !== viewGeneration) return;
       console.error(error);
       showToast(`读取课程包失败：${describeError(error)}`);
     }
@@ -173,6 +187,28 @@ export const useCoursesStore = defineStore('courses', () => {
     const id = shown && list.value?.entries.some((entry) => entry.id === shown) ? shown : list.value?.current.ref.id;
     if (id) await view(id);
   };
+
+  // While a view that lists packs is open, a pick, copy, save or
+  // confirmation made elsewhere reloads the list, and in the 课程 view the
+  // pack shown. The views load on mount themselves, so start() only subscribes.
+  let showsPack = false;
+  const watcher = createStateWatcher({
+    name: 'courses',
+    domains: ['courses', 'workspace'],
+    initialRead: false,
+    read: async () => {
+      if (showsPack) await loadView();
+      else await load();
+    },
+  });
+
+  // withPack: the 课程 view, which also shows one pack's content.
+  const enter = (withPack = false) => {
+    showsPack = withPack;
+    return watcher.start();
+  };
+
+  const leave = () => watcher.stop();
 
   // A refusal that names a field of the form (`id`, `rubric[1].label`) is
   // returned for the form to show there; anything else is a toast.
@@ -246,6 +282,8 @@ export const useCoursesStore = defineStore('courses', () => {
     viewed,
     view,
     loadView,
+    enter,
+    leave,
     copy,
     save,
   };

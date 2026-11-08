@@ -2,11 +2,14 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises } from '@vue/test-utils';
+import { defineComponent, h } from 'vue';
 
 import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
+import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { agentStatus, installApi, planPackage, requirement } from '../requirements_fakes.ts';
+import { ok } from '../ipc_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -227,5 +230,86 @@ describe('RequirementsView', () => {
     expect(wrapper.findAll('.interface-section h4').map((heading) => heading.text())).toEqual(['仓库约定', '未读取']);
     expect(wrapper.find('.interface-section.skipped li').text()).toBe('.env（可能含密钥）');
     wrapper.unmount();
+  });
+
+  test('one package can be redone from a comment, which locks the other plan actions', async () => {
+    const packages = [planPackage(), planPackage({ title: '登录锁定', dependsOn: [1] })];
+    state.list = [requirement({ status: 'reviewing', plan: { summary: 'plan', packages } })];
+    const { wrapper } = await render();
+    const cards = wrapper.findAll('.plan-package');
+    await cards[1].get('[data-action="redo-package"]').trigger('click');
+    const submit = cards[1].get('.plan-redo-form [type="submit"]');
+    expect(submit.attributes('disabled')).toBeDefined();
+    await cards[1].get('.plan-redo-form textarea').setValue('只锁定 15 分钟');
+    await cards[1].get('.plan-redo-form').trigger('submit');
+    await flushPromises();
+    expect(api.requirements.redoPackage).toHaveBeenCalledWith('r1', 1, '只锁定 15 分钟');
+    const after = wrapper.findAll('.plan-package');
+    expect(after[1].get('.plan-redo-status').text()).toContain('正在重做这个工作包');
+    expect(after[0].get('[data-action="redo-package"]').attributes('disabled')).toBeDefined();
+    const publish = wrapper.findAll('.req-actions button').find((button) => button.text().startsWith('发布'))!;
+    expect(publish.attributes('disabled')).toBeDefined();
+    await wrapper.get('[data-action="cancel-redo"]').trigger('click');
+    expect(api.requirements.cancel).toHaveBeenCalledWith('r1');
+    wrapper.unmount();
+  });
+
+  test('a package whose dependency was redone after it is flagged; a failed redo shows why', async () => {
+    const packages = [planPackage({ revision: 1 }), planPackage({ title: '登录锁定', dependsOn: [1] })];
+    state.list = [
+      requirement({
+        status: 'reviewing',
+        plan: { summary: 'plan', packages },
+        redo: { index: 1, status: 'failed', error: { code: 'agent_bad_output', message: 'package.title is empty' } },
+      }),
+    ];
+    const { wrapper } = await render();
+    const cards = wrapper.findAll('.plan-package');
+    expect(cards[0].find('[data-plan-stale]').exists()).toBe(false);
+    expect(cards[1].get('[data-plan-stale]').text()).toContain('工作包 1 重做过');
+    expect(cards[1].get('.plan-redo-status.failed').text()).toContain('计划保持原样');
+    wrapper.unmount();
+  });
+
+  test('a published plan offers no redo', async () => {
+    state.list = [requirement({ status: 'published', plan: { summary: 'plan', packages: [planPackage()] } })];
+    const { wrapper } = await render();
+    expect(wrapper.find('[data-plan-redo]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  test('switching repositories on the requirement center shows the new repository, not the old requirement', async () => {
+    state.list = [requirement({ id: 'old', title: '旧仓库的需求', status: 'reviewing' })];
+    api.repositories.switch.mockImplementation((id: string) => ok({ current: id, repositories: [] }));
+    const repositories = useRepositoriesStore();
+    // The app keys the views on the switch generation, so they remount.
+    const Host = defineComponent({ setup: () => () => h(RequirementsView, { key: repositories.generation }) });
+    const store = useRequirementsStore();
+    await store.open();
+    const wrapper = await mountView(Host);
+    expect(wrapper.find('.req-detail').text()).toContain('旧仓库的需求');
+
+    state.list = [requirement({ id: 'new-repo', title: '新仓库的需求', status: 'reviewing' })];
+    expect(await repositories.switchTo('other')).toBe(true);
+    await flushPromises();
+    expect(wrapper.find('.req-detail').text()).not.toContain('旧仓库的需求');
+    expect(wrapper.findAll('.req-row').map((row) => row.attributes('data-id'))).toEqual(['new-repo']);
+    expect(store.selectedId).toBe('new-repo');
+    expect(wrapper.find('.req-detail').text()).toContain('新仓库的需求');
+  });
+
+  test('reset drops the old repository requirement and its compose context', async () => {
+    state.list = [requirement({ id: 'old' })];
+    const store = useRequirementsStore();
+    await store.open({ compose: true });
+    await flushPromises();
+    expect(store.composeContext).not.toBeNull();
+    store.reset();
+    expect(store.items).toEqual([]);
+    expect(store.selectedId).toBeNull();
+    expect(store.current).toBeNull();
+    expect(store.pane).toBeNull();
+    expect(store.composing).toBe(false);
+    expect(store.composeContext).toBeNull();
   });
 });

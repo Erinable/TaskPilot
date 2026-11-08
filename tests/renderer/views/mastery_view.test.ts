@@ -16,9 +16,11 @@ import { useNotesStore } from '@/stores/notes.ts';
 import { useTasksStore } from '@/stores/tasks.ts';
 import * as feedback from '@/lib/feedback.ts';
 import { mountView } from '../mount_view.ts';
-import { courseList, installApi, ok } from '../settings_fakes.ts';
+import { courseList, fail, installApi, ok } from '../settings_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import { taskView } from '../execution_fakes.ts';
 import type * as masteryTypes from '@shared/ipc/mastery.ts';
+import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
@@ -215,4 +217,51 @@ test('opened from a grade, the page shows that pack with its concept picked', as
   const wrapper = await mountView(MasteryView);
   expect(api.mastery.course).toHaveBeenCalledWith('os');
   expect(wrapper.get('[data-section="concept"] h3').text()).toBe('时间片轮转（RR）');
+});
+
+// ========== Loading, errors and state events ==========
+
+test('while the course loads the page says so; a failed read offers a retry', async () => {
+  expectConsole('error', /\[mastery\] course failed/);
+  const held = Promise.withResolvers<IpcResult<masteryTypes.CourseMastery>>();
+  api.mastery.course.mockReturnValueOnce(held.promise);
+  const wrapper = await openView();
+  expect(wrapper.find('[data-state="loading"]').exists()).toBe(true);
+  held.resolve({ ok: false, error: { code: 'unknown', message: 'disk gone' } });
+  await flushPromises();
+  expect(wrapper.find('[data-state="loading"]').exists()).toBe(false);
+  expect(wrapper.get('[data-state="error"]').text()).toContain('读取掌握度失败');
+  await wrapper.get('[data-action="retry"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find('[data-state="error"]').exists()).toBe(false);
+  expect(wrapper.find('[data-chart]').exists()).toBe(true);
+});
+
+test('a failed review list says why and can be read again', async () => {
+  expectConsole('error', /\[mastery\] reviews failed/);
+  api.mastery.reviews.mockReturnValueOnce(fail('unknown', 'disk gone'));
+  const wrapper = await openView();
+  expect(wrapper.find('[data-empty="reviews-error"]').exists()).toBe(true);
+  await wrapper.get('[data-action="retry-reviews"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find(`[data-review="${RR_NOTE.id}"]`).exists()).toBe(true);
+});
+
+test('a mastery or notes change reloads the open page; after leaving, events read nothing', async () => {
+  const wrapper = await openView();
+  const passed = { ...OS_MASTERY, concepts: OS_MASTERY.concepts.map((entry) => (entry.id === 'fcfs' ? { ...entry, state: 'passed' as const } : entry)) };
+  api.mastery.course.mockReturnValue(ok(passed));
+  api.emitState({ repositoryId: 'other', domains: ['mastery'] });
+  await flushPromises();
+  expect(wrapper.get('[data-concept="fcfs"]').attributes('data-state')).toBe('passed');
+  api.mastery.reviews.mockReturnValue(ok({ today: '2026-10-28', due: [], total: 0 }));
+  api.emitState({ repositoryId: null, domains: ['notes'] });
+  await flushPromises();
+  expect(wrapper.find('[data-empty="reviews"]').exists()).toBe(true);
+
+  wrapper.unmount();
+  const calls = api.mastery.course.mock.calls.length + api.mastery.reviews.mock.calls.length;
+  api.emitState({ repositoryId: null, domains: ['mastery', 'notes'] });
+  await flushPromises();
+  expect(api.mastery.course.mock.calls.length + api.mastery.reviews.mock.calls.length).toBe(calls);
 });

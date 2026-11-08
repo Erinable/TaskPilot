@@ -33,4 +33,10 @@ describe('nextStep', () => {
       expect(advice.text).not.toBe('');
     }
   });
+
+  test('a done package waits to be saved until its scope files are committed', () => {
+    expect(nextStep(taskView({ status: 'done' }), 3).text).toContain('提交这 3 个文件');
+    expect(nextStep(taskView({ status: 'done' }), 0).text).toContain('已交付');
+    expect(nextStep(taskView({ status: 'done' })).text).toContain('已交付');
+  });
 });

@@ -1,6 +1,6 @@
 /** @module-tag integration */
 // IPC channels for packages and practice service (src/main/ipc/packages.ts, src/main/work_packages/practice_service.ts).
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 
 import type { TaskView } from '../../../src/shared/ipc/packages.ts';
@@ -8,6 +8,7 @@ import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
 import * as practice from './practice_fixtures.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 // ========== practice ==========
 
@@ -218,3 +219,45 @@ test('practice: the confirmed course guide and rubric reach reference and gradin
 });
 
 // [人工决策-2026-10-27 00:36:21] 用 os 包规划的项目任务带上骨架里的知识点，判卷后按知识点写掌握度。
+
+// A failure right after the running reference is written (where the sandbox
+// starts) used to escape the run's try: the entry leaked and the run stayed 'running'.
+test('practice: a reference run failing before Coding Agent starts is failed and leaves no run behind', async () => {
+  const logged = expectConsole('error', /\[reference\] run failed/);
+  const h = await practice.practiceHarness();
+  const original = h.store.setReferenceRun.bind(h.store);
+  vi.spyOn(h.store, 'setReferenceRun').mockImplementationOnce(async (...args) => {
+    await original(...args);
+    throw new Error('sandbox broke');
+  });
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await h.idle();
+  const view = (await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data as TaskView;
+  assert.equal(view.referenceRun!.status, 'failed');
+  assert.deepEqual(view.referenceRun!.error, { code: 'coding_failed', message: 'sandbox broke' });
+  assert.deepEqual(h.prompts, [], 'Coding Agent never ran');
+  assert.deepEqual((await h.call(CHANNELS.repositoriesBusy)).data, []);
+  assert.equal(logged.length, 1);
+});
+
+test('practice: a grade failing while its input is gathered is failed, frees the run and can be asked again', async () => {
+  const logged = expectConsole('error', /\[grade\] run failed/);
+  const h = await practice.practiceHarness();
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'practice' });
+  await practice.settleTask(h.call, 'auth-edge-tests', (task) => task.referenceRun?.status === 'ready');
+  vi.spyOn(h.notes, 'list').mockImplementationOnce(() => {
+    throw new Error('notes unreadable');
+  });
+  await practice.writeSubmission(h.root);
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'submit_for_review');
+  await h.idle();
+  const failed = (await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data as TaskView;
+  assert.equal(failed.grade!.status, 'failed');
+  assert.equal(failed.grade!.error!.message, 'notes unreadable');
+  assert.deepEqual((await h.call(CHANNELS.repositoriesBusy)).data, []);
+  assert.equal(logged.length, 1);
+
+  await h.call(CHANNELS.practiceGrade, 'auth-edge-tests', false);
+  const graded = await practice.settleTask(h.call, 'auth-edge-tests', (task) => task.grade?.status === 'done');
+  assert.equal(graded.grade!.withReference, true);
+});

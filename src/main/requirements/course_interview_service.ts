@@ -25,6 +25,7 @@ import { checkCourse } from '../../shared/course_rules.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { CourseChoice, Requirement, RequirementStep } from './requirement_store.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type CourseInterviewServiceContext = Pick<AppContext, 'backgroundRuns' | 'commandPath' | 'configDir' | 'coursePlaces' | 'requirements' | 'runnerFor'>;
 
@@ -68,15 +69,9 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
   const startRun = async (id: string, step: RequirementStep, work: (item: Requirement, signal: AbortSignal) => Promise<unknown>) => {
     const store = requireRequirements();
     const item = await store.begin(id, step);
-    const controller = backgroundRuns.start({
-      kind: 'requirement',
-      key: id,
-      busy: 'requirement',
-      agent: () => 'tutor',
-      label: () => store.get(id).title || id,
-    });
     logger.debug(`[course-interview] start requirement=${id} step=${step}`);
-    const settled = (async () => {
+    const info: RunInfo = { kind: 'requirement', key: id, busy: 'requirement', agent: () => 'tutor', label: () => store.get(id).title || id };
+    void backgroundRuns.run(info, async (controller) => {
       let failure: unknown = null;
       try {
         await store.setPhase(id, 'tutor');
@@ -94,8 +89,7 @@ export const createCourseInterviewService = (ctx: CourseInterviewServiceContext)
       if (agentError.code !== 'agent_cancelled' && agentError.code !== 'agent_bad_output') logger.error(failure);
       logger.debug(`[course-interview] failed requirement=${id} step=${step} title=${title} code=${agentError.code ?? 'unknown'}`);
       await store.failRun(id, step, agentError).catch((error) => logger.error(error));
-    })();
-    backgroundRuns.track(settled);
+    });
     return item;
   };
 

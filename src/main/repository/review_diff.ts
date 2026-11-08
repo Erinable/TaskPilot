@@ -85,6 +85,11 @@ export const collectChanges = async (
       skip('binary');
       continue;
     }
+    // An untracked file git.changesSince() did not read is not diffed either.
+    if (change.tooLarge) {
+      skip('too_large');
+      continue;
+    }
     if (files.length >= maxFiles) {
       skip('file_limit');
       continue;

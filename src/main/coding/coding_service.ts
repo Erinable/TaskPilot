@@ -20,6 +20,7 @@ import type * as codingTypes from '../../shared/coding_types.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { CodingRuntime } from './coding_runtime.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type CodingServiceContext = Pick<
   AppContext,
@@ -51,6 +52,29 @@ type ActiveRound = {
 };
 
 const MAX_CODING_EVENTS = 200;
+// A streaming round reports many events a second; the renderer refetches on
+// each notification, so they are sent at most this often.
+export const EVENT_NOTIFY_MS = 250;
+
+// Calls `notify` at most once per `ms`, at the end of the window (trailing).
+// `flush` sends a pending call now; `cancel` drops it.
+const trailingThrottle = (notify: () => void, ms: number) => {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    timer = null;
+    notify();
+  };
+  return {
+    call: () => {
+      if (!timer) timer = setTimeout(fire, ms);
+    },
+    flush: () => {
+      if (!timer) return;
+      clearTimeout(timer);
+      fire();
+    },
+  };
+};
 
 // A new round may start once the previous one has finished or handed its
 // patch over; ready (unapplied) and in-flight rounds block it.
@@ -135,20 +159,21 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
     };
     await store.setCodingRun(id, initial);
     record({ kind: 'coding_run', packageId: id, title: task.title, status: 'started', costUsd: null });
-    const controller = backgroundRuns.start({ kind: 'coding', key: id, busy: 'coding', agent: () => 'coding-agent', label: ctx.packageLabel(id) });
-    const active: ActiveRound = {
-      run: initial,
-      controller,
-      events: [],
-      workspace: { runName: initial.runName, directory: initial.runName },
-    };
-    activeRounds.set(id, active);
-    eventHistory.set(id, []);
     const timeoutPatch = async (error: unknown, prepared: codingWorkspace.PreparedCodingWorkspace | null, cancelled: boolean) => {
       if (cancelled || !prepared || errorCode(error) !== 'coding_timeout') return undefined;
       return runtime.readPatch(prepared.runName, task.fileScope, { sandbox, cli: runtimeConfig.cli }).catch((failure) => void logger.error(failure));
     };
-    const settled = (async () => {
+    const info: RunInfo = { kind: 'coding', key: id, busy: 'coding', agent: () => 'coding-agent', label: ctx.packageLabel(id) };
+    void backgroundRuns.run(info, async (controller) => {
+      const active: ActiveRound = {
+        run: initial,
+        controller,
+        events: [],
+        workspace: { runName: initial.runName, directory: initial.runName },
+      };
+      activeRounds.set(id, active);
+      eventHistory.set(id, []);
+      const eventsChanged = trailingThrottle(() => ctx.changed('coding', 'activity'), EVENT_NOTIFY_MS);
       let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
       try {
         prepared = await runtime.prepare(root, baseline, { runName: initial.runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
@@ -166,9 +191,10 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
           onEvent: (event) => {
             active.events.push(event);
             if (active.events.length > MAX_CODING_EVENTS) active.events = active.events.slice(-MAX_CODING_EVENTS);
-            ctx.changed('coding', 'activity');
+            eventsChanged.call();
           },
         });
+        eventsChanged.flush();
         active.events = result.events.map((event, sequence) => ({ ...event, sequence })).slice(-MAX_CODING_EVENTS);
         eventHistory.set(id, [...active.events]);
         await updateCoding(id, { status: 'checking', output: result.output, usage: result.usage, sessionId: result.sessionId });
@@ -215,6 +241,7 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
         }).catch(() => {});
         record({ kind: 'coding_run', packageId: id, title: task.title, status: cancelled ? 'cancelled' : 'failed', costUsd: spent?.costUsd ?? null });
       } finally {
+        eventsChanged.flush();
         eventHistory.set(id, [...active.events]);
         const current = store.get(id).codingRun;
         if (prepared && current && current.status !== 'ready' && current.status !== 'applied') await runtime.cleanRun(prepared.runName).catch(() => {});
@@ -225,8 +252,7 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
       // a per-file review.
       const settledRun = store.get(id).codingRun;
       if (trigger !== 'human' && settledRun?.status === 'ready' && !settledRun.halt) continueLoop(id, () => autoApplyRound(id));
-    })();
-    backgroundRuns.track(settled);
+    });
     return ctx.viewOf(task, store.get(id));
   };
 
@@ -283,13 +309,12 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
   // permissions. A clean run hands the package to QA; a blocking failure
   // starts the next round while attempts remain.
   const verifyApplied = async (id: string) => {
-    // Submit checks running on an applied patch, per package.
-    const controller = backgroundRuns.start({ kind: 'coding-checks', key: id, busy: 'coding', label: ctx.packageLabel(id) });
     const config = ctx.getConfig();
     const baselines = store.get(id).baselineChecks?.checks ?? {};
     const failures: Parameters<typeof codingLoop.checksFeedback>[0] = [];
     const runs: codingTypes.CodingRun['checks'] = {};
-    try {
+    // Submit checks running on an applied patch, per package.
+    const stopped = await backgroundRuns.run({ kind: 'coding-checks', key: id, busy: 'coding', label: ctx.packageLabel(id) }, async (controller) => {
       const steps = await ctx.runnableSteps(config);
       const { path: envPath } = await ctx.commandPath();
       for (const check of submitChecks(steps)) {
@@ -306,10 +331,9 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
         const item = evidence.evaluate(check, outcome, evidence.usableBaseline(baselines[check.kind], check.line));
         if (item.status === 'fail' && check.blocking) failures.push({ evidence: item, run: runs[check.kind] ?? null });
       }
-    } finally {
-      backgroundRuns.finish('coding-checks', id, controller);
-    }
-    if (controller.signal.aborted) return void (await updateCoding(id, { status: 'applied', checks: runs, halt: 'stopped' }));
+      return controller.signal.aborted;
+    });
+    if (stopped) return void (await updateCoding(id, { status: 'applied', checks: runs, halt: 'stopped' }));
     const run = (await updateCoding(id, { checks: runs })).codingRun as codingTypes.CodingRun;
     if (failures.length) {
       if (!codingLoop.canRetry(run)) return void (await updateCoding(id, { status: 'applied', halt: 'attempts_exhausted' }));

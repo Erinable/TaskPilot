@@ -16,6 +16,12 @@ export const useTasksStore = defineStore('tasks', () => {
     if (token === generation) tasks.value = next;
   };
 
+  // Puts a fresher view of one package in its place without reading the whole
+  // queue; a package the queue does not list yet waits for the next reload.
+  const adoptTask = (task: packageTypes.TaskView) => {
+    tasks.value = tasks.value.map((entry) => (entry.id === task.id ? task : entry));
+  };
+
   const reset = () => {
     generation += 1;
     tasks.value = [];
@@ -26,6 +32,7 @@ export const useTasksStore = defineStore('tasks', () => {
     tasks,
     pendingCount,
     reloadQueue,
+    adoptTask,
     reset,
   };
 });

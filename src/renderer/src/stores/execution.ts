@@ -44,7 +44,9 @@ export const useExecutionStore = defineStore('execution', () => {
   // Acceptance evidence from the last verification run; falls back to the review's.
   const acceptanceOverride = ref<workspaceTypes.CriterionEvidence[] | null>(null);
   let generation = 0;
-  // Re-reads the open package and the queue after a state change.
+  // Re-reads the open package after an action and puts it in its queue entry.
+  // The rest of the queue is reloaded once, by the notification center's
+  // watcher, on the 'packages' change the action emits.
   const reloadCurrent = async () => {
     const before = current.value;
     const token = generation;
@@ -52,9 +54,9 @@ export const useExecutionStore = defineStore('execution', () => {
     const fresh = await call(window.taskpilot.tasks.get(before.id));
     if (generation !== token || current.value?.id !== before.id) return;
     current.value = fresh;
+    useTasksStore().adoptTask(fresh);
     acceptanceOverride.value = null;
     await refreshDiff();
-    await useTasksStore().reloadQueue();
   };
 
   const open = async (id: string) => {
@@ -94,7 +96,7 @@ export const useExecutionStore = defineStore('execution', () => {
   const adoptTask = (task: packageTypes.TaskView) => {
     if (current.value?.id !== task.id) return false;
     current.value = task;
-    useTasksStore().tasks = useTasksStore().tasks.map((entry) => (entry.id === task.id ? task : entry));
+    useTasksStore().adoptTask(task);
     return true;
   };
 
@@ -160,6 +162,8 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // Reads are dropped by the open package's generation, not the watcher's.
+  // The fresh package replaces its queue entry; the whole queue is reloaded
+  // only by the notification center's watcher.
   const watcher = createStateWatcher({
     name: 'execution',
     domains: ['packages', 'workspace'],
@@ -171,9 +175,9 @@ export const useExecutionStore = defineStore('execution', () => {
       const task = await call(window.taskpilot.tasks.get(before.id));
       if (generation !== token || current.value?.id !== before.id) return;
       current.value = task;
+      useTasksStore().adoptTask(task);
       acceptanceOverride.value = null;
       await refreshDiff();
-      await useTasksStore().reloadQueue();
       if (before.review?.status === 'running' && task.review?.status !== 'running') announceReview(task);
       if (before.grade && before.grade.status !== 'done' && task.grade?.status === 'done') announceAgent('导师判完卷了，参考答案也可以看了。');
       if (before.adjudication?.status === 'running' && task.adjudication?.status !== 'running') announceAdjudication(task);

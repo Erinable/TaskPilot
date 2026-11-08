@@ -11,6 +11,7 @@ import { useCodingStore } from '@/stores/coding.ts';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
+import { MAX_AUTO_ATTEMPTS } from '@shared/coding_types.ts';
 import type * as codingTypes from '@shared/coding_types.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
@@ -93,7 +94,10 @@ const resume = () => coding.resume().catch((error) => console.error(error));
         <span class="panel-icon"><AppIcon name="terminal" /></span>
         <div>
           <h2 id="codingTitle">Coding Agent</h2>
-          <p>{{ coding.runtime?.boundary === 'separate-user' ? '独立账号执行' : '沙箱内执行' }}；分析、审查和提交仍由人完成</p>
+          <p>
+            {{ coding.runtime?.boundary === 'separate-user' ? '独立账号执行' : '沙箱内执行' }}；写完自动跑检查和 QA，没过会带着问题自动重写（最多
+            {{ MAX_AUTO_ATTEMPTS }} 次）；第一轮和改到高风险文件时等你确认，验收和保存到 git 由你来做
+          </p>
         </div>
       </div>
       <span v-if="coding.run" class="coding-status" :class="coding.run.status">{{ STATUS_LABELS[coding.run.status] }}</span>

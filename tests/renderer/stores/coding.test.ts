@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { flushPromises } from '@vue/test-utils';
 
 import { useCodingStore } from '../../../src/renderer/src/stores/coding.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
@@ -184,5 +185,35 @@ describe('coding store', () => {
     deferred.resolve({ ok: true, data: current.task });
     await first;
     expect(execution.current?.id).toBe('t2');
+  });
+
+  test('a transcript event reads only new events; a packages change also reads the package', async () => {
+    current.task = taskView({ codingRun: codingRun({ status: 'running' }) });
+    const execution = useExecutionStore();
+    execution.current = current.task;
+    const coding = useCodingStore();
+    await coding.select('t1');
+    await flushPromises();
+    api.coding.get.mockClear();
+    api.coding.events.mockClear();
+
+    api.coding.events.mockResolvedValueOnce({
+      ok: true,
+      data: { events: [{ sequence: 0, type: 'text', text: '读取文件', at: '' }], next: 0, truncated: false },
+    });
+    api.emitState({ repositoryId: null, domains: ['coding', 'activity'] });
+    await flushPromises();
+    expect(api.coding.events).toHaveBeenCalledTimes(1);
+    expect(api.coding.get).not.toHaveBeenCalled();
+    expect(coding.events).toHaveLength(1);
+
+    current.task = taskView({ codingRun: codingRun({ status: 'checking' }) });
+    api.emitState({ repositoryId: null, domains: ['packages'] });
+    await flushPromises();
+    expect(api.coding.events).toHaveBeenCalledTimes(2);
+    expect(api.coding.events).toHaveBeenLastCalledWith('t1', 0);
+    expect(api.coding.get).toHaveBeenCalledTimes(1);
+    expect(execution.current?.codingRun?.status).toBe('checking');
+    coding.leave();
   });
 });

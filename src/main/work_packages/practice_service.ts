@@ -25,6 +25,7 @@ import type * as codingWorkspace from '../coding/coding_workspace.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app/app_context.ts';
 import type { CodingRuntime } from '../coding/coding_runtime.ts';
+import type { RunInfo } from '../app/background_runs.ts';
 
 type PracticeServiceContext = Pick<
   AppContext,
@@ -98,7 +99,6 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
     const baseline = requireBaseline(id);
     const runtimeConfig = { ...getPreferences().agents['coding-agent'] };
     const timeoutMinutes = getPreferences().coding.timeoutMinutes;
-    const controller = backgroundRuns.start({ kind: 'reference', key: id, busy: 'reference', agent: () => 'coding-agent', label: ctx.packageLabel(id) });
     const runId = codingExec.codingRunId();
     const initial: packageTypes.ReferenceRun = {
       id: runId,
@@ -112,13 +112,16 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
       source: 'run',
     };
     logger.debug(`[reference] start package=${id} run=${runId}`);
-    const settled = (async () => {
-      await store.setReferenceRun(id, initial);
-      const sandbox = await runtime.startSandbox();
-      const runName = runtime.runNameFor(sandbox, runId);
+    const info: RunInfo = { kind: 'reference', key: id, busy: 'reference', agent: () => 'coding-agent', label: ctx.packageLabel(id) };
+    // The final write is a side record of the run: a failure is logged.
+    void backgroundRuns.run(info, async (controller) => {
       let prepared: codingWorkspace.PreparedCodingWorkspace | null = null;
       let finished: Partial<packageTypes.ReferenceRun>;
       try {
+        // Inside the try: a failed write or sandbox start still ends the run as failed.
+        await store.setReferenceRun(id, initial);
+        const sandbox = await runtime.startSandbox();
+        const runName = runtime.runNameFor(sandbox, runId);
         prepared = await runtime.prepare(root, baseline, { runName, signal: controller.signal, sandbox, cli: runtimeConfig.cli });
         if (controller.signal.aborted) throw Object.assign(new Error('Reference run was cancelled'), { code: 'coding_aborted' });
         const profile = await ctx.profile(config);
@@ -151,12 +154,13 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
         if (prepared) await runtime.cleanRun(prepared.runName).catch((error) => logger.error('[reference] clean failed', error));
         backgroundRuns.finish('reference', id, controller);
       }
-      const written = await store.setReferenceRun(id, { ...initial, ...finished, finishedAt: new Date().toISOString() }, runId);
+      const written = await store
+        .setReferenceRun(id, { ...initial, ...finished, finishedAt: new Date().toISOString() }, runId)
+        .catch((error) => void logger.error('[reference] could not record the outcome', error));
       logger.debug(`[reference] done package=${id} run=${runId} status=${finished.status} kept=${Boolean(written)}`);
       // QA may have finished first; its grade waits for the reference.
       if (written?.grade?.status === 'waiting') startGrade(id, { force: true }).catch((error) => logger.error('[grade] could not start', error));
-    })();
-    backgroundRuns.track(settled);
+    });
   };
 
   // Tutor grades the current submission once QA has judged it. With the
@@ -206,23 +210,30 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
       return saved?.answer.snippet ? [saved.answer.snippet.code] : [];
     });
     const shown = [...snippets, ...(referencePatch && reference?.revealedAt ? [hintLeak.addedLines(referencePatch)] : [])];
-    const controller = backgroundRuns.start({ kind: 'grade', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) });
-    await store.setGrade(id, { ...base, withReference: referencePatch !== null });
     const tutorRunner = ctx.runnerFor('tutor', { kind: 'package', id });
-    const { path: envPath } = await ctx.commandPath();
-    const profile = await ctx.profile(config);
-    const history = ctx.notes
-      ? practice.notesForGrade(
-          ctx.notes.list().notes,
-          submission.map((file) => file.path),
-          course,
-          courses.knownPacks(ctx.builtinCourses, course),
-        )
-      : [];
-    logger.debug(`[grade] start package=${id} course=${courseRef.id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`);
-    const settled = (async () => {
+    const notesHistory = () =>
+      ctx.notes
+        ? practice.notesForGrade(
+            ctx.notes.list().notes,
+            submission.map((file) => file.path),
+            course,
+            courses.knownPacks(ctx.builtinCourses, course),
+          )
+        : [];
+    const info: RunInfo = { kind: 'grade', key: id, busy: 'grade', agent: () => 'tutor', label: ctx.packageLabel(id) };
+    // The store sets the running grade in memory before its first await, so
+    // the view returned below already shows it.
+    void backgroundRuns.run(info, async (controller) => {
       let finished: Partial<packageTypes.Grade>;
+      // Inside the try: a failure while gathering the input still ends the grade as failed.
       try {
+        await store.setGrade(id, { ...base, withReference: referencePatch !== null });
+        const { path: envPath } = await ctx.commandPath();
+        const profile = await ctx.profile(config);
+        const history = notesHistory();
+        logger.debug(
+          `[grade] start package=${id} course=${courseRef.id} files=${submission.length} reference=${referencePatch !== null} notes=${history.length}`,
+        );
         const { output, costUsd } = await tutorRunner({
           prompt: tutorGrade.gradePrompt({
             task,
@@ -258,11 +269,13 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
           status: 'failed',
           error: cancelled ? { code: 'agent_cancelled', message: 'Grading was cancelled' } : { code: info.code ?? 'agent_failed', message: info.message },
         };
-      } finally {
-        backgroundRuns.finish('grade', id, controller);
       }
+      // Dropped before the outcome is written, so nobody sees a finished grade that still looks cancellable.
+      backgroundRuns.finish('grade', id, controller);
       const finishedAt = new Date().toISOString();
-      const written = await store.setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt }, gradeId);
+      const written = await store
+        .setGrade(id, { ...base, withReference: referencePatch !== null, ...finished, finishedAt }, gradeId)
+        .catch((error) => void logger.error('[grade] could not record the outcome', error));
       logger.debug(`[grade] done package=${id} status=${finished.status} kept=${Boolean(written)}`);
       // [人工决策-2026-10-27 00:36:21] 判卷 done 时按知识点写一次掌握度；同一包同一次提交（diffDigest）只写一次，ai 模式不写。
       // Mastery is a side record: a failed write is logged and the grade stands.
@@ -285,8 +298,7 @@ export const createPracticeService = (ctx: PracticeServiceContext, runtime: Codi
           })
           .catch((error) => logger.error('[mastery] record failed', error));
       }
-    })();
-    backgroundRuns.track(settled);
+    });
     return ctx.viewOf(task, store.get(id));
   };
 

@@ -10,7 +10,7 @@ import { describeError } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import * as model from '@/lib/notes_model.ts';
 import { DEFAULT_COURSE_ID } from '@shared/course_pack.ts';
-import * as markdown from '@shared/note_markdown.ts';
+import { titleKey, toTitle } from '@shared/note_title.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import { useCoursesStore } from './courses.ts';
@@ -33,16 +33,20 @@ export const useNotesStore = defineStore('notes', () => {
   const filter = ref<model.NoteFilter>({ query: '', category: null, tag: null });
   // Ids whose body matched the current query, from the main process.
   const bodyMatches = ref(new Set<string>());
+  // The query the list is filtered by: the one the last body search answered
+  // for, so typing (which the index debounces into search()) does not refilter
+  // thousands of notes on every key, and titles and bodies match together.
+  const searchedQuery = ref('');
   // The packs that name categories; the one in use follows the open
   // repository. Until the main process answers, only the default pack.
   const coursesStore = useCoursesStore();
   const loadedCourses = ref<noteTypes.NoteCourses | null>(null);
   const courses = computed(() => loadedCourses.value ?? model.defaultCourses(coursesStore.defaultPack));
-  const visible = computed(() => model.filterNotes(notes.value, filter.value, courses.value, bodyMatches.value));
+  const visible = computed(() => model.filterNotes(notes.value, { ...filter.value, query: searchedQuery.value }, courses.value, bodyMatches.value));
   const categoryLabel = (note: Pick<noteTypes.NoteMeta, 'category' | 'course'>) => model.categoryLabel(note, courses.value);
   const tags = computed(() => [...new Set(notes.value.flatMap((note) => model.allTags(note)))].sort((a, b) => a.localeCompare(b)));
   const byTitle = computed(() => model.titleIndex(notes.value));
-  const findByTitle = (title: string) => byTitle.value.get(markdown.titleKey(title)) ?? null;
+  const findByTitle = (title: string) => byTitle.value.get(titleKey(title)) ?? null;
 
   const applyList = (list: noteTypes.NoteList) => {
     notes.value = list.notes;
@@ -84,8 +88,18 @@ export const useNotesStore = defineStore('notes', () => {
   let searchGeneration = 0;
   const search = async (query: string) => {
     const generation = (searchGeneration += 1);
-    const ids = query.trim() ? await call(window.taskpilot.notes.search(query)) : [];
-    if (generation === searchGeneration) bodyMatches.value = new Set(ids);
+    const apply = (ids: string[]) => {
+      if (generation !== searchGeneration) return;
+      bodyMatches.value = new Set(ids);
+      searchedQuery.value = query;
+    };
+    try {
+      apply(query.trim() ? await call(window.taskpilot.notes.search(query)) : []);
+    } catch (error) {
+      // Without body matches the query still filters titles, tags and excerpts.
+      apply([]);
+      throw error;
+    }
   };
 
   // ========== Pages ==========
@@ -368,7 +382,7 @@ export const useNotesStore = defineStore('notes', () => {
     const repository = useRepositoriesStore().current;
     const note = await create(
       {
-        title: markdown.toTitle(comment.observation.length > 60 ? `${comment.observation.slice(0, 59)}…` : comment.observation),
+        title: toTitle(comment.observation.length > 60 ? `${comment.observation.slice(0, 59)}…` : comment.observation),
         body: `${comment.observation}\n\n## 下次可以\n\n${comment.betterWay}\n`,
         category: comment.category,
         course: task.grade?.course?.id ?? DEFAULT_COURSE_ID,

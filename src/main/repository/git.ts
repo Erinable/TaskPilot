@@ -28,6 +28,8 @@ export interface FileChange {
   removed: number;
   binary: boolean;
   untracked: boolean;
+  // An untracked file above MAX_COUNTED_BYTES, whose lines were not counted.
+  tooLarge?: boolean;
 }
 
 // The workspace header summary, also used as a work package baseline.
@@ -153,10 +155,21 @@ export const diffStat = async (cwd: string, baseline: string): Promise<FileChang
   });
 };
 
+// Untracked files above this are reported as too large instead of read.
+export const MAX_COUNTED_BYTES = 1024 * 1024;
+// How many untracked files are counted at once.
+const COUNT_CONCURRENCY = 8;
+
 // Line count for an untracked file; binary or unreadable files report 0.
-const countAddedLines = async (cwd: string, filePath: string): Promise<Pick<FileChange, 'added' | 'removed' | 'binary'>> => {
+// Only regular files are read: a symlink (which could point at /dev/zero or a
+// FIFO and never end), a FIFO or a device reports 0 without being opened.
+const countAddedLines = async (cwd: string, filePath: string): Promise<Pick<FileChange, 'added' | 'removed' | 'binary' | 'tooLarge'>> => {
   try {
-    const contents = await fs.readFile(path.join(cwd, filePath));
+    const file = path.join(cwd, filePath);
+    const info = await fs.lstat(file);
+    if (!info.isFile()) return { added: 0, removed: 0, binary: false };
+    if (info.size > MAX_COUNTED_BYTES) return { added: 0, removed: 0, binary: false, tooLarge: true };
+    const contents = await fs.readFile(file);
     if (contents.includes(0)) return { added: 0, removed: 0, binary: true };
     const text = contents.toString('utf8');
     const lines = text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
@@ -176,16 +189,17 @@ const countAddedLines = async (cwd: string, filePath: string): Promise<Pick<File
 export const changesSince = async (cwd: string, baseline: string): Promise<FileChange[]> => {
   const [tracked, entries] = await Promise.all([diffStat(cwd, baseline), status(cwd)]);
   const known = new Set(tracked.map((change) => change.path));
-  const untracked: FileChange[] = [];
-
-  for (const entry of entries) {
-    if (!entry.untracked || known.has(entry.path)) continue;
-    untracked.push({
-      path: entry.path,
-      ...(await countAddedLines(cwd, entry.path)),
-      untracked: true,
-    });
-  }
+  const paths = entries.filter((entry) => entry.untracked && !known.has(entry.path)).map((entry) => entry.path);
+  const untracked: FileChange[] = new Array(paths.length);
+  // A few files at a time, in git's order, so a tree of many new files is
+  // neither read one by one nor opened all at once.
+  let next = 0;
+  const worker = async () => {
+    for (let index = next++; index < paths.length; index = next++) {
+      untracked[index] = { path: paths[index], ...(await countAddedLines(cwd, paths[index])), untracked: true };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(COUNT_CONCURRENCY, paths.length) }, worker));
   return [...tracked, ...untracked];
 };
 

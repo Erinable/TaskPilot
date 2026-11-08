@@ -353,11 +353,13 @@ export const stepOf = (schema) =>
                   ? 'env'
                   : schema.properties.packages
                     ? 'plan'
-                    : schema.properties.questions
-                      ? 'clarify'
-                      : schema.properties.modules
-                        ? 'summarize'
-                        : 'select';
+                    : schema.properties.package
+                      ? 'redo'
+                      : schema.properties.questions
+                        ? 'clarify'
+                        : schema.properties.modules
+                          ? 'summarize'
+                          : 'select';
 export const TUTOR_ANSWER = {
   explanation: '在测试文件里加一个用例，检查邮箱大小写不同也能登录。',
   hints: ['打开 tests/auth/login-user.test.ts', '仿照已有用例写一个新的 test()'],
@@ -397,6 +399,7 @@ export const fakeAgent =
       summarize: () => overrides.summarize ?? SUMMARY_OUTPUT,
       clarify: () => overrides.clarify ?? CLARIFY_OUTPUT,
       plan: () => overrides.plan ?? PLAN_OUTPUT,
+      redo: () => overrides.redo ?? { summary: '重做后的计划。', package: { ...PLAN_OUTPUT.packages[0], title: '只做登录' } },
       review: () => overrides.review ?? QA_PASS,
       env: () => overrides.env ?? ENV_PLAN,
       adjudicate: () => overrides.adjudicate ?? ADJUDICATE_REPLAN,

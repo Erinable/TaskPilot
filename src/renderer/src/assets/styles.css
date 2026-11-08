@@ -2160,6 +2160,26 @@ code {
   border-radius: var(--radius-sm);
   font-size: var(--text-sm);
 }
+.delivery-summary {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--success-soft);
+  border-radius: var(--radius-sm);
+}
+.delivery-summary div {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: var(--space-2);
+}
+.delivery-summary dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.delivery-summary dd {
+  margin: 0;
+}
 .review-summary {
   margin: 0;
   color: var(--text-secondary);

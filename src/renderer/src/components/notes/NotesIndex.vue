@@ -3,7 +3,7 @@
 // newest first, each a title link with its date; one category of the pack
 // in use, one dimension shared by every pack, or one tag can be picked from
 // the side. Note text is shown with {{ }} only.
-import { computed, onUnmounted, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import * as model from '@/lib/notes_model.ts';
@@ -12,6 +12,14 @@ import { useNotesStore } from '@/stores/notes.ts';
 const notes = useNotesStore();
 
 const groups = computed(() => model.groupByMonth(notes.visible));
+// Rows are built a page at a time; a new filter starts again from the top.
+const limit = ref(model.INDEX_PAGE);
+watch(
+  () => notes.visible,
+  () => (limit.value = model.INDEX_PAGE),
+);
+const shownGroups = computed(() => model.firstNotes(groups.value, limit.value));
+const hidden = computed(() => Math.max(0, notes.visible.length - limit.value));
 const tagCounts = computed(() => model.tagCounts(notes.notes));
 const rubricCounts = computed(() => model.rubricCounts(notes.notes, notes.courses));
 const dimensionCounts = computed(() => (model.showDimensions(notes.notes, notes.courses) ? model.dimensionCounts(notes.notes, notes.courses) : []));
@@ -56,7 +64,7 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
       </p>
       <p v-else-if="notes.loaded && !notes.visible.length" class="blog-empty">没有符合条件的笔记。</p>
 
-      <section v-for="group in groups" :key="group.month" class="post-group">
+      <section v-for="group in shownGroups" :key="group.month" class="post-group">
         <h3>{{ group.label }}</h3>
         <ul>
           <li v-for="note in group.notes" :key="note.id" class="post-item" :data-note="note.id">
@@ -76,6 +84,9 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
           </li>
         </ul>
       </section>
+      <button v-if="hidden" class="blog-link blog-more" type="button" data-notes-more @click="limit += model.INDEX_PAGE">
+        再显示 {{ Math.min(hidden, model.INDEX_PAGE) }} 篇（还有 {{ hidden }} 篇）
+      </button>
     </main>
 
     <aside v-if="notes.notes.length && !filtered" class="blog-aside">
@@ -117,3 +128,10 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
     </aside>
   </div>
 </template>
+
+<style scoped>
+.blog-more {
+  display: block;
+  margin: var(--space-4) auto 0;
+}
+</style>

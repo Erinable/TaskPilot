@@ -141,6 +141,15 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) =>
       plan: (id: string) => ok(requirement({ id, status: 'planning' })),
       publish: (id: string) =>
         ok(requirement({ id, status: 'published', plan: { summary: 's', packages: [planPackage()] }, packages: [{} as packageTypes.TaskDefinition] })),
+      redoPackage: (id: string, index: number) =>
+        ok(
+          requirement({
+            id,
+            status: 'reviewing',
+            plan: state.list.find((item) => item.id === id)?.plan ?? null,
+            redo: { index, status: 'running', error: null },
+          }),
+        ),
       remove: () => ok(true as const),
       cancel: () => ok(true),
       coursePath: (id: string, path: PathEntry[]) => ok(requirement({ id, kind: 'course', status: 'reviewing', course: coursePathInterview(path) })),

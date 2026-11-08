@@ -1,6 +1,7 @@
 /** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir } from '../../fixtures/temp_dir.ts';
@@ -155,5 +156,37 @@ test('git errors surface a code and stderr instead of a raw exec failure', async
       assert.ok(error.stderr, 'stderr is kept and non-empty');
       return true;
     },
+  );
+});
+
+test('changesSince() never opens a FIFO or a symlink to a device and does not read a file past the cap', async () => {
+  const { dir } = await makeRepo();
+  const baseline = await git.head(dir);
+  // Reading either would block or never end.
+  execFileSync('mkfifo', [path.join(dir, 'pipe')]);
+  await fs.symlink('/dev/zero', path.join(dir, 'zero'));
+  await fs.writeFile(path.join(dir, 'huge.txt'), 'line\n'.repeat(Math.ceil(git.MAX_COUNTED_BYTES / 5) + 1));
+  await fs.writeFile(path.join(dir, 'small.txt'), 'a\nb\n');
+  const byPath = Object.fromEntries((await git.changesSince(dir, baseline)).map((change) => [change.path, change]));
+  assert.deepEqual([byPath.zero.added, byPath.zero.binary, byPath.zero.tooLarge], [0, false, undefined]);
+  assert.deepEqual([byPath['huge.txt'].added, byPath['huge.txt'].tooLarge], [0, true]);
+  assert.equal(byPath['small.txt'].added, 2);
+  // git status leaves FIFOs out; if it ever lists one, it must not be read.
+  if (byPath.pipe) assert.equal(byPath.pipe.added, 0);
+});
+
+test('changesSince() counts many untracked files and keeps git status order', async () => {
+  const { dir } = await makeRepo();
+  const baseline = await git.head(dir);
+  const names = Array.from({ length: 30 }, (_unused, index) => `n${String(index).padStart(2, '0')}.txt`);
+  for (const [index, name] of names.entries()) await fs.writeFile(path.join(dir, name), 'x\n'.repeat(index + 1));
+  const untracked = (await git.changesSince(dir, baseline)).filter((change) => change.untracked);
+  assert.deepEqual(
+    untracked.map((change) => change.path),
+    names,
+  );
+  assert.deepEqual(
+    untracked.map((change) => change.added),
+    names.map((_name, index) => index + 1),
   );
 });

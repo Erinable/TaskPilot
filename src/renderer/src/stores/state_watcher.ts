@@ -2,7 +2,7 @@
 // that follow main-process state: events for another repository or other
 // domains are ignored, a change during a read queues exactly one more read,
 // and invalidate()/stop() make every in-flight read stale.
-import type { StateDomain } from '@shared/ipc/state.ts';
+import type { StateChange, StateDomain } from '@shared/ipc/state.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
 
 export type StateWatcherOptions = {
@@ -15,8 +15,8 @@ export type StateWatcherOptions = {
   global?: boolean;
   // false: start() only subscribes and the store reads when it needs to.
   initialRead?: boolean;
-  // Runs on every matching event, before the read.
-  onChange?: () => void;
+  // Runs on every matching event, before the read, with that event.
+  onChange?: (change: StateChange) => void;
 };
 
 export const createStateWatcher = (options: StateWatcherOptions) => {
@@ -52,7 +52,7 @@ export const createStateWatcher = (options: StateWatcherOptions) => {
       unsubscribe = window.taskpilot.state.onChanged((change) => {
         if (!options.global && change.repositoryId !== repositories.currentId) return;
         if (!change.domains.some((domain) => options.domains.includes(domain))) return;
-        options.onChange?.();
+        options.onChange?.(change);
         logged();
       });
     }
