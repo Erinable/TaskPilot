@@ -7,6 +7,7 @@ import { ref } from 'vue';
 import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
+import { createStateWatcher } from './state_watcher.ts';
 import type * as activityTypes from '@shared/ipc/activity.ts';
 
 export const useCostsStore = defineStore('costs', () => {
@@ -36,6 +37,25 @@ export const useCostsStore = defineStore('costs', () => {
     load().catch((cause) => console.error(cause));
   };
 
+  // ========== State events ==========
+  // Every model call is an activity record, so the report follows activity
+  // while the cost page is open.
+  const watcher = createStateWatcher({ name: 'costs', domains: ['activity'], read: () => load() });
+
+  const enter = () => watcher.start();
+
+  const leave = () => watcher.stop();
+
+  // The report belongs to the repository it was read for.
+  const reset = () => {
+    watcher.stop();
+    generation += 1;
+    report.value = null;
+    loading.value = false;
+    error.value = null;
+    syncError.value = null;
+  };
+
   // ========== Prices ==========
   const syncing = ref(false);
   const syncError = ref<string | null>(null);
@@ -63,6 +83,10 @@ export const useCostsStore = defineStore('costs', () => {
     error,
     load,
     setDays,
+    // State events
+    enter,
+    leave,
+    reset,
     // Prices
     syncing,
     syncError,

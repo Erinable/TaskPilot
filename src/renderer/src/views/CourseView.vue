@@ -7,7 +7,7 @@
 //
 // [人工决策-2026-10-27 00:55:52] 侧栏新增「课程」一级视图，浏览、复制再改和表单编辑都在这里；
 // 内置包只读，只显示「复制再改」。保存后 contentHash 变了，要重新确认，界面要讲清楚。
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
@@ -108,7 +108,11 @@ watch(
 const openSettings = () => run(useSettingsStore().open('courses'));
 const learn = () => run(useRequirementsStore().open({ compose: 'course' }));
 
-onMounted(() => run(courses.loadView()));
+onMounted(() => {
+  run(courses.enter(true));
+  run(courses.loadView());
+});
+onBeforeUnmount(() => courses.leave());
 </script>
 
 <template>

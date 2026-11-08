@@ -6,7 +6,7 @@
 //
 // [人工决策-2026-10-27 00:36:21] 掌握度一期用简单记录加笔记的间隔复习，不做 BKT：页面只显示记录（次数、结果、独立完成度）和到期复习，
 // 不显示概率或预测。
-import { computed, onMounted, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import NoteChart from '@/components/notes/NoteChart.vue';
@@ -55,11 +55,18 @@ const openNote = async (id: string) => {
 };
 const openTask = (id: string) => run(execution.open(id));
 
+// Mastery, its reviews and the pack list follow state events while the page is open.
 onMounted(() => {
-  run(mastery.load());
+  run(mastery.enter());
+  run(courses.enter());
   run(courses.load());
   run(notes.load());
 });
+onBeforeUnmount(() => {
+  mastery.leave();
+  courses.leave();
+});
+const retry = () => run(mastery.load());
 // Picking another pack on the page clears the picked concept.
 watch(
   () => course.value?.course.id,
@@ -83,6 +90,18 @@ watch(
       </div>
     </div>
 
+    <p v-if="!course && mastery.courseLoading" class="empty-hint" data-state="loading">
+      <AppIcon name="spinner" class="spin" />
+      正在读取掌握度…
+    </p>
+    <div v-else-if="!course && mastery.courseError" class="empty-hint" data-state="error" role="alert">
+      <AppIcon name="alert" />
+      <span>{{ `读取掌握度失败：${mastery.courseError}` }}</span>
+      <button class="secondary-button small" type="button" data-action="retry" @click="retry">
+        <AppIcon name="refresh" />
+        重试
+      </button>
+    </div>
     <div v-if="course" class="mastery-columns">
       <section class="panel glass mastery-graph" data-section="graph" aria-label="知识点">
         <div class="panel-heading">
@@ -191,6 +210,10 @@ watch(
               </div>
             </li>
           </ul>
+          <p v-else-if="mastery.reviewsError" class="mastery-empty" data-empty="reviews-error" role="alert">
+            {{ `读取复习列表失败：${mastery.reviewsError}` }}
+            <button class="link-button" type="button" data-action="retry-reviews" @click="run(mastery.loadReviews())">重试</button>
+          </p>
           <p v-else class="mastery-empty" data-empty="reviews">今天没有到期的笔记。</p>
         </section>
         <section class="panel glass" data-section="errors" aria-label="最近的错误类型">

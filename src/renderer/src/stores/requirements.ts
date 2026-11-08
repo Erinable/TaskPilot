@@ -331,11 +331,32 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   const stopWatching = () => watcher.stop();
 
+  // ========== Repository switch ==========
+  // Set by reset(): the view reopens itself when it remounts after a switch.
+  let reopen = false;
+
+  // Drops what was shown for the old repository; answers still in flight
+  // for it are discarded through the watcher session and contextGeneration.
+  const reset = () => {
+    watcher.stop();
+    contextGeneration += 1;
+    items.value = [];
+    selectedId.value = null;
+    current.value = null;
+    pane.value = null;
+    composing.value = false;
+    composeContext.value = null;
+    composeStatus.value = { text: '', error: false };
+    composeInvalid.value = false;
+    reopen = true;
+  };
+
   // ========== Navigation ==========
   // `compose: 'course'` opens the "我想学…" form.
   const open = async ({ compose = false, id = null }: { compose?: boolean | requirementTypes.RequirementKind; id?: string | null } = {}) => {
     const app = useAppStore();
     if (!(await app.navigate('requirements'))) return;
+    reopen = false;
     await refreshList();
     const target = id ?? selectedId.value;
     if (compose) startCompose(compose === true ? 'project' : compose);
@@ -343,6 +364,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
     else if (items.value.length) select(items.value[0].id);
     else pane.value = 'empty';
     startWatching();
+  };
+
+  // The view mounted: after a reset nothing is shown, so it opens again.
+  const enter = async () => {
+    if (reopen) await open();
   };
 
   // Loads counts for the sidebar badge on startup, without opening the view.
@@ -402,6 +428,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     // State events
     startWatching,
     stopWatching,
+    // Repository switch
+    reset,
+    enter,
     // Navigation
     open,
     init,

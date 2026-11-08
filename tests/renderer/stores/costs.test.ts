@@ -87,3 +87,36 @@ test('a failed sync keeps the report and shows why', async () => {
   expect(api.costs.report).not.toHaveBeenCalled();
   expect(store.syncing).toBe(false);
 });
+
+test('while the page is open, an activity change reloads the report; leaving stops it', async () => {
+  const store = useCostsStore();
+  await store.enter();
+  expect(api.costs.report).toHaveBeenCalledTimes(1);
+  api.emitState({ repositoryId: null, domains: ['activity'] });
+  await flushPromises();
+  expect(api.costs.report).toHaveBeenCalledTimes(2);
+  api.emitState({ repositoryId: null, domains: ['notes'] });
+  await flushPromises();
+  expect(api.costs.report).toHaveBeenCalledTimes(2);
+  store.leave();
+  api.emitState({ repositoryId: null, domains: ['activity'] });
+  await flushPromises();
+  expect(api.costs.report).toHaveBeenCalledTimes(2);
+});
+
+test('reset clears the report, stops following activity and drops a late answer', async () => {
+  const store = useCostsStore();
+  await store.enter();
+  expect(store.report).not.toBeNull();
+  const held = Promise.withResolvers<IpcResult<activityTypes.CostReport>>();
+  api.costs.report.mockReturnValueOnce(held.promise);
+  const late = store.load();
+  store.reset();
+  held.resolve({ ok: true, data: report(30) });
+  await late;
+  expect(store.report).toBeNull();
+  expect(store.loading).toBe(false);
+  api.emitState({ repositoryId: null, domains: ['activity'] });
+  await flushPromises();
+  expect(api.costs.report).toHaveBeenCalledTimes(2);
+});

@@ -65,13 +65,11 @@ export const useAgentSettingsPage = () => {
     },
     { flush: 'sync' },
   );
-  watch(
-    () => settings.agentFieldErrors,
-    (errors) => {
-      if (Object.values(errors).some(Boolean)) query.value = '';
-    },
-    { deep: true },
-  );
+  // A field error clears the search, so the agent it names is shown.
+  const hasFieldError = computed(() => Object.values(settings.agentFieldErrors).some(Boolean));
+  watch(hasFieldError, (errors) => {
+    if (errors) query.value = '';
+  });
 
   const state = (agent: agentRuntime.AgentId): { label: string; tone: 'available' | 'unavailable' | 'pending' | 'unknown' } => {
     const status = runtime(agent);

@@ -20,7 +20,8 @@ const palette = usePaletteStore();
 const repositories = useRepositoriesStore();
 const codingActivity = useCodingActivityStore();
 const execution = useExecutionStore();
-const now = useNow();
+// The clock only ticks while the coding chip shows an elapsed time.
+const now = useNow(() => codingActivity.runs.length > 0);
 
 // The Coding Agent's work, visible from every page; a click opens the package.
 const codingChip = computed(() => {

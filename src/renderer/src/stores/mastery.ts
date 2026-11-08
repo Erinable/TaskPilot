@@ -9,6 +9,7 @@ import { call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import { useAppStore } from './app.ts';
+import { createStateWatcher } from './state_watcher.ts';
 import type * as masteryTypes from '@shared/ipc/mastery.ts';
 
 export const useMasteryStore = defineStore('mastery', () => {
@@ -17,15 +18,30 @@ export const useMasteryStore = defineStore('mastery', () => {
   // The pack picked on the page; null follows the one in use.
   const courseId = ref<string | null>(null);
   const selected = ref<string | null>(null);
+  // Why the page's course could not be read; the page offers a retry.
+  const courseError = ref<string | null>(null);
+  const courseLoading = ref(false);
+  // Bumped by every course read and by reset(): only the latest answer applies.
+  let courseGeneration = 0;
 
   const loadCourse = async (id: string | null = courseId.value) => {
+    const token = ++courseGeneration;
+    // Set before the read, so a refresh from an event asks for the same pack.
+    courseId.value = id;
+    courseLoading.value = true;
     try {
-      course.value = await call(window.taskpilot.mastery.course(id ?? undefined));
-      courseId.value = id;
-      if (selected.value && !course.value.concepts.some((concept) => concept.id === selected.value)) selected.value = null;
+      const next = await call(window.taskpilot.mastery.course(id ?? undefined));
+      if (token !== courseGeneration) return;
+      course.value = next;
+      courseError.value = null;
+      if (selected.value && !next.concepts.some((concept) => concept.id === selected.value)) selected.value = null;
     } catch (error) {
+      if (token !== courseGeneration) return;
       console.error('[mastery] course failed', error);
+      courseError.value = describeError(error);
       showToast(`读取掌握度失败：${describeError(error)}`);
+    } finally {
+      if (token === courseGeneration) courseLoading.value = false;
     }
   };
 
@@ -59,12 +75,20 @@ export const useMasteryStore = defineStore('mastery', () => {
   // ========== Review ==========
   const reviews = ref<masteryTypes.ReviewList | null>(null);
   const reviewing = ref<string | null>(null);
+  const reviewsError = ref<string | null>(null);
+  let reviewsGeneration = 0;
 
   const loadReviews = async () => {
+    const token = ++reviewsGeneration;
     try {
-      reviews.value = await call(window.taskpilot.mastery.reviews());
+      const next = await call(window.taskpilot.mastery.reviews());
+      if (token !== reviewsGeneration) return;
+      reviews.value = next;
+      reviewsError.value = null;
     } catch (error) {
+      if (token !== reviewsGeneration) return;
       console.error('[mastery] reviews failed', error);
+      reviewsError.value = describeError(error);
       showToast(`读取复习列表失败：${describeError(error)}`);
     }
   };
@@ -86,12 +110,38 @@ export const useMasteryStore = defineStore('mastery', () => {
 
   const load = () => Promise.all([loadCourse(), loadReviews()]);
 
+  // ========== State events ==========
+  // Mastery and notes are global, but the pack in use follows the open
+  // repository, so its events are read too while the page is open.
+  const watcher = createStateWatcher({
+    name: 'mastery',
+    domains: ['mastery', 'notes', 'courses'],
+    global: true,
+    initialRead: false,
+    read: async () => {
+      await load();
+    },
+  });
+
+  const enter = async () => {
+    await watcher.start();
+    await load();
+  };
+
+  const leave = () => watcher.stop();
+
   // The pack in use may change with the repository.
   const reset = () => {
+    watcher.stop();
+    courseGeneration += 1;
+    reviewsGeneration += 1;
     course.value = null;
     courseId.value = null;
+    courseError.value = null;
+    courseLoading.value = false;
     selected.value = null;
     summary.value = null;
+    reviewsError.value = null;
   };
 
   return {
@@ -99,6 +149,8 @@ export const useMasteryStore = defineStore('mastery', () => {
     course,
     courseId,
     selected,
+    courseError,
+    courseLoading,
     loadCourse,
     select,
     // Course summary
@@ -108,10 +160,13 @@ export const useMasteryStore = defineStore('mastery', () => {
     // Review
     reviews,
     reviewing,
+    reviewsError,
     loadReviews,
     review,
     // Page
     load,
+    enter,
+    leave,
     reset,
   };
 });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';
@@ -14,7 +14,9 @@ const bars = computed(() => (report.value ? view.barHeights(report.value.byDay) 
 const range = computed({ get: () => costs.days, set: (value: activityTypes.CostRange) => costs.setDays(value) });
 const syncedAt = computed(() => (report.value?.prices ? report.value.prices.syncedAt.slice(0, 10) : null));
 
-onMounted(() => costs.load().catch((error) => console.error(error)));
+// Loads the report and follows new model calls while the page is open.
+onMounted(() => costs.enter().catch((error) => console.error(error)));
+onBeforeUnmount(() => costs.leave());
 </script>
 
 <template>

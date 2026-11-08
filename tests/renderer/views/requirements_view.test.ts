@@ -2,11 +2,14 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises } from '@vue/test-utils';
+import { defineComponent, h } from 'vue';
 
 import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
+import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { agentStatus, installApi, planPackage, requirement } from '../requirements_fakes.ts';
+import { ok } from '../ipc_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -273,5 +276,40 @@ describe('RequirementsView', () => {
     const { wrapper } = await render();
     expect(wrapper.find('[data-plan-redo]').exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  test('switching repositories on the requirement center shows the new repository, not the old requirement', async () => {
+    state.list = [requirement({ id: 'old', title: '旧仓库的需求', status: 'reviewing' })];
+    api.repositories.switch.mockImplementation((id: string) => ok({ current: id, repositories: [] }));
+    const repositories = useRepositoriesStore();
+    // The app keys the views on the switch generation, so they remount.
+    const Host = defineComponent({ setup: () => () => h(RequirementsView, { key: repositories.generation }) });
+    const store = useRequirementsStore();
+    await store.open();
+    const wrapper = await mountView(Host);
+    expect(wrapper.find('.req-detail').text()).toContain('旧仓库的需求');
+
+    state.list = [requirement({ id: 'new-repo', title: '新仓库的需求', status: 'reviewing' })];
+    expect(await repositories.switchTo('other')).toBe(true);
+    await flushPromises();
+    expect(wrapper.find('.req-detail').text()).not.toContain('旧仓库的需求');
+    expect(wrapper.findAll('.req-row').map((row) => row.attributes('data-id'))).toEqual(['new-repo']);
+    expect(store.selectedId).toBe('new-repo');
+    expect(wrapper.find('.req-detail').text()).toContain('新仓库的需求');
+  });
+
+  test('reset drops the old repository requirement and its compose context', async () => {
+    state.list = [requirement({ id: 'old' })];
+    const store = useRequirementsStore();
+    await store.open({ compose: true });
+    await flushPromises();
+    expect(store.composeContext).not.toBeNull();
+    store.reset();
+    expect(store.items).toEqual([]);
+    expect(store.selectedId).toBeNull();
+    expect(store.current).toBeNull();
+    expect(store.pane).toBeNull();
+    expect(store.composing).toBe(false);
+    expect(store.composeContext).toBeNull();
   });
 });
