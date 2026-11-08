@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { businessClock } from '@/lib/time_zone.ts';
 import type * as codingTypes from '@shared/coding_types.ts';
 
 const props = defineProps<{ events: codingTypes.CodingEvent[] }>();
@@ -17,7 +18,7 @@ const EVENT_LABELS: Record<codingTypes.CodingEvent['type'], string> = {
   <div class="coding-transcript" aria-live="polite" aria-label="编码 Agent 实时记录">
     <div v-if="props.events.length === 0" class="empty-hint">等待编码 Agent 输出…</div>
     <div v-for="event in props.events" :key="event.sequence" class="coding-event">
-      <time>{{ new Date(event.at).toLocaleTimeString() }}</time>
+      <time>{{ businessClock(new Date(event.at)) }}</time>
       <strong :class="event.type">{{ EVENT_LABELS[event.type] }}</strong>
       <span>{{ event.text }}</span>
     </div>

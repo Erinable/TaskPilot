@@ -2,7 +2,7 @@
 // [[ completion and the labels it shows.
 import { businessDay, businessTimeZone } from '@/lib/time_zone.ts';
 import { COURSE_DIMENSIONS, COURSE_DIMENSION_LABELS, DEFAULT_COURSE_ID } from '@shared/course_pack.ts';
-import * as markdown from '@shared/note_markdown.ts';
+import { MAX_TITLE, titleKey } from '@shared/note_title.ts';
 import * as noteCourses from '@shared/note_courses.ts';
 import type { CourseDimension, CoursePack } from '@shared/course_pack.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
@@ -74,18 +74,18 @@ export const sourceLabel = (source: noteTypes.NoteSource | null): string | null 
 };
 
 // Title (any case) → note, for resolving [[links]].
-export const titleIndex = (notes: noteTypes.NoteMeta[]) => new Map(notes.map((note) => [markdown.titleKey(note.title), note]));
+export const titleIndex = (notes: noteTypes.NoteMeta[]) => new Map(notes.map((note) => [titleKey(note.title), note]));
 
 // Notes that link to this one, newest first.
 export const backlinks = (notes: noteTypes.NoteMeta[], note: noteTypes.NoteMeta): noteTypes.NoteMeta[] => {
-  const key = markdown.titleKey(note.title);
-  return notes.filter((other) => other.id !== note.id && other.links.some((link) => markdown.titleKey(link) === key));
+  const key = titleKey(note.title);
+  return notes.filter((other) => other.id !== note.id && other.links.some((link) => titleKey(link) === key));
 };
 
 // Notes that link to a title, for the rename dialog.
 export const linkingCount = (notes: noteTypes.NoteMeta[], title: string, selfId: string) => {
-  const key = markdown.titleKey(title);
-  return notes.filter((other) => other.id !== selfId && other.links.some((link) => markdown.titleKey(link) === key)).length;
+  const key = titleKey(title);
+  return notes.filter((other) => other.id !== selfId && other.links.some((link) => titleKey(link) === key)).length;
 };
 
 // An open [[ before the cursor on the same line: what has been typed after it.
@@ -94,7 +94,7 @@ export const linkQueryAt = (text: string, cursor: number): { start: number; quer
   const open = before.lastIndexOf('[[');
   if (open === -1) return null;
   const typed = before.slice(open + 2);
-  if (/[\]\n|#]/.test(typed) || typed.length > markdown.MAX_TITLE) return null;
+  if (/[\]\n|#]/.test(typed) || typed.length > MAX_TITLE) return null;
   return { start: open, query: typed };
 };
 
@@ -123,9 +123,27 @@ export const groupByMonth = (notes: noteTypes.NoteMeta[], timeZone = businessTim
   const groups = new Map<string, noteTypes.NoteMeta[]>();
   for (const note of [...notes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
     const month = formatDay(note.createdAt, timeZone).slice(0, 7);
-    groups.set(month, [...(groups.get(month) ?? []), note]);
+    const group = groups.get(month);
+    if (group) group.push(note);
+    else groups.set(month, [note]);
   }
   return [...groups].map(([month, entries]) => ({ month, label: `${month.slice(0, 4)} 年 ${Number(month.slice(5, 7))} 月`, notes: entries }));
+};
+
+// The index renders this many notes at first and this many more per click,
+// so a folder of thousands of notes does not build thousands of rows at once.
+export const INDEX_PAGE = 100;
+
+// The month groups cut after the first `limit` notes, keeping their order.
+export const firstNotes = <Group extends { notes: noteTypes.NoteMeta[] }>(groups: Group[], limit: number): Group[] => {
+  const shown: Group[] = [];
+  let left = limit;
+  for (const group of groups) {
+    if (left <= 0) break;
+    shown.push(group.notes.length <= left ? group : { ...group, notes: group.notes.slice(0, left) });
+    left -= group.notes.length;
+  }
+  return shown;
 };
 
 // Tags with how many notes carry them, most used first.

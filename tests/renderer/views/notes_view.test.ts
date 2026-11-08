@@ -285,6 +285,25 @@ describe('NotesView', () => {
     expect(useNotesStore().notes).toEqual([]);
     expect(wrapper.find('.blog-index').exists()).toBe(true);
   });
+
+  test('a long archive shows its newest 100 notes and 再显示 adds the next page', async () => {
+    const many = Array.from({ length: 230 }, (_, index) =>
+      meta({ id: `n${index}.md`, title: `n${index}`, createdAt: new Date(Date.UTC(2026, 0, 1) + index * 3_600_000).toISOString() }),
+    );
+    const wrapper = await openView(many);
+    expect(wrapper.findAll('.post-item')).toHaveLength(100);
+    expect(wrapper.find('[data-note="n229.md"]').exists()).toBe(true);
+    expect(wrapper.get('[data-notes-more]').text()).toBe('再显示 100 篇（还有 130 篇）');
+    await wrapper.get('[data-notes-more]').trigger('click');
+    expect(wrapper.findAll('.post-item')).toHaveLength(200);
+    await wrapper.get('[data-notes-more]').trigger('click');
+    expect(wrapper.findAll('.post-item')).toHaveLength(230);
+    expect(wrapper.find('[data-notes-more]').exists()).toBe(false);
+    // A new filter starts from the first page again.
+    await wrapper.get('[data-note="n0.md"] .post-tag').trigger('click');
+    await flushPromises();
+    expect(wrapper.findAll('.post-item')).toHaveLength(100);
+  });
 });
 
 describe('NoteMarkdown', () => {

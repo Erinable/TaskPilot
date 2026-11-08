@@ -93,6 +93,32 @@ test('the archive groups by the business-day month written, newest first, and co
   expect(model.formatDay('2026-09-30T17:00:00Z', 'Asia/Shanghai')).toBe('2026-10-01');
 });
 
+test('thousands of notes group in one pass and the index shows them a page at a time', () => {
+  const list = Array.from({ length: 5000 }, (_, index) => note(`n${index}`, { createdAt: new Date(Date.UTC(2026, 0, 1) + index * 3_600_000).toISOString() }));
+  const groups = model.groupByMonth(list, 'Asia/Shanghai');
+  expect(groups.reduce((sum, group) => sum + group.notes.length, 0)).toBe(5000);
+  expect(groups[0].notes[0].id).toBe('n4999');
+
+  const shown = model.firstNotes(groups, model.INDEX_PAGE);
+  expect(shown.flatMap((group) => group.notes).map((entry) => entry.id)).toEqual(
+    list
+      .slice(-model.INDEX_PAGE)
+      .reverse()
+      .map((entry) => entry.id),
+  );
+  // Groups that fit whole are kept as they are; only the last one is cut.
+  const small = model.groupByMonth(
+    [note('a', { createdAt: '2026-10-02T00:00:00Z' }), note('b', { createdAt: '2026-09-02T00:00:00Z' }), note('c', { createdAt: '2026-09-01T00:00:00Z' })],
+    'UTC',
+  );
+  expect(model.firstNotes(small, 2).map((group) => [group.month, group.notes.map((entry) => entry.id)])).toEqual([
+    ['2026-10', ['a']],
+    ['2026-09', ['b']],
+  ]);
+  expect(model.firstNotes(small, 2)[0]).toBe(small[0]);
+  expect(model.firstNotes(small, 10)).toEqual(small);
+});
+
 describe('categories across course packs', () => {
   const OS: noteTypes.NoteCourse = {
     id: 'os',

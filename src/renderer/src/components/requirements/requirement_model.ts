@@ -1,5 +1,6 @@
 // Pure rules for the requirement center: status wording, the stepper, limits
 // and validation. Kept free of Vue and IPC so tests can call them directly.
+import { businessMonthDay, businessTimeZone } from '@/lib/time_zone.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type { CourseLevel, CourseTarget, PathStatus } from '@shared/course_plan.ts';
@@ -88,7 +89,8 @@ export const validateText = (text: string) => {
 // The list row title: the given title, else the start of the text.
 export const rowTitle = (item: Pick<requirementTypes.Requirement, 'title' | 'text'>) => item.title || item.text.slice(0, 40);
 
-export const rowDate = (updatedAt: string) => new Date(updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+// "10月1日" in the business time zone, like every other date on the page.
+export const rowDate = (updatedAt: string, timeZone = businessTimeZone()) => businessMonthDay(new Date(updatedAt), timeZone);
 
 // ========== Course interview ==========
 // The form's options: every field is picked; the environment also takes a

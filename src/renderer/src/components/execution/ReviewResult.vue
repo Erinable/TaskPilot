@@ -6,6 +6,7 @@ import InlineCode from '@/components/InlineCode.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import * as reviewModel from '@/lib/review_model.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
+import { businessDateTime } from '@/lib/time_zone.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import EvidenceRow from './EvidenceRow.vue';
 import FailureExplain from './FailureExplain.vue';
@@ -30,7 +31,7 @@ const failedRun = computed(() => {
   if (!run || 'error' in run || run.summary.ok) return null;
   return { kind: run.kind, exitCode: run.exitCode, timedOut: run.timedOut, output: run.outputTail ?? '', failed: run.failing.length };
 });
-const finishedAt = computed(() => (props.review.finishedAt ? new Date(props.review.finishedAt).toLocaleString('zh-CN') : ''));
+const finishedAt = computed(() => (props.review.finishedAt ? businessDateTime(new Date(props.review.finishedAt)) : ''));
 const criterionText = (index: number) => props.task.acceptance[index]?.text ?? `条件 ${index + 1}`;
 const issueLocation = (issue: packageTypes.QaReport['issues'][number]) => (issue.line ? `${issue.file}:${issue.line}` : issue.file);
 </script>

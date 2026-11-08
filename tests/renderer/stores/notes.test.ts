@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import { useNotesStore } from '@/stores/notes.ts';
 import { useRepositoryIdentityStore } from '@/stores/repository_identity.ts';
-import { installFakeApi, ok } from '../ipc_fakes.ts';
+import { fail, installFakeApi, ok } from '../ipc_fakes.ts';
 import { noteMeta } from '../notes_fakes.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
@@ -75,4 +75,25 @@ test('course filters loaded for a repository that is no longer open are dropped'
   held.resolve({ ok: true, data: coursesFor('os') });
   await loading;
   expect(store.courses.current).not.toBe('os');
+});
+
+test('typing does not refilter the list until the debounced search for that query answers', async () => {
+  const store = useNotesStore();
+  await store.load();
+  store.filter.query = 'beta';
+  expect(store.visible.map((note) => note.id)).toEqual([ALPHA.id, BETA.id]);
+  await store.search('beta');
+  expect(store.visible.map((note) => note.id)).toEqual([BETA.id]);
+  store.filter.query = '';
+  await store.search('');
+  expect(store.visible).toHaveLength(2);
+});
+
+test('a failed body search still filters by title', async () => {
+  const store = useNotesStore();
+  await store.load();
+  api.notes.search.mockImplementationOnce(() => fail('unknown', 'disk gone'));
+  store.filter.query = 'alpha';
+  await expect(store.search('alpha')).rejects.toThrow('disk gone');
+  expect(store.visible.map((note) => note.id)).toEqual([ALPHA.id]);
 });

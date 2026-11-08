@@ -6,6 +6,7 @@ import TermHint from '@/components/TermHint.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { resolutionTitle } from '@/lib/review_model.ts';
+import { businessDateTime } from '@/lib/time_zone.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
@@ -29,11 +30,9 @@ const view = computed((): { hint: string; icon: IconName; action: { name: 'cance
   return { hint: deviations.length ? `共 ${deviations.length} 条，裁决结果已自动生效，可在上方撤销。` : '', icon: 'flag', action: null };
 });
 const revisionTitle = computed(() =>
-  props.task.revision
-    ? `当前是第 ${props.task.revision.version} 版计划，${new Date(props.task.revision.revisedAt).toLocaleString('zh-CN')} 由 Architect 修订`
-    : '',
+  props.task.revision ? `当前是第 ${props.task.revision.version} 版计划，${businessDateTime(new Date(props.task.revision.revisedAt))} 由 Architect 修订` : '',
 );
-const when = (iso: string) => new Date(iso).toLocaleString('zh-CN');
+const when = (iso: string) => businessDateTime(new Date(iso));
 
 const run = (action: 'cancel' | 'retry') => {
   execution.runDeviationAction(action).catch((error) => console.error(error));

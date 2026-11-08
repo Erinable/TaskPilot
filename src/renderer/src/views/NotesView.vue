@@ -13,13 +13,12 @@ import '@/components/notes/notes.css';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import { useNotesStore } from '@/stores/notes.ts';
-import * as markdown from '@shared/note_markdown.ts';
+import { toTitle } from '@shared/note_title.ts';
 
 const notes = useNotesStore();
 const run = (action: Promise<unknown>) => action.catch((error) => console.error('[notes] action failed', error));
 
-const startNew = () =>
-  run(notes.create({ title: markdown.toTitle('未命名'), body: '', category: null, tags: [], source: null }, { autoRename: true, open: true }));
+const startNew = () => run(notes.create({ title: toTitle('未命名'), body: '', category: null, tags: [], source: null }, { autoRename: true, open: true }));
 
 const openUrl = (url: string) => {
   notes.openUrl(url).catch((error) => {
