@@ -2,6 +2,7 @@
 // Architect's repository summary and cancellable background runs, plus
 // creating, publishing and removing requirements.
 import * as git from '../repository/git.ts';
+import { logger } from '../infrastructure/logger.ts';
 import { asAgentError, failWith } from '../infrastructure/coded_error.ts';
 import * as productLead from '../agents/product_lead.ts';
 import { summarizeForRequirement, throwIfCancelled } from '../agents/pipeline.ts';
@@ -12,6 +13,7 @@ import type { RequirementStore } from './requirement_store.ts';
 import type { CourseInterviewService } from './course_interview_service.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
+import { CONTROL_CHARS } from '../../shared/text_rules.ts';
 
 type RequirementServiceContext = Pick<
   AppContext,
@@ -29,7 +31,7 @@ type RequirementServiceContext = Pick<
 >;
 
 type RequirementItem = Awaited<ReturnType<RequirementStore['get']>>;
-type PromptInput = Omit<RequirementItem, 'interfaces' | 'course'> & {
+type PromptInput = Omit<RequirementItem, 'interfaces' | 'course' | 'redo'> & {
   files: string[];
   interfaces: string | null;
   profile: ProjectProfile | null;
@@ -43,6 +45,20 @@ const repositoryFiles = async (root: string | null): Promise<string[]> => {
   } catch {
     return [];
   }
+};
+
+const withoutRedo = ({ redo: _redo, ...item }: RequirementItem) => item;
+
+const MAX_REDO_COMMENT = 1000;
+
+// The developer's feedback on a package; required, since a redo without one
+// would only reroll the same plan.
+const redoComment = (value: unknown): string => {
+  if (typeof value !== 'string' || !value.trim()) return failWith('Say what to change in the package', 'required', 'comment');
+  const comment = value.trim();
+  if ([...comment].length > MAX_REDO_COMMENT) failWith(`The comment is longer than ${MAX_REDO_COMMENT} characters`, 'too_long', 'comment');
+  if (CONTROL_CHARS.test(comment)) failWith('The comment contains control characters', 'invalid_text', 'comment');
+  return comment;
 };
 
 export const createRequirementService = (ctx: RequirementServiceContext, { courseInterview }: { courseInterview: CourseInterviewService }) => {
@@ -97,7 +113,7 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
         }
         throwIfCancelled(controller.signal);
         const { output, costUsd } = await productRunner({
-          prompt: buildPrompt({ ...item, files, interfaces, profile, course: course.pack }),
+          prompt: buildPrompt({ ...withoutRedo(item), files, interfaces, profile, course: course.pack }),
           systemPrompt: productLead.systemPrompt(course.pack),
           schema: schema(course.pack),
           envPath,
@@ -158,6 +174,64 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     );
   };
 
+  // Redoes package `index` (0-based) of the plan under review with the
+  // developer's comment. The requirement stays in reviewing; only that
+  // package and the summary change, and only once the output validates.
+  const redoPackage = async (id: string, index: number, rawComment: unknown) => {
+    const store = requireRequirements();
+    const item = store.get(id);
+    if (item.kind === 'course' || !item.plan) return failWith('There is no plan to redo', 'invalid_state');
+    const comment = redoComment(rawComment);
+    const linkTests = (await ctx.runnableSteps().catch(() => [])).some((step) => step.id === 'test' && step.stage === 'submit');
+    const runner = ctx.runnerFor('product-lead', { kind: 'requirement', id });
+    const started = await store.beginRedo(id, index);
+    const plan = item.plan;
+    const controller = backgroundRuns.start({ kind: 'requirement', key: id, busy: 'requirement', agent: () => 'product-lead', label: () => item.title || id });
+    const config = ctx.getConfig();
+    const files = await repositoryFiles(config.root);
+    const { path: envPath } = await ctx.commandPath();
+    const title = item.title || item.text.slice(0, 40);
+    const settled = (async () => {
+      let costUsd = 0;
+      try {
+        const profile = await ctx.profile(config);
+        const course = await ctx.course(config);
+        throwIfCancelled(controller.signal);
+        const result = await runner({
+          prompt: productLead.planPrompt({
+            ...item,
+            files,
+            interfaces: item.interfaces?.text ?? null,
+            profile,
+            course: course.pack,
+            linkTests,
+            redo: { plan, index, comment },
+          }),
+          systemPrompt: productLead.systemPrompt(course.pack),
+          schema: productLead.redoSchema(course.pack),
+          envPath,
+          signal: controller.signal,
+        });
+        costUsd = result.costUsd ?? 0;
+        const next = productLead.validateRedo(
+          result.output,
+          { plan, index },
+          { linkTests, concepts: (course.pack.concepts ?? []).map((concept) => concept.id) },
+        );
+        backgroundRuns.finish('requirement', id, controller);
+        await store.finishRedo(id, next, costUsd);
+        record({ kind: 'requirement_finished', requirementId: id, title, step: 'planning', costUsd });
+      } catch (error) {
+        backgroundRuns.finish('requirement', id, controller);
+        const agentError = asAgentError(error);
+        record({ kind: 'requirement_failed', requirementId: id, title, step: 'planning', code: agentError.code ?? 'unknown' });
+        await store.failRedo(id, agentError, costUsd).catch((caught) => logger.error('[requirements] could not record a failed redo', caught));
+      }
+    })();
+    backgroundRuns.track(settled);
+    return started;
+  };
+
   // A new requirement goes straight into clarification.
   const create = async (input: Parameters<RequirementStore['create']>[0]) => {
     const item = await requireRequirements().create(input);
@@ -194,7 +268,7 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     await store.remove(item.id);
   };
 
-  return { clarify, plan, create, cancel, publish, remove };
+  return { clarify, plan, redoPackage, create, cancel, publish, remove };
 };
 
 export type RequirementService = ReturnType<typeof createRequirementService>;

@@ -142,6 +142,8 @@ export type PlanPackage = {
   dependsOn?: number[];
   // Concept ids of the pack's skeleton; absent when none were tagged.
   concepts?: string[];
+  // Set on a package redone on its own: the plan's nth redo.
+  revision?: number;
 };
 
 // course: the pack it was planned with; absent on older plans (programming).
@@ -182,7 +184,11 @@ export type Requirement = {
   createdAt: string;
   updatedAt: string;
   course?: CourseInterview;
+  // A package of the plan under review being redone, or the redo that failed.
+  redo?: PackageRedoState | null;
 };
+
+export type PackageRedoState = { index: number; status: 'running' | 'failed'; error: ErrorInfo | null };
 
 export const requirementsContract = {
   list: invoke<[], Requirement[]>('requirements:list'),
@@ -191,6 +197,8 @@ export const requirementsContract = {
   clarify: invoke<[id: string], Requirement>('requirements:clarify'),
   answer: invoke<[id: string, answers: RequirementAnswers], Requirement>('requirements:answer'),
   plan: invoke<[id: string, answers?: RequirementAnswers, choice?: CourseChoice], Requirement>('requirements:plan'),
+  // Redoes one package (0-based index) of the plan under review with the developer's comment.
+  redoPackage: invoke<[id: string, index: number, comment: string], Requirement>('requirements:redo-package'),
   publish: invoke<[id: string], Requirement>('requirements:publish'),
   remove: invoke<[id: string], true>('requirements:remove'),
   cancel: invoke<[id: string], boolean>('requirements:cancel'),

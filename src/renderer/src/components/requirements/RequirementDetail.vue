@@ -69,6 +69,28 @@ const onPublish = async () => {
   if (!(await store.publishPlan(props.item))) publishing.value = false;
 };
 
+// A redo is running or another step is starting: no other plan action.
+const redoing = computed(() => props.item.redo?.status === 'running');
+const planBusy = computed(() => store.acting !== null || publishing.value || redoing.value);
+// Per package: whether it can be redone now, and the earlier packages it
+// depends on that were redone after it was written (it may need a redo too).
+const redoOf = (pkg: requirementTypes.PlanPackage, index: number) => {
+  const packages = plan.value?.packages ?? [];
+  const redo = props.item.redo;
+  return {
+    running: redo?.status === 'running' && redo.index === index,
+    disabled: planBusy.value,
+    failed: redo?.status === 'failed' && redo.index === index ? describeErrorInfo(redo.error) : null,
+    staleDependencies: (pkg.dependsOn ?? []).filter((number) => (packages[number - 1]?.revision ?? 0) > (pkg.revision ?? 0)),
+  };
+};
+const onRedo = (index: number, comment: string, done: (started: boolean) => void) => {
+  store
+    .redoPackage(props.item, index, comment)
+    .then(done)
+    .catch((error) => console.error(error));
+};
+
 const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answers.value]));
 </script>
 
@@ -210,35 +232,47 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
             {{ `本需求累计费用 $${item.costUsd.toFixed(3)}` }}
           </span>
         </div>
-        <PlanPackageCard v-for="(pkg, index) in plan.packages" :key="index" :pkg="pkg" :index="index" />
+        <PlanPackageCard
+          v-for="(pkg, index) in plan.packages"
+          :key="index"
+          :pkg="pkg"
+          :index="index"
+          :redo="item.status === 'reviewing' ? redoOf(pkg, index) : undefined"
+          @redo="(comment, done) => onRedo(index, comment, done)"
+        />
         <MilestonePicker v-if="item.status === 'published'" :requirement-id="item.id" />
         <div class="req-actions sticky">
+          <button v-if="redoing" class="secondary-button" type="button" :disabled="cancelling" data-action="cancel-redo" @click="onCancel">
+            <AppIcon name="x" />
+            取消重做
+          </button>
           <button v-if="item.status === 'published'" class="primary-button" type="button" @click="report(store.showQueue())">
             <AppIcon name="arrow-right" />
             查看工作队列
           </button>
           <template v-else>
-            <button
-              class="secondary-button"
-              type="button"
-              :disabled="store.acting !== null || publishing"
-              :aria-busy="store.acting === 'edit'"
-              @click="report(store.editAnswers(item))"
-            >
+            <button class="secondary-button" type="button" :disabled="planBusy" :aria-busy="store.acting === 'edit'" @click="report(store.editAnswers(item))">
               <AppIcon :name="store.acting === 'edit' ? 'spinner' : 'arrow-left'" :class="{ spin: store.acting === 'edit' }" />
               修改回答
             </button>
             <button
               class="secondary-button"
               type="button"
-              :disabled="store.acting !== null || publishing"
+              :disabled="planBusy"
               :aria-busy="store.acting === 'plan'"
               @click="report(store.runStep(item, 'plan'))"
             >
               <AppIcon :name="store.acting === 'plan' ? 'spinner' : 'refresh'" :class="{ spin: store.acting === 'plan' }" />
               重新拆解
             </button>
-            <button class="primary-button" type="button" :disabled="publishing || store.acting !== null" :aria-busy="publishing" @click="report(onPublish())">
+            <button
+              class="primary-button"
+              type="button"
+              :disabled="planBusy"
+              :title="redoing ? '有工作包正在重做，完成后再发布' : undefined"
+              :aria-busy="publishing"
+              @click="report(onPublish())"
+            >
               <AppIcon :name="publishing ? 'spinner' : 'send'" :class="{ spin: publishing }" />
               {{ `发布 ${plan.packages.length} 个工作包` }}
             </button>
