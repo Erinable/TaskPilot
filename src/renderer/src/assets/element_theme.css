@@ -41,10 +41,13 @@ html.dark {
   color: var(--el-checkbox-text-color);
 }
 
-/* Floating surfaces (dialogs, message boxes, popovers, toasts) are glass. */
+/* Floating surfaces (dialogs, message boxes, popovers, toasts) are glass.
+ * The date picker loads with the release page. Its two-class popper selector
+ * must stay below this three-class override even when its CSS arrives later. */
 .el-dialog,
 .el-message-box,
 .el-popper.is-light,
+.el-picker__popper.el-popper.is-light,
 .el-select__popper.el-popper,
 .el-message {
   -webkit-backdrop-filter: var(--glass-blur);
@@ -80,6 +83,7 @@ html.dark {
   .el-dialog,
   .el-message-box,
   .el-popper.is-light,
+  .el-picker__popper.el-popper.is-light,
   .el-message {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

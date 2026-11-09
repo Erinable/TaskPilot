@@ -1,0 +1,779 @@
+/* TaskPilot frosted-glass theme.
+ *
+ * Layering, back to front:
+ *   1. .backdrop  — soft colour fields that give the glass something to blur.
+ *   2. .glass     — translucent surfaces with backdrop-filter blur and a hairline
+ *                   highlight along the top edge.
+ *   3. Content    — text and controls on the glass.
+ *
+ * Light and dark follow the system (prefers-color-scheme). Users who ask for
+ * reduced transparency get opaque surfaces instead of blur. */
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  min-height: 100%;
+}
+
+/* Scrollbars: a thin rounded thumb with no track, darker while hovered,
+ * like macOS overlay scrollbars. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  /* The transparent border insets the thumb: 4px wide in a 10px gutter. */
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 22%, transparent) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 38%, transparent) padding-box;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+body {
+  margin: 0;
+  color: var(--text);
+  background: var(--canvas);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+button:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+code {
+  font-family: var(--font-mono);
+}
+
+/* Icons */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: inline-block;
+  vertical-align: -3px;
+}
+
+/* Backdrop */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+}
+.orb-a {
+  width: 46vw;
+  height: 46vw;
+  top: -14vw;
+  left: -8vw;
+  background: var(--orb-a);
+}
+.orb-b {
+  width: 40vw;
+  height: 40vw;
+  top: 18vh;
+  right: -12vw;
+  background: var(--orb-b);
+}
+.orb-c {
+  width: 36vw;
+  height: 36vw;
+  bottom: -16vw;
+  left: 30vw;
+  background: var(--orb-c);
+}
+
+/* Glass surfaces */
+.glass,
+.glass-strong {
+  position: relative;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    0 0 0 0.5px var(--glass-edge),
+    var(--glass-shadow);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.glass-strong {
+  background: var(--glass-bg-strong);
+}
+
+/* Panels docked to a window edge are divided by one hairline in the line
+ * colour: the glass's white border and top highlight would draw a second,
+ * white line beside it. */
+.full-screen .topbar {
+  padding-left: var(--space-5);
+}
+.topbar.glass,
+.sidebar.glass,
+.settings-nav.glass,
+.req-list-pane.glass {
+  border-color: var(--line-soft);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong {
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .orb {
+    display: none;
+  }
+}
+
+/* Top bar. Left padding clears the macOS traffic lights (hiddenInset). */
+.window-shell {
+  min-height: 100vh;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: var(--topbar-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  /* Room for the window buttons (trafficLightPosition), gone in full screen. */
+  padding: 0 var(--space-5) 0 88px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  -webkit-app-region: drag;
+}
+.brand-area {
+  width: 176px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+/* The icon's squircle covers 824 of its 1024 units; the negative margin
+ * keeps the visible mark at 30px. */
+.brand-mark {
+  width: 37px;
+  height: 37px;
+  margin: -3.5px;
+  filter: drop-shadow(0 4px 10px rgba(76, 99, 245, 0.45));
+}
+.brand-name {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+.brand-caption {
+  color: var(--text-tertiary);
+  font: 500 var(--text-xs) var(--font-sans);
+  margin-top: 2px;
+}
+.workspace-picker {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px 11px;
+  color: var(--text-secondary);
+  background: var(--fill);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.workspace-picker:hover {
+  background: var(--fill-hover);
+}
+.workspace-picker > .icon {
+  color: var(--text-tertiary);
+}
+.workspace-picker .chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+.workspace-picker:disabled {
+  cursor: progress;
+}
+/* The repository menu under the top-bar picker. */
+.repo-menu .el-dropdown-menu__item {
+  gap: var(--space-3);
+  min-width: 280px;
+  max-width: 420px;
+  padding: 8px 14px;
+  line-height: 1.35;
+}
+.repo-menu .el-dropdown-menu__item .icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--text-tertiary);
+}
+.repo-menu .el-dropdown-menu__item.is-active .icon {
+  color: var(--accent);
+}
+.repo-menu .el-dropdown-menu__item.missing .icon,
+.repo-menu .el-dropdown-menu__item.missing small {
+  color: var(--warning);
+}
+.repo-menu-text {
+  display: grid;
+  min-width: 0;
+}
+.repo-menu-text small {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font: var(--text-xs) var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 0 3px rgba(47, 191, 113, 0.18);
+}
+.repo-dot.off {
+  background: var(--text-tertiary);
+  box-shadow: none;
+}
+.top-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  -webkit-app-region: no-drag;
+}
+/* What the Coding Agent is doing, from any page */
+.coding-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 12px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.coding-chip:hover,
+.coding-chip:focus-visible {
+  background: var(--fill-hover);
+}
+.coding-chip .icon {
+  width: 14px;
+  height: 14px;
+}
+.coding-chip-more {
+  color: var(--text-tertiary);
+}
+.icon-button {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-md);
+  transition:
+    background 0.15s var(--ease),
+    color 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+.icon-button:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+.icon-button .icon {
+  width: 18px;
+  height: 18px;
+}
+.icon-button.small {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.icon-button.small .icon {
+  width: 15px;
+  height: 15px;
+}
+.notification-dot {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--glass-bg-strong);
+  border-radius: 50%;
+  background: var(--danger);
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  margin-left: 6px;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, #f6a96b, #e8678a);
+  box-shadow: 0 0 0 2px var(--glass-border);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+/* Sidebar */
+.app-grid {
+  /* The sidebar's current width, also read by fixed bars that centre on the main column. */
+  --sidebar-current: var(--sidebar-width);
+  display: grid;
+  grid-template-columns: var(--sidebar-current) 1fr;
+  min-height: calc(100vh - var(--topbar-height));
+  transition: grid-template-columns 0.2s var(--ease);
+}
+.app-grid.sidebar-collapsed {
+  --sidebar-current: var(--sidebar-collapsed);
+}
+/* Dragging follows the pointer at once; the eased transition is for toggles. */
+.resizing-sidebar .app-grid {
+  transition: none;
+}
+.resizing-sidebar,
+.resizing-sidebar * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+/* The slot sticks under the top bar; the sidebar fills it. */
+.sidebar-slot {
+  position: sticky;
+  top: var(--topbar-height);
+  align-self: start;
+  height: calc(100vh - var(--topbar-height));
+  min-width: 0;
+}
+.sidebar-slot > .sidebar {
+  position: static;
+  height: 100%;
+}
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  z-index: 6;
+  width: 6px;
+  cursor: col-resize;
+}
+/* A thin accent line shows where the edge is while hovering or dragging. */
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease) 0.1s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after,
+.sidebar-resizer:focus-visible::after {
+  opacity: 0.6;
+}
+.sidebar-resizer:focus-visible {
+  outline: none;
+}
+.sidebar {
+  position: sticky;
+  top: var(--topbar-height);
+  height: calc(100vh - var(--topbar-height));
+  display: flex;
+  flex-direction: column;
+  padding: 22px 12px 16px;
+  border-width: 0 1px 0 0;
+  border-radius: 0;
+  /* Still scrolls on a short window, but never shows a scrollbar. */
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+.sidebar::-webkit-scrollbar {
+  display: none;
+}
+/* Collapsed to an icon rail: labels leave the layout but stay readable to screen readers. */
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .side-section-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.sidebar.collapsed .nav-item,
+.sidebar.collapsed .sync-card {
+  position: relative;
+  justify-content: center;
+  padding-inline: 0;
+}
+.sidebar.collapsed .sync-card {
+  padding-block: 6px;
+}
+/* Counts shrink to a corner badge on the icon. */
+.sidebar.collapsed .nav-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  box-shadow: 0 0 0 2px var(--glass-border);
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 16px;
+}
+.side-section-label {
+  color: var(--text-tertiary);
+  font: 500 var(--text-xs) var(--font-sans);
+  padding: 0 12px 10px;
+}
+.main-nav {
+  display: grid;
+  gap: 2px;
+}
+.nav-item {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 12px;
+  color: var(--text-muted);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  text-align: left;
+  transition:
+    background 0.15s var(--ease),
+    color 0.15s var(--ease);
+}
+.nav-item:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+.nav-item.active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.nav-icon {
+  color: var(--text-tertiary);
+}
+.nav-item.active .nav-icon {
+  color: var(--accent);
+}
+.nav-count {
+  margin-left: auto;
+  min-width: 22px;
+  padding: 2px 7px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
+  font: 600 var(--text-xs) var(--font-mono);
+  text-align: center;
+}
+.agent-avatar,
+.activity-avatar {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  border-radius: var(--radius-md);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  font: 600 var(--text-xs) var(--font-mono);
+}
+.pm {
+  background: linear-gradient(135deg, #f08bb4, #d4568d);
+}
+.arch {
+  background: linear-gradient(135deg, #9a8cf5, #6a58e0);
+}
+.qa {
+  background: linear-gradient(135deg, #4fd0a0, #239a6c);
+}
+.rel {
+  background: linear-gradient(135deg, #f5be6b, #d68a2e);
+}
+.env {
+  background: linear-gradient(135deg, #8fc96a, #4f8f2f);
+}
+.tutor {
+  background: linear-gradient(135deg, #f08f6e, #cf5a3a);
+}
+.code {
+  background: linear-gradient(135deg, #5bb7e8, #3178b8);
+}
+/* The human, in activity feeds. */
+.activity-avatar.you {
+  background: linear-gradient(135deg, #7d8597, #5a6172);
+  font-size: var(--text-sm);
+}
+.presence {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+}
+.presence.online {
+  background: var(--online);
+  box-shadow: 0 0 0 3px rgba(47, 191, 113, 0.16);
+}
+.presence.idle {
+  background: var(--text-tertiary);
+  opacity: 0.6;
+}
+.sidebar-bottom {
+  margin-top: auto;
+  display: grid;
+  gap: var(--space-2);
+}
+.sync-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 11px 12px;
+  background: var(--fill);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+}
+.sync-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 28px;
+  color: var(--success);
+  background: var(--success-soft);
+  border-radius: var(--radius-md);
+}
+.sync-icon.off {
+  color: var(--text-tertiary);
+  background: var(--fill);
+}
+.sync-card div {
+  min-width: 0;
+}
+.sync-card strong,
+.sync-card small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-card strong {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.sync-card small {
+  color: var(--text-tertiary);
+  font: var(--text-xs) var(--font-mono);
+  margin-top: 2px;
+}
+
+/* Main column and page heading */
+.main-content {
+  width: 100%;
+  max-width: 1360px;
+  padding: var(--page-pad-y) var(--page-pad-x) var(--space-10);
+  margin: 0 auto;
+}
+.view {
+  animation: view-in 0.28s var(--ease);
+}
+.view[hidden] {
+  display: none;
+}
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.eyebrow {
+  color: var(--text-tertiary);
+  font: 500 var(--text-xs) var(--font-sans);
+  margin-bottom: 10px;
+}
+.page-heading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-4xl);
+  font-weight: 700;
+}
+.wave {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+  vertical-align: 0;
+}
+.page-heading p {
+  color: var(--text-muted);
+  margin: 10px 0 0;
+  font-size: var(--text-md);
+}
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.team-presence {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 11px;
+  color: var(--text-muted);
+  background: var(--fill);
+  border-radius: 20px;
+  font-size: var(--text-sm);
+}
+.team-presence span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 0 3px rgba(47, 191, 113, 0.16);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+
+/* Buttons */
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0 15px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    transform 0.15s var(--ease),
+    box-shadow 0.15s var(--ease),
+    background 0.15s var(--ease),
+    filter 0.15s var(--ease);
+}
+.primary-button {
+  color: #fff;
+  background: var(--accent-gradient);
+  box-shadow:
+    0 6px 18px -6px rgba(76, 99, 245, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.primary-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow:
+    0 10px 24px -8px rgba(76, 99, 245, 0.8),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.primary-button:active {
+  transform: translateY(0);
+}
+.secondary-button {
+  color: var(--text-secondary);
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--line-soft);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+.secondary-button:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+.secondary-button.danger {
+  color: var(--danger);
+}
+.primary-button:disabled,
+.secondary-button:disabled,
+.segment:disabled,
+.icon-button:disabled,
+.view-all-button:disabled,
+.empty-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+  filter: none;
+}
+.filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  background: var(--fill);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+.filter-button:hover {
+  color: var(--text);
+  background: var(--fill-hover);
+}
+.filter-button .icon {
+  width: 13px;
+  height: 13px;
+}
+.view-all-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 14px;
+  color: var(--accent-strong);
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition: background 0.15s var(--ease);
+}
+.view-all-button:hover {
+  background: var(--fill);
+}
+.view-all-button .icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s var(--ease);
+}
+.view-all-button:hover .icon {
+  transform: translateX(3px);
+}

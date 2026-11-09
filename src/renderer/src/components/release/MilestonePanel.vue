@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import 'element-plus/theme-chalk/el-date-picker.css';
+import 'element-plus/theme-chalk/el-date-picker-panel.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { useReleaseStore } from '@/stores/release.ts';

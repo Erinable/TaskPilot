@@ -204,7 +204,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
   display: block;
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 .modified-dot {
@@ -271,7 +271,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
   gap: 5px;
   margin-top: 3px;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 13px;
 }
 .runtime-state.available {
@@ -335,7 +335,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
   border-radius: var(--radius-sm);
   background: var(--fill);
   color: var(--warning);
-  font: 11px/1.6 var(--font-mono);
+  font: var(--text-xs)/1.6 var(--font-mono);
 }
 .model-catalog-issue {
   color: var(--warning);
@@ -385,7 +385,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
     clip-path: none;
     margin-bottom: var(--space-1);
     color: var(--text-muted);
-    font-size: 11px;
+    font-size: var(--text-xs);
     white-space: normal;
   }
   .agent-details {

@@ -75,14 +75,38 @@ const remove = async () => {
         <div class="article-meta">
           <time>{{ model.formatDay(note.createdAt) }}</time>
           <span v-if="model.formatDay(note.updatedAt) !== model.formatDay(note.createdAt)">更新于 {{ model.formatDay(note.updatedAt) }}</span>
-          <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))">
+          <a
+            v-if="note.category"
+            class="post-category"
+            role="link"
+            tabindex="0"
+            @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+            @keydown.enter="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+          >
             {{ notes.categoryLabel(note) }}
           </a>
-          <a v-for="tag in model.allTags(note)" :key="tag" class="post-tag" role="link" tabindex="0" @click="run(notes.goIndex({ tag }))">#{{ tag }}</a>
+          <a
+            v-for="tag in model.allTags(note)"
+            :key="tag"
+            class="post-tag"
+            role="link"
+            tabindex="0"
+            @click="run(notes.goIndex({ tag }))"
+            @keydown.enter="run(notes.goIndex({ tag }))"
+          >
+            #{{ tag }}
+          </a>
         </div>
         <p v-if="model.sourceLabel(note.source)" class="article-source">
           来自
-          <a v-if="canOpenSource" class="blog-link" role="link" tabindex="0" @click="openWorkspaceFile(note.source!.file!, note.source!.line)">
+          <a
+            v-if="canOpenSource"
+            class="blog-link"
+            role="link"
+            tabindex="0"
+            @click="openWorkspaceFile(note.source!.file!, note.source!.line)"
+            @keydown.enter="openWorkspaceFile(note.source!.file!, note.source!.line)"
+          >
             {{ model.sourceLabel(note.source) }}
           </a>
           <span v-else>{{ model.sourceLabel(note.source) }}</span>
@@ -148,6 +172,7 @@ const remove = async () => {
         tabindex="0"
         :style="{ paddingLeft: `${(heading.depth - 1) * 12}px` }"
         @click="run(scrollToHeading(heading.text))"
+        @keydown.enter="run(scrollToHeading(heading.text))"
       >
         {{ heading.text || '（空标题）' }}
       </a>

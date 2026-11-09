@@ -53,7 +53,7 @@
   padding: 0 18px;
   border: 0;
   border-radius: var(--radius-md);
-  color: #fff;
+  color: var(--text-on-color);
   background: var(--accent-gradient);
   font: inherit;
   font-size: var(--text-lg);

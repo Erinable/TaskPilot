@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../mount_view.ts';
 import { envState, fail, installApi, ok } from '../settings_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
+import { until } from '../../fixtures/until.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -25,6 +26,8 @@ const openView = async (page: 'profile' | 'commands' | 'setup' | 'agents' = 'pro
   setActivePinia(pinia);
   const wrapper = await mountView(SettingsView);
   await useSettingsStore().open(page);
+  const targets = { profile: '#profileName', commands: '[data-step="test"]', setup: '#setupBody', agents: '#agentSearch' };
+  await until(() => wrapper.find(targets[page]).exists(), Boolean, `settings ${page} page`);
   await flushPromises();
   return wrapper;
 };
@@ -41,6 +44,37 @@ const chooseModel = async (wrapper: Awaited<ReturnType<typeof openView>>, agent:
 };
 
 const isShown = (element: { attributes: (name: string) => string | undefined }) => !(element.attributes('style') ?? '').includes('display: none');
+test('unvisited pages stay unmounted and an error focuses a page after its first load', async () => {
+  const wrapper = await openView();
+  expect(wrapper.find('#agentSearch').exists()).toBe(false);
+  expect(wrapper.find('#setupBody').exists()).toBe(false);
+  expect(wrapper.find('#resetProgress').exists()).toBe(false);
+  expectConsole('error', /Invalid model identifier/);
+  useSettingsStore().preferencesDraft!.agents['product-lead'].model = '--bad';
+  api.preferences.set.mockReturnValueOnce(fail('invalid_choice', 'Invalid model identifier', 'agents.product-lead.model'));
+  await wrapper.get('#saveSettings').trigger('click');
+  await until(
+    () => document.activeElement?.id,
+    (id) => id === 'agent-product-lead-model',
+    'first-load validation focus',
+  );
+  expect(wrapper.get('#agent-product-lead-model').attributes('aria-invalid')).toBe('true');
+  wrapper.unmount();
+});
+
+test('visited pages retain local expansion and unsaved drafts when switching', async () => {
+  const wrapper = await openView('commands');
+  await wrapper.get('[data-step="lint"] [data-edit]').trigger('click');
+  await wrapper.get('[data-page="profile"].settings-nav-item').trigger('click');
+  await until(() => wrapper.find('#profileName').exists(), Boolean, 'profile page');
+  await wrapper.get('#profileName').setValue('Grace');
+  await wrapper.get('[data-page="commands"].settings-nav-item').trigger('click');
+  expect(wrapper.get('[data-step="lint"] [data-edit]').attributes('aria-expanded')).toBe('true');
+  await wrapper.get('[data-page="profile"].settings-nav-item').trigger('click');
+  expect((wrapper.get('#profileName').element as HTMLInputElement).value).toBe('Grace');
+  wrapper.unmount();
+});
+
 test('agent configuration saves a custom model without changing other roles', async () => {
   const wrapper = await openView('agents');
   const codex = wrapper.get('#agent-product-lead-cli').find('option[value="codex"]');
@@ -84,6 +118,26 @@ test('an invalid hidden role becomes visible and focuses its model field', async
   await chooseModel(wrapper, 'product-lead', 'planning-model');
   expect(wrapper.find('[data-agent="product-lead"] .agent-row-message.error').exists()).toBe(false);
   expect(wrapper.get('#agent-product-lead-model').attributes('aria-invalid')).toBe('false');
+  wrapper.unmount();
+});
+
+test('repeated validation reveals an errored role hidden in a retained page', async () => {
+  const wrapper = await openView('agents');
+  await chooseModel(wrapper, 'product-lead', '--bad');
+  expectConsole('error', /Invalid model identifier/);
+  api.preferences.set.mockReturnValueOnce(fail('invalid_choice', 'Invalid model identifier', 'agents.product-lead.model'));
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  await wrapper.get('#agentSearch').setValue('Tutor');
+  expect(wrapper.find('#agent-product-lead-model').exists()).toBe(false);
+  await wrapper.get('[data-page="profile"].settings-nav-item').trigger('click');
+  await until(() => wrapper.find('#profileName').exists(), Boolean, 'profile page');
+  expectConsole('error', /Invalid model identifier/);
+  api.preferences.set.mockReturnValueOnce(fail('invalid_choice', 'Invalid model identifier', 'agents.product-lead.model'));
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  expect(wrapper.findAll('.agent-settings-card')).toHaveLength(7);
+  expect(document.activeElement?.id).toBe('agent-product-lead-model');
   wrapper.unmount();
 });
 
@@ -167,6 +221,7 @@ test('avatar swatches are a radiogroup that arrow keys move through', async () =
 test('the reset button asks for confirmation before resetting', async () => {
   const wrapper = await openView();
   await wrapper.get('[data-page="data"].settings-nav-item').trigger('click');
+  await until(() => wrapper.find('#resetProgress').exists(), Boolean, 'data settings page');
   await flushPromises();
   vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
   await wrapper.get('#resetProgress').trigger('click');

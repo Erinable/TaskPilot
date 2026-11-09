@@ -88,6 +88,8 @@ npm install
 npm run dev
 ```
 
+`npm run dev` 和 `npm start` 会检查 Electron 二进制，并在启动时清除继承的 `ELECTRON_RUN_AS_NODE`。如果直接运行 `electron-vite` 遇到 `electron does not provide an export named 'BrowserWindow'`，先执行 `unset ELECTRON_RUN_AS_NODE`，再重试。
+
 打包成 App：`npm run dist`，在 `dist/` 生成 dmg 和 zip。安装包未签名，第一次打开时在「访达」里右键选「打开」。
 
 打开后，首页的「开始使用」会带你走完：检查 CLI 登录、选择项目文件夹（git 仓库）、设置检查命令、写第一个需求。

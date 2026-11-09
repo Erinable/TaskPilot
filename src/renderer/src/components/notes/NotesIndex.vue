@@ -76,10 +76,27 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
             </div>
             <p v-if="note.summary || note.excerpt" class="post-excerpt">{{ note.summary ?? note.excerpt }}</p>
             <div v-if="note.category || model.allTags(note).length" class="post-meta">
-              <a v-if="note.category" class="post-category" role="link" tabindex="0" @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))">
+              <a
+                v-if="note.category"
+                class="post-category"
+                role="link"
+                tabindex="0"
+                @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+                @keydown.enter="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+              >
                 {{ notes.categoryLabel(note) }}
               </a>
-              <a v-for="tag in model.allTags(note)" :key="tag" class="post-tag" role="link" tabindex="0" @click="run(notes.goIndex({ tag }))">#{{ tag }}</a>
+              <a
+                v-for="tag in model.allTags(note)"
+                :key="tag"
+                class="post-tag"
+                role="link"
+                tabindex="0"
+                @click="run(notes.goIndex({ tag }))"
+                @keydown.enter="run(notes.goIndex({ tag }))"
+              >
+                #{{ tag }}
+              </a>
             </div>
           </li>
         </ul>
@@ -94,7 +111,15 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
         <h4>分类 · {{ packTitle }}</h4>
         <ul>
           <li v-for="entry in rubricCounts" :key="entry.filter.category">
-            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goIndex({ category: entry.filter }))">{{ entry.label }}</a>
+            <a
+              class="blog-link"
+              role="link"
+              tabindex="0"
+              @click="run(notes.goIndex({ category: entry.filter }))"
+              @keydown.enter="run(notes.goIndex({ category: entry.filter }))"
+            >
+              {{ entry.label }}
+            </a>
             <span class="count">{{ entry.count }}</span>
           </li>
         </ul>
@@ -103,7 +128,15 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
         <h4>通用维度</h4>
         <ul>
           <li v-for="entry in dimensionCounts" :key="entry.filter.dimension">
-            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goIndex({ category: entry.filter }))">{{ entry.label }}</a>
+            <a
+              class="blog-link"
+              role="link"
+              tabindex="0"
+              @click="run(notes.goIndex({ category: entry.filter }))"
+              @keydown.enter="run(notes.goIndex({ category: entry.filter }))"
+            >
+              {{ entry.label }}
+            </a>
             <span class="count">{{ entry.count }}</span>
           </li>
         </ul>
@@ -111,7 +144,15 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
       <section v-if="tagCounts.length">
         <h4>标签</h4>
         <div class="tag-cloud">
-          <a v-for="entry in tagCounts" :key="entry.tag" class="post-tag" role="link" tabindex="0" @click="run(notes.goIndex({ tag: entry.tag }))">
+          <a
+            v-for="entry in tagCounts"
+            :key="entry.tag"
+            class="post-tag"
+            role="link"
+            tabindex="0"
+            @click="run(notes.goIndex({ tag: entry.tag }))"
+            @keydown.enter="run(notes.goIndex({ tag: entry.tag }))"
+          >
             #{{ entry.tag }}
             <span class="count">{{ entry.count }}</span>
           </a>
@@ -121,7 +162,7 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
         <h4>最近更新</h4>
         <ul>
           <li v-for="note in recent" :key="note.id">
-            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goNote(note.id))">{{ note.title }}</a>
+            <a class="blog-link" role="link" tabindex="0" @click="run(notes.goNote(note.id))" @keydown.enter="run(notes.goNote(note.id))">{{ note.title }}</a>
           </li>
         </ul>
       </section>

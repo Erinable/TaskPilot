@@ -4,6 +4,7 @@
 // note that arrives afterwards.
 import { beforeEach, expect, test } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { reactive } from 'vue';
 
 import { useNotesStore } from '@/stores/notes.ts';
 import { useRepositoryIdentityStore } from '@/stores/repository_identity.ts';
@@ -25,6 +26,48 @@ beforeEach(() => {
   api = installFakeApi({
     notes: { list: () => ok(list), get: (id) => ok(noteOf(id === BETA.id ? BETA : ALPHA)), search: () => ok([]), courses: () => ok(coursesFor('programming')) },
   });
+});
+
+test('creating a note detaches nested reactive tags, concepts and source before IPC', async () => {
+  const store = useNotesStore();
+  const input: noteTypes.NoteInput = {
+    title: 'created',
+    body: '内容'.repeat(10000),
+    category: 'writing',
+    course: 'programming',
+    tags: reactive(['review']),
+    concepts: reactive(['testing']),
+    source: reactive({ repositoryId: 'r1', repositoryName: 'repo', packageId: 'p1', packageTitle: 'task', file: 'src/a.ts', line: 4 }),
+  };
+  api.notes.create.mockReturnValueOnce(ok({ revision: 2, note: noteOf(ALPHA), relinked: 0 }));
+  await store.create(reactive(input));
+  const sent = api.notes.create.mock.calls[0][0];
+  expect(structuredClone(sent)).toEqual(input);
+  input.tags.push('later');
+  input.concepts!.push('later');
+  input.source!.line = 8;
+  expect(sent.tags).toEqual(['review']);
+  expect(sent.concepts).toEqual(['testing']);
+  expect(sent.source?.line).toBe(4);
+});
+
+test('saving a note keeps dirty tracking and sends detached edit data', async () => {
+  const store = useNotesStore();
+  await store.openNote(ALPHA.id);
+  expect(store.dirty).toBe(false);
+  const tags = reactive(['edited']);
+  store.draft!.tags = tags;
+  store.draft!.body = '修改后的正文'.repeat(10000);
+  expect(store.dirty).toBe(true);
+  api.notes.update.mockReturnValueOnce(ok({ revision: 2, note: noteOf(ALPHA), relinked: 0 }));
+  await store.save();
+  const sent = api.notes.update.mock.calls[0][1];
+  expect(structuredClone(sent)).toMatchObject({ body: '修改后的正文'.repeat(10000), tags: ['edited'], baseVersion: ALPHA.version });
+  tags.push('later');
+  expect(sent.tags).toEqual(['edited']);
+  expect(store.dirty).toBe(false);
+  store.draft!.body += '再修改';
+  expect(store.dirty).toBe(true);
 });
 
 test('an older body search that answers last does not filter the list', async () => {

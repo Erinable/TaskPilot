@@ -5,10 +5,8 @@
   "type": "module",
   "main": "out/main/index.js",
   "scripts": {
-    "prestart": "bash scripts/check_electron.sh",
-    "start": "electron-vite preview",
-    "predev": "bash scripts/check_electron.sh",
-    "dev": "electron-vite dev",
+    "start": "bash scripts/check_electron.sh electron-vite preview",
+    "dev": "bash scripts/check_electron.sh electron-vite dev",
     "build": "electron-vite build",
     "dist": "electron-vite build && electron-builder --mac",
     "typecheck": "vue-tsc --build --noEmit tsconfig.json tsconfig.test.json",

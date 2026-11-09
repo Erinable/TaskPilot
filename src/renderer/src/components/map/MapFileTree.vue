@@ -3,6 +3,8 @@
 // is expanded, so thousands of paths cost nothing until they are opened.
 import { computed, ref } from 'vue';
 import type { LoadFunction, TreeNodeData } from 'element-plus';
+import 'element-plus/theme-chalk/el-tree.css';
+import 'element-plus/theme-chalk/el-text.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { buildMapTree, summarizedOnly } from '@/lib/map_tree.ts';

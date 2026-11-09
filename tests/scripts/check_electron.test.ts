@@ -8,7 +8,7 @@ import { tempDir } from '../fixtures/temp_dir.ts';
 
 const SCRIPT = path.resolve('scripts/check_electron.sh');
 // A repository copy holding only the script and an electron package.
-const fakeRepo = async (electron: Record<string, string> | null) => {
+const fakeRepo = async (electron: Record<string, string> | null, args: string[] = [], env = process.env) => {
   const root = await tempDir('taskpilot-electron-');
   await fs.mkdir(path.join(root, 'scripts'));
   await fs.copyFile(SCRIPT, path.join(root, 'scripts/check_electron.sh'));
@@ -16,12 +16,28 @@ const fakeRepo = async (electron: Record<string, string> | null) => {
     await fs.mkdir(path.dirname(path.join(root, 'node_modules/electron', file)), { recursive: true });
     await fs.writeFile(path.join(root, 'node_modules/electron', file), content);
   }
-  return spawnSync('bash', [path.join(root, 'scripts/check_electron.sh')], { encoding: 'utf8' });
+  return spawnSync('bash', [path.join(root, 'scripts/check_electron.sh'), ...args], { encoding: 'utf8', env });
 };
 
 test('check_electron passes when the binary path.txt names exists', async () => {
   const result = await fakeRepo({ 'path.txt': 'Electron.app/Contents/MacOS/Electron', 'dist/Electron.app/Contents/MacOS/Electron': '' });
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('the launcher removes Node mode, preserves arguments and forwards the exit status', async () => {
+  const result = await fakeRepo(
+    { 'path.txt': 'Electron.app/Contents/MacOS/Electron', 'dist/Electron.app/Contents/MacOS/Electron': '' },
+    [
+      process.execPath,
+      '-e',
+      'console.log(JSON.stringify({ nodeMode: process.env.ELECTRON_RUN_AS_NODE ?? null, args: process.argv.slice(1), retained: process.env.TASKPILOT_LAUNCH_TEST })); process.exitCode = 23;',
+      'argument with spaces',
+      'preview',
+    ],
+    { ...process.env, ELECTRON_RUN_AS_NODE: '1', TASKPILOT_LAUNCH_TEST: 'kept' },
+  );
+  assert.equal(result.status, 23, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { nodeMode: null, args: ['argument with spaces', 'preview'], retained: 'kept' });
 });
 
 test('check_electron explains a missing binary and a missing package', async () => {

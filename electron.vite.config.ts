@@ -25,10 +25,9 @@ export default defineConfig({
   },
   renderer: {
     resolve: { alias: { '@': resolve('src/renderer/src'), '@shared': resolve('src/shared') } },
-    // Element Plus components are imported where a template uses them instead
-    // of the whole library. Their styles are listed in mount_app.ts, ahead of
-    // element_theme.css, so a lazily loaded view cannot reorder them after the
-    // theme's overrides. No generated components.d.ts: type checking is as before.
+    // Template imports are automatic; common styles load with mount_app.ts and
+    // lazy-only styles with their owners. Theme picker overrides use higher
+    // specificity than vendor rules, independent of CSS chunk arrival order.
     plugins: [vue(), unocss(), components({ resolvers: [ElementPlusResolver({ importStyle: false })], dts: false }), devCsp()],
     // The CSP allows fonts from 'self' only, so KaTeX's small fonts must
     // stay files instead of being inlined as data: URLs.

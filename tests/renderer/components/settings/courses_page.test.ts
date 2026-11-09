@@ -9,6 +9,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../../mount_view.ts';
 import { courseList, coursePreview, defaultCourse, installApi, ok } from '../../settings_fakes.ts';
+import { until } from '../../../fixtures/until.ts';
 import { OS_COURSE } from '../../../fixtures/builtin_courses.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 
@@ -26,6 +27,7 @@ const mountPage = async () => {
   setActivePinia(pinia);
   const wrapper = await mountView(SettingsView);
   await useSettingsStore().open('courses');
+  await until(() => wrapper.find('#courseState').exists(), Boolean, 'course settings page');
   await flushPromises();
   return wrapper;
 };
