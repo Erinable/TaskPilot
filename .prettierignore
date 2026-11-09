@@ -5,3 +5,6 @@ evals/*/reports/
 *.md
 # Golden files are written byte for byte by toMatchFileSnapshot.
 **/__golden__/
+# Third-party skills and local design review artifacts keep their upstream format.
+.dsh/
+.impeccable/
