@@ -8,7 +8,9 @@ import * as feedback from '@/lib/feedback.ts';
 import SettingsView from '@/views/SettingsView.vue';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../mount_view.ts';
-import { envState, fail, installApi, ok } from '../settings_fakes.ts';
+import { envState, fail, installApi, ok, preferences } from '../settings_fakes.ts';
+import type { IpcResult } from '@shared/ipc/envelope.ts';
+import type { Preferences } from '@shared/ipc/settings.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { until } from '../../fixtures/until.ts';
 
@@ -205,6 +207,30 @@ test('enter in a form saves instead of reloading', async () => {
   await wrapper.get('#profileForm').trigger('submit');
   await flushPromises();
   expect(api.preferences.set).toHaveBeenCalledWith(expect.objectContaining({ profile: { displayName: 'Grace', avatarColor: 'ocean' } }));
+  wrapper.unmount();
+});
+
+test('typing during a slow save survives the reply and repeated submits share the pending write', async () => {
+  const wrapper = await openView();
+  const settings = useSettingsStore();
+  await wrapper.get('#profileName').setValue('Submitted');
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  await wrapper.get('#saveSettings').trigger('click');
+  expect(settings.saving).toBe(true);
+  expect(wrapper.get('#profileName').attributes('disabled')).toBeUndefined();
+  expect(wrapper.get('#saveSettings').attributes('aria-busy')).toBe('true');
+  await wrapper.get('#profileName').setValue('Later input');
+  await wrapper.get('#profileForm').trigger('submit');
+  await wrapper.get('#profileForm').trigger('submit');
+  expect(api.preferences.set).toHaveBeenCalledTimes(1);
+  held.resolve({ ok: true, data: { ...preferences(), profile: { ...preferences().profile, displayName: 'Submitted' } } });
+  await flushPromises();
+  expect((wrapper.get('#profileName').element as HTMLInputElement).value).toBe('Later input');
+  expect(settings.savedPreferences!.profile.displayName).toBe('Submitted');
+  expect(isShown(wrapper.get('#settingsSavebar'))).toBe(true);
+  expect(wrapper.get('#saveSettings').attributes('disabled')).toBeUndefined();
+  expect(settings.hasUnsavedChanges()).toBe(true);
   wrapper.unmount();
 });
 

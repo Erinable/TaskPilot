@@ -6,7 +6,7 @@ import path from 'node:path';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import { until } from '../../fixtures/until.ts';
-import { DEFAULT_DIRNAME, LOCATION_FILENAME, MAX_NOTES, NoteStore } from '../../../src/main/notes/note_store.ts';
+import { DEFAULT_DIRNAME, IDENTITIES_FILENAME, LOCATION_FILENAME, MAX_NOTES, NoteStore } from '../../../src/main/notes/note_store.ts';
 import { validateNote } from '../../../src/main/notes/note_file.ts';
 
 const dir = () => tempDir('tp-notes-');
@@ -20,7 +20,10 @@ const input = (overrides = {}) => ({
 });
 const open = async (configDir: string, options = {}) => {
   const store = await new NoteStore(configDir, { watch: false, ...options }).load();
-  onTestFinished(() => store.close());
+  onTestFinished(async () => {
+    store.close();
+    await store.flush();
+  });
   return store;
 };
 const notesDir = (configDir: string) => path.join(configDir, DEFAULT_DIRNAME);
@@ -295,4 +298,73 @@ test('concepts are kept in the frontmatter, checked on save and read loosely', a
   const reopened = await open(configDir);
   assert.deepEqual(reopened.get('手写.md').concepts, ['paging']);
   assert.deepEqual(reopened.get('没有.md').concepts, []);
+});
+
+test('a summary queued behind a folder switch cannot use that folder, even with identical versions', async () => {
+  const configDir = await dir();
+  const other = await dir();
+  const store = await open(configDir);
+  const { note } = await store.create(input());
+  const original = path.join(store.directory, note.id);
+  const raw = await fs.readFile(original, 'utf8');
+  await fs.writeFile(path.join(other, note.id), raw);
+  const identity = store.directoryIdentity;
+  const switching = store.setDirectory(other);
+  const summary = store.setSummary(note.id, 'old task', note.version, identity);
+  await switching;
+  await assert.rejects(summary, { code: 'note_conflict' });
+  assert.equal(await fs.readFile(original, 'utf8'), raw);
+  assert.equal(await fs.readFile(path.join(other, note.id), 'utf8'), raw);
+});
+
+test('canonical vault identities survive aliases and note identities survive app rename and restart', async () => {
+  const configDir = await dir();
+  const vault = await dir();
+  const aliases = await dir();
+  const alias = path.join(aliases, 'alias');
+  await fs.symlink(vault, alias, 'dir');
+  const store = await open(configDir);
+  await store.setDirectory(vault);
+  const { note } = await store.create(input());
+  const vaultId = store.directoryIdentity.vaultId;
+  const identity = store.noteIdentities().get(note.id);
+  const renamed = (await store.update(note.id, edit(note, { title: 'renamed' }))).note;
+  assert.equal(store.noteIdentities().get(renamed.id), identity);
+  await store.setDirectory(alias);
+  assert.equal(store.directoryIdentity.vaultId, vaultId);
+  const reloaded = await open(configDir);
+  assert.equal(reloaded.directoryIdentity.vaultId, vaultId);
+  assert.equal(reloaded.noteIdentities().get(renamed.id), identity);
+  await reloaded.remove(renamed.id);
+  const replacement = (await reloaded.create(input({ title: 'renamed' }))).note;
+  assert.notEqual(reloaded.noteIdentities().get(replacement.id), identity, 'a deleted then recreated filename starts a new note');
+});
+
+test('an unsupported identity envelope refuses startup and folder changes without replacing data', async () => {
+  const configDir = await dir();
+  const other = await dir();
+  const newer = JSON.stringify({ version: 2, vaults: { future: { 'Shared.md': 'future-id' } } });
+  const file = path.join(configDir, IDENTITIES_FILENAME);
+  await fs.writeFile(file, newer);
+  await assert.rejects(() => open(configDir), { code: 'unsupported_version' });
+  const store = new NoteStore(configDir, { watch: false });
+  await assert.rejects(() => store.setDirectory(other), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(file, 'utf8'), newer);
+  assert.deepEqual(await fs.readdir(other), []);
+});
+
+test('a newer identity sidecar installed after load blocks Markdown writes and folder changes', async () => {
+  const configDir = await dir();
+  const store = await open(configDir);
+  const { note } = await store.create(input());
+  const original = path.join(store.directory, note.id);
+  const raw = await fs.readFile(original, 'utf8');
+  const newer = JSON.stringify({ version: 2, vaults: {} });
+  const file = path.join(configDir, IDENTITIES_FILENAME);
+  await fs.writeFile(file, newer);
+  await assert.rejects(() => store.setSummary(note.id, 'summary', note.version), { code: 'unsupported_version' });
+  const other = await dir();
+  await assert.rejects(() => store.setDirectory(other), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(original, 'utf8'), raw);
+  assert.equal(await fs.readFile(file, 'utf8'), newer);
 });

@@ -8,6 +8,7 @@ import * as labs from './labs.ts';
 import { programOfLab } from '../agents/lab_generator.ts';
 import type * as generator from '../agents/lab_generator.ts';
 import type * as labVerify from './lab_verify.ts';
+import type { CourseRef } from '../../shared/course_pack.ts';
 
 const DRAFTS_DIRNAME = 'lab_drafts';
 const DRAFT_FILENAME = 'lab.json';
@@ -15,7 +16,7 @@ const VERIFY_FILENAME = 'verify.json';
 
 // What the generator writes, private: the request it was written for and the
 // lab; `costUsd` is the generation's, the self-check's is on its report.
-export type LabDraft = { requirementId: string; request: generator.LabRequest; lab: generator.GeneratedLab; costUsd: number };
+export type LabDraft = { requirementId: string; request: generator.LabRequest; courseRef?: CourseRef; lab: generator.GeneratedLab; costUsd: number };
 
 const draftDir = (configDir: string, requirementId: string) => path.join(configDir, DRAFTS_DIRNAME, encodeURIComponent(requirementId));
 export const draftPath = (configDir: string, requirementId: string) => path.join(draftDir(configDir, requirementId), DRAFT_FILENAME);

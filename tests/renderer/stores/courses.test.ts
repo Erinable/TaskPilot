@@ -6,7 +6,7 @@ import { flushPromises } from '@vue/test-utils';
 import * as feedback from '@/lib/feedback.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
 import { useRepositoryIdentityStore } from '@/stores/repository_identity.ts';
-import { courseList, coursePreview, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
+import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
@@ -136,6 +136,141 @@ test('a save returning after selecting another course or switching repositories 
   await oldSave;
   expect(courses.list).toBeNull();
   expect(courses.viewed).toBeNull();
+});
+
+test.each(['preview', 'list'] as const)('copy keeps its selection when an older refresh %s arrives afterward', async (pending) => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  const previewHeld = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.preview>>>();
+  const listHeld = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.list>>>();
+  if (pending === 'preview') api.courses.preview.mockReturnValueOnce(previewHeld.promise);
+  else api.courses.list.mockReturnValueOnce(listHeld.promise);
+  const refreshing = courses.loadView();
+  await flushPromises();
+  await courses.copy('programming', 'my-copy');
+  expect(courses.viewedId).toBe('my-copy');
+  expect(courses.viewed?.ref.id).toBe('my-copy');
+  const savedList = courses.list;
+  const previewCalls = api.courses.preview.mock.calls.length;
+  if (pending === 'preview') previewHeld.resolve({ ok: true, data: coursePreview('programming') });
+  else listHeld.resolve({ ok: true, data: courseList() });
+  await refreshing;
+  expect(courses.viewedId).toBe('my-copy');
+  expect(courses.viewed?.ref.id).toBe('my-copy');
+  expect(courses.list).toBe(savedList);
+  expect(api.courses.preview).toHaveBeenCalledTimes(previewCalls);
+});
+
+test('a copy or save invalidates a pending preview even when its old response fails', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.preview>>>();
+  api.courses.preview.mockReturnValueOnce(held.promise);
+  const viewing = courses.view('programming');
+  await courses.copy('programming', 'mine');
+  held.resolve({ ok: false, error: { code: 'unknown', message: 'old preview failed' } });
+  await viewing;
+  expect(courses.viewedId).toBe('mine');
+  expect(courses.viewError).toBeNull();
+  const stale = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.preview>>>();
+  api.courses.preview.mockReturnValueOnce(stale.promise);
+  const refreshing = courses.view('mine');
+  api.courses.save.mockReturnValueOnce(ok(courseSaved('mine', { ...OS_COURSE, title: 'saved title' })));
+  await courses.save({ ...OS_COURSE, id: 'mine', title: 'saved title' });
+  stale.resolve({ ok: true, data: coursePreview('mine') });
+  await refreshing;
+  expect(courses.viewed?.pack.title).toBe('saved title');
+  expect(courses.viewedId).toBe('mine');
+});
+
+test('a selection made while copying wins over the completed copy', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(held.promise);
+  const copying = courses.copy('programming', 'mine');
+  await courses.view('os');
+  held.resolve({ ok: true, data: courseSaved('mine') });
+  await copying;
+  expect(courses.viewedId).toBe('os');
+  expect(courses.viewed?.ref.id).toBe('os');
+});
+
+test('a refresh started during copying cannot consume its pending selection', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(held.promise);
+  const copying = courses.copy('programming', 'mine');
+  await courses.loadView();
+  expect(api.courses.preview).toHaveBeenCalledTimes(1);
+  held.resolve({ ok: true, data: courseSaved('mine') });
+  await copying;
+  expect(courses.viewedId).toBe('mine');
+  expect(courses.viewed?.ref.id).toBe('mine');
+});
+
+test('confirmation does not prevent refreshes of the viewed pack trust', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  courses.preview = coursePreview('mine');
+  courses.previewMode = 'confirm';
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.workspace.confirmCourse>>>();
+  api.workspace.confirmCourse.mockReturnValueOnce(held.promise);
+  const confirming = courses.confirm();
+  await courses.loadView();
+  expect(api.courses.preview).toHaveBeenCalledTimes(2);
+  held.resolve(await api.workspace.get());
+  await confirming;
+});
+
+test('reset drops late copy results and their busy cleanup cannot release a newer action', async () => {
+  const courses = useCoursesStore();
+  courses.editDraft('user:mine', OS_COURSE).title = 'global draft';
+  const old = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(old.promise);
+  const copying = courses.copy('programming', 'old-copy');
+  courses.reset();
+  useRepositoryIdentityStore().currentId = 'repo-b';
+  expect(courses.busy).toBe(false);
+  const latest = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(latest.promise);
+  const newer = courses.copy('os', 'new-copy');
+  old.resolve({ ok: true, data: courseSaved('old-copy') });
+  await copying;
+  expect(courses.list).toBeNull();
+  expect(courses.viewedId).toBeNull();
+  expect(courses.viewed).toBeNull();
+  expect(courses.busy).toBe(true);
+  expect(courses.drafts['user:mine'].title).toBe('global draft');
+  latest.resolve({ ok: true, data: courseSaved('new-copy') });
+  await newer;
+  expect(courses.viewedId).toBe('new-copy');
+  expect(courses.busy).toBe(false);
+});
+
+test('pending course writes guard duplicate and competing mutation actions', async () => {
+  const courses = useCoursesStore();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(held.promise);
+  const copying = courses.copy('programming', 'mine');
+  expect(await courses.copy('programming', 'duplicate')).toMatchObject({ field: 'id' });
+  expect(await courses.save({ ...OS_COURSE, id: 'mine' })).toMatchObject({ field: 'pack' });
+  await courses.select('os');
+  courses.preview = coursePreview('mine');
+  courses.previewMode = 'confirm';
+  await courses.confirm();
+  courses.previewMode = 'import';
+  await courses.importPicked();
+  expect(api.courses.copy).toHaveBeenCalledTimes(1);
+  expect(api.courses.save).not.toHaveBeenCalled();
+  expect(api.courses.select).not.toHaveBeenCalled();
+  expect(api.workspace.confirmCourse).not.toHaveBeenCalled();
+  expect(api.courses.import).not.toHaveBeenCalled();
+  expect(courses.busy).toBe(true);
+  held.resolve({ ok: true, data: courseSaved('mine') });
+  await copying;
+  expect(courses.busy).toBe(false);
 });
 
 test('the default pack is asked for once and kept across a reset', async () => {

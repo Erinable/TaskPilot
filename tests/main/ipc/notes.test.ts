@@ -2,9 +2,13 @@
 // IPC channels of the notes domain (src/main/ipc/notes.ts).
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { tempDir } from '../../fixtures/temp_dir.ts';
+import { until } from '../../fixtures/until.ts';
 
 // ========== notes ==========
 
@@ -52,4 +56,31 @@ test('notes: Tutor writes a summary pinned to the version it read', async () => 
   assert.equal(saved.data.note.summary, '先写失败的测试，再写实现。');
   assert.match(h.agentCalls.at(-1)!.prompt, /<note>\nTitle: 测试先行\n\n先红后绿\n<\/note>/);
   assert.equal((await h.call(CHANNELS.notesSummarize, note.id, note.version)).error.code, 'note_conflict');
+});
+
+// Identical filenames and bytes deliberately also have the same content version.
+test.each([false, true])('notes: an in-flight summary cannot write after a folder switch (switch back: %s)', async (switchBack) => {
+  const held = Promise.withResolvers<unknown>();
+  const other = await tempDir('tp-summary-vault-');
+  const h = await fixtures.harness({ agent: async () => held.promise, coding: { pickDirectory: async () => other } });
+  const { note } = (await h.call(CHANNELS.notesCreate, { title: 'Shared', body: 'same copied body', category: null, tags: [], source: null })).data;
+  const original = path.join(h.notes.directory, note.id);
+  const copied = path.join(other, note.id);
+  const before = await fs.readFile(original, 'utf8');
+  await fs.writeFile(copied, before);
+  const inFlight = h.call(CHANNELS.notesSummarize, note.id, note.version);
+  await until(
+    () => h.agentCalls.length,
+    (count) => count === 1,
+    'summary started',
+  );
+  assert.equal((await h.call(CHANNELS.notesPickDirectory)).data, other);
+  assert.equal((await h.call(CHANNELS.notesSetDirectory, other)).ok, true);
+  if (switchBack) assert.equal((await h.call(CHANNELS.notesSetDirectory, null)).ok, true);
+  held.resolve({ output: { noteSummary: 'old vault summary' }, costUsd: 0 });
+  const result = await inFlight;
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'note_conflict');
+  assert.equal(await fs.readFile(original, 'utf8'), before);
+  assert.equal(await fs.readFile(copied, 'utf8'), before);
 });

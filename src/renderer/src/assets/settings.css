@@ -58,6 +58,10 @@
   font: inherit;
   font-size: var(--text-sm);
 }
+.settings-search input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
 .settings-search input::-webkit-search-cancel-button {
   display: none;
 }

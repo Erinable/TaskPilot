@@ -59,6 +59,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const id = requireString(rawId, 'id');
       const baseVersion = requireString(rawVersion, 'baseVersion');
       const note = store.get(id);
+      const directoryIdentity = store.directoryIdentity;
       if (note.version !== baseVersion) return failWith('The note changed on disk since it was opened', 'note_conflict');
       if (backgroundRuns.has('note-summary', id)) return failWith('A summary of this note is already being written', 'invalid_state');
       logger.debug(`[notes] summarize id=${id} length=${note.body.length}`);
@@ -74,7 +75,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             signal: controller.signal,
           });
           throwIfCancelled(controller.signal);
-          return store.setSummary(id, noteSummary.validateSummary(output), baseVersion);
+          return store.setSummary(id, noteSummary.validateSummary(output), baseVersion, directoryIdentity);
         },
       );
     },

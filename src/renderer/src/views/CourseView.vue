@@ -78,7 +78,7 @@ const copyError = ref<string | null>(null);
 const takenIds = computed(() => entries.value.map((entry) => entry.id));
 
 const startCopy = () => {
-  if (!viewed.value) return;
+  if (!viewed.value || courses.busy) return;
   copyId.value = copyIdFor(viewed.value.ref.id, takenIds.value);
   copyError.value = null;
   copying.value = true;
@@ -90,12 +90,14 @@ const copyIdProblem = (id: string) => {
 };
 
 const submitCopy = async () => {
-  if (!viewed.value) return;
-  copyError.value = copyIdProblem(copyId.value);
+  if (!viewed.value || courses.busy) return;
+  const id = copyId.value;
+  copyError.value = copyIdProblem(id);
   if (copyError.value) return;
-  const refused = await courses.copy(viewed.value.ref.id, copyId.value);
+  const refused = await courses.copy(viewed.value.ref.id, id);
+  if (!copying.value) return;
   if (refused) copyError.value = refused.message;
-  else {
+  else if (courses.viewedId === id && viewed.value?.ref.id === id) {
     copying.value = false;
     editing.value = true;
   }
@@ -220,7 +222,7 @@ onBeforeUnmount(() => courses.leave());
               <AppIcon name="sliders" />
               编辑
             </button>
-            <button class="secondary-button small" type="button" data-action="copy" @click="startCopy">
+            <button class="secondary-button small" type="button" data-action="copy" :disabled="courses.busy" @click="startCopy">
               <AppIcon name="copy" />
               复制再改
             </button>
@@ -261,6 +263,7 @@ onBeforeUnmount(() => courses.leave());
               class="field-input mono"
               type="text"
               :aria-invalid="Boolean(copyError)"
+              :disabled="courses.busy"
               aria-describedby="courseCopyHint"
               @input="copyError = null"
             />
@@ -268,8 +271,8 @@ onBeforeUnmount(() => courses.leave());
               {{ copyError ?? `复制到 ${courses.list.userDir}，所有仓库都能选。复制品要在本机确认后才会用。` }}
             </small>
             <div class="course-copy-actions">
-              <button class="secondary-button small" type="button" @click="copying = false">取消</button>
-              <button class="primary-button small" type="submit" data-action="copy-submit" :disabled="courses.busy">
+              <button class="secondary-button small" type="button" :disabled="courses.busy" @click="copying = false">取消</button>
+              <button class="primary-button small" type="submit" data-action="copy-submit" :disabled="courses.busy" :aria-busy="courses.busy">
                 <AppIcon name="copy" />
                 复制并编辑
               </button>

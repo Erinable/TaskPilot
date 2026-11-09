@@ -32,6 +32,7 @@ export const useReleaseStore = defineStore('release', () => {
   const notesText = ref('');
   let notesSource: string | null = null;
   let notesGeneration = 0;
+  let draftWriteRevision = 0;
 
   const apply = (next: releaseTypes.ReleaseState) => {
     state.value = next;
@@ -40,6 +41,9 @@ export const useReleaseStore = defineStore('release', () => {
     if (source !== notesSource) {
       notesGeneration += 1;
       notesSaving = null;
+      draftUpdating = null;
+      checklistPending.value = 0;
+      checklistError.value = null;
       if (notesTimer !== null) clearTimeout(notesTimer);
       notesTimer = null;
     }
@@ -55,9 +59,10 @@ export const useReleaseStore = defineStore('release', () => {
     name: 'release',
     domains: ['release'],
     read: async (isCurrent) => {
+      const writeRevision = draftWriteRevision;
       try {
         const next = await call(window.taskpilot.release.get());
-        if (isCurrent()) {
+        if (isCurrent() && writeRevision === draftWriteRevision && !draftUpdating) {
           apply(next);
           loadError.value = null;
         }
@@ -135,12 +140,29 @@ export const useReleaseStore = defineStore('release', () => {
   const notesStatus = ref<NotesStatus>('idle');
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
   let notesSaving: Promise<boolean> | null = null;
+  let draftUpdating: Promise<boolean> | null = null;
+  const checklistPending = ref(0);
+  const checklistError = ref<string | null>(null);
 
-  const update = async (input: releaseTypes.ReleaseDraftInput) => {
+  // All draft writes share one queue because each response contains the whole draft.
+  const update = (input: releaseTypes.ReleaseDraftInput | (() => releaseTypes.ReleaseDraftInput)): Promise<boolean> => {
+    draftWriteRevision += 1;
     const generation = notesGeneration;
     const repositoryId = repository.currentId;
-    const next = await call(window.taskpilot.release.updateDraft(input));
-    if (generation === notesGeneration && repositoryId === repository.currentId) apply(next);
+    const current = () => generation === notesGeneration && repositoryId === repository.currentId;
+    const send = async () => {
+      if (!current()) return false;
+      const next = await call(window.taskpilot.release.updateDraft(typeof input === 'function' ? input() : input));
+      if (!current()) return false;
+      apply(next);
+      return true;
+    };
+    const previous = draftUpdating;
+    const pending = (previous ? previous.catch(() => false).then(send) : send()).finally(() => {
+      if (draftUpdating === pending) draftUpdating = null;
+    });
+    draftUpdating = pending;
+    return pending;
   };
 
   const saveNotes = (): Promise<boolean> => {
@@ -152,8 +174,7 @@ export const useReleaseStore = defineStore('release', () => {
     notesStatus.value = 'saving';
     const pending = (async () => {
       try {
-        await update({ notes: text });
-        if (generation !== notesGeneration) return false;
+        if (!(await update({ notes: text })) || generation !== notesGeneration) return false;
         // Typing during the save leaves the newer text unsaved.
         notesStatus.value = notesText.value === text ? 'saved' : 'dirty';
         return true;
@@ -178,6 +199,7 @@ export const useReleaseStore = defineStore('release', () => {
   };
 
   const editNotes = (text: string) => {
+    if (finishing.value) return;
     notesText.value = text;
     notesStatus.value = 'dirty';
     if (notesTimer !== null) clearTimeout(notesTimer);
@@ -192,6 +214,14 @@ export const useReleaseStore = defineStore('release', () => {
     notesTimer = null;
     const generation = notesGeneration;
     while (generation === notesGeneration) {
+      if (draftUpdating) {
+        try {
+          if (!(await draftUpdating)) return false;
+        } catch {
+          return false;
+        }
+      }
+      if (generation !== notesGeneration || checklistError.value) return false;
       if (notesSaving && !(await notesSaving)) return false;
       if (generation !== notesGeneration) return false;
       if (notesStatus.value !== 'dirty' && notesStatus.value !== 'error') return true;
@@ -201,43 +231,52 @@ export const useReleaseStore = defineStore('release', () => {
   };
 
   const setChecked = async (index: number, value: boolean) => {
-    const current = draft.value;
-    if (!current) return;
+    if (draft.value?.status !== 'ready' || finishing.value) return;
+    const generation = notesGeneration;
+    checklistPending.value += 1;
+    checklistError.value = null;
     try {
-      await update({ checked: model.toggleChecked(current.checked, index, value) });
+      // Compute from the preceding acknowledged selection, not from the click-time snapshot.
+      await update(() => ({ checked: model.toggleChecked(draft.value!.checked, index, value) }));
     } catch (error) {
+      if (generation !== notesGeneration) return;
       console.error('[release] save checklist failed', error);
-      showToast(`保存检查项失败：${describeError(error)}`, 'error');
+      checklistError.value = describeError(error);
+      showToast(`保存检查项失败：${checklistError.value}`, 'error');
+    } finally {
+      if (generation === notesGeneration) checklistPending.value -= 1;
     }
   };
 
   // ========== Finish ==========
   const finishing = ref(false);
-  const canFinish = computed(() => draft.value?.status === 'ready' && model.allChecked(draft.value));
+  const canFinish = computed(() => draft.value?.status === 'ready' && model.allChecked(draft.value) && checklistPending.value === 0 && !checklistError.value);
 
   const finish = async () => {
     const plan = draft.value?.plan;
     if (!canFinish.value || !plan || finishing.value) return;
     const generation = notesGeneration;
     const repositoryId = repository.currentId;
-    const accepted = await confirmAction({
-      title: '完成发布',
-      body: `把 ${plan.nextVersion} 记入发布历史。TaskPilot 不会打 tag、提交或推送，这些请你自己完成。`,
-      accept: '完成发布',
-    });
-    if (!accepted || generation !== notesGeneration || repositoryId !== repository.currentId) return;
     finishing.value = true;
     try {
-      if (!(await flushNotes()) || generation !== notesGeneration || repositoryId !== repository.currentId) return;
+      const accepted = await confirmAction({
+        title: '完成发布',
+        body: `把 ${plan.nextVersion} 记入发布历史。TaskPilot 不会打 tag、提交或推送，这些请你自己完成。`,
+        accept: '完成发布',
+      });
+      if (!accepted || generation !== notesGeneration || repositoryId !== repository.currentId) return;
+      if (!(await flushNotes()) || generation !== notesGeneration || repositoryId !== repository.currentId || !canFinish.value) return;
       const release = await call(window.taskpilot.release.finish());
+      if (generation !== notesGeneration || repositoryId !== repository.currentId) return;
       showToast(`已记录发布 ${release.version}`);
     } catch (error) {
+      if (generation !== notesGeneration || repositoryId !== repository.currentId) return;
       console.error('[release] finish failed', error);
       showToast(`完成发布失败：${describeError(error)}`, 'error');
     } finally {
       finishing.value = false;
     }
-    await load();
+    if (generation === notesGeneration && repositoryId === repository.currentId) await load();
   };
 
   // ========== Notes output ==========
@@ -269,17 +308,25 @@ export const useReleaseStore = defineStore('release', () => {
       writeError.value = '只能写入 .md 文件。';
       return false;
     }
+    if (writing.value || finishing.value) return false;
+    const generation = notesGeneration;
+    const repositoryId = repository.currentId;
+    const current = () => generation === notesGeneration && repositoryId === repository.currentId;
     writing.value = true;
     writeError.value = null;
     try {
-      if (!(await flushNotes())) {
+      const saved = await flushNotes();
+      if (!current()) return false;
+      if (!saved) {
         writeError.value = '更新说明尚未保存，请重试保存后再写入文件。';
         return false;
       }
       const result = await call(window.taskpilot.release.writeNotes({ path: trimmed }));
+      if (!current()) return false;
       showToast(`已写入 ${result.path}`);
       return true;
     } catch (error) {
+      if (!current()) return false;
       console.error('[release] write notes failed', error);
       writeError.value = describeError(error);
       return false;
@@ -328,6 +375,9 @@ export const useReleaseStore = defineStore('release', () => {
     () => {
       notesGeneration += 1;
       notesSaving = null;
+      draftUpdating = null;
+      checklistPending.value = 0;
+      checklistError.value = null;
       if (notesTimer !== null) clearTimeout(notesTimer);
       notesTimer = null;
       watcher.invalidate();
@@ -374,6 +424,8 @@ export const useReleaseStore = defineStore('release', () => {
     notesStatus,
     editNotes,
     flushNotes,
+    checklistPending,
+    checklistError,
     setChecked,
     // Finish
     finishing,

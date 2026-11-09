@@ -346,6 +346,107 @@ test('errors are checked with the main process rules and shown on their field, w
   expect(fieldOf(wrapper, 'title').find('.course-field-error').exists()).toBe(false);
 });
 
+test('a long invalid form focuses its first field after rendering and keeps a linked error count beside save until corrected', async () => {
+  const wrapper = await openMine();
+  const title = fieldOf(wrapper, 'title');
+  const version = fieldOf(wrapper, 'version');
+  const titleScroll = vi.spyOn(title.element, 'scrollIntoView').mockImplementation(() => {
+    expect(title.get('input').attributes('aria-invalid')).toBe('true');
+    expect(wrapper.get('[data-error="save-summary"]').text()).toContain('2 项');
+  });
+  const versionScroll = vi.spyOn(version.element, 'scrollIntoView');
+  await title.get('input').setValue('');
+  await version.get('input').setValue('v2');
+  wrapper.get<HTMLButtonElement>('[data-action="save-course"]').element.focus();
+  await save(wrapper);
+  expect(api.courses.save).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(title.get('input').element);
+  expect(titleScroll).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' });
+  expect(wrapper.get('[data-error="save-summary"]').findAll('button')).toHaveLength(2);
+  await wrapper.get('[data-error-field="version"]').trigger('click');
+  expect(document.activeElement).toBe(version.get('input').element);
+  expect(versionScroll).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' });
+  await title.get('input').setValue('已修正的名称');
+  expect(wrapper.get('[data-error="save-summary"]').text()).toContain('1 项');
+  expect(useCoursesStore().drafts['user:mine'].title).toBe('已修正的名称');
+  await version.get('input').setValue('2.0.0');
+  expect(wrapper.find('[data-error="save-summary"]').exists()).toBe(false);
+  api.courses.save.mockReturnValueOnce(ok({ list: withMine(), preview: minePreview({ pack: { ...MINE, title: '已修正的名称', version: '2.0.0' } }) }));
+  await save(wrapper);
+  expect(api.courses.save).toHaveBeenCalledWith('mine', expect.objectContaining({ title: '已修正的名称', version: '2.0.0' }));
+  expect(wrapper.find('form.course-editor').exists()).toBe(false);
+  expect(useCoursesStore().drafts['user:mine']).toBeUndefined();
+});
+
+test('invalid save opens collapsed concepts and links internal errors to the correct native control', async () => {
+  const wrapper = await openMine();
+  useCoursesStore().drafts['user:mine'].concepts = [
+    { id: 'first', label: '第一个', summary: '说明', prerequisites: [] },
+    { id: 'second', label: '', summary: '', prerequisites: [] },
+  ];
+  expect(wrapper.find('.concept-editor').exists()).toBe(false);
+  await save(wrapper);
+  expect(api.courses.save).not.toHaveBeenCalled();
+  const row = wrapper.get('[data-concept-row="1"]');
+  expect(document.activeElement).toBe(row.get('input[aria-label="知识点名称"]').element);
+  expect(wrapper.get('[data-error="save-summary"]').text()).toContain('2 项');
+  await wrapper.get('[data-error-field="concepts[1].summary"]').trigger('click');
+  expect(document.activeElement).toBe(row.get('textarea[aria-label="知识点说明"]').element);
+  expect(useCoursesStore().drafts['user:mine'].concepts[1].label).toBe('');
+});
+
+test('server concept field errors expand the collapsed section, retain the draft and provide the same focus recovery', async () => {
+  expectConsole('error', /server concept refusal/);
+  const wrapper = await openMine();
+  useCoursesStore().drafts['user:mine'].concepts = [{ id: 'first', label: '名称', summary: '说明', prerequisites: [] }];
+  api.courses.save.mockReturnValueOnce(fail('invalid_course', 'server concept refusal', 'concepts[0].summary'));
+  await save(wrapper);
+  expect(wrapper.get('[data-error="save-summary"]').text()).toContain('1 项');
+  expect(wrapper.get('[data-error-field="concepts[0].summary"]').text()).toContain('server concept refusal');
+  expect(document.activeElement).toBe(wrapper.get('[data-concept-row="0"] textarea').element);
+  expect(useCoursesStore().drafts['user:mine'].concepts[0].summary).toBe('说明');
+  await wrapper.get('[data-concept-row="0"] textarea').setValue('修正说明');
+  expect(wrapper.find('[data-error="save-summary"]').exists()).toBe(false);
+});
+
+test('copy-and-edit stays on the copied editor when a pending refresh preview returns', async () => {
+  const wrapper = await openView();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.preview>>>();
+  api.courses.preview.mockReturnValueOnce(held.promise);
+  const refreshing = useCoursesStore().loadView();
+  await flushPromises();
+  await wrapper.get('[data-action="copy"]').trigger('click');
+  await wrapper.get('#courseCopyId').setValue('my-copy');
+  await wrapper.get('form.course-copy').trigger('submit');
+  await flushPromises();
+  expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('my-copy');
+  await fieldOf(wrapper, 'title').get('input').setValue('副本草稿');
+  held.resolve({ ok: true, data: coursePreview('programming') });
+  await refreshing;
+  await flushPromises();
+  expect(useCoursesStore().viewedId).toBe('my-copy');
+  expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('my-copy');
+  expect(wrapper.get('[data-course="my-copy"]').attributes('aria-current')).toBe('true');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('副本草稿');
+});
+
+test('copy form guards keyboard resubmission and does not open an editor after selecting another course', async () => {
+  const wrapper = await openView();
+  await wrapper.get('[data-action="copy"]').trigger('click');
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.copy>>>();
+  api.courses.copy.mockReturnValueOnce(held.promise);
+  await wrapper.get('form.course-copy').trigger('submit');
+  expect(wrapper.get('[data-action="copy-submit"]').attributes('aria-busy')).toBe('true');
+  await wrapper.get('form.course-copy').trigger('submit');
+  expect(api.courses.copy).toHaveBeenCalledTimes(1);
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  held.resolve({ ok: true, data: courseSaved('programming-copy') });
+  await flushPromises();
+  expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('os');
+  expect(wrapper.find('form.course-editor').exists()).toBe(false);
+});
+
 test('the rubric keeps 2 to 6 items', async () => {
   const wrapper = await openMine();
   const items = () => wrapper.findAll('.course-editor-item');
@@ -364,6 +465,9 @@ test('a field the main process refuses is shown on that field', async () => {
   await save(wrapper);
   expect(api.courses.save).toHaveBeenCalled();
   expect(fieldOf(wrapper, 'rubric[0].label').text()).toContain('must not contain control characters');
+  expect(document.activeElement).toBe(fieldOf(wrapper, 'rubric[0].label').get('input').element);
+  expect(wrapper.get('[data-error="save-summary"]').text()).toContain('1 项');
+  expect(wrapper.get('[data-error-field="rubric[0].label"]').text()).toContain('must not contain control characters');
   expect(wrapper.find('form.course-editor').exists()).toBe(true);
 });
 

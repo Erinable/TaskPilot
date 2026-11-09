@@ -136,6 +136,15 @@ export const useSettingsStore = defineStore('settings', () => {
   const savedWorkspace = ref<WorkspaceDraft | null>(null);
   const preferencesDraft = ref<settingsTypes.PreferencesInput | null>(null);
   const workspaceDraft = ref<WorkspaceDraft | null>(null);
+  let loadGeneration = 0;
+  let loadedGeneration = -1;
+  let loadedRepositoryId: string | null = null;
+  const settingsReady = () => loadedGeneration === loadGeneration && loadedRepositoryId === useRepositoryIdentityStore().currentId;
+  const settingsIdentity = () => {
+    const generation = loadGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
+    return () => settingsReady() && generation === loadGeneration && repositoryId === useRepositoryIdentityStore().currentId;
+  };
 
   const agentSettings = useAgentSettings(preferencesDraft);
   const {
@@ -307,16 +316,22 @@ export const useSettingsStore = defineStore('settings', () => {
     tools.value = result.tools;
   };
 
-  const checkWorkspace = async () => {
-    if (!workspaceDraft.value) return false;
+  const checkWorkspaceSnapshot = async (form: workspaceTypes.WorkspaceForm, isCurrent: () => boolean) => {
     clearWorkspaceStatus();
     try {
-      renderWorkspaceCheck(await call(window.taskpilot.workspace.check(model.workspaceForm(copyWorkspace(workspaceDraft.value)))));
+      const result = await call(window.taskpilot.workspace.check(form));
+      if (!isCurrent()) return false;
+      if (workspaceDraft.value && model.sameValue(form, model.workspaceForm(copyWorkspace(workspaceDraft.value)))) renderWorkspaceCheck(result);
       return true;
     } catch (error) {
-      showFieldError(error);
+      if (isCurrent()) showFieldError(error);
       return false;
     }
+  };
+
+  const checkWorkspace = () => {
+    if (!settingsReady() || !workspaceDraft.value) return Promise.resolve(false);
+    return checkWorkspaceSnapshot(model.workspaceForm(copyWorkspace(workspaceDraft.value)), settingsIdentity());
   };
 
   // A folder from the native picker, for the sandbox's extra folders; null when dismissed.
@@ -438,38 +453,55 @@ export const useSettingsStore = defineStore('settings', () => {
     return root ? (root.split(/[\\/]/).filter(Boolean).pop() ?? '工作区') : '工作区';
   });
 
-  // Resolves true when everything saved.
-  const saveAll = async () => {
+  let savePromise: Promise<boolean> | null = null;
+  // Every caller shares the in-flight save, including keyboard shortcuts and
+  // the leave guard. Later edits stay pending for the next explicit save.
+  const saveAll = () => {
+    if (savePromise) return savePromise;
+    if (!settingsReady() || !workspaceDraft.value || !preferencesDraft.value) return Promise.resolve(false);
     const app = useAppStore();
     const current = dirty.value;
+    const workspace = copyWorkspace(workspaceDraft.value);
+    const preferences = preferencesForm(preferencesDraft.value);
+    const isCurrent = settingsIdentity();
     saving.value = true;
-    try {
-      if (current.workspace && workspaceDraft.value) {
-        // check first, so a failure is shown beside its field before anything is written
-        if (!(await checkWorkspace())) return false;
-        const view = await call(window.taskpilot.workspace.set(model.workspaceForm(copyWorkspace(workspaceDraft.value))));
-        workspaceView.value = view;
-        savedWorkspace.value = workspaceForm(view);
-        fillWorkspace(savedWorkspace.value);
-        await app.refreshWorkspaceStatus();
+    savePromise = (async () => {
+      try {
+        if (current.workspace) {
+          // Validate exactly what will be written, even if typing continues.
+          const form = model.workspaceForm(workspace);
+          if (!(await checkWorkspaceSnapshot(form, isCurrent))) return false;
+          const view = await call(window.taskpilot.workspace.set(form));
+          if (!isCurrent()) return false;
+          workspaceView.value = view;
+          savedWorkspace.value = workspaceForm(view);
+          if (model.sameValue(workspaceDraft.value, workspace)) fillWorkspace(savedWorkspace.value);
+          await app.refreshWorkspaceStatus();
+          if (!isCurrent()) return false;
+        }
+        if (current.preferences) {
+          const prefs = await call(window.taskpilot.preferences.set(preferences));
+          if (!isCurrent()) return false;
+          savedPreferences.value = preferencesForm(prefs);
+          if (model.sameValue(preferencesDraft.value, preferences)) fillPreferences(savedPreferences.value);
+          checkNameLength();
+          app.applyPreferences(prefs);
+          refreshAgentRuntimes().catch((error) => console.error(error));
+          if (activePage.value === 'environment') await renderEnvironment();
+        }
+        if (!isCurrent()) return false;
+        const complete = !hasUnsavedChanges();
+        showToast(complete ? '设置已保存。' : '本次提交已保存，后续修改尚未保存。');
+        return complete;
+      } catch (error) {
+        if (isCurrent()) showFieldError(error);
+        return false;
       }
-      if (current.preferences && preferencesDraft.value) {
-        const prefs = await call(window.taskpilot.preferences.set(preferencesForm(preferencesDraft.value)));
-        savedPreferences.value = preferencesForm(prefs);
-        fillPreferences(savedPreferences.value);
-        checkNameLength();
-        app.applyPreferences(prefs);
-        refreshAgentRuntimes().catch((error) => console.error(error));
-        if (activePage.value === 'environment') await renderEnvironment();
-      }
-      showToast('设置已保存。');
-      return true;
-    } catch (error) {
-      showFieldError(error);
-      return false;
-    } finally {
+    })().finally(() => {
       saving.value = false;
-    }
+      savePromise = null;
+    });
+    return savePromise;
   };
 
   const discardAll = () => {
@@ -482,7 +514,6 @@ export const useSettingsStore = defineStore('settings', () => {
     if (activePage.value === 'environment') renderEnvironment().catch((error) => console.error(error));
   };
 
-  let loadGeneration = 0;
   const load = async () => {
     const token = ++loadGeneration;
     const repositoryId = useRepositoryIdentityStore().currentId;
@@ -494,6 +525,8 @@ export const useSettingsStore = defineStore('settings', () => {
       savedWorkspace.value = workspaceForm(view);
       fillPreferences(savedPreferences.value);
       fillWorkspace(savedWorkspace.value);
+      loadedGeneration = token;
+      loadedRepositoryId = repositoryId;
       checkNameLength();
       clearWorkspaceStatus();
       repoFacts.value = null;
