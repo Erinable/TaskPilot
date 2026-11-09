@@ -8,6 +8,10 @@ import PracticePanel from '../../../../src/renderer/src/components/execution/Pra
 import { useExecutionStore } from '../../../../src/renderer/src/stores/execution.ts';
 import type * as packageTypes from '../../../../src/shared/ipc/packages.ts';
 import { installApi, taskView } from '../../execution_fakes.ts';
+import { fail, ok } from '../../ipc_fakes.ts';
+import { expectConsole } from '../../../fixtures/expected_console.ts';
+import { independenceScore } from '../../../../src/main/work_packages/grade_scores.ts';
+import type { IpcResult } from '../../../../src/shared/ipc/envelope.ts';
 
 vi.mock('../../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -58,6 +62,13 @@ const mountPanel = async (overrides: Partial<packageTypes.TaskView>) => {
   return wrapper;
 };
 
+const expandReference = async (wrapper: Awaited<ReturnType<typeof mountPanel>>, open = true) => {
+  const details = wrapper.get('[data-reference]');
+  (details.element as HTMLDetailsElement).open = open;
+  await details.trigger('toggle');
+  await flushPromises();
+};
+
 beforeEach(() => {
   current = { task: taskView() };
   api = installApi(current);
@@ -77,6 +88,10 @@ describe('PracticePanel', () => {
 
   test('once unlocked, the grade shows by category and the reference can be read beside it', async () => {
     const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: OPEN });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('测试已经全部通过');
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会扣除');
+    await expandReference(wrapper);
     expect(api.practice.reference).toHaveBeenCalledWith('t1');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('先列出输入的几种情况再写代码。');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('src/auth.ts:4');
@@ -86,6 +101,87 @@ describe('PracticePanel', () => {
     expect(wrapper.find('[data-category="thinking"] [data-overall]').exists()).toBe(false);
     expect(wrapper.find('[data-category="writing"]').exists()).toBe(false);
     expect(wrapper.get('[data-reference]').text()).toContain('+export const login = () => true;');
+  });
+
+  test('L5 eligibility explains the 40 point cost before opening and records it only on explicit viewing', async () => {
+    const reference: packageTypes.ReferenceRun = { ...READY };
+    api.practice.reference.mockImplementation(async () => {
+      reference.revealedAt ??= '2026-11-09T01:00:00Z';
+      reference.revealedWith = 'hints_used';
+      return ok('diff --git a/src/auth.ts b/src/auth.ts\n+reference code\n');
+    });
+    const wrapper = await mountPanel({ referenceRun: reference, referenceLock: { unlocked: true, reason: 'hints_used' } });
+    const score = () => independenceScore({ hints: [{ level: 3 }, { level: 4 }, { level: 5 }], reference, similarity: 0 });
+    expect(wrapper.get('[data-reference]').attributes('open')).toBeUndefined();
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(reference.revealedAt).toBeNull();
+    expect(score().signals.reference.deduction).toBe(0);
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('扣 40 分');
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('等测试全部通过后再看');
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[data-reference]').text()).toContain('+reference code');
+    expect(score().signals.reference.deduction).toBe(40);
+    expect(score().independence).toBe(25);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会重复扣分');
+    wrapper.unmount();
+  });
+
+  test('a previously revealed answer stays closed until requested and gives no new deduction warning', async () => {
+    const wrapper = await mountPanel({
+      referenceRun: { ...READY, revealedAt: '2026-11-09T01:00:00Z', revealedWith: 'hints_used' },
+      referenceLock: { unlocked: true, reason: 'revealed' },
+    });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会重复扣分');
+    await expandReference(wrapper);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  test('an unlock or replacement run does not fetch until opened, and duplicate toggles share the pending request', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, referenceLock: { unlocked: false, reason: 'not_submitted' } });
+    const unlocked = { ...current.task, referenceLock: { unlocked: true, reason: 'hints_used' } as packageTypes.ReferenceLock };
+    useExecutionStore().adoptTask(unlocked);
+    await wrapper.setProps({ task: unlocked });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    const held = Promise.withResolvers<IpcResult<string>>();
+    api.practice.reference.mockReturnValueOnce(held.promise);
+    await expandReference(wrapper);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[role="status"]').text()).toContain('正在读取');
+    held.resolve({ ok: true, data: 'diff --git a/src/auth.ts b/src/auth.ts\n+first\n' });
+    await flushPromises();
+    const replacement = { ...unlocked, referenceRun: { ...READY, id: 'r2' } };
+    useExecutionStore().adoptTask(replacement);
+    await wrapper.setProps({ task: replacement });
+    expect(wrapper.get('[data-reference]').attributes('open')).toBeUndefined();
+    expect(wrapper.get('[data-reference]').text()).not.toContain('+first');
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  test('an explicit reference read reports errors and can be retried', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, referenceLock: OPEN });
+    api.practice.reference.mockReturnValueOnce(fail('unknown', 'read failed'));
+    expectConsole('error', /read failed/);
+    await expandReference(wrapper);
+    expect(wrapper.get('.practice-error').text()).toContain('read failed');
+    await wrapper.get('[data-action="retry-reference"]').trigger('click');
+    await flushPromises();
+    expect(api.practice.reference).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('.practice-error').exists()).toBe(false);
+    expect(wrapper.get('[data-reference]').text()).toContain('+export const login');
+    wrapper.unmount();
   });
 
   test('a grade made with another course pack shows that rubric, in its order, with its labels', async () => {

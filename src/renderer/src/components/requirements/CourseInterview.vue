@@ -12,7 +12,7 @@
 // code, tests, hints or what a check found.
 //
 // [人工决策-2026-10-27 00:36:21] 自验证重试 2 次仍不过，lab 标为 needs_review，给出"换一个知识点"或"先用课程包示例"。
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
@@ -22,6 +22,9 @@ import InlineCode from '@/components/InlineCode.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
 import CourseEditor from '@/components/courses/CourseEditor.vue';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
+import { useAppStore } from '@/stores/app.ts';
+import { useNotesStore } from '@/stores/notes.ts';
+import { useExecutionStore } from '@/stores/execution.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import AgentBubble from './AgentBubble.vue';
 import * as model from './requirement_model.ts';
@@ -48,8 +51,13 @@ const initialChoice = () => {
   if (choice) return 'draft' in choice ? DRAFT : choice.course;
   return props.course.pick?.course ?? DRAFT;
 };
-const chosen = ref(initialChoice());
-const answers = ref(props.item.questions.map((question) => question.answer ?? ''));
+const chosen = computed({
+  get: () => store.answerDraft(props.item).choice ?? initialChoice(),
+  set: (value: string) => {
+    store.answerDraft(props.item).choice = value;
+  },
+});
+const answers = computed(() => store.answerDraft(props.item).answers);
 const choiceOf = (): requirementTypes.CourseChoice => (chosen.value === DRAFT ? { draft: true } : { course: chosen.value });
 const onPlan = () => report(store.runStep(props.item, 'plan', [...answers.value], choiceOf()));
 
@@ -93,6 +101,14 @@ const onSaveDraft = (pack: CoursePack) => store.saveDraft(props.item, pack);
 // ========== First lab ==========
 const lab = computed(() => props.course.lab ?? null);
 const estimate = computed(() => (store.labEstimate?.requirementId === props.item.id ? store.labEstimate.estimate : null));
+const reviewedStuck = ref(false);
+watch(estimate, () => {
+  reviewedStuck.value = false;
+});
+const reviewNote = async (id: string) => {
+  if (await useAppStore().navigate('notes')) await useNotesStore().goNote(id);
+};
+const retryConcept = () => report(store.loadLabEstimate(props.item, lab.value?.concepts[0] ?? null));
 const now = useNow();
 const labElapsed = computed(() => (lab.value?.status === 'running' ? elapsedSince(lab.value.startedAt, now.value) : null));
 const cancellingLab = ref(false);
@@ -262,7 +278,13 @@ const verifyProgress = computed(() => {
           <p v-if="verify" class="course-path-note" data-field="verify-result">
             {{ `自验证第 ${verify.rounds.length} 轮通过（参考解、初始代码、变异检测、一致性），自验证花费 ${formatCost(verify.costUsd)}。` }}
           </p>
-          <p v-if="lab.placed" class="course-path-note" data-field="lab-placed">已写入实验仓库，在工作队列的阶段条里打开它。</p>
+          <template v-if="lab.placed">
+            <p class="course-path-note" data-field="lab-placed">已写入实验仓库。跳过知识点不会完成现有 lab；已有阶段仍需通过测试和审查。</p>
+            <button class="secondary-button small" type="button" data-action="open-placed-lab" @click="report(useExecutionStore().open(`lab-${lab.lab.id}`))">
+              打开当前 lab
+            </button>
+            <p v-if="counts.planned === 0" class="course-path-note">路径上已没有待生成的知识点。</p>
+          </template>
           <div v-else class="req-actions">
             <button class="primary-button" type="button" data-action="place-lab" :disabled="store.courseBusy" @click="report(repositories.placeLab(item))">
               <AppIcon name="folder" />
@@ -280,6 +302,10 @@ const verifyProgress = computed(() => {
           </ul>
           <small>{{ `共花费 ${formatCost(lab.costUsd)}。` }}</small>
           <div class="req-actions">
+            <button class="primary-button" type="button" data-action="retry-same-concept" :disabled="store.courseBusy" @click="retryConcept">
+              <AppIcon name="refresh" />
+              重新估算并重试这个知识点
+            </button>
             <el-select v-model="otherConcept" placeholder="换一个知识点" :disabled="!otherConcepts.length" aria-label="换一个知识点" data-field="other-concept">
               <el-option v-for="entry in otherConcepts" :key="entry.id" :label="entry.label" :value="entry.id" />
             </el-select>
@@ -302,6 +328,43 @@ const verifyProgress = computed(() => {
           </p>
           <template v-if="estimate">
             <h3>{{ `生成${labName}` }}</h3>
+            <div v-if="estimate.previousLab" class="course-warning" role="status" data-field="previous-lab">
+              <AppIcon name="info" />
+              <span>当前 lab「{{ estimate.previousLab.title }}」尚未完成。复习或跳过知识点不会完成这个阶段；请先完成它并通过测试，再生成下一阶段。</span>
+              <button
+                class="secondary-button small"
+                type="button"
+                data-action="open-current-lab"
+                @click="report(useExecutionStore().open(estimate.previousLab.packageId))"
+              >
+                打开当前 lab
+              </button>
+            </div>
+            <div v-if="estimate.stuck" class="course-stuck" data-field="stuck">
+              <p class="course-warning" role="status">
+                <AppIcon name="alert" />
+                <span>这个知识点连续两次在入门难度未通过。先复习相关笔记，也可以跳过这个知识点。</span>
+              </p>
+              <ul v-if="estimate.stuck.notes.length">
+                <li v-for="note in estimate.stuck.notes" :key="note.id">
+                  <button class="link-button" type="button" data-action="review-stuck-note" @click="report(reviewNote(note.id))">{{ note.title }}</button>
+                </li>
+              </ul>
+              <p v-else class="course-path-note">还没有这个知识点的笔记。可以回到当前 lab 查看反馈和提示，再继续尝试。</p>
+              <label>
+                <input v-model="reviewedStuck" type="checkbox" />
+                已复习，继续练习这个知识点
+              </label>
+              <button
+                class="secondary-button small"
+                type="button"
+                data-action="skip-concept"
+                :disabled="store.courseBusy"
+                @click="report(store.skipCourseConcept(item, estimate.concepts[0]!.id))"
+              >
+                跳过这个知识点
+              </button>
+            </div>
             <p>
               覆盖知识点：
               <code v-for="entry in estimate.concepts" :key="entry.id" class="path-chip">{{ entry.label }}</code>
@@ -330,7 +393,7 @@ const verifyProgress = computed(() => {
                 class="primary-button"
                 type="button"
                 data-action="generate-lab"
-                :disabled="store.courseBusy || !estimate.toolchain.ready"
+                :disabled="store.courseBusy || !estimate.toolchain.ready || Boolean(estimate.previousLab) || Boolean(estimate.stuck && !reviewedStuck)"
                 @click="onGenerate"
               >
                 <AppIcon name="wand" />
@@ -342,12 +405,15 @@ const verifyProgress = computed(() => {
                 type="button"
                 data-action="recheck-toolchain"
                 :disabled="store.courseBusy"
-                @click="report(store.loadLabEstimate(item))"
+                @click="report(store.loadLabEstimate(item, store.labEstimate?.conceptId ?? null))"
               >
                 重新检查
               </button>
             </div>
           </template>
+          <p v-else-if="counts.planned === 0" class="course-path-note" data-field="path-complete">
+            路径上已没有待生成的知识点。已写入仓库的 lab 仍需完成并通过测试。
+          </p>
           <div v-else class="req-actions">
             <button class="primary-button" type="button" data-action="estimate-lab" :disabled="store.courseBusy" @click="report(store.loadLabEstimate(item))">
               <AppIcon :name="store.courseBusy ? 'spinner' : 'flask'" :class="{ spin: store.courseBusy }" />
@@ -382,7 +448,13 @@ const verifyProgress = computed(() => {
             编辑并保存
           </button>
         </div>
-        <CourseEditor v-if="editing" :pack="draft.pack" :save="onSaveDraft" @close="editing = false" />
+        <CourseEditor
+          v-if="editing"
+          :pack="draft.pack"
+          :draft-key="`requirement:${repositories.current?.id ?? 'none'}:${item.id}:${draft.contentHash}`"
+          :save="onSaveDraft"
+          @close="editing = false"
+        />
         <CourseContent v-else :pack="draft.pack" :changes="[]" />
       </section>
       <div v-if="!editing" class="req-actions sticky">
@@ -461,10 +533,6 @@ const verifyProgress = computed(() => {
   padding: var(--space-2) var(--space-3);
   border-radius: 12px;
 }
-.course-path-item[data-status='known'],
-.course-path-item[data-status='skipped'] {
-  opacity: 0.72;
-}
 .course-path-item p {
   margin: 0;
   color: var(--text-secondary);
@@ -499,8 +567,25 @@ const verifyProgress = computed(() => {
 .course-lab p {
   margin: 0;
 }
+.course-stuck {
+  display: grid;
+  gap: var(--space-2);
+}
+.course-stuck > button {
+  justify-self: start;
+}
+.course-stuck ul {
+  margin: 0;
+  padding-inline-start: var(--space-4);
+}
+.course-stuck .link-button {
+  text-align: start;
+  overflow-wrap: anywhere;
+}
 .course-lab .course-warning {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
   color: var(--text-secondary);
 }

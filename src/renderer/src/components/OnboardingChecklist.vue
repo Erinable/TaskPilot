@@ -69,15 +69,17 @@ onMounted(() => recheck());
     </div>
     <ol class="onboarding-steps">
       <li
-        v-for="(step, index) in steps"
+        v-for="step in steps"
         :key="step.id"
         class="onboarding-step"
         :class="{ done: step.done, next: step.id === nextId, waiting: step.waiting && !step.done, optional: step.optional }"
         :data-step="step.id"
+        :value="step.optional ? undefined : required.indexOf(step) + 1"
       >
         <span class="onboarding-mark" aria-hidden="true">
           <AppIcon v-if="step.done" name="check" />
-          <template v-else>{{ index + 1 }}</template>
+          <AppIcon v-else-if="step.optional" :name="step.icon" />
+          <template v-else>{{ required.indexOf(step) + 1 }}</template>
         </span>
         <div class="onboarding-body">
           <strong>

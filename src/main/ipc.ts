@@ -67,7 +67,7 @@ export const registerIpcHandlers = (ipcMain: IpcMainLike, deps: IpcDeps): IpcHan
   const practice = createPracticeService(ctx, runtime);
   const coding = createCodingService(ctx, runtime, { startReview: review.startReview });
 
-  packagesIpc.register(ipcMain, ctx, { review, practice, explanation: createExplanationService(ctx) });
+  packagesIpc.register(ipcMain, ctx, { review, practice, coding, explanation: createExplanationService(ctx) });
   codingIpc.register(ipcMain, ctx, { coding, runtime });
   workspaceIpc.register(ipcMain, ctx);
   settingsIpc.register(ipcMain, ctx, { runtime });

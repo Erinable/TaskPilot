@@ -13,7 +13,10 @@ import { computed, ref } from 'vue';
 import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
+import { draftOf } from '@/lib/course_model.ts';
+import type { CourseDraft } from '@/lib/course_model.ts';
 import { createStateWatcher } from './state_watcher.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -25,6 +28,16 @@ export const useCoursesStore = defineStore('courses', () => {
   // ========== List ==========
   const list = ref<courseTypes.CourseList | null>(null);
   const loading = ref(false);
+  const loadError = ref<string | null>(null);
+  const viewError = ref<string | null>(null);
+  const viewedId = ref<string | null>(null);
+  // User packs are global. Keep their drafts across view and repository resets;
+  // requirement drafts use a repository/requirement key supplied by the editor.
+  const drafts = ref<Record<string, CourseDraft>>({});
+  const editDraft = (key: string, pack: CoursePack) => (drafts.value[key] ??= draftOf(pack));
+  const discardDraft = (key: string) => {
+    delete drafts.value[key];
+  };
   const current = computed(() => list.value?.current ?? null);
   // Bumped by every list read and by reset(): only the latest answer applies.
   let listGeneration = 0;
@@ -34,11 +47,15 @@ export const useCoursesStore = defineStore('courses', () => {
     loading.value = true;
     try {
       const next = await call(window.taskpilot.courses.list());
-      if (token === listGeneration) list.value = next;
+      if (token === listGeneration) {
+        list.value = next;
+        loadError.value = null;
+      }
     } catch (error) {
       if (token !== listGeneration) return;
       console.error(error);
-      showToast(`读取课程包失败：${describeError(error)}`);
+      loadError.value = describeError(error);
+      showToast(`读取课程包失败：${loadError.value}`);
     } finally {
       if (token === listGeneration) loading.value = false;
     }
@@ -50,6 +67,9 @@ export const useCoursesStore = defineStore('courses', () => {
     viewGeneration += 1;
     list.value = null;
     loading.value = false;
+    loadError.value = null;
+    viewError.value = null;
+    viewedId.value = null;
     viewed.value = null;
     closePreview();
   };
@@ -170,13 +190,16 @@ export const useCoursesStore = defineStore('courses', () => {
 
   const view = async (id: string) => {
     const token = ++viewGeneration;
+    viewedId.value = id;
+    viewError.value = null;
     try {
       const next = await call(window.taskpilot.courses.preview(id));
       if (token === viewGeneration) viewed.value = next;
     } catch (error) {
       if (token !== viewGeneration) return;
       console.error(error);
-      showToast(`读取课程包失败：${describeError(error)}`);
+      viewError.value = describeError(error);
+      showToast(`读取课程包失败：${viewError.value}`);
     }
   };
 
@@ -242,12 +265,19 @@ export const useCoursesStore = defineStore('courses', () => {
   // a saved pack has new content, so it is pending until confirmed again.
   const save = async (pack: CoursePack) => {
     busy.value = true;
+    const token = viewGeneration;
+    const shown = viewed.value?.ref.id;
+    const repositoryId = useRepositoryIdentityStore().currentId;
     try {
-      saved(await call(window.taskpilot.courses.save(pack.id, pack)));
+      const result = await call(window.taskpilot.courses.save(pack.id, pack));
+      if (repositoryId === useRepositoryIdentityStore().currentId) {
+        list.value = result.list;
+        if (token === viewGeneration && shown === pack.id) viewed.value = result.preview;
+      }
       showToast('已保存。内容变了，要在本机重新确认后才会用于规划和判卷。', 'info');
       return null;
     } catch (error) {
-      return fieldError(error, '保存');
+      return fieldError(error, '保存') ?? { field: 'pack', message: `保存失败：${describeError(error)}` };
     } finally {
       busy.value = false;
     }
@@ -257,6 +287,12 @@ export const useCoursesStore = defineStore('courses', () => {
     // List
     list,
     loading,
+    loadError,
+    viewError,
+    viewedId,
+    drafts,
+    editDraft,
+    discardDraft,
     current,
     load,
     reset,

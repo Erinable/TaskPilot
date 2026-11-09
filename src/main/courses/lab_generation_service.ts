@@ -150,6 +150,13 @@ export const createLabGenerationService = (
     return { request, next, course: pack.id, root: repository?.root ?? null, programs: repository?.programs ?? [] };
   };
 
+  const previousLab = async (item: Requirement) => {
+    const last = (await labRepository(item))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
+    if (!last || ctx.store.get(labs.packageId(last.id)).status === 'done') return null;
+    const generated = item.course?.lab;
+    return { packageId: labs.packageId(last.id), title: generated?.placed && generated.lab?.id === last.id ? generated.lab.title : last.id };
+  };
+
   // ========== Estimate ==========
   // Prompts are measured; the code call's input adds the spec it is given.
   // Priced with the synced price table for the model Tutor's CLI would use.
@@ -164,14 +171,17 @@ export const createLabGenerationService = (
     logger.debug(
       `[lab-gen] estimate requirement=${id} concepts=${request.concepts.map((concept) => concept.id).join(',')} model=${model ?? 'unknown'} toolchain=${request.toolchain} ready=${toolchain.ready}`,
     );
-    return estimateLab({
-      request,
-      next,
-      model,
-      price,
-      toolchain,
-      stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [],
-    });
+    return {
+      ...estimateLab({
+        request,
+        next,
+        model,
+        price,
+        toolchain,
+        stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [],
+      }),
+      previousLab: await previousLab(requireRequirements().get(id)),
+    };
   };
 
   // ========== Generation ==========
@@ -233,8 +243,8 @@ export const createLabGenerationService = (
     if (lab?.status === 'running' || backgroundRuns.has('requirement', id)) return failWith('A lab is already being generated', 'invalid_state');
     // The next stage builds on the last one's code, so it waits until that
     // stage is done.
-    const last = (await labRepository(requireRequirements().get(id)))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
-    if (last && ctx.store.get(labs.packageId(last.id)).status !== 'done') return failWith(`Finish lab ${last.id} first`, 'previous_lab_open');
+    const openLab = await previousLab(requireRequirements().get(id));
+    if (openLab) return failWith(`Finish lab ${openLab.title} first`, 'previous_lab_open');
     // Nothing is paid for until the toolchain runs under the sandbox.
     const { path: commandPath } = await ctx.commandPath();
     const check = await probe(request.toolchain, { envPath: commandPath });

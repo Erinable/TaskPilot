@@ -7,6 +7,7 @@ import { registerContract } from './handler.ts';
 import { packagesContract, tasksContract, reviewContract, deviationContract, practiceContract } from '../../shared/ipc/packages.ts';
 import type * as packageTypes from '../../shared/ipc/packages.ts';
 import type { AppContext } from '../app/app_context.ts';
+import type { CodingService } from '../coding/coding_service.ts';
 import type { ExplanationService } from '../work_packages/explanation_service.ts';
 import type { PracticeService } from '../work_packages/practice_service.ts';
 import type { ReviewService } from '../work_packages/review_service.ts';
@@ -19,7 +20,7 @@ const EXECUTION_MODES: unknown[] = ['practice', 'ai', 'self'] satisfies packageT
 export const register = (
   ipcMain: IpcMainLike,
   ctx: AppContext,
-  { review, practice, explanation }: { review: ReviewService; practice: PracticeService; explanation: ExplanationService },
+  { review, practice, explanation, coding }: { review: ReviewService; practice: PracticeService; explanation: ExplanationService; coding: CodingService },
 ) => {
   const { store, backgroundRuns, requireTask } = ctx;
 
@@ -73,15 +74,17 @@ export const register = (
       }
       // The store validates the deviation it is given.
       if (name === 'report_deviation') extra.deviation = (options as { deviation?: DeviationInput } | null | undefined)?.deviation;
+      // store.transition() rejects names that are not transitions.
+      const previous = store.get(id);
+      const before = previous.status;
+      const entry = await store.transition(id, name as TransitionName, 'human', extra);
       if (name === 'release') {
         backgroundRuns.get('baseline', id)?.abort();
         backgroundRuns.get('reference', id)?.abort();
         backgroundRuns.get('grade', id)?.abort();
         backgroundRuns.get('explain', id)?.abort();
+        await coding.release(id, previous.codingRun);
       }
-      // store.transition() rejects names that are not transitions.
-      const before = store.get(id).status;
-      const entry = await store.transition(id, name as TransitionName, 'human', extra);
       ctx.recordTransition(id, before, entry, name as packageTypes.HumanTransition, 'human');
       if (name === 'claim') {
         review.measureBaseline(id);

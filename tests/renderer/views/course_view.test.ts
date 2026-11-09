@@ -10,6 +10,7 @@ import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
+import { useCoursesStore } from '@/stores/courses.ts';
 import { mountView } from '../mount_view.ts';
 import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
@@ -69,6 +70,73 @@ const save = async (wrapper: ReturnType<typeof mount>) => {
   await wrapper.get('form.course-editor').trigger('submit');
   await flushPromises();
 };
+
+test('switching courses, leaving the view and switching repositories retain the full user draft until explicit cancel', async () => {
+  let wrapper = await openMine();
+  await fieldOf(wrapper, 'title').get('input').setValue('未保存的标题');
+  await fieldOf(wrapper, 'labGuide[0]').get('textarea').setValue('未保存的实验指引');
+  expect(wrapper.get('[data-field="draft-status"]').text()).toContain('草稿会保留');
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find('form.course-editor').exists()).toBe(false);
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('未保存的标题');
+  wrapper.unmount();
+  // Repository switches reset repository data while global user packs keep their drafts.
+  useCoursesStore().reset();
+  wrapper = await mountView(CourseView);
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  expect(fieldOf(wrapper, 'labGuide[0]').get<HTMLTextAreaElement>('textarea').element.value).toBe('未保存的实验指引');
+  await wrapper.get('.course-editor-actions .secondary-button').trigger('click');
+  await wrapper.get('[data-action="edit"]').trigger('click');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe(MINE.title);
+});
+
+test('a delayed save preserves edits made after its snapshot and does not reopen its course after a switch', async () => {
+  const wrapper = await openMine();
+  await fieldOf(wrapper, 'title').get('input').setValue('提交的标题');
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.save>>>();
+  api.courses.save.mockReturnValueOnce(held.promise);
+  await wrapper.get('form.course-editor').trigger('submit');
+  await fieldOf(wrapper, 'title').get('input').setValue('提交后继续写');
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  held.resolve({ ok: true, data: { list: withMine(), preview: minePreview({ pack: { ...MINE, title: '提交的标题' } }) } });
+  await flushPromises();
+  expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('os');
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('提交后继续写');
+});
+
+test('initial list and preview failures show persistent retry actions instead of indefinite loading', async () => {
+  expectConsole('error', /read failed/);
+  api.courses.list.mockReturnValueOnce(fail('unknown', 'read failed'));
+  const wrapper = await openView();
+  expect(wrapper.get('[data-error="courses-load"]').text()).toContain('read failed');
+  expect(wrapper.find('[data-loading]').exists()).toBe(false);
+  api.courses.preview.mockReturnValueOnce(fail('unknown', 'read failed'));
+  await wrapper.get('[data-action="retry-courses"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find('[data-error="courses-load"]').exists()).toBe(false);
+  expect(wrapper.get('[data-error="course-preview"]').text()).toContain('read failed');
+  await wrapper.get('[data-action="retry-preview"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find('[data-error="course-preview"]').exists()).toBe(false);
+  expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('programming');
+});
+
+test('a failed save retains the editor and its draft with an inline recovery message', async () => {
+  expectConsole('error', /read-only disk/);
+  const wrapper = await openMine();
+  await fieldOf(wrapper, 'title').get('input').setValue('保留的输入');
+  api.courses.save.mockReturnValueOnce(fail('unknown', 'read-only disk'));
+  await save(wrapper);
+  expect(wrapper.get('form.course-editor').text()).toContain('read-only disk');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('保留的输入');
+});
 
 test('the list groups every pack by source and marks the one in use, which is shown first', async () => {
   api.courses.list.mockReturnValue(ok(courseList({ entries: [...courseList().entries, entry('oslab', 'repository'), entry('net', 'user')] })));

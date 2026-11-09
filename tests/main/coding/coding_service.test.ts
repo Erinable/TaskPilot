@@ -24,9 +24,11 @@ const USAGE = { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reason
 const codingHarness = () => {
   const notified: StateDomain[][] = [];
   let codingRun: codingTypes.CodingRun | null = null;
-  const state = () => ({ status: 'in_progress', mode: null, codingRun, baselineChecks: null });
+  const state = () => ({ status: 'in_progress', baseline: 'base', mode: null, codingRun, baselineChecks: null });
+  const claim = Symbol('claim');
   const store = {
     get: () => state(),
+    claimIdentity: () => claim,
     setCodingRun: async (_id: string, run: codingTypes.CodingRun) => {
       codingRun = run;
       return state();

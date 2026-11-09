@@ -8,8 +8,8 @@
   /* Text */
   --text: #16181d;
   --text-secondary: #3f4350;
-  --text-muted: #5f6472;
-  --text-tertiary: #8a8f9c;
+  --text-muted: #555b69;
+  --text-tertiary: #595f6d;
 
   /* Glass surfaces */
   --glass-bg: rgba(255, 255, 255, 0.58);
@@ -30,20 +30,21 @@
   --orb-c: rgba(94, 214, 196, 0.38);
 
   /* Accent and semantic colours */
-  --accent: #3f6bf5;
-  --accent-strong: #2a52d6;
+  --accent: #284abb;
+  --accent-strong: #2242ab;
   --accent-soft: rgba(63, 107, 245, 0.12);
-  --accent-gradient: linear-gradient(135deg, #5b84ff 0%, #6c5bf5 100%);
-  --success: #17915b;
+  --accent-fill: #3f61d5;
+  --accent-gradient: linear-gradient(135deg, var(--accent-fill) 0%, #6250d8 100%);
+  --success: #086237;
   --success-soft: rgba(23, 145, 91, 0.12);
-  --warning: #c26a0b;
+  --warning: #8a4906;
   --warning-soft: rgba(214, 129, 23, 0.14);
-  --danger: #cf3a32;
+  --danger: #a0201b;
   --danger-soft: rgba(207, 58, 50, 0.11);
   --online: #2fbf71;
   --text-on-color: #fff;
   --danger-border: rgba(207, 58, 50, 0.25);
-  --danger-gradient: linear-gradient(135deg, #f0625a, #cf3a32);
+  --danger-gradient: linear-gradient(135deg, #b92d26, #a52723);
 
   /* Identity palettes stay fixed across themes. */
   --avatar-sunset: linear-gradient(135deg, #f6a96b, #e8678a);
@@ -110,8 +111,8 @@
   :root {
     --text: #eef0f6;
     --text-secondary: #c9ccd6;
-    --text-muted: #9ea3b2;
-    --text-tertiary: #737888;
+    --text-muted: #afb5c5;
+    --text-tertiary: #abb1c2;
 
     --glass-bg: rgba(30, 33, 44, 0.52);
     --glass-bg-strong: rgba(34, 37, 50, 0.8);
@@ -128,14 +129,14 @@
     --orb-b: rgba(132, 74, 214, 0.34);
     --orb-c: rgba(32, 150, 136, 0.28);
 
-    --accent: #7c9cff;
-    --accent-strong: #9db4ff;
+    --accent: #a6bdff;
+    --accent-strong: #b7caff;
     --accent-soft: rgba(124, 156, 255, 0.16);
-    --success: #4cd394;
+    --success: #55dfa1;
     --success-soft: rgba(76, 211, 148, 0.14);
-    --warning: #f2a948;
+    --warning: #f6b961;
     --warning-soft: rgba(242, 169, 72, 0.15);
-    --danger: #ff7a70;
+    --danger: #ffa69e;
     --danger-soft: rgba(255, 122, 112, 0.14);
   }
 }

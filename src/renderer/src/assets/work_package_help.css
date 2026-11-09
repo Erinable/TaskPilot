@@ -185,9 +185,6 @@
 .onboarding-step.next {
   background: var(--accent-soft);
 }
-.onboarding-step.waiting {
-  opacity: 0.6;
-}
 .onboarding-mark {
   width: 28px;
   height: 28px;

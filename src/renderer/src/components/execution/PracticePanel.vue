@@ -5,7 +5,7 @@
 // two scores, explaining the differences from the reference, and the
 // reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import GradeExplanation from '@/components/execution/GradeExplanation.vue';
@@ -90,14 +90,18 @@ const referenceFiles = computed(() =>
     : [],
 );
 
-// Fetched once unlocked; a new reference run replaces the old patch.
-watch(
-  () => [unlocked.value, run.value?.id],
-  () => {
-    if (unlocked.value && execution.reference?.id !== run.value?.id) execution.loadReference().catch((error) => console.error(error));
-  },
-  { immediate: true },
-);
+const referenceNotice = computed(() => {
+  if (run.value?.revealedAt || execution.reference?.id === run.value?.id) return '已经查看过，再次打开不会重复扣分。';
+  return props.task.referenceLock?.reason === 'hints_used'
+    ? '测试还没有全部通过。现在展开查看参考写法，会使独立完成度扣 40 分；等测试全部通过后再看可避免这项扣分。'
+    : '测试已经全部通过，现在展开查看参考写法不会扣除这项独立完成度分数。';
+});
+
+// Eligibility alone never reads the answer or records a scoring deduction.
+const readReference = () => execution.loadReference().catch((error) => console.error(error));
+const toggleReference = (event: Event) => {
+  if ((event.currentTarget as HTMLDetailsElement).open) readReference();
+};
 
 // Read once at startup (App.vue); asked again here in case that failed.
 onMounted(() => courses.loadDefault().catch((error) => console.error(error)));
@@ -193,18 +197,25 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
       </template>
     </div>
 
-    <details v-if="unlocked" class="practice-reference" data-reference>
-      <summary>参考写法</summary>
-      <p v-if="execution.referenceError" class="practice-error">{{ execution.referenceError }}</p>
-      <div v-for="file in referenceFiles" :key="file.path" class="diff-file">
-        <div class="diff-file-header static">
-          <span class="scope-path">{{ file.path }}</span>
+    <div v-if="unlocked" class="practice-reference">
+      <p class="practice-reference-notice" data-reference-notice>{{ referenceNotice }}</p>
+      <details :key="`${task.id}:${run?.id}`" data-reference @toggle="toggleReference">
+        <summary>查看参考写法</summary>
+        <p v-if="execution.referenceLoading" role="status">正在读取参考写法…</p>
+        <p v-if="execution.referenceError" class="practice-error">
+          {{ execution.referenceError }}
+          <button class="link-button" type="button" data-action="retry-reference" :disabled="execution.referenceLoading" @click="readReference">重试</button>
+        </p>
+        <div v-for="file in referenceFiles" :key="file.path" class="diff-file">
+          <div class="diff-file-header static">
+            <span class="scope-path">{{ file.path }}</span>
+          </div>
+          <div class="diff-body">
+            <div v-for="(line, index) in file.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
+          </div>
         </div>
-        <div class="diff-body">
-          <div v-for="(line, index) in file.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
-        </div>
-      </div>
-    </details>
+      </details>
+    </div>
   </section>
 </template>
 
@@ -342,6 +353,11 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 }
 .practice-reference {
   margin: 0 var(--panel-pad) var(--space-4);
+}
+.practice-reference-notice {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 .practice-reference summary {
   cursor: pointer;

@@ -99,6 +99,9 @@ export type LabEstimate = {
   difficulty: packageTypes.Difficulty;
   change: 'lowered' | 'raised' | 'kept';
   stuck: { notes: { id: string; title: string }[] } | null;
+  // Review and skipping remain available while an existing stage is open.
+  // A new stage still requires completing this package and its tests first.
+  previousLab?: { packageId: string; title: string } | null;
   calls: number;
   maxCalls: number;
   tokens: { input: number; output: number };

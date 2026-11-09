@@ -11,6 +11,7 @@ import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useSettingsStore } from '../../../src/renderer/src/stores/settings.ts';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
+import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { openDialogs } from '../../../src/renderer/src/lib/feedback.ts';
 import { taskView } from '../execution_fakes.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
@@ -160,6 +161,19 @@ describe('CommandPalette', () => {
     wrapper = null;
     await key(document, 'k', { metaKey: true });
     expect(palette.visible).toBe(false);
+  });
+
+  test('repository switching closes the palette and blocks shortcuts until the switch settles', async () => {
+    await render();
+    const repositories = useRepositoriesStore();
+    repositories.switching = true;
+    await flushPromises();
+    expect(usePaletteStore().visible).toBe(false);
+    await key(document, 'k', { metaKey: true });
+    expect(usePaletteStore().visible).toBe(false);
+    repositories.switching = false;
+    await key(document, 'k', { metaKey: true });
+    expect(usePaletteStore().visible).toBe(true);
   });
 
   test('⌘K leaves an open confirm box alone', async () => {

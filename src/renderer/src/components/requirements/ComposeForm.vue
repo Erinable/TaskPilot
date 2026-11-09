@@ -34,10 +34,13 @@ watch(() => store.composeFocus, focusText);
 // ⌘↩ submits the requirement from the textarea.
 const onKeydown = (event: Event | KeyboardEvent) => {
   if (!(event instanceof KeyboardEvent)) return;
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) store.submitNew().catch((error) => console.error(error));
+  if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.isComposing) return;
+  event.preventDefault();
+  onSubmit();
 };
 
 const onSubmit = () => {
+  if (store.submitting || (course.value && !store.composeForm.toolchain)) return;
   store.submitNew().catch((error) => console.error(error));
 };
 </script>
@@ -70,6 +73,37 @@ const onSubmit = () => {
       <p>写下要做什么、为什么做。Product Lead 会先提出澄清问题，再把需求拆成可执行的工作包，你确认后才会进入工作队列。</p>
     </header>
     <div class="settings-card glass req-form-card">
+      <div v-if="!course" class="setting-row stacked">
+        <label class="setting-label" for="reqTitle">
+          <strong>标题（可选）</strong>
+          <small>留空时 Product Lead 会起一个</small>
+        </label>
+        <el-input id="reqTitle" v-model="store.composeTitle" maxlength="60" autocomplete="off" placeholder="例如：邮箱登录" />
+      </div>
+      <div class="setting-row stacked">
+        <label class="setting-label" for="reqText">
+          <strong>{{ course ? '想学的内容' : '需求描述' }}</strong>
+        </label>
+        <el-input
+          id="reqText"
+          ref="textInput"
+          v-model="store.composeText"
+          class="req-textarea"
+          type="textarea"
+          :rows="8"
+          :placeholder="
+            course ? '例如：想学操作系统的进程调度。' : '例如：用户可以用邮箱和密码登录。登录失败时不能暴露邮箱是否注册。需要为现有的 UserRepository 补测试。'
+          "
+          aria-describedby="reqTextStatus"
+          :aria-invalid="String(store.composeInvalid)"
+          @input="store.onComposeInput"
+          @keydown="onKeydown"
+        />
+        <div class="field-meta">
+          <p id="reqTextStatus" class="field-status" :class="{ error: store.composeStatus.error }" aria-live="polite">{{ store.composeStatus.text }}</p>
+          <span class="char-count" :class="{ over: count > MAX_TEXT }">{{ `${count}/${MAX_TEXT}` }}</span>
+        </div>
+      </div>
       <template v-if="course">
         <div class="setting-row stacked" data-field="level">
           <span class="setting-label"><strong>基础</strong></span>
@@ -105,38 +139,14 @@ const onSubmit = () => {
             <el-radio-button v-for="hours in HOURS_OPTIONS" :key="hours" :value="hours">{{ `${hours} 小时` }}</el-radio-button>
           </el-radio-group>
         </div>
-      </template>
-      <div class="setting-row stacked">
-        <label class="setting-label" for="reqTitle">
-          <strong>标题（可选）</strong>
-          <small>留空时 Product Lead 会起一个</small>
-        </label>
-        <el-input id="reqTitle" v-model="store.composeTitle" maxlength="60" autocomplete="off" placeholder="例如：邮箱登录" />
-      </div>
-      <div class="setting-row stacked">
-        <label class="setting-label" for="reqText">
-          <strong>{{ course ? '想学的内容' : '需求描述' }}</strong>
-        </label>
-        <el-input
-          id="reqText"
-          ref="textInput"
-          v-model="store.composeText"
-          class="req-textarea"
-          type="textarea"
-          :rows="8"
-          :placeholder="
-            course ? '例如：想学操作系统的进程调度。' : '例如：用户可以用邮箱和密码登录。登录失败时不能暴露邮箱是否注册。需要为现有的 UserRepository 补测试。'
-          "
-          aria-describedby="reqTextStatus"
-          :aria-invalid="String(store.composeInvalid)"
-          @input="store.onComposeInput"
-          @keydown="onKeydown"
-        />
-        <div class="field-meta">
-          <p id="reqTextStatus" class="field-status" :class="{ error: store.composeStatus.error }" aria-live="polite">{{ store.composeStatus.text }}</p>
-          <span class="char-count" :class="{ over: count > MAX_TEXT }">{{ `${count}/${MAX_TEXT}` }}</span>
+        <div class="setting-row stacked" data-field="title">
+          <label class="setting-label" for="reqTitle">
+            <strong>标题（可选）</strong>
+            <small>留空时 Tutor 会起一个</small>
+          </label>
+          <el-input id="reqTitle" v-model="store.composeTitle" maxlength="60" autocomplete="off" placeholder="例如：操作系统进程调度" />
         </div>
-      </div>
+      </template>
     </div>
     <div class="req-context">
       <template v-if="store.composeContext && course">

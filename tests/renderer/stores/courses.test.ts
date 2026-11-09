@@ -5,6 +5,7 @@ import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '@/lib/feedback.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
+import { useRepositoryIdentityStore } from '@/stores/repository_identity.ts';
 import { courseList, coursePreview, defaultCourse, fail, installApi, ok } from '../settings_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
@@ -85,6 +86,56 @@ test('import: a picked file is previewed, then copied with its hash; cancelling 
   await courses.importPicked();
   expect(api.courses.import).toHaveBeenCalledWith('b'.repeat(64));
   expect(courses.previewOpen).toBe(false);
+});
+
+test('load errors persist until a successful retry and a refresh failure keeps known data', async () => {
+  const courses = useCoursesStore();
+  expectConsole('error', /disk unavailable/);
+  api.courses.list.mockReturnValueOnce(fail('unknown', 'disk unavailable'));
+  await courses.load();
+  expect(courses.loading).toBe(false);
+  expect(courses.list).toBeNull();
+  expect(courses.loadError).toContain('disk unavailable');
+  await courses.load();
+  const known = courses.list;
+  expect(courses.loadError).toBeNull();
+  api.courses.list.mockReturnValueOnce(fail('unknown', 'disk unavailable'));
+  await courses.load();
+  expect(courses.list).toBe(known);
+  expect(courses.loadError).toContain('disk unavailable');
+});
+
+test('global user drafts survive repository reset and are separate from requirement drafts', () => {
+  const courses = useCoursesStore();
+  courses.editDraft('user:os', OS_COURSE).title = 'global draft';
+  courses.editDraft('requirement:repo-a:r1:h', OS_COURSE).title = 'interview draft';
+  courses.reset();
+  expect(courses.editDraft('user:os', OS_COURSE).title).toBe('global draft');
+  expect(courses.editDraft('requirement:repo-a:r1:h', OS_COURSE).title).toBe('interview draft');
+  expect(courses.editDraft('requirement:repo-b:r1:h', OS_COURSE).title).toBe(OS_COURSE.title);
+  courses.discardDraft('user:os');
+  expect(courses.editDraft('user:os', OS_COURSE).title).toBe(OS_COURSE.title);
+});
+
+test('a save returning after selecting another course or switching repositories cannot replace that view', async () => {
+  const courses = useCoursesStore();
+  await courses.loadView();
+  const held = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.save>>>();
+  api.courses.save.mockReturnValueOnce(held.promise);
+  const saving = courses.save({ ...OS_COURSE, id: 'mine' });
+  await courses.view('os');
+  held.resolve({ ok: true, data: { list: courseList(), preview: coursePreview('mine') } });
+  await saving;
+  expect(courses.viewed?.ref.id).toBe('os');
+  const late = Promise.withResolvers<Awaited<ReturnType<typeof api.courses.save>>>();
+  api.courses.save.mockReturnValueOnce(late.promise);
+  const oldSave = courses.save({ ...OS_COURSE, id: 'mine' });
+  courses.reset();
+  useRepositoryIdentityStore().currentId = 'repo-b';
+  late.resolve({ ok: true, data: { list: courseList(), preview: coursePreview('mine') } });
+  await oldSave;
+  expect(courses.list).toBeNull();
+  expect(courses.viewed).toBeNull();
 });
 
 test('the default pack is asked for once and kept across a reset', async () => {

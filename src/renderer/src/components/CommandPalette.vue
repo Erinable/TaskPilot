@@ -10,6 +10,7 @@ import { useTasksStore } from '@/stores/tasks.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { NAV_GROUPS, useSettingsStore } from '@/stores/settings.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
+import { useRepositoriesStore } from '@/stores/repositories.ts';
 import type { IconName } from '@/lib/icons.ts';
 
 const palette = usePaletteStore();
@@ -17,6 +18,13 @@ const tasks = useTasksStore();
 const requirements = useRequirementsStore();
 const settings = useSettingsStore();
 const execution = useExecutionStore();
+const repositories = useRepositoriesStore();
+watch(
+  () => repositories.switching,
+  (switching) => {
+    if (switching) palette.closePalette();
+  },
+);
 
 const query = ref('');
 const highlighted = ref(-1);
@@ -67,6 +75,7 @@ const scrollToActive = () => {
 };
 
 const choose = (entry: search.SearchEntry) => {
+  if (repositories.switching) return;
   palette.closePalette();
   const target = entry.target;
   const action =
@@ -92,6 +101,7 @@ const onInputKeydown = (event: KeyboardEvent) => {
 
 // ⌘K / Ctrl+K toggles; Escape closes even if focus left the input.
 const onDocumentKeydown = (event: KeyboardEvent) => {
+  if (repositories.switching) return;
   if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
     // Another dialog (confirm box) is open: leave it alone.
     if (!palette.visible && openDialogs.value > 0) return;

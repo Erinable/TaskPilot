@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia';
 
 import * as feedback from '@/lib/feedback.ts';
 import { createRequirementsCourseActions } from '@/stores/requirements_course.ts';
-import { installApi, requirement } from '../requirements_fakes.ts';
+import { LAB_ESTIMATE, coursePathInterview, installApi, requirement } from '../requirements_fakes.ts';
 import { fail, ok } from '../ipc_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
@@ -93,6 +93,52 @@ test('a draft refused on a field returns it for the form instead of a toast', as
   expect(await actions.saveDraft(item, OS_COURSE)).toEqual({ field: 'title', message: expect.any(String) });
   expect(feedback.showToast).not.toHaveBeenCalled();
   expect(actions.draftSaved.value).toBeNull();
+});
+
+test('skipping a stuck concept refreshes the path and estimate without allowing an unfinished stage to be bypassed', async () => {
+  const course = coursePathInterview();
+  const updated = requirement({
+    id: 'r1',
+    kind: 'course',
+    status: 'published',
+    course: {
+      ...course,
+      plan: { ...course.plan!, path: course.plan!.path.map((entry) => (entry.conceptId === 'round-robin' ? { ...entry, status: 'skipped' } : entry)) },
+    },
+  });
+  api.requirements.courseSkip.mockReturnValueOnce(ok(updated));
+  api.requirements.labEstimate.mockReturnValueOnce(ok({ ...LAB_ESTIMATE, previousLab: { packageId: 'lab-rr', title: 'RR' } }));
+  const actions = createRequirementsCourseActions(deps);
+  await actions.skipCourseConcept(item, 'round-robin');
+  expect(api.requirements.courseSkip).toHaveBeenCalledWith('r1', 'round-robin');
+  expect(deps.renderDetail).toHaveBeenCalledWith(updated);
+  expect(api.requirements.labEstimate).toHaveBeenCalledWith('r1', undefined);
+  await actions.generateLab(item);
+  expect(api.requirements.labGenerate).not.toHaveBeenCalled();
+  expect(feedback.showToast).toHaveBeenLastCalledWith(expect.stringContaining('当前 lab 还没有完成'));
+});
+
+test('skipping the final planned concept clears the old estimate without requesting an impossible next one', async () => {
+  api.requirements.courseSkip.mockReturnValueOnce(
+    ok(requirement({ ...item, status: 'published', course: coursePathInterview([{ conceptId: 'round-robin', status: 'skipped' }]) })),
+  );
+  const actions = createRequirementsCourseActions(deps);
+  await actions.loadLabEstimate(item, 'round-robin');
+  api.requirements.labEstimate.mockClear();
+  await actions.skipCourseConcept(item, 'round-robin');
+  expect(actions.labEstimate.value).toBeNull();
+  expect(api.requirements.labEstimate).not.toHaveBeenCalled();
+});
+
+test('a late estimate cannot replace a newer concept selection', async () => {
+  const held = Promise.withResolvers<IpcResult<requirementTypes.LabEstimate>>();
+  api.requirements.labEstimate.mockReturnValueOnce(held.promise);
+  const actions = createRequirementsCourseActions(deps);
+  const first = actions.loadLabEstimate(item, 'fcfs');
+  await actions.loadLabEstimate(item, 'round-robin');
+  held.resolve({ ok: true, data: { ...LAB_ESTIMATE, concepts: [{ id: 'fcfs', label: 'FCFS' }] } });
+  await first;
+  expect(actions.labEstimate.value?.conceptId).toBe('round-robin');
 });
 
 test('adding a lab reloads the queue and names the lab', async () => {

@@ -3,7 +3,7 @@
 // State events track files changed outside TaskPilot. Notes are global, so a
 // repository switch leaves them alone.
 import { defineStore } from 'pinia';
-import { computed, ref, toRaw } from 'vue';
+import { computed, ref, toRaw, watch } from 'vue';
 
 import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
@@ -170,6 +170,8 @@ export const useNotesStore = defineStore('notes', () => {
   type Draft = { title: string; body: string; category: packageTypes.GradeCategory | null; course: string | null; tags: string[]; summary: string | null };
   const current = ref<noteTypes.Note | null>(null);
   const draft = ref<Draft | null>(null);
+  let draftGeneration = 0;
+  watch(draft, () => (draftGeneration += 1), { deep: true, flush: 'sync' });
   // The file changed on disk while there were unsaved edits.
   const conflict = ref(false);
   const saving = ref(false);
@@ -240,9 +242,6 @@ export const useNotesStore = defineStore('notes', () => {
 
   // previousId: the id before a rename, whose entry goes.
   const afterSave = (saved: noteTypes.NoteSaved, previousId: string = saved.note.id) => {
-    current.value = saved.note;
-    draft.value = toDraft(saved.note);
-    conflict.value = false;
     const { body: _body, ...meta } = saved.note;
     notes.value = [meta, ...notes.value.filter((entry) => entry.id !== meta.id && entry.id !== previousId)];
     // Renames touch other notes; the next state event brings their versions.
@@ -254,16 +253,28 @@ export const useNotesStore = defineStore('notes', () => {
     const note = current.value;
     const edit = draft.value;
     if (!note || !edit || saving.value) return null;
+    const snapshot = toDraft(edit);
+    const fromSession = watcher.session();
+    const fromNote = noteGeneration;
+    const fromDraft = draftGeneration;
+    const sameEditor = () => fromSession === watcher.session() && fromNote === noteGeneration && current.value?.id === note.id;
     saving.value = true;
     try {
-      const saved = await call(window.taskpilot.notes.update(note.id, { ...toDraft(edit), baseVersion: note.version, force, renameLinks }));
+      const saved = await call(window.taskpilot.notes.update(note.id, { ...snapshot, baseVersion: note.version, force, renameLinks }));
+      if (fromSession !== watcher.session()) return saved.note;
       afterSave(saved, note.id);
+      if (sameEditor()) {
+        current.value = saved.note;
+        // Advance the base version while keeping anything typed after submission.
+        if (fromDraft === draftGeneration) draft.value = toDraft(saved.note);
+        conflict.value = false;
+      }
       renamePages(note.id, saved.note.id);
       if (saved.relinked) showToast(`已同步更新 ${saved.relinked} 篇笔记里的链接。`);
       return saved.note;
     } catch (error) {
       if (error instanceof IpcError && error.code === 'note_conflict') {
-        conflict.value = true;
+        if (sameEditor()) conflict.value = true;
         return null;
       }
       console.error('[notes] save failed', error);
@@ -297,7 +308,10 @@ export const useNotesStore = defineStore('notes', () => {
       notes.value = [meta, ...notes.value.filter((entry) => entry.id !== meta.id)];
       revision.value = null;
       if (open) {
-        afterSave(saved);
+        noteGeneration += 1;
+        current.value = saved.note;
+        draft.value = toDraft(saved.note);
+        conflict.value = false;
         history.value = [...history.value.slice(0, position.value + 1), { name: 'note', id: saved.note.id, heading: null }];
         position.value = history.value.length - 1;
         editing.value = true;
@@ -332,17 +346,29 @@ export const useNotesStore = defineStore('notes', () => {
   // so the summary is of what the developer sees.
   const summarize = async () => {
     if (summarizing.value || !current.value) return;
-    if (dirty.value && !(await save())) return;
-    const note = current.value;
+    const fromSession = watcher.session();
+    const fromNote = noteGeneration;
+    if (dirty.value) {
+      const saved = await save();
+      if (!saved || toRaw(current.value) !== saved) return;
+    }
+    if (fromSession !== watcher.session() || fromNote !== noteGeneration || dirty.value) return;
+    const note = current.value!;
+    const sameEditor = () => fromSession === watcher.session() && fromNote === noteGeneration && current.value?.id === note.id;
+    const summary = draft.value?.summary;
     summarizing.value = true;
     try {
       const saved = await call(window.taskpilot.notes.summarize(note.id, note.version));
-      const keep = draft.value;
+      if (fromSession !== watcher.session()) return;
       afterSave(saved);
-      if (keep && current.value) draft.value = { ...keep, summary: saved.note.summary };
+      if (sameEditor()) {
+        current.value = saved.note;
+        if (draft.value && draft.value.summary === summary) draft.value = { ...draft.value, summary: saved.note.summary };
+        conflict.value = false;
+      }
       showToast('导师写好了总结。');
     } catch (error) {
-      if (error instanceof IpcError && error.code === 'note_conflict') conflict.value = true;
+      if (sameEditor() && error instanceof IpcError && error.code === 'note_conflict') conflict.value = true;
       console.error('[notes] summarize failed', error);
       showToast(`总结没写成：${describeError(error)}`, 'error');
     } finally {
@@ -353,6 +379,7 @@ export const useNotesStore = defineStore('notes', () => {
   // ========== Folder ==========
   // Picks a folder in the native dialog and switches to it; false when cancelled.
   const resetPages = () => {
+    watcher.invalidate();
     history.value = [{ name: 'index', category: null, tag: null }];
     position.value = 0;
     editing.value = false;

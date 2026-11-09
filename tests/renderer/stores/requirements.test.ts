@@ -5,6 +5,7 @@ import { flushPromises } from '@vue/test-utils';
 
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
+import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/repository_identity.ts';
 import * as model from '../../../src/renderer/src/components/requirements/requirement_model.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
@@ -141,6 +142,38 @@ describe('requirements store', () => {
     expectConsole('error', /Failed to load requirements/);
     await store.refreshList();
     expect(store.items.map((item) => item.id)).toEqual(['r1']);
+  });
+
+  test('answer drafts are scoped to repository and question text and survive a reset', () => {
+    const store = useRequirementsStore();
+    const identity = useRepositoryIdentityStore();
+    const item = requirement({ questions: [{ text: '原问题', answer: '原回答' }] });
+    identity.currentId = 'a';
+    store.answerDraft(item).answers[0] = '仓库 A 的草稿';
+    store.reset();
+    identity.currentId = 'b';
+    expect(store.answerDraft(item).answers).toEqual(['原回答']);
+    store.answerDraft(item).answers[0] = '仓库 B 的草稿';
+    identity.currentId = 'a';
+    expect(store.answerDraft(item).answers).toEqual(['仓库 A 的草稿']);
+    const changed = requirement({ questions: [{ text: '重新澄清的问题', answer: '' }] });
+    expect(store.answerDraft(changed).answers).toEqual(['']);
+  });
+
+  test('list read failures preserve known data and clear after retry', async () => {
+    const store = useRequirementsStore();
+    const item = requirement();
+    state.list = [item];
+    await store.refreshList();
+    api.requirements.list.mockResolvedValueOnce({ ok: false, error: { code: 'unknown', message: '读取失败' } });
+    expectConsole('error', /Failed to load requirements/);
+    await store.refreshList();
+    expect(store.listLoaded).toBe(true);
+    expect(store.listLoading).toBe(false);
+    expect(store.listError).toBe('读取失败');
+    expect(store.items).toEqual([item]);
+    await store.refreshList();
+    expect(store.listError).toBeNull();
   });
 
   test('init loads the list without subscribing to state events', async () => {

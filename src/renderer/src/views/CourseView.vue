@@ -55,8 +55,15 @@ const groups = computed(() =>
 );
 
 const editing = ref(false);
+watch(
+  () => viewed.value?.ref.id,
+  (id) => {
+    editing.value = Boolean(id && viewed.value?.ref.source === 'user' && courses.drafts[`user:${id}`]);
+  },
+  { immediate: true },
+);
 const open = (id: string) => {
-  editing.value = false;
+  copying.value = false;
   run(courses.view(id));
 };
 
@@ -134,6 +141,23 @@ onBeforeUnmount(() => courses.leave());
       </div>
     </div>
 
+    <div v-if="courses.loadError" class="course-state" role="alert" data-error="courses-load">
+      <AppIcon name="alert" />
+      <span>
+        读取课程包失败：{{ courses.loadError }}
+        <template v-if="courses.list">。保留上次读取的内容。</template>
+      </span>
+      <button class="secondary-button small" type="button" data-action="retry-courses" :disabled="courses.loading" @click="run(courses.loadView())">
+        重试
+      </button>
+    </div>
+    <div v-if="courses.viewError" class="course-state" role="alert" data-error="course-preview">
+      <AppIcon name="alert" />
+      <span>读取「{{ courses.viewedId }}」失败：{{ courses.viewError }}。已显示的内容和草稿仍保留。</span>
+      <button class="secondary-button small" type="button" data-action="retry-preview" @click="courses.viewedId && run(courses.view(courses.viewedId))">
+        重试
+      </button>
+    </div>
     <div v-if="courses.list" class="course-columns">
       <nav class="panel glass course-list-panel" aria-label="课程包">
         <section v-for="group in groups" :key="group.source" class="course-group" :data-group="group.source">
@@ -150,6 +174,7 @@ onBeforeUnmount(() => courses.leave());
           >
             <span class="course-item-title">
               <strong>{{ entry.title ?? entry.id }}</strong>
+              <span v-if="entry.source === 'user' && courses.drafts[`user:${entry.id}`]" class="scope-badge selected">编辑草稿</span>
               <span v-if="inUse(entry)" class="scope-badge in-use">正在使用</span>
               <span v-else-if="isSelected(entry)" class="scope-badge selected">已选，待确认</span>
             </span>
@@ -275,13 +300,13 @@ onBeforeUnmount(() => courses.leave());
             </template>
           </section>
 
-          <CourseEditor v-if="editing && editable" :key="viewed.ref.contentHash" :pack="viewed.pack" @close="editing = false" />
+          <CourseEditor v-if="editing && editable" :key="viewed.ref.id" :pack="viewed.pack" @close="editing = false" />
           <CourseContent v-else :pack="viewed.pack" :changes="viewed.changes" />
         </div>
       </section>
     </div>
 
-    <p v-else class="empty-hint" data-loading>
+    <p v-else-if="courses.loading || !courses.loadError" class="empty-hint" data-loading>
       <AppIcon name="spinner" class="spin" />
       正在读取课程包…
     </p>

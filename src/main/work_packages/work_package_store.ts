@@ -49,6 +49,7 @@ export class WorkPackageStore {
   #file: string;
   #state = new Map<string, WorkPackageState>();
   #tasks: StoreTask[] = [];
+  #claims = new Map<string, symbol>();
   #onChanged?: StateChanged;
 
   setOnChanged(listener: StateChanged): void {
@@ -77,6 +78,7 @@ export class WorkPackageStore {
 
   // Seeds from task definitions, then overlays anything already on disk.
   async load(tasks: readonly StoreTask[]): Promise<this> {
+    this.#claims.clear();
     this.#tasks = [...tasks];
     for (const task of tasks) this.#state.set(task.id, initialState(task));
     try {
@@ -126,6 +128,18 @@ export class WorkPackageStore {
     const entry = this.#state.get(id);
     if (!entry) throw new StoreError(`Unknown work package: ${id}`, 'unknown_package');
     return structuredClone(entry);
+  }
+
+  // In-memory identity of a claim, including claims of the same commit in the
+  // same millisecond. Async coding work must retain this across preparation.
+  claimIdentity(id: string): symbol {
+    this.get(id);
+    let identity = this.#claims.get(id);
+    if (!identity) {
+      identity = Symbol(id);
+      this.#claims.set(id, identity);
+    }
+    return identity;
   }
 
   all(): Record<string, WorkPackageState> {
@@ -197,6 +211,10 @@ export class WorkPackageStore {
       entry.review = { ...(entry.review as Review), humanVerdict: name, humanAt: new Date().toISOString() };
     }
 
+    if (['claim', 'release', 'revert_replan'].includes(name)) {
+      this.#claims.delete(id);
+      entry.codingRun = null;
+    }
     if (next === 'done') entry.completedAt = new Date().toISOString();
     entry.status = next;
     this.#state.set(id, entry);
@@ -212,6 +230,7 @@ export class WorkPackageStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
     }
+    this.#claims.clear();
     this.#state = new Map(this.#tasks.map((task) => [task.id, initialState(task)]));
     await fs.rm(this.#file, { force: true });
     this.#notify();
@@ -381,6 +400,8 @@ export class WorkPackageStore {
         revisedAt: now,
       };
       // Same as a release: the new plan is claimed from a fresh baseline.
+      this.#claims.delete(id);
+      entry.codingRun = null;
       entry.baseline = null;
       entry.claimedAt = null;
       entry.completedSteps = [];
@@ -472,17 +493,23 @@ export class WorkPackageStore {
     return structuredClone(entry);
   }
 
-  async setCodingRun(id: string, run: CodingRun | null): Promise<WorkPackageState> {
+  async setCodingRun(id: string, run: CodingRun | null, claim?: symbol): Promise<WorkPackageState> {
     const entry = this.get(id);
+    if (claim !== undefined && (this.claimIdentity(id) !== claim || entry.status !== 'in_progress' || !entry.baseline)) {
+      throw new StoreError('The coding claim is no longer current', 'invalid_state');
+    }
     entry.codingRun = run ? structuredClone(run) : null;
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);
   }
 
-  async updateCodingRun(id: string, patch: Partial<CodingRun>): Promise<WorkPackageState> {
+  async updateCodingRun(id: string, patch: Partial<CodingRun>, expect?: string): Promise<WorkPackageState> {
     const entry = this.get(id);
     if (!entry.codingRun) throw new StoreError('No coding run exists', 'invalid_state');
+    if (expect !== undefined && (entry.codingRun.id !== expect || entry.status !== 'in_progress' || !entry.baseline)) {
+      throw new StoreError('The coding run is no longer current', 'invalid_state');
+    }
     if (patch.id !== undefined || patch.packageId !== undefined || patch.baseline !== undefined || patch.runName !== undefined) {
       throw new StoreError('Coding run identity cannot change', 'invalid_argument');
     }

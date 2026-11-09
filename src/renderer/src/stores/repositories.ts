@@ -74,14 +74,18 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     generation.value += 1;
   };
 
-  // Settles what belongs to the old repository: unsaved settings and notes.
+  // Preserve current data until the main process has accepted the switch.
   const leaveCurrent = async () => {
     const app = useAppStore();
     if (!(await app.confirmLeaveSettings())) return false;
-    await useReleaseStore().flushNotes();
+    return useReleaseStore().flushNotes();
+  };
+
+  const resetCurrent = async () => {
+    const app = useAppStore();
     const execution = useExecutionStore();
     useRequirementsStore().reset();
-    useReleaseStore().leave();
+    useReleaseStore().leave({ saveNotes: false });
     execution.close();
     useTasksStore().reset();
     // What the views read for the old repository; each view reloads on remount.
@@ -117,7 +121,9 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     switching.value = true;
     try {
       if (!(await confirmCancel()) || !(await leaveCurrent())) return false;
-      apply(await call(action()));
+      const next = await call(action());
+      await resetCurrent();
+      apply(next);
       await reloadAll();
       return true;
     } catch (error) {
@@ -135,17 +141,24 @@ export const useRepositoriesStore = defineStore('repositories', () => {
   const switchWith = async <T>(action: () => Promise<T>, failure: string): Promise<T | null> => {
     if (switching.value) return null;
     switching.value = true;
+    const previousId = currentId.value;
     try {
       if (!(await confirmCancel()) || !(await leaveCurrent())) return null;
       const result = await action();
-      apply(await call(window.taskpilot.repositories.list()));
+      const next = await call(window.taskpilot.repositories.list());
+      await resetCurrent();
+      apply(next);
       await reloadAll();
       return result;
     } catch (error) {
       console.error('[repositories] switch failed', error);
       showToast(`${failure}：${describeError(error)}`);
-      // The action may have switched before failing; show where things are.
+      // An action may have committed a switch before its later step failed.
       await refresh();
+      if (currentId.value !== previousId) {
+        await resetCurrent();
+        await reloadAll();
+      }
       return null;
     } finally {
       switching.value = false;

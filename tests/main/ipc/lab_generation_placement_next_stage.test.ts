@@ -68,6 +68,31 @@ test('a concept failing at easy twice is stuck: notes are listed, and skipping m
   );
 });
 
+test('a stuck learner can review and skip while an unfinished placed lab still blocks the next stage before any model call', async () => {
+  const coursePath = {
+    ...lab.RR_PATH,
+    path: lab.RR_PATH.path.map((entry) => (entry.conceptId === 'priority-sched' ? { ...entry, status: 'planned' } : entry)),
+  };
+  const h = await lab.harness({ agent: lab.team({ path: coursePath }) });
+  const id = await lab.confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  await settleLab(h, id);
+  await h.call(CHANNELS.requirementsLabPlace, id, await lab.labFolder());
+  await gradeOnce(h, 'round-robin', 0, { digest: 'd1' });
+  await gradeOnce(h, 'round-robin', 0, { digest: 'd2' });
+  const calls = h.agentCalls.length;
+  const estimate = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.ok(estimate.stuck);
+  assert.deepEqual(estimate.previousLab, { packageId: 'lab-round-robin', title: '时间片轮转调度' });
+  assert.equal((await h.call(CHANNELS.requirementsCourseSkip, id, 'round-robin')).error, undefined);
+  const next = (await h.call(CHANNELS.requirementsLabEstimate, id)).data;
+  assert.equal(next.concepts[0].id, 'priority-sched');
+  assert.equal(next.previousLab.packageId, 'lab-round-robin');
+  assert.equal((await h.call(CHANNELS.requirementsLabGenerate, id)).error.code, 'previous_lab_open');
+  assert.equal(h.agentCalls.length, calls);
+  assert.notEqual(h.store.get('lab-round-robin').status, 'done');
+});
+
 test('two fails at medium lower the next lab to easy', async () => {
   const h = await lab.harness({ agent: lab.team() });
   const id = await lab.confirmedCourse(h);

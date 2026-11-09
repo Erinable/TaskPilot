@@ -31,11 +31,18 @@ export const useReleaseStore = defineStore('release', () => {
   // so state events never overwrite what the user is typing.
   const notesText = ref('');
   let notesSource: string | null = null;
+  let notesGeneration = 0;
 
   const apply = (next: releaseTypes.ReleaseState) => {
     state.value = next;
     const nextDraft = next.draft;
     const source = nextDraft?.status === 'ready' ? nextDraft.startedAt : null;
+    if (source !== notesSource) {
+      notesGeneration += 1;
+      notesSaving = null;
+      if (notesTimer !== null) clearTimeout(notesTimer);
+      notesTimer = null;
+    }
     if (source !== null && source !== notesSource) {
       notesText.value = nextDraft!.notesText;
       notesStatus.value = 'idle';
@@ -66,9 +73,9 @@ export const useReleaseStore = defineStore('release', () => {
 
   const enter = () => watcher.start();
 
-  const leave = () => {
+  const leave = ({ saveNotes = true } = {}) => {
     watcher.stop();
-    flushNotes().catch((error) => console.error(error));
+    if (saveNotes) flushNotes().catch((error) => console.error(error));
   };
 
   // ========== Start point ==========
@@ -127,23 +134,47 @@ export const useReleaseStore = defineStore('release', () => {
   // ========== Draft edits ==========
   const notesStatus = ref<NotesStatus>('idle');
   let notesTimer: ReturnType<typeof setTimeout> | null = null;
+  let notesSaving: Promise<boolean> | null = null;
 
-  const update = async (input: releaseTypes.ReleaseDraftInput) => apply(await call(window.taskpilot.release.updateDraft(input)));
+  const update = async (input: releaseTypes.ReleaseDraftInput) => {
+    const generation = notesGeneration;
+    const repositoryId = repository.currentId;
+    const next = await call(window.taskpilot.release.updateDraft(input));
+    if (generation === notesGeneration && repositoryId === repository.currentId) apply(next);
+  };
 
-  const saveNotes = async () => {
+  const saveNotes = (): Promise<boolean> => {
     if (notesTimer !== null) clearTimeout(notesTimer);
     notesTimer = null;
-    notesStatus.value = 'saving';
+    if (notesSaving) return notesSaving;
+    const generation = notesGeneration;
     const text = notesText.value;
-    try {
-      await update({ notes: text });
-      // Typing during the save leaves the newer text unsaved.
-      notesStatus.value = notesText.value === text ? 'saved' : 'dirty';
-    } catch (error) {
-      console.error('[release] save notes failed', error);
-      notesStatus.value = 'error';
-      showToast(`保存说明失败：${describeError(error)}`, 'error');
-    }
+    notesStatus.value = 'saving';
+    const pending = (async () => {
+      try {
+        await update({ notes: text });
+        if (generation !== notesGeneration) return false;
+        // Typing during the save leaves the newer text unsaved.
+        notesStatus.value = notesText.value === text ? 'saved' : 'dirty';
+        return true;
+      } catch (error) {
+        if (generation !== notesGeneration) return false;
+        console.error('[release] save notes failed', error);
+        notesStatus.value = 'error';
+        showToast(`保存说明失败：${describeError(error)}`, 'error');
+        return false;
+      }
+    })().finally(() => {
+      if (notesSaving !== pending) return;
+      notesSaving = null;
+      if (generation === notesGeneration && notesStatus.value === 'dirty' && notesTimer === null) {
+        notesTimer = setTimeout(() => {
+          saveNotes().catch((error) => console.error(error));
+        }, NOTES_DEBOUNCE_MS);
+      }
+    });
+    notesSaving = pending;
+    return pending;
   };
 
   const editNotes = (text: string) => {
@@ -155,9 +186,18 @@ export const useReleaseStore = defineStore('release', () => {
     }, NOTES_DEBOUNCE_MS);
   };
 
-  // Saves pending edits now (blur, leaving the page, before finishing).
-  const flushNotes = async () => {
-    if (notesStatus.value === 'dirty') await saveNotes();
+  // Waits for an in-flight save, then saves newer edits or retries a failed save.
+  const flushNotes = async (): Promise<boolean> => {
+    if (notesTimer !== null) clearTimeout(notesTimer);
+    notesTimer = null;
+    const generation = notesGeneration;
+    while (generation === notesGeneration) {
+      if (notesSaving && !(await notesSaving)) return false;
+      if (generation !== notesGeneration) return false;
+      if (notesStatus.value !== 'dirty' && notesStatus.value !== 'error') return true;
+      if (!(await saveNotes())) return false;
+    }
+    return false;
   };
 
   const setChecked = async (index: number, value: boolean) => {
@@ -177,16 +217,18 @@ export const useReleaseStore = defineStore('release', () => {
 
   const finish = async () => {
     const plan = draft.value?.plan;
-    if (!canFinish.value || !plan) return;
+    if (!canFinish.value || !plan || finishing.value) return;
+    const generation = notesGeneration;
+    const repositoryId = repository.currentId;
     const accepted = await confirmAction({
       title: '完成发布',
       body: `把 ${plan.nextVersion} 记入发布历史。TaskPilot 不会打 tag、提交或推送，这些请你自己完成。`,
       accept: '完成发布',
     });
-    if (!accepted) return;
+    if (!accepted || generation !== notesGeneration || repositoryId !== repository.currentId) return;
     finishing.value = true;
     try {
-      await flushNotes();
+      if (!(await flushNotes()) || generation !== notesGeneration || repositoryId !== repository.currentId) return;
       const release = await call(window.taskpilot.release.finish());
       showToast(`已记录发布 ${release.version}`);
     } catch (error) {
@@ -230,7 +272,10 @@ export const useReleaseStore = defineStore('release', () => {
     writing.value = true;
     writeError.value = null;
     try {
-      await flushNotes();
+      if (!(await flushNotes())) {
+        writeError.value = '更新说明尚未保存，请重试保存后再写入文件。';
+        return false;
+      }
       const result = await call(window.taskpilot.release.writeNotes({ path: trimmed }));
       showToast(`已写入 ${result.path}`);
       return true;
@@ -281,6 +326,10 @@ export const useReleaseStore = defineStore('release', () => {
   watch(
     () => repository.currentId,
     () => {
+      notesGeneration += 1;
+      notesSaving = null;
+      if (notesTimer !== null) clearTimeout(notesTimer);
+      notesTimer = null;
       watcher.invalidate();
       state.value = null;
       loadError.value = null;

@@ -60,7 +60,7 @@ watch(
 
 // Dialogs (Element Plus) handle their own Escape; these are the page shortcuts.
 const onKeydown = (event: KeyboardEvent) => {
-  if (openDialogs.value > 0) return;
+  if (openDialogs.value > 0 || repositories.switching) return;
   if (event.key === 'Escape' && app.view === 'execution' && !execution.deviationOpen) {
     app
       .navigate('queue')
@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
     <span class="orb orb-c"></span>
   </div>
 
-  <div class="window-shell">
+  <div class="window-shell" :inert="repositories.switching" :aria-busy="repositories.switching">
     <TopBar />
     <!-- :style goes through the CSSOM, which the page CSP allows (unlike style attributes). -->
     <div class="app-grid" :class="{ 'sidebar-collapsed': app.sidebarCollapsed }" :style="{ '--sidebar-width': `${app.sidebarWidth}px` }">
@@ -144,5 +144,20 @@ onBeforeUnmount(() => {
       </main>
     </div>
   </div>
+  <p v-if="repositories.switching" class="repository-switch-notice glass-strong" role="status">正在准备切换仓库…</p>
   <CommandPalette />
 </template>
+
+<style scoped>
+.repository-switch-notice {
+  position: fixed;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: 10;
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+</style>

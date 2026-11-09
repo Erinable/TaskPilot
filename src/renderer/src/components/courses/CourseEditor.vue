@@ -18,12 +18,23 @@ import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import { COURSE_LIMITS, checkCourse } from '@shared/course_rules.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
-const props = defineProps<{ pack: CoursePack; save?: (pack: CoursePack) => Promise<{ field: string; message: string } | null> }>();
+const props = defineProps<{
+  pack: CoursePack;
+  draftKey?: string;
+  save?: (pack: CoursePack) => Promise<{ field: string; message: string } | null>;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
 const courses = useCoursesStore();
 
-const draft = ref(draftOf(props.pack));
+const draftKey = props.draftKey ?? (props.save ? null : `user:${props.pack.id}`);
+const draft = ref(draftKey ? courses.editDraft(draftKey, props.pack) : draftOf(props.pack));
+const saving = ref(false);
+const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(draftOf(props.pack)));
+const cancel = () => {
+  if (draftKey) courses.discardDraft(draftKey);
+  emit('close');
+};
 // Errors show once saving was tried, then follow the edits.
 const tried = ref(false);
 // The concept list is mounted only when opened: os has dozens of concepts,
@@ -99,17 +110,30 @@ const removeExample = (index: number, exampleIndex: number) => {
 };
 
 const save = async () => {
+  if (saving.value) return;
   tried.value = true;
   serverError.value = null;
   if (!checked.value.pack) return;
-  const refused = await (props.save ?? courses.save)(checked.value.pack);
-  if (refused) serverError.value = refused;
-  else emit('close');
+  const snapshot = JSON.stringify(draft.value);
+  saving.value = true;
+  try {
+    const refused = await (props.save ?? courses.save)(checked.value.pack);
+    if (refused) serverError.value = refused;
+    else if (JSON.stringify(draft.value) === snapshot) {
+      if (draftKey && courses.drafts[draftKey] === draft.value) courses.discardDraft(draftKey);
+      emit('close');
+    }
+  } finally {
+    saving.value = false;
+  }
 };
 </script>
 
 <template>
   <form class="course-editor" novalidate aria-label="编辑课程包" @submit.prevent="save().catch((error) => console.error(error))" @input="edited">
+    <p v-if="dirty && draftKey" class="course-path-note" role="status" data-field="draft-status">
+      有未保存修改。草稿会保留，切课程、离页或切仓后可以继续编辑；取消会丢弃草稿。
+    </p>
     <p class="course-editor-note" role="note">
       <AppIcon name="info" />
       <span>保存后内容就变了：要在本机重新确认，确认之前规划和判卷不会用这个课程包。</span>
@@ -307,8 +331,8 @@ const save = async () => {
     <p v-for="[field, message] in otherErrors" :key="field" class="course-field-error" role="alert">{{ message }}</p>
 
     <div class="course-editor-actions">
-      <button class="secondary-button" type="button" @click="emit('close')">取消</button>
-      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy">
+      <button class="secondary-button" type="button" :disabled="saving" @click="cancel">取消</button>
+      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy || saving" :aria-busy="saving">
         <AppIcon name="check" />
         保存
       </button>

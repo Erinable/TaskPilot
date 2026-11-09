@@ -35,6 +35,13 @@ html.dark {
   --el-font-size-large: var(--text-lg);
 }
 
+/* Filled selections need the same white-text contrast in both themes. */
+.el-radio-button {
+  --el-radio-button-checked-bg-color: var(--accent-fill);
+  --el-radio-button-checked-text-color: var(--text-on-color);
+  --el-radio-button-checked-border-color: var(--accent-fill);
+}
+
 /* A checked box marks the state; its label keeps the text colour so it does
  * not read as a link. */
 .el-checkbox__input.is-checked + .el-checkbox__label {

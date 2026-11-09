@@ -10,6 +10,7 @@ import { useNotificationsStore } from '../../../src/renderer/src/stores/notifica
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
+import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import { installApi, taskView } from '../execution_fakes.ts';
 import { fail, ok } from '../ipc_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
@@ -40,6 +41,66 @@ describe('execution store', () => {
     expect(useAppStore().view).toBe('execution');
     expect(execution.current?.id).toBe('t1');
     expect(execution.diffHint).toBe('相对基线 abcdef12');
+  });
+
+  test('reference reads refuse locked tasks and discard replies after switching packages', async () => {
+    const referenceRun: packageTypes.ReferenceRun = {
+      id: 'r1',
+      status: 'ready',
+      startedAt: '',
+      finishedAt: '',
+      error: null,
+      files: [],
+      costUsd: 0,
+      revealedAt: null,
+    };
+    current.task = taskView({ referenceRun, referenceLock: { unlocked: false, reason: 'not_submitted' } });
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    await execution.loadReference();
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    execution.adoptTask({ ...current.task, referenceLock: { unlocked: true, reason: 'tests_passed' } });
+    const held = Promise.withResolvers<IpcResult<string>>();
+    api.practice.reference.mockReturnValueOnce(held.promise);
+    const reading = execution.loadReference();
+    expect(execution.referenceLoading).toBe(true);
+    current.task = taskView({ id: 't2', referenceRun: { ...referenceRun, id: 'r2' }, referenceLock: { unlocked: true, reason: 'tests_passed' } });
+    await execution.open('t2');
+    held.resolve({ ok: true, data: 'old patch' });
+    await reading;
+    expect(execution.reference).toBeNull();
+    expect(execution.referenceLoading).toBe(false);
+    expect(execution.referenceError).toBeNull();
+    await execution.loadReference();
+    expect(execution.reference?.id).toBe('r2');
+    execution.close();
+    expect(execution.reference).toBeNull();
+  });
+
+  test('a delayed reference error from a replaced run does not appear on the new run', async () => {
+    const referenceRun: packageTypes.ReferenceRun = {
+      id: 'r1',
+      status: 'ready',
+      startedAt: '',
+      finishedAt: '',
+      error: null,
+      files: [],
+      costUsd: 0,
+      revealedAt: null,
+    };
+    current.task = taskView({ referenceRun, referenceLock: { unlocked: true, reason: 'tests_passed' } });
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    const held = Promise.withResolvers<IpcResult<string>>();
+    api.practice.reference.mockReturnValueOnce(held.promise);
+    const reading = execution.loadReference();
+    execution.adoptTask({ ...current.task, referenceRun: { ...referenceRun, id: 'r2' } });
+    await execution.loadReference();
+    held.resolve({ ok: false, error: { code: 'unknown', message: 'old failure' } });
+    await reading;
+    expect(execution.reference?.id).toBe('r2');
+    expect(execution.referenceError).toBeNull();
+    expect(execution.referenceLoading).toBe(false);
   });
 
   test('open() reports a failed load and stays put', async () => {
