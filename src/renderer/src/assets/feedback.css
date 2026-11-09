@@ -1,0 +1,226 @@
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 12, 20, 0.28);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  backdrop-filter: blur(8px) saturate(120%);
+  animation: fade-in 0.2s var(--ease);
+}
+.modal-backdrop[hidden] {
+  display: none;
+}
+.task-modal {
+  width: min(540px, 100%);
+  padding: 28px 30px 26px;
+  border-radius: 20px;
+  animation: modal-in 0.26s var(--ease);
+}
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+.modal-badge {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 14px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--radius-lg);
+}
+.modal-badge .icon {
+  width: 20px;
+  height: 20px;
+}
+.modal-kicker {
+  color: var(--text-tertiary);
+  font: 500 var(--text-xs) var(--font-sans);
+}
+.task-modal h2 {
+  margin: 6px 0 8px;
+  color: var(--text);
+  font-size: var(--text-2xl);
+}
+.modal-intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: 24px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
+  padding: 11px 16px 11px 11px;
+  color: var(--text);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  pointer-events: none;
+  transition:
+    opacity 0.22s var(--ease),
+    transform 0.22s var(--ease);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.toast-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  color: var(--text-on-color);
+  background: var(--success);
+  border-radius: var(--radius-md);
+}
+.toast-icon .icon {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.25;
+}
+.toast.error .toast-icon {
+  background: var(--danger);
+}
+.toast.info .toast-icon {
+  background: var(--accent);
+}
+
+/* Motion */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Responsive */
+@media (max-width: 1180px) {
+  .main-content {
+    --page-pad-x: var(--space-6);
+  }
+  .content-columns,
+  .exec-columns {
+    grid-template-columns: 1fr;
+  }
+  .settings-view {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .requirements-view {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+  .req-detail {
+    padding: 32px 28px 64px;
+  }
+  .settings-content {
+    padding: 32px 28px 120px;
+  }
+  .settings-savebar {
+    left: calc(var(--sidebar-current) + 200px + (100vw - var(--sidebar-current) - 200px) / 2);
+    width: min(680px, calc(100vw - var(--sidebar-current) - 200px - 48px));
+  }
+  .setting-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+  }
+  .avatar-control,
+  .setting-control.end {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 760px) {
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    display: none;
+  }
+  .brand-area {
+    width: auto;
+  }
+  .brand-caption,
+  .workspace-picker #workspaceName {
+    display: none;
+  }
+  .main-content {
+    --page-pad-x: var(--space-4);
+    --page-pad-y: var(--space-5);
+  }
+  .page-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+  }
+  .metrics-row {
+    grid-template-columns: 1fr;
+  }
+}

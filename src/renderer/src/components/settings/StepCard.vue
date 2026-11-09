@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import 'element-plus/theme-chalk/el-input-number.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { PARSER_LABELS, SOURCE_LABELS, STEP_HINTS, stepIcon, stepLabel } from '@/lib/check_steps.ts';

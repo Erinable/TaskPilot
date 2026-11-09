@@ -1,20 +1,30 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { defineAsyncComponent, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import UserAvatar from '@/components/UserAvatar.vue';
+import { useAppStore } from '@/stores/app.ts';
 import { NAV_GROUPS, useSettingsStore } from '@/stores/settings.ts';
-import ProfilePage from '@/components/settings/ProfilePage.vue';
-import PreferencesPage from '@/components/settings/PreferencesPage.vue';
-import RepositoryPage from '@/components/settings/RepositoryPage.vue';
-import CommandsPage from '@/components/settings/CommandsPage.vue';
-import CoursesPage from '@/components/settings/CoursesPage.vue';
-import SetupPage from '@/components/settings/SetupPage.vue';
-import EnvironmentPage from '@/components/settings/EnvironmentPage.vue';
-import DataPage from '@/components/settings/DataPage.vue';
-import AgentsPage from '@/components/settings/AgentsPage.vue';
+import type { SettingsPage } from '@/stores/settings.ts';
+
+const ProfilePage = defineAsyncComponent(() => import('@/components/settings/ProfilePage.vue'));
+const PreferencesPage = defineAsyncComponent(() => import('@/components/settings/PreferencesPage.vue'));
+const RepositoryPage = defineAsyncComponent(() => import('@/components/settings/RepositoryPage.vue'));
+const CommandsPage = defineAsyncComponent(() => import('@/components/settings/CommandsPage.vue'));
+const CoursesPage = defineAsyncComponent(() => import('@/components/settings/CoursesPage.vue'));
+const SetupPage = defineAsyncComponent(() => import('@/components/settings/SetupPage.vue'));
+const EnvironmentPage = defineAsyncComponent(() => import('@/components/settings/EnvironmentPage.vue'));
+const DataPage = defineAsyncComponent(() => import('@/components/settings/DataPage.vue'));
+const AgentsPage = defineAsyncComponent(() => import('@/components/settings/AgentsPage.vue'));
 
 const settings = useSettingsStore();
+// Keep visited pages mounted so expanded controls and local editor drafts survive.
+const visitedPages = ref(new Set<SettingsPage>([settings.activePage]));
+watch(
+  () => settings.activePage,
+  (page) => visitedPages.value.add(page),
+  { flush: 'sync' },
+);
 
 const run = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
@@ -24,7 +34,9 @@ const onSubmit = () => run(settings.saveAll());
 const onSearch = (event: Event) => settings.search((event.target as HTMLInputElement).value);
 // The view loads on first open, after settings.open() has tried to focus the
 // nav item, so the first mount focuses it instead.
-onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-page="${settings.activePage}"]`)?.focus());
+onMounted(() => {
+  if (useAppStore().view === 'settings') document.querySelector<HTMLElement>(`.settings-nav-item[data-page="${settings.activePage}"]`)?.focus();
+});
 </script>
 
 <template>
@@ -91,7 +103,7 @@ onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-pag
 
     <div class="settings-content">
       <form v-show="settings.activePage === 'profile'" id="profileForm" class="settings-page" data-page="profile" novalidate @submit.prevent="onSubmit">
-        <ProfilePage />
+        <ProfilePage v-if="visitedPages.has('profile')" @vue:mounted="settings.focusPendingField('profile')" />
       </form>
       <form
         v-show="settings.activePage === 'preferences'"
@@ -101,7 +113,7 @@ onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-pag
         novalidate
         @submit.prevent="onSubmit"
       >
-        <PreferencesPage />
+        <PreferencesPage v-if="visitedPages.has('preferences')" @vue:mounted="settings.focusPendingField('preferences')" />
       </form>
       <form
         v-show="settings.activePage === 'repository'"
@@ -111,13 +123,17 @@ onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-pag
         novalidate
         @submit.prevent="onSubmit"
       >
-        <RepositoryPage />
+        <RepositoryPage v-if="visitedPages.has('repository')" @vue:mounted="settings.focusPendingField('repository')" />
       </form>
       <form v-show="settings.activePage === 'commands'" id="commandsForm" class="settings-page" data-page="commands" novalidate @submit.prevent="onSubmit">
-        <CommandsPage />
+        <CommandsPage v-if="visitedPages.has('commands')" @vue:mounted="settings.focusPendingField('commands')" />
       </form>
-      <section v-show="settings.activePage === 'courses'" id="coursesPage" class="settings-page" data-page="courses"><CoursesPage /></section>
-      <section v-show="settings.activePage === 'setup'" id="setupPage" class="settings-page" data-page="setup"><SetupPage /></section>
+      <section v-show="settings.activePage === 'courses'" id="coursesPage" class="settings-page" data-page="courses">
+        <CoursesPage v-if="visitedPages.has('courses')" @vue:mounted="settings.focusPendingField('courses')" />
+      </section>
+      <section v-show="settings.activePage === 'setup'" id="setupPage" class="settings-page" data-page="setup">
+        <SetupPage v-if="visitedPages.has('setup')" @vue:mounted="settings.focusPendingField('setup')" />
+      </section>
       <form
         v-show="settings.activePage === 'environment'"
         id="environmentForm"
@@ -126,9 +142,11 @@ onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-pag
         novalidate
         @submit.prevent="onSubmit"
       >
-        <EnvironmentPage />
+        <EnvironmentPage v-if="visitedPages.has('environment')" @vue:mounted="settings.focusPendingField('environment')" />
       </form>
-      <section v-show="settings.activePage === 'data'" id="dataPage" class="settings-page" data-page="data"><DataPage /></section>
+      <section v-show="settings.activePage === 'data'" id="dataPage" class="settings-page" data-page="data">
+        <DataPage v-if="visitedPages.has('data')" @vue:mounted="settings.focusPendingField('data')" />
+      </section>
       <form
         v-show="settings.activePage === 'agents'"
         id="agentsForm"
@@ -137,7 +155,7 @@ onMounted(() => document.querySelector<HTMLElement>(`.settings-nav-item[data-pag
         novalidate
         @submit.prevent="onSubmit"
       >
-        <AgentsPage v-if="settings.activePage === 'agents'" />
+        <AgentsPage v-if="visitedPages.has('agents')" @vue:mounted="settings.focusPendingField('agents')" />
       </form>
 
       <div v-show="settings.anyDirty" id="settingsSavebar" class="settings-savebar glass-strong">

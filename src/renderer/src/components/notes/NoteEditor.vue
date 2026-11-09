@@ -5,6 +5,7 @@
 // file another program changed without asking; renaming asks whether to
 // update [[links]] in other notes. Save or cancel returns to reading.
 import { computed, nextTick, ref } from 'vue';
+import 'element-plus/theme-chalk/el-segmented.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import NoteMarkdown from '@/components/notes/NoteMarkdown.vue';

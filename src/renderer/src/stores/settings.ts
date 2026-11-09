@@ -1,7 +1,7 @@
 // Settings view: secondary nav, search, one form per page, and a shared save
 // bar for unsaved edits. Drafts live here, so they survive leaving the view.
 import { defineStore } from 'pinia';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, toRaw } from 'vue';
 
 import { call, IpcError } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
@@ -90,8 +90,22 @@ export type StatusKey = 'root' | 'displayName' | workspaceTypes.CheckKind;
 export type WorkspaceDraft = model.WorkspaceDraft;
 export type Fact = { term: string; value: string };
 
-// Drafts are reactive proxies, which structuredClone rejects; they are plain JSON.
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+// Copy each known mutable node, including independently reactive nested values.
+// Unwrapping only the root leaves those proxies in the IPC payload. These
+// copies run for load/save/discard, outside computed dependency tracking.
+const copyWorkspace = (value: WorkspaceDraft): WorkspaceDraft => {
+  const form = toRaw(value);
+  return {
+    root: form.root,
+    steps: Object.fromEntries(
+      Object.entries(toRaw(form.steps)).map(([id, entry]) => {
+        if (!entry) return [id, entry];
+        const step = toRaw(entry);
+        return [id, { ...step, lines: [...toRaw(step.lines)], parser: { ...toRaw(step.parser) } }];
+      }),
+    ),
+  };
+};
 
 const emptyStatus = (): FieldStatus => ({ tone: null, message: '' });
 
@@ -102,14 +116,18 @@ const workspaceForm = (view: workspaceTypes.WorkspaceView): WorkspaceDraft => ({
 });
 
 // The form shape of saved preferences, dropping derived fields.
-const preferencesForm = (prefs: settingsTypes.Preferences): settingsTypes.PreferencesInput => ({
-  profile: { displayName: prefs.profile.displayName, avatarColor: prefs.profile.avatarColor },
-  appearance: { ...prefs.appearance },
-  environment: { ...prefs.environment },
-  agents: clone(prefs.agents),
+const preferencesForm = (value: settingsTypes.PreferencesInput): settingsTypes.PreferencesInput => {
+  const prefs = toRaw(value);
   // Older main processes send no coding section; sandbox is the default.
-  coding: clone(prefs.coding ?? { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 }),
-});
+  const coding = toRaw(prefs.coding ?? { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 });
+  return {
+    profile: { displayName: prefs.profile.displayName, avatarColor: prefs.profile.avatarColor },
+    appearance: { ...toRaw(prefs.appearance) },
+    environment: { ...toRaw(prefs.environment) },
+    agents: Object.fromEntries(Object.entries(toRaw(prefs.agents)).map(([id, config]) => [id, { ...toRaw(config) }])) as agentRuntimeTypes.AgentSettings,
+    coding: { ...coding, extraRead: [...toRaw(coding.extraRead)], extraWrite: [...toRaw(coding.extraWrite)] },
+  };
+};
 
 export const useSettingsStore = defineStore('settings', () => {
   // ========== Drafts ==========
@@ -138,12 +156,12 @@ export const useSettingsStore = defineStore('settings', () => {
     agentStatus,
   } = agentSettings;
   const fillPreferences = (prefs: settingsTypes.PreferencesInput) => {
-    preferencesDraft.value = clone(prefs);
+    preferencesDraft.value = preferencesForm(prefs);
     agentFieldErrors.value = {};
     agentConfigNotices.value = {};
   };
   const fillWorkspace = (form: WorkspaceDraft) => {
-    workspaceDraft.value = clone(form);
+    workspaceDraft.value = copyWorkspace(form);
   };
 
   // ========== Unsaved changes ==========
@@ -200,7 +218,22 @@ export const useSettingsStore = defineStore('settings', () => {
     setStatus('displayName', over ? 'error' : null, over ? `最多 ${MAX_NAME_LENGTH} 个字符` : '');
   };
 
-  const focusById = (id: string) => nextTick(() => document.getElementById(id)?.focus());
+  // A validation target may belong to a page whose chunk has not mounted yet.
+  const pendingFocus = ref<{ page: SettingsPage; id: string } | null>(null);
+  const pendingFieldFocus = computed(() => pendingFocus.value);
+  const focusPendingField = async (page: SettingsPage) => {
+    await nextTick();
+    if (!pendingFocus.value || pendingFocus.value.page !== page || activePage.value !== page || useAppStore().view !== 'settings') return;
+    const element = document.getElementById(pendingFocus.value.id);
+    if (element) {
+      element.focus();
+      pendingFocus.value = null;
+    }
+  };
+  const focusById = (id: string) => {
+    pendingFocus.value = { page: activePage.value, id };
+    return focusPendingField(activePage.value);
+  };
 
   // A step error names `steps.<id>.<field>`; it goes beside that step.
   // False when `field` is not a step's.
@@ -278,7 +311,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!workspaceDraft.value) return false;
     clearWorkspaceStatus();
     try {
-      renderWorkspaceCheck(await call(window.taskpilot.workspace.check(model.workspaceForm(clone(workspaceDraft.value)))));
+      renderWorkspaceCheck(await call(window.taskpilot.workspace.check(model.workspaceForm(copyWorkspace(workspaceDraft.value)))));
       return true;
     } catch (error) {
       showFieldError(error);
@@ -414,14 +447,14 @@ export const useSettingsStore = defineStore('settings', () => {
       if (current.workspace && workspaceDraft.value) {
         // check first, so a failure is shown beside its field before anything is written
         if (!(await checkWorkspace())) return false;
-        const view = await call(window.taskpilot.workspace.set(model.workspaceForm(clone(workspaceDraft.value))));
+        const view = await call(window.taskpilot.workspace.set(model.workspaceForm(copyWorkspace(workspaceDraft.value))));
         workspaceView.value = view;
         savedWorkspace.value = workspaceForm(view);
         fillWorkspace(savedWorkspace.value);
         await app.refreshWorkspaceStatus();
       }
       if (current.preferences && preferencesDraft.value) {
-        const prefs = await call(window.taskpilot.preferences.set(clone(preferencesDraft.value)));
+        const prefs = await call(window.taskpilot.preferences.set(preferencesForm(preferencesDraft.value)));
         savedPreferences.value = preferencesForm(prefs);
         fillPreferences(savedPreferences.value);
         checkNameLength();
@@ -483,6 +516,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const openPage = (page: string) => {
     if (!model.isSettingsPage(page)) return;
+    if (activePage.value !== page) pendingFocus.value = null;
     activePage.value = page;
     if (page === 'agents') refreshAgentRuntimes().catch((error) => console.error(error));
     if (page === 'environment') renderEnvironment().catch((error) => console.error(error));
@@ -582,6 +616,8 @@ export const useSettingsStore = defineStore('settings', () => {
     discardAll,
     load,
     // Navigation
+    focusPendingField,
+    pendingFieldFocus,
     activePage,
     searchQuery,
     visiblePages,

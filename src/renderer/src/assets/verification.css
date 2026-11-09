@@ -1,0 +1,121 @@
+/* Verification checks: per-command options */
+.check-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+.check-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+/* The report path gets its own row so the label and placeholder never wrap. */
+.check-option.grow {
+  flex: 1 1 100%;
+}
+.check-option.grow .field-input {
+  flex: 1;
+  min-width: 0;
+}
+.field-input.small {
+  width: auto;
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--text-sm);
+}
+select.field-input.small {
+  padding-right: 4px;
+}
+
+/* Evidence */
+.evidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 0;
+  font-size: var(--text-sm);
+}
+.evidence-row + .evidence-row {
+  border-top: 1px solid var(--line-soft);
+}
+.evidence-text {
+  color: var(--text-secondary);
+}
+.evidence-list {
+  flex-basis: 100%;
+  margin-left: 2px;
+  color: var(--text-muted);
+  font: var(--text-xs)/1.6 var(--font-mono);
+}
+.evidence-list summary {
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+.evidence-list div {
+  padding-left: 14px;
+  overflow-wrap: anywhere;
+}
+.verify-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 8px;
+  font-size: var(--text-sm);
+}
+.review-attention {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 6px 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.review-attention .icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--warning);
+}
+.criterion.unverifiable .criterion-mark {
+  color: var(--warning);
+}
+
+/* Baseline status on the execution page */
+.baseline-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: var(--fill);
+  border-radius: var(--radius-md);
+}
+.baseline-status[hidden],
+.baseline-status [hidden] {
+  display: none;
+}
+.baseline-status p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.baseline-status.measuring p::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  vertical-align: middle;
+  animation: pulse 1.8s ease-in-out infinite;
+}

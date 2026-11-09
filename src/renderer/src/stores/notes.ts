@@ -3,7 +3,7 @@
 // State events track files changed outside TaskPilot. Notes are global, so a
 // repository switch leaves them alone.
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, toRaw } from 'vue';
 
 import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
@@ -17,9 +17,6 @@ import { useCoursesStore } from './courses.ts';
 import { useRepositoriesStore } from './repositories.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
 import { createStateWatcher } from './state_watcher.ts';
-
-// Drafts are reactive proxies, which IPC cannot clone; they are plain JSON.
-const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 export const useNotesStore = defineStore('notes', () => {
   // ========== List ==========
@@ -177,7 +174,9 @@ export const useNotesStore = defineStore('notes', () => {
   const conflict = ref(false);
   const saving = ref(false);
   const summarizing = ref(false);
-  const toDraft = (note: noteTypes.Note): Draft => ({
+  // Copy tags explicitly; body text is immutable and need not be serialized.
+  // Read through the proxy here: dirty's computed relies on these dependencies.
+  const toDraft = (note: Draft): Draft => ({
     title: note.title,
     body: note.body,
     category: note.category,
@@ -257,7 +256,7 @@ export const useNotesStore = defineStore('notes', () => {
     if (!note || !edit || saving.value) return null;
     saving.value = true;
     try {
-      const saved = await call(window.taskpilot.notes.update(note.id, { ...plain(edit), baseVersion: note.version, force, renameLinks }));
+      const saved = await call(window.taskpilot.notes.update(note.id, { ...toDraft(edit), baseVersion: note.version, force, renameLinks }));
       afterSave(saved, note.id);
       renamePages(note.id, saved.note.id);
       if (saved.relinked) showToast(`已同步更新 ${saved.relinked} 篇笔记里的链接。`);
@@ -280,7 +279,20 @@ export const useNotesStore = defineStore('notes', () => {
   const create = async (input: noteTypes.NoteInput, { autoRename = false, open = false } = {}) => {
     if (open && !(await confirmLeave())) return null;
     try {
-      const saved = await call(window.taskpilot.notes.create(plain(input), autoRename));
+      // Only the known arrays and source object are mutable. Detach each from
+      // Vue before IPC, even if a caller supplied an independently reactive one.
+      const value = toRaw(input);
+      const saved = await call(
+        window.taskpilot.notes.create(
+          {
+            ...value,
+            tags: [...toRaw(value.tags)],
+            ...(value.concepts ? { concepts: [...toRaw(value.concepts)] } : {}),
+            source: value.source ? { ...toRaw(value.source) } : null,
+          },
+          autoRename,
+        ),
+      );
       const { body: _body, ...meta } = saved.note;
       notes.value = [meta, ...notes.value.filter((entry) => entry.id !== meta.id)];
       revision.value = null;

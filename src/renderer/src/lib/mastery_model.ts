@@ -36,7 +36,9 @@ const label = (text: string) => text.replace(/["<>#;`]/g, ' ').trim() || '?';
 // needs them. `selected` gets a thicker border.
 export const conceptGraph = (concepts: masteryTypes.ConceptMastery[], selected: string | null): string => {
   const index = new Map(concepts.map((concept, at) => [concept.id, at]));
-  const lines = ['flowchart LR'];
+  // These small prerequisite graphs use Dagre. Mermaid's default flowchart
+  // layout loads ELK (~2.6 MB); notes still choose their own diagrams/layouts.
+  const lines = ['---', 'config:', '  layout: dagre', '---', 'flowchart LR'];
   for (const [at, concept] of concepts.entries()) lines.push(`  ${nodeId(at)}["${label(concept.label)}"]`);
   for (const [at, concept] of concepts.entries())
     for (const prerequisite of concept.prerequisites) if (index.has(prerequisite)) lines.push(`  ${nodeId(index.get(prerequisite)!)} --> ${nodeId(at)}`);

@@ -42,6 +42,29 @@
   --danger: #cf3a32;
   --danger-soft: rgba(207, 58, 50, 0.11);
   --online: #2fbf71;
+  --text-on-color: #fff;
+  --danger-border: rgba(207, 58, 50, 0.25);
+  --danger-gradient: linear-gradient(135deg, #f0625a, #cf3a32);
+
+  /* Identity palettes stay fixed across themes. */
+  --avatar-sunset: linear-gradient(135deg, #f6a96b, #e8678a);
+  --avatar-ocean: linear-gradient(135deg, #5bb8f5, #3f6bf5);
+  --avatar-violet: linear-gradient(135deg, #b18cf5, #6c5bf5);
+  --avatar-forest: linear-gradient(135deg, #5fd3a0, #1f8f63);
+  --avatar-graphite: linear-gradient(135deg, #8b93a7, #4a5162);
+
+  /* Verification output and diffs intentionally use a fixed dark palette. */
+  --terminal-bg: #12141c;
+  --terminal-text: #c9d1e4;
+  --terminal-line: #a9b1c6;
+  --terminal-muted: #6c7489;
+  --terminal-added: #8ce0a8;
+  --terminal-added-bg: rgba(46, 160, 90, 0.16);
+  --terminal-removed: #ff9c94;
+  --terminal-removed-bg: rgba(220, 70, 60, 0.16);
+  --terminal-hunk: #8fb0ff;
+  --terminal-hunk-bg: rgba(90, 130, 255, 0.1);
+  --switch-thumb: #fff;
 
   /* Layout system. Every spacing value is a step of the 4px grid below, and
    * every surface uses one of three radii, so pages line up with each other.
@@ -66,7 +89,9 @@
   /* Type scale, desktop sizes for Chinese UI text (12px body, as in macOS
    * apps and Linear). Hierarchy below body comes from weight and colour.
    * [人工决策-2026-10-24 20:01:56] 用户反馈全部字体偏大：整体小一号，辅助 11、正文 12、小标题 13、面板标题 14、页面标题 22，笔记正文 15；取代 2026-10-07 的「正文 13 / 辅助 12 / 小标题 14 / 面板标题 15 / 页面标题 24」。 */
-  --text-xs: 11px;
+  /* Keep auxiliary Chinese text at least 12px; weight and colour provide
+   * hierarchy without shrinking below the body size. */
+  --text-xs: 12px;
   --text-sm: 12px;
   --text-md: 13px;
   --text-lg: 14px;
@@ -74,6 +99,9 @@
   --text-2xl: 18px;
   --text-3xl: 20px;
   --text-4xl: 22px;
+  --text-5xl: 24px;
+  --text-6xl: 26px;
+  --text-7xl: 28px;
   /* Long-form reading (note articles) stays a little larger than the UI. */
   --text-read: 15px;
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;

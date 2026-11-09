@@ -5,34 +5,28 @@ import { createPinia } from 'pinia';
 import { ElMessage, ElMessageBox, provideGlobalConfig } from 'element-plus';
 import zhCn from 'element-plus/es/locale/lang/zh-cn.mjs';
 
-// Element Plus components are imported where templates use them
-// (unplugin-vue-components in electron.vite.config.ts); their styles are
-// listed here instead, one per component the app uses (each pulls in what it
-// builds on, such as popper and scrollbar), so they always come before
-// element_theme.css, even for components only lazily loaded views use. A
-// template that starts using another el-* component adds its style here.
+// Common Element Plus styles load once here. Styles used only by lazy views
+// (date-picker, tree, segmented, input-number) load with the owning component.
+// element_theme.css makes shared picker overrides more specific than the lazy
+// vendor rules, so a late CSS load cannot change the theme's floating surfaces.
 import 'element-plus/es/components/base/style/css';
 import 'element-plus/es/components/button/style/css';
 import 'element-plus/es/components/checkbox/style/css';
 import 'element-plus/es/components/checkbox-group/style/css';
-import 'element-plus/es/components/date-picker/style/css';
 import 'element-plus/es/components/dialog/style/css';
 import 'element-plus/es/components/dropdown/style/css';
 import 'element-plus/es/components/dropdown-item/style/css';
 import 'element-plus/es/components/dropdown-menu/style/css';
 import 'element-plus/es/components/input/style/css';
-import 'element-plus/es/components/input-number/style/css';
 import 'element-plus/es/components/option/style/css';
 import 'element-plus/es/components/option-group/style/css';
 import 'element-plus/es/components/popover/style/css';
 import 'element-plus/es/components/radio/style/css';
 import 'element-plus/es/components/radio-button/style/css';
 import 'element-plus/es/components/radio-group/style/css';
-import 'element-plus/es/components/segmented/style/css';
 import 'element-plus/es/components/select/style/css';
 import 'element-plus/es/components/switch/style/css';
 import 'element-plus/es/components/tooltip/style/css';
-import 'element-plus/es/components/tree/style/css';
 // Toasts and confirm dialogs (lib/feedback.ts).
 import 'element-plus/es/components/message/style/css';
 import 'element-plus/es/components/message-box/style/css';

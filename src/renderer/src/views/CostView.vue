@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue';
+import 'element-plus/theme-chalk/el-segmented.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';

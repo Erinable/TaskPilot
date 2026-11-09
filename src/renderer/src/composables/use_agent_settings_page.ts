@@ -71,6 +71,15 @@ export const useAgentSettingsPage = () => {
     if (errors) query.value = '';
   });
 
+  // Retained pages can already have errors when validation requests the same
+  // field again. Reveal that target even when the error boolean stays true.
+  watch(
+    () => settings.pendingFieldFocus,
+    (target) => {
+      if (target?.page === 'agents') query.value = '';
+    },
+  );
+
   const state = (agent: agentRuntime.AgentId): { label: string; tone: 'available' | 'unavailable' | 'pending' | 'unknown' } => {
     const status = runtime(agent);
     if (status) return { label: status.available ? '可用' : '需配置', tone: status.available ? 'available' : 'unavailable' };

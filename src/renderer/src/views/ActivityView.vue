@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
+import 'element-plus/theme-chalk/el-segmented.css';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TeamTabs from '@/components/TeamTabs.vue';

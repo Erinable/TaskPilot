@@ -2,6 +2,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises } from '@vue/test-utils';
+import { reactive } from 'vue';
 
 import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -28,6 +29,44 @@ const loaded = async () => {
   await settings.open('profile');
   return settings;
 };
+
+test('saving detaches independently reactive settings nodes for IPC', async () => {
+  const settings = await loaded();
+  const folders = reactive(['/repo/read']);
+  const agent = reactive({ cli: 'claude' as const, model: 'provider/nested', thinking: 'high' as const });
+  const lines = reactive([' npm run lint ']);
+  const parser = reactive({ format: 'regex' as const, pattern: '(?<message>.*)', severity: 'warning' as const });
+  settings.preferencesDraft!.coding.extraRead = folders;
+  settings.preferencesDraft!.agents.qa = agent;
+  settings.workspaceDraft!.steps.lint = reactive({ ...settings.workspaceDraft!.steps.lint!, mode: 'override' as const, lines, parser });
+  expect(await settings.saveAll()).toBe(true);
+  const preferences = api.preferences.set.mock.calls[0][0];
+  const workspace = api.workspace.set.mock.calls[0][0];
+  expect(structuredClone(preferences).agents.qa.model).toBe('provider/nested');
+  expect(structuredClone(workspace).steps.lint?.parser).toEqual({ format: 'regex', pattern: '(?<message>.*)', severity: 'warning' });
+  expect(structuredClone(api.workspace.check.mock.calls[0][0])).toEqual(workspace);
+  folders.push('/later');
+  agent.model = 'provider/later';
+  parser.pattern = 'later';
+  lines.push('later');
+  expect(preferences.coding.extraRead).toEqual(['/repo/read']);
+  expect(preferences.agents.qa.model).toBe('provider/nested');
+  expect(workspace.steps.lint?.lines).toEqual(['npm run lint']);
+  expect(workspace.steps.lint?.parser).toEqual({ format: 'regex', pattern: '(?<message>.*)', severity: 'warning' });
+});
+
+test('discarded drafts never share mutable arrays or parser objects with saved settings', async () => {
+  const settings = await loaded();
+  settings.preferencesDraft!.coding.extraRead.push('/discard');
+  settings.workspaceDraft!.steps.test!.lines.push('npm run extra');
+  settings.workspaceDraft!.steps.test!.parser = { format: 'junit', path: 'report.xml' };
+  settings.discardAll();
+  expect(settings.preferencesDraft!.coding.extraRead).toEqual([]);
+  expect(settings.workspaceDraft!.steps.test!.lines).toEqual(['npm test']);
+  expect(settings.workspaceDraft!.steps.test!.parser).toEqual({ format: 'tests' });
+  settings.preferencesDraft!.coding.extraRead.push('/another edit');
+  expect(settings.savedPreferences!.coding.extraRead).toEqual([]);
+});
 
 test('open() navigates to settings and loads both stores', async () => {
   const settings = await loaded();
@@ -179,6 +218,25 @@ test('a failed check shows the error on its field and writes nothing', async () 
   expect(settings.activePage).toBe('commands');
   expect(settings.statuses.build).toEqual({ tone: 'error', message: 'steps.build.commands[0]: command uses shell syntax "|"' });
   expect(settings.hasUnsavedChanges()).toBe(true);
+});
+
+test('a page that finishes loading after leaving settings does not steal focus', async () => {
+  expectConsole('error', /Invalid model identifier/);
+  const settings = await loaded();
+  settings.preferencesDraft!.agents['product-lead'].model = '--bad';
+  api.preferences.set.mockReturnValueOnce(fail('invalid_choice', 'Invalid model identifier', 'agents.product-lead.model'));
+  expect(await settings.saveAll()).toBe(false);
+  vi.mocked(feedback.confirmChoice).mockResolvedValueOnce('alternate');
+  await useAppStore().navigate('queue');
+  const input = document.createElement('input');
+  input.id = 'agent-product-lead-model';
+  document.body.append(input);
+  try {
+    await settings.focusPendingField('agents');
+    expect(document.activeElement).not.toBe(input);
+  } finally {
+    input.remove();
+  }
 });
 
 test('an error without a known field becomes a toast', async () => {
