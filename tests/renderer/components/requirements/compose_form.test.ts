@@ -1,18 +1,20 @@
 // @vitest-environment happy-dom
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises } from '@vue/test-utils';
 
 import ComposeForm from '@/components/requirements/ComposeForm.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
 import { mountView } from '../../mount_view.ts';
-import { installApi } from '../../requirements_fakes.ts';
+import { agentStatus, installApi } from '../../requirements_fakes.ts';
 
 let api: ReturnType<typeof installApi>;
 
-beforeEach(() => {
+beforeEach(async () => {
   setActivePinia(createPinia());
   api = installApi({ list: [] });
+  await useRequirementsStore().startCompose();
 });
 
 test('course starts with its learning content and keeps labeled configuration, toolchain gating and cost information', async () => {
@@ -71,6 +73,51 @@ test.each(['metaKey', 'ctrlKey'] as const)('%s + Enter ignores IME composition a
   expect(submit.defaultPrevented).toBe(true);
   expect(api.requirements.create).toHaveBeenCalledExactlyOnceWith({ title: '', text: '用户可以用邮箱登录' });
   store.stopWatching();
+});
+
+test('missing runtime offers configuration and recheck without submitting or losing the draft', async () => {
+  const store = useRequirementsStore();
+  api.agent.status.mockResolvedValueOnce({ ok: true, data: agentStatus({ available: false, command: null }) });
+  await store.refreshComposeContext();
+  const wrapper = await mountView(ComposeForm);
+  await wrapper.get('#reqTitle').setValue('邮箱登录');
+  await wrapper.get('#reqText').setValue('支持邮箱和密码登录');
+  expect(wrapper.get('.req-warning').text()).toContain('你的输入会保留');
+  expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
+  await wrapper.get('form').trigger('submit');
+  await wrapper.get('#reqText').trigger('keydown', { key: 'Enter', metaKey: true });
+  expect(api.requirements.create).not.toHaveBeenCalled();
+
+  const openSettings = vi.spyOn(useSettingsStore(), 'open').mockResolvedValue();
+  await wrapper.get('[data-action="configure-runtime"]').trigger('click');
+  expect(openSettings).toHaveBeenCalledWith('environment');
+  expect(store.composeTitle).toBe('邮箱登录');
+  expect(store.composeText).toBe('支持邮箱和密码登录');
+  openSettings.mockRestore();
+
+  await wrapper.get('[data-action="recheck-runtime"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.find('.req-warning').exists()).toBe(false);
+  expect(wrapper.get('button[type="submit"]').text()).toBe('交给 Product Lead');
+  await wrapper.get('form').trigger('submit');
+  await flushPromises();
+  expect(api.requirements.create).toHaveBeenCalledExactlyOnceWith({ title: '邮箱登录', text: '支持邮箱和密码登录' });
+  store.stopWatching();
+});
+
+test('a failed environment check offers retry and keeps the form editable', async () => {
+  const store = useRequirementsStore();
+  api.agent.status.mockResolvedValueOnce({ ok: false, error: { code: 'unknown', message: '状态读取失败' } });
+  await store.refreshComposeContext();
+  const wrapper = await mountView(ComposeForm);
+  expect(wrapper.get('.req-warning').text()).toContain('运行环境检查失败：状态读取失败');
+  await wrapper.get('#reqText').setValue('稍后提交的需求');
+  await wrapper.get('form').trigger('submit');
+  expect(api.requirements.create).not.toHaveBeenCalled();
+  await wrapper.get('[data-action="recheck-runtime"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.get<HTMLTextAreaElement>('#reqText').element.value).toBe('稍后提交的需求');
+  expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined();
 });
 
 test('keyboard shortcut respects the submitting state', async () => {

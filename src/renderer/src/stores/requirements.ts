@@ -125,19 +125,25 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // Bumped when the form should take focus (opened, or rejected locally).
   const composeFocus = ref(0);
   const composeContext = ref<ComposeContext | null>(null);
+  const composeContextLoading = ref(false);
+  const composeContextError = ref<string | null>(null);
   let contextGeneration = 0;
 
-  const loadContext = async () => {
+  const refreshComposeContext = async () => {
     const generation = ++contextGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
     composeContext.value = null;
+    composeContextLoading.value = true;
+    composeContextError.value = null;
     try {
-      const [workspace, agent] = await Promise.all([
-        call(window.taskpilot.workspace.info()),
-        call(window.taskpilot.agent.status()).catch(() => ({ available: false })),
-      ]);
-      if (generation === contextGeneration && composing.value) composeContext.value = { workspace, agentAvailable: agent.available };
+      const [workspace, agent] = await Promise.all([call(window.taskpilot.workspace.info()), call(window.taskpilot.agent.status())]);
+      if (generation === contextGeneration && composing.value && repositoryId === useRepositoryIdentityStore().currentId)
+        composeContext.value = { workspace, agentAvailable: agent.available };
     } catch (error) {
-      if (generation === contextGeneration) console.error('Failed to read requirement context', error);
+      if (generation === contextGeneration && composing.value && repositoryId === useRepositoryIdentityStore().currentId)
+        composeContextError.value = `运行环境检查失败：${describeError(error)}`;
+    } finally {
+      if (generation === contextGeneration) composeContextLoading.value = false;
     }
   };
 
@@ -148,9 +154,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pane.value = 'new';
     composeStatus.value = { text: '', error: false };
     composeInvalid.value = false;
-    loadContext().catch((error) => console.error(error));
     composeFocus.value += 1;
     selectionRevision.value += 1;
+    return refreshComposeContext();
   };
 
   // Clears a previous "required" error once the user starts typing.
@@ -162,6 +168,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const submitNew = async () => {
+    if (
+      submitting.value ||
+      (composeKind.value === 'project' && (composeContextLoading.value || composeContextError.value || composeContext.value?.agentAvailable === false))
+    )
+      return;
     const text = composeText.value;
     const invalid = model.validateText(text);
     composeStatus.value = { text: invalid ?? '', error: Boolean(invalid) };
@@ -393,6 +404,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pane.value = null;
     composing.value = false;
     composeContext.value = null;
+    composeContextLoading.value = false;
+    composeContextError.value = null;
     composeStatus.value = { text: '', error: false };
     composeInvalid.value = false;
     reopen = true;
@@ -406,7 +419,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     reopen = false;
     await refreshList();
     const target = id ?? selectedId.value;
-    if (compose) startCompose(compose === true ? 'project' : compose);
+    if (compose) await startCompose(compose === true ? 'project' : compose);
+    else if (!id && composing.value && pane.value === 'new') await refreshComposeContext();
     else if (target) select(target);
     else if (items.value.length) select(items.value[0].id);
     else pane.value = listError.value ? null : 'empty';
@@ -454,6 +468,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     submitting,
     composeFocus,
     composeContext,
+    composeContextLoading,
+    composeContextError,
+    refreshComposeContext,
     startCompose,
     onComposeInput,
     submitNew,

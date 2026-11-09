@@ -55,10 +55,11 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
   <aside class="sidebar glass" :class="{ collapsed: app.sidebarCollapsed }">
     <!-- Collapsed, labels stay in the DOM for screen readers and show as native tooltips. -->
     <div class="side-section-label">工作区</div>
-    <nav class="main-nav">
+    <nav class="main-nav" aria-label="工作区导航">
       <button
         class="nav-item"
         :class="{ active: app.view === 'queue' || app.view === 'execution' }"
+        :aria-current="app.view === 'queue' || app.view === 'execution' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? `工作队列（${tasks.pendingCount} 个待办）` : undefined"
         @click="showQueue"
       >
@@ -69,6 +70,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'requirements' }"
+        :aria-current="app.view === 'requirements' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '需求中心' : undefined"
         @click="requirements.open()"
       >
@@ -76,17 +78,30 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
         <span class="nav-label">需求中心</span>
         <span v-if="requirements.attentionCount > 0" class="nav-count attention">{{ requirements.attentionCount }}</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'map' }" :title="app.sidebarCollapsed ? '工程地图' : undefined" @click="openView('map')">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'map' }"
+        :aria-current="app.view === 'map' ? 'page' : undefined"
+        :title="app.sidebarCollapsed ? '工程地图' : undefined"
+        @click="openView('map')"
+      >
         <AppIcon name="map" class="nav-icon" />
         <span class="nav-label">工程地图</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'release' }" :title="app.sidebarCollapsed ? '发布' : undefined" @click="openView('release')">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'release' }"
+        :aria-current="app.view === 'release' ? 'page' : undefined"
+        :title="app.sidebarCollapsed ? '发布' : undefined"
+        @click="openView('release')"
+      >
         <AppIcon name="rocket" class="nav-icon" />
         <span class="nav-label">发布</span>
       </button>
       <button
         class="nav-item"
         :class="{ active: app.view === 'notes' }"
+        :aria-current="app.view === 'notes' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '学习笔记' : undefined"
         data-nav="notes"
         @click="openView('notes')"
@@ -97,6 +112,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'mastery' }"
+        :aria-current="app.view === 'mastery' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '掌握度' : undefined"
         data-nav="mastery"
         @click="openView('mastery')"
@@ -107,6 +123,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'courses' }"
+        :aria-current="app.view === 'courses' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '课程' : undefined"
         data-nav="courses"
         @click="openView('courses')"
@@ -121,6 +138,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item team-entry"
         :class="{ active: TEAM_VIEWS.includes(app.view), working: teamWork }"
+        :aria-current="TEAM_VIEWS.includes(app.view) ? 'page' : undefined"
         :title="app.sidebarCollapsed ? teamTitle : undefined"
         :aria-label="teamTitle"
         @click="openView('team')"
@@ -147,6 +165,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="settings-link nav-item"
         :class="{ active: app.view === 'settings' }"
+        :aria-current="app.view === 'settings' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '设置' : undefined"
         @click="settings.open()"
       >

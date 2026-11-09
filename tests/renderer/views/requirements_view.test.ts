@@ -213,7 +213,9 @@ describe('RequirementsView', () => {
     api.workspace.info.mockResolvedValueOnce({ ok: true, data: { configured: true, root: '/Users/me/projects/app' } as never });
     const { wrapper } = await render({ compose: true });
     expect(wrapper.find('.req-context-list li').text()).toContain('Architect 会读取仓库 app 中');
-    expect(wrapper.find('.req-warning').text()).toContain('找不到 Claude Code CLI');
+    expect(wrapper.find('.req-warning').text()).toContain('需求规划所需的 CLI 还不能运行');
+    expect(wrapper.get('[data-action="configure-runtime"]').text()).toBe('配置运行环境');
+    expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

@@ -5,8 +5,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import { ERROR_HINTS } from '@/lib/errors.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
 import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import { HOURS_OPTIONS, LEVEL_OPTIONS, MAX_TEXT, TARGET_OPTIONS, countChars } from './requirement_model.ts';
 
@@ -15,6 +15,12 @@ const textInput = ref<{ focus: () => void } | null>(null);
 
 const count = computed(() => countChars(store.composeText));
 const course = computed(() => store.composeKind === 'course');
+const needsRuntime = computed(() => !course.value && store.composeContext?.agentAvailable === false);
+const runtimeBlocked = computed(() => !course.value && (store.composeContextLoading || Boolean(store.composeContextError) || needsRuntime.value));
+const configureRuntime = () =>
+  useSettingsStore()
+    .open('environment')
+    .catch((error) => console.error(error));
 
 const workspaceFact = computed(() => {
   const workspace = store.composeContext?.workspace;
@@ -40,7 +46,7 @@ const onKeydown = (event: Event | KeyboardEvent) => {
 };
 
 const onSubmit = () => {
-  if (store.submitting || (course.value && !store.composeForm.toolchain)) return;
+  if (store.submitting || runtimeBlocked.value || (course.value && !store.composeForm.toolchain)) return;
   store.submitNew().catch((error) => console.error(error));
 };
 </script>
@@ -172,16 +178,45 @@ const onSubmit = () => {
             通过本机的 Claude Code CLI 运行，不启用任何工具，花费计入 AI 团队页的本周统计。
           </li>
         </ul>
-        <p v-if="!store.composeContext.agentAvailable" class="req-warning">
-          <AppIcon name="alert" />
-          {{ ERROR_HINTS.agent_unavailable }}
-        </p>
       </template>
+      <div v-if="!course && (needsRuntime || store.composeContextError)" class="req-warning compose-runtime-warning" role="status">
+        <AppIcon name="alert" />
+        <div>
+          <strong>{{ store.composeContextError ?? '需求规划所需的 CLI 还不能运行' }}</strong>
+          <p>你的输入会保留。检查运行环境，或在「模型与智能体」选择已安装的 CLI，完成后回到这里重新检查。</p>
+        </div>
+      </div>
+      <p v-else-if="!course && store.composeContextLoading" class="empty-hint" role="status">正在检查运行环境…</p>
     </div>
     <div class="req-actions">
-      <button class="primary-button" type="submit" :disabled="store.submitting || (course && !store.composeForm.toolchain)" :aria-busy="store.submitting">
-        <AppIcon :name="store.submitting ? 'spinner' : 'send'" :class="{ spin: store.submitting }" />
-        {{ course ? '交给 Tutor' : '交给 Product Lead' }}
+      <template v-if="!course && (needsRuntime || store.composeContextError)">
+        <button
+          class="secondary-button"
+          type="button"
+          data-action="recheck-runtime"
+          :disabled="store.composeContextLoading"
+          @click="store.refreshComposeContext()"
+        >
+          <AppIcon name="refresh" />
+          重新检查
+        </button>
+        <button class="primary-button" type="button" data-action="configure-runtime" @click="configureRuntime">
+          <AppIcon name="settings" />
+          配置运行环境
+        </button>
+      </template>
+      <button
+        v-else
+        class="primary-button"
+        type="submit"
+        :disabled="store.submitting || runtimeBlocked || (course && !store.composeForm.toolchain)"
+        :aria-busy="store.submitting || (!course && store.composeContextLoading)"
+      >
+        <AppIcon
+          :name="store.submitting || (!course && store.composeContextLoading) ? 'spinner' : 'send'"
+          :class="{ spin: store.submitting || (!course && store.composeContextLoading) }"
+        />
+        {{ !course && store.composeContextLoading ? '正在检查运行环境…' : course ? '交给 Tutor' : '交给 Product Lead' }}
       </button>
     </div>
   </form>
@@ -191,6 +226,13 @@ const onSubmit = () => {
 .req-kind-switch {
   display: flex;
   justify-content: flex-start;
+}
+.compose-runtime-warning {
+  align-items: flex-start;
+}
+.compose-runtime-warning p {
+  margin: var(--space-1) 0 0;
+  line-height: 1.6;
 }
 .req-textarea :deep(textarea) {
   min-height: 160px;

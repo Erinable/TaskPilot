@@ -27,9 +27,10 @@ beforeEach(() => {
   api = installApi();
 });
 
-const openView = async () => {
+const openView = async (repositoryId: string | null = 'repo-open') => {
   const pinia = createPinia();
   setActivePinia(pinia);
+  useRepositoriesStore().currentId = repositoryId;
   const wrapper = await mountView(CourseView);
   return wrapper;
 };
@@ -70,6 +71,112 @@ const save = async (wrapper: ReturnType<typeof mount>) => {
   await wrapper.get('form.course-editor').trigger('submit');
   await flushPromises();
 };
+
+test('the default overview presents course facts while the complete original instructions stay in a closed disclosure', async () => {
+  const wrapper = await openView();
+  const pack = coursePreview('programming').pack;
+  const overview = wrapper.get('[data-section="course-overview"]');
+  expect(overview.get('[aria-label="课程简介"]').text()).toContain(pack.summary);
+  expect(overview.get('[aria-label="适合谁"]').text()).toContain('学习编程的开发者');
+  expect(overview.get('[aria-label="适合谁"]').text()).not.toContain(pack.learner);
+  expect(overview.get('[aria-label="练习内容"]').text()).toContain('未列出固定知识点');
+  expect(
+    overview
+      .get('[aria-label="如何判卷"]')
+      .findAll('dt')
+      .map((item) => item.text()),
+  ).toEqual(pack.rubric.map((item) => item.label));
+  expect(overview.text()).not.toContain(pack.difficultyGuide[0]);
+  for (const item of pack.rubric) expect(overview.get('[aria-label="如何判卷"]').text()).not.toContain(item.description);
+  const details = wrapper.get<HTMLDetailsElement>('[data-section="course-instructions"]');
+  expect(details.element.open).toBe(false);
+  expect(details.get('summary').text()).toBe('完整课程指令');
+  for (const guide of [
+    ...pack.tutorGuide,
+    ...pack.difficultyGuide,
+    ...pack.practiceGuide,
+    pack.referenceGuide,
+    pack.learner,
+    ...pack.rubric.map((item) => item.description),
+  ]) {
+    expect(details.get('.course-fields').element.textContent).toContain(guide);
+  }
+});
+
+test('the built-in operating systems overview uses Chinese descriptions while preserving the full original pack', async () => {
+  const wrapper = await openView();
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  const overview = wrapper.get('[data-section="course-overview"]');
+  expect(overview.get('[aria-label="适合谁"]').text()).toContain('基础 C 语言');
+  expect(overview.get('[aria-label="如何判卷"]').text()).toContain('内核态');
+  expect(overview.get('[aria-label="如何判卷"]').text()).toContain('分配失败');
+  expect(overview.get('[aria-label="如何判卷"]').text()).toContain('竞争条件');
+  const original = wrapper.get('[data-section="course-instructions"] .course-fields').element.textContent;
+  expect(original).toContain(OS_COURSE.learner);
+  for (const item of OS_COURSE.rubric) {
+    expect(overview.text()).not.toContain(item.description);
+    expect(original).toContain(item.description);
+  }
+});
+
+test('custom course wording and every concept remain exact in the full instructions without expanding them in the overview', async () => {
+  const pack: CoursePack = {
+    ...MINE,
+    summary: '自定义简介，保持原文。',
+    learner: 'Custom learners: keep THIS exact wording.',
+    tutorGuide: ['Original tutor instruction — unchanged.'],
+    concepts: MINE.concepts!.slice(0, 5),
+  };
+  api.courses.list.mockReturnValue(ok(withMine()));
+  api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ pack }) : coursePreview(id)));
+  const wrapper = await openView();
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  const overview = wrapper.get('[data-section="course-overview"]');
+  expect(overview.get('[aria-label="课程简介"] p').element.textContent).toBe(pack.summary);
+  expect(overview.get('[aria-label="适合谁"] p').element.textContent).toBe(pack.learner);
+  expect(overview.findAll('.course-overview-concepts li')).toHaveLength(4);
+  expect(overview.text()).toContain('包含 5 个知识点');
+  expect(overview.text()).not.toContain(pack.concepts![4].summary);
+  expect(overview.text()).not.toContain(pack.tutorGuide[0]);
+  const instructions = wrapper.get('[data-section="course-instructions"] .course-fields');
+  expect(instructions.element.textContent).toContain(pack.tutorGuide[0]);
+  for (const concept of pack.concepts!) expect(instructions.get(`[data-concept="${concept.id}"]`).text()).toContain(concept.summary);
+  for (const item of pack.rubric) expect(overview.get('[aria-label="如何判卷"]').element.textContent).toContain(item.description);
+});
+
+test('without an open repository the default pack is labeled honestly and repository selection or mismatch statuses stay hidden', async () => {
+  const wrapper = await openView(null);
+  expect(wrapper.get('[data-course="programming"]').text()).toContain('默认课程');
+  expect(wrapper.get('[data-state="no-repository"]').text()).toContain('这是内置默认课程');
+  expect(wrapper.find('[data-state="in-use"]').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('正在使用');
+  await wrapper.get('[data-course="os"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.get('[data-state="no-repository"]').text()).toContain('打开仓库后再选择使用');
+  expect(wrapper.find('[data-action="select"]').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('这个仓库正在用它');
+  expect(wrapper.text()).not.toContain('和仓库语言不匹配');
+  expect(api.courses.select).not.toHaveBeenCalled();
+});
+
+test('an unassigned pending choice does not appear as a repository selection or enable repository confirmation', async () => {
+  const ref = minePreview().ref;
+  api.courses.list.mockReturnValue(
+    ok(withMine({ ...defaultCourse(), selected: { id: 'mine', from: 'local' }, state: { status: 'pending', pack: MINE, ref } })),
+  );
+  api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ trust: 'pending' }) : coursePreview(id)));
+  const wrapper = await openView(null);
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  expect(wrapper.get('[data-state="no-repository"]').text()).toContain('未打开仓库');
+  expect(wrapper.find('[data-state="pending"]').exists()).toBe(false);
+  expect(wrapper.find('[data-action="confirm"]').exists()).toBe(false);
+  expect(wrapper.find('[data-action="select"]').exists()).toBe(false);
+  expect(wrapper.get('[data-course="mine"]').text()).not.toContain('已选，待确认');
+  expect(wrapper.get('[data-course="programming"]').text()).toContain('默认课程');
+});
 
 test('switching courses, leaving the view and switching repositories retain the full user draft until explicit cancel', async () => {
   let wrapper = await openMine();
@@ -275,6 +382,14 @@ test('a saved pack picked here waits for confirmation, and confirming it puts it
   await flushPromises();
   const accept = document.querySelector<HTMLButtonElement>('[data-action="accept-course"]')!;
   expect(accept.textContent).toContain('确认使用');
+  const fullContent = document.querySelector('.course-preview-dialog .course-fields')!;
+  expect(fullContent.closest('details')).toBeNull();
+  expect(fullContent.textContent).toContain(MINE.learner);
+  for (const guide of [...MINE.tutorGuide, ...MINE.difficultyGuide, ...MINE.practiceGuide, ...MINE.labGuide!, MINE.referenceGuide]) {
+    expect(fullContent.textContent).toContain(guide);
+  }
+  expect(fullContent.querySelectorAll('[data-concept]')).toHaveLength(MINE.concepts!.length);
+  expect(fullContent.querySelectorAll('[data-rubric]')).toHaveLength(MINE.rubric.length);
 
   const inUse = withMine({ ...defaultCourse(), selected: { id: 'mine', from: 'local' }, ref });
   api.courses.list.mockReturnValue(ok(inUse));

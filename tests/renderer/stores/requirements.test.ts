@@ -10,7 +10,7 @@ import * as model from '../../../src/renderer/src/components/requirements/requir
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../../src/renderer/src/lib/inline_code.ts';
-import { installApi, requirement } from '../requirements_fakes.ts';
+import { agentStatus, installApi, requirement } from '../requirements_fakes.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -253,6 +253,51 @@ describe('requirements store', () => {
     store.onComposeInput();
     expect(store.composeStatus).toEqual({ text: '', error: false });
     expect(store.composeInvalid).toBe(false);
+  });
+
+  test('returning from settings restores the compose draft and refreshes runtime readiness', async () => {
+    state.list = [requirement()];
+    const store = useRequirementsStore();
+    await store.open({ compose: true });
+    store.composeTitle = '未提交标题';
+    store.composeText = '尚未提交的需求';
+    await useAppStore().navigate('settings');
+    api.agent.status.mockResolvedValueOnce({ ok: true, data: agentStatus({ available: false }) });
+    await store.open();
+    expect(store.pane).toBe('new');
+    expect(store.composing).toBe(true);
+    expect(store.composeTitle).toBe('未提交标题');
+    expect(store.composeText).toBe('尚未提交的需求');
+    expect(store.composeContext?.agentAvailable).toBe(false);
+    await store.submitNew();
+    expect(api.requirements.create).not.toHaveBeenCalled();
+  });
+
+  test('runtime rechecks ignore older responses and reset invalidates pending checks', async () => {
+    const store = useRequirementsStore();
+    await store.startCompose();
+    const older = Promise.withResolvers<Awaited<ReturnType<typeof api.agent.status>>>();
+    api.agent.status.mockReturnValueOnce(older.promise);
+    const first = store.refreshComposeContext();
+    const latest = store.refreshComposeContext();
+    store.composeText = '检查期间编辑的内容';
+    await store.submitNew();
+    expect(api.requirements.create).not.toHaveBeenCalled();
+    await latest;
+    older.resolve({ ok: true, data: agentStatus({ available: false }) });
+    await first;
+    expect(store.composeContext?.agentAvailable).toBe(true);
+    expect(store.composeContextLoading).toBe(false);
+
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.agent.status>>>();
+    api.agent.status.mockReturnValueOnce(pending.promise);
+    const checking = store.refreshComposeContext();
+    store.reset();
+    pending.resolve({ ok: true, data: agentStatus() });
+    await checking;
+    expect(store.composeContext).toBeNull();
+    expect(store.composeContextError).toBeNull();
+    expect(store.composeContextLoading).toBe(false);
   });
 
   test('a valid submission creates, opens and watches the new requirement', async () => {

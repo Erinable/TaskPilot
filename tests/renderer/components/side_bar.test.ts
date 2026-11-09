@@ -60,6 +60,38 @@ describe('SideBar', () => {
     for (const item of wrapper.findAll('nav button.nav-item')) expect(item.attributes('title')).toBeUndefined();
   });
 
+  test.each([
+    ['queue', '工作队列'],
+    ['execution', '工作队列'],
+    ['requirements', '需求中心'],
+    ['map', '工程地图'],
+    ['release', '发布'],
+    ['notes', '学习笔记'],
+    ['mastery', '掌握度'],
+    ['courses', '课程'],
+    ['team', 'AI 团队'],
+    ['activity', 'AI 团队'],
+    ['costs', 'AI 团队'],
+    ['settings', '设置'],
+  ] as const)('%s exposes one current destination before and after collapsing the sidebar', async (view, label) => {
+    const app = useAppStore();
+    const wrapper = mount(SideBar);
+    expect(wrapper.get('nav.main-nav').attributes('aria-label')).toBe('工作区导航');
+    await app.navigate(view);
+    await wrapper.vm.$nextTick();
+    const current = wrapper.findAll('button[aria-current="page"]');
+    expect(current).toHaveLength(1);
+    expect(current[0].get('.nav-label').text()).toBe(label);
+    app.toggleSidebar();
+    await wrapper.vm.$nextTick();
+    expect(current[0].attributes('aria-current')).toBe('page');
+    await app.navigate('queue');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll('button[aria-current="page"]')).toHaveLength(1);
+    expect(wrapper.get('button[aria-current="page"] .nav-label').text()).toBe('工作队列');
+    wrapper.unmount();
+  });
+
   test('an unreadable stored value opens expanded', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('denied');
