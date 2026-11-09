@@ -102,11 +102,15 @@ export const sanitizeSvg = (source: string): SafeSvg => {
 };
 
 // Puts a cleaned drawing in the host's shadow root, replacing what was there.
-export const mountSvg = (host: HTMLElement, { svg, css }: SafeSvg) => {
+// A drawing shrinks to the host's width unless `natural` keeps it at the size
+// its viewBox gives, for a wide graph its container scrolls instead.
+export const mountSvg = (host: HTMLElement, { svg, css }: SafeSvg, natural = false) => {
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   const sheet = new CSSStyleSheet();
+  const box = svg.viewBox.baseVal;
+  const size = natural && box?.width ? `svg { max-width: none; width: ${box.width}px; height: ${box.height}px; }` : 'svg { max-width: 100%; height: auto; }';
   // External loads in the CSS (url(), @import) stay subject to the page CSP.
-  sheet.replaceSync(`:host { display: block; } svg { max-width: 100%; height: auto; }\n${css}`);
+  sheet.replaceSync(`:host { display: block; } ${size}\n${css}`);
   root.adoptedStyleSheets = [sheet];
   root.replaceChildren(svg);
 };

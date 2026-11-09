@@ -37,6 +37,10 @@
   color: var(--warning);
   background: var(--warning-soft);
 }
+.metric-icon.violet {
+  color: var(--hue-violet);
+  background: var(--violet-soft);
+}
 .metric-card span {
   display: block;
   color: var(--text-muted);

@@ -7,7 +7,8 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import * as charts from '@/lib/note_charts.ts';
 
-const props = defineProps<{ lang: charts.ChartLanguage; source: string }>();
+// natural: draw at the chart's own size and let the container scroll.
+const props = defineProps<{ lang: charts.ChartLanguage; source: string; natural?: boolean }>();
 
 const host = ref<HTMLElement | null>(null);
 const error = ref<string | null>(null);
@@ -74,7 +75,7 @@ const draw = async () => {
     } else {
       const drawing = props.lang === 'mermaid' ? await charts.renderMermaid(props.source) : charts.sanitizeSvg(props.source);
       if (current !== generation) return;
-      charts.mountSvg(target, drawing);
+      charts.mountSvg(target, drawing, props.natural);
     }
   } catch (failure) {
     if (current !== generation) return;

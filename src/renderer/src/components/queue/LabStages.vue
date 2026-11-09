@@ -111,71 +111,139 @@ const next = () => {
 </template>
 
 <style scoped>
+/* The stages as one track: a node per lab, joined by a line that fills in
+ * once a lab has passed. The node carries the state; text sits under it.
+ * [人工决策-2026-11-09 19:22:13] 用户反馈实验仓库一排灰框不好看：改为带节点的进度轨道。 */
 .lab-stages {
   margin-bottom: var(--space-4);
 }
+.lab-stages .panel-heading p {
+  font-variant-numeric: tabular-nums;
+}
 .lab-stage-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin: 0;
-  padding: 0 var(--panel-pad) var(--space-3);
+  padding: var(--space-1) var(--panel-pad) var(--space-4);
   list-style: none;
+}
+.lab-stage {
+  position: relative;
+  padding-top: 26px;
+}
+.lab-stage::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 22px;
+  right: -22px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line-soft);
+}
+.lab-stage:last-child::before {
+  display: none;
+}
+.lab-stage.passed::before {
+  background: linear-gradient(90deg, var(--hue-green), var(--hue-violet));
+}
+.lab-stage::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid var(--text-tertiary);
+  border-radius: 50%;
+  background: var(--glass-bg-strong);
+}
+.lab-stage.passed::after {
+  border-color: var(--hue-green);
+  background: var(--hue-green);
+}
+.lab-stage.active::after {
+  border: 0;
+  background: linear-gradient(135deg, var(--hue-blue), var(--hue-violet));
+  box-shadow: 0 0 0 4px var(--violet-soft);
+  animation: stage-pulse 2.4s ease-in-out infinite;
+}
+.lab-stage.review::after {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+.lab-stage.generating::after {
+  border-style: dashed;
+  border-color: var(--accent);
+}
+@keyframes stage-pulse {
+  50% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-stage.active::after {
+    animation: none;
+  }
 }
 .lab-stage-button {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px var(--space-2);
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  background: var(--fill);
+  gap: 2px;
+  width: calc(100% - var(--space-3));
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--text);
   font: inherit;
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
   text-align: left;
 }
 button.lab-stage-button {
   cursor: pointer;
 }
 button.lab-stage-button:hover {
-  background: var(--fill-hover);
+  background: var(--fill);
 }
 .lab-stage-number {
-  grid-row: span 2;
-  align-self: center;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lab-stage-number::before {
+  content: 'LAB ';
 }
 .lab-stage-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .lab-stage-state {
   display: flex;
   align-items: center;
   gap: 4px;
   color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
-.lab-stage.passed .lab-stage-button {
-  border-color: var(--success);
-  background: var(--success-soft);
+.lab-stage-state .icon {
+  width: 12px;
+  height: 12px;
 }
-.lab-stage.active .lab-stage-button {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+.lab-stage.passed .lab-stage-state {
+  color: var(--success);
 }
-.lab-stage.review .lab-stage-button {
-  border-color: var(--warning);
-  background: var(--warning-soft);
+.lab-stage.active .lab-stage-state {
+  color: var(--hue-violet);
+  font-weight: 600;
 }
-.lab-stage.locked .lab-stage-button {
+.lab-stage.review .lab-stage-state {
+  color: var(--warning);
+}
+.lab-stage.locked .lab-stage-title {
   color: var(--text-tertiary);
-}
-.lab-stage.generating .lab-stage-button {
-  border-style: dashed;
 }
 .lab-stage-run {
   display: flex;
@@ -184,10 +252,10 @@ button.lab-stage-button:hover {
   gap: var(--space-2);
   margin: 0;
   padding: 0 var(--panel-pad) var(--panel-pad);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .lab-stage-run small {
   color: var(--text-secondary);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 </style>

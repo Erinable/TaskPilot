@@ -48,6 +48,9 @@ export const ICONS = {
   'arrow-left': { shapes: [['path', { d: 'M19 12H5M11 6l-6 6 6 6' }]] },
   'arrow-right': { shapes: [['path', { d: 'M5 12h14M13 6l6 6-6 6' }]] },
   plus: { shapes: [['path', { d: 'M12 5v14M5 12h14' }]] },
+  minus: { shapes: [['path', { d: 'M5 12h14' }]] },
+  // Fit to view: four corners pointing out.
+  fit: { shapes: [['path', { d: 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5' }]] },
   more: {
     filled: true,
     shapes: [

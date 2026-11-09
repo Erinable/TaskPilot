@@ -192,39 +192,43 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
 .sidebar.collapsed .team-entry-wrap {
   margin-top: var(--space-6);
 }
-/* One small avatar per member, overlapping; working members stand out, offline ones fade. */
+/* One small dot per member in that member's colour; offline ones fade,
+ * working ones get a ring and a pulse.
+ * [人工决策-2026-11-09 19:22:13] 用户反馈七个灰色头像叠在一起不好看：改为彩色小圆点。 */
 .team-stack {
   display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
 }
 .team-stack-avatar {
   position: relative;
-  width: 18px;
-  height: 18px;
-  flex-basis: 18px;
+  width: 9px;
+  height: 9px;
+  flex-basis: 9px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--glass-border);
-}
-.team-stack-avatar + .team-stack-avatar {
-  margin-left: -4px;
+  box-shadow: none;
+  color: transparent;
+  font-size: 0;
 }
 .team-stack-avatar.offline {
-  filter: grayscale(1);
-  opacity: 0.4;
+  opacity: 0.55;
 }
 .team-stack-avatar.busy {
   z-index: 1;
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow:
+    0 0 0 2px var(--glass-bg-strong),
+    0 0 0 3.5px var(--accent);
 }
 .team-stack .presence.busy {
   position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 7px;
-  height: 7px;
+  inset: -3px;
+  width: auto;
+  height: auto;
   margin: 0;
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--glass-border);
+  border-radius: 50%;
+  background: none;
+  box-shadow: 0 0 0 1px var(--accent);
   animation: pulse 1.6s ease-in-out infinite;
 }
 .sidebar.collapsed .team-stack {
