@@ -172,6 +172,11 @@
   .exec-columns {
     grid-template-columns: 1fr;
   }
+  .exec-side {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
   .settings-view {
     grid-template-columns: 200px minmax(0, 1fr);
   }

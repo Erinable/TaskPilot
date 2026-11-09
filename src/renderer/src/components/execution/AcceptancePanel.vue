@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import TermHint from '@/components/TermHint.vue';
@@ -7,7 +7,13 @@ import { criterionRows } from '@/lib/review_model.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: packageTypes.TaskView }>();
+// folded: starts with only the heading shown (a finished package's criteria).
+const props = defineProps<{ task: packageTypes.TaskView; folded?: boolean }>();
+const open = ref(!props.folded);
+watch(
+  () => props.folded,
+  (folded) => (open.value = !folded),
+);
 
 const execution = useExecutionStore();
 
@@ -29,8 +35,12 @@ const rows = computed(() => {
           <p>关联测试通过后自动勾选</p>
         </div>
       </div>
+      <button class="link-button panel-fold-toggle" type="button" :aria-expanded="open" data-action="fold" @click="open = !open">
+        <AppIcon :name="open ? 'chevron-down' : 'chevron-right'" />
+        {{ open ? '收起' : '展开' }}
+      </button>
     </div>
-    <div class="acceptance-list">
+    <div v-show="open" class="acceptance-list">
       <div v-for="(row, index) in rows" :key="index" class="criterion" :class="row.tone">
         <span class="criterion-mark"><AppIcon :name="row.icon" /></span>
         <div>

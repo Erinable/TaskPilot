@@ -99,6 +99,11 @@ const submit = () => execution.answerExplanation(drafts.value.map((draft) => dra
 </template>
 
 <style scoped>
+/* The practice section's subheading size, like 做得好的地方. */
+h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+}
 .grade-explanation-hint,
 .grade-explanation-status {
   display: flex;
@@ -106,13 +111,13 @@ const submit = () => execution.answerExplanation(drafts.value.map((draft) => dra
   gap: var(--space-2);
   margin: 0 0 var(--space-2);
   color: var(--text-secondary);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .grade-explanation-answer {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .grade-explanation-answer textarea {
   font: inherit;

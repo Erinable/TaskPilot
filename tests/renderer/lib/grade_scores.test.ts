@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { independenceLines, qualityLines, rubricLevels } from '../../../src/renderer/src/lib/grade_scores.ts';
+import { gradeDimensions, independenceLines, qualityLines } from '../../../src/renderer/src/lib/grade_scores.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 const scores = (signals: Partial<packageTypes.GradeScores['signals']> = {}): packageTypes.GradeScores => ({
@@ -35,13 +35,32 @@ test('independence lines list only deductions, or say there were none', () => {
   ).toEqual([{ label: '用了 L5 提示', value: '−20' }]);
 });
 
-test('rubric levels follow the rubric order and skip items without one', () => {
-  const report = { summary: '', strengths: [], comments: [], levels: { b: 2 } };
+test('dimension rows follow rubric order and keep levels even when there are no comments', () => {
+  const comment: packageTypes.GradeComment = { category: 'a', observation: '边界条件漏了', betterWay: '补上空输入', file: null, line: null, repeated: false };
+  const report = { summary: '', strengths: [], comments: [comment], levels: { b: 2 } };
   expect(
-    rubricLevels(report, [
-      { id: 'a', label: 'A' },
+    gradeDimensions(report, [
       { id: 'b', label: 'B' },
+      { id: 'a', label: 'A' },
+      { id: 'c', label: 'C' },
     ]),
-  ).toEqual([{ label: 'B', value: '2/4 级', level: 2 }]);
-  expect(rubricLevels({ summary: '', strengths: [], comments: [] }, [{ id: 'a', label: 'A' }])).toEqual([]);
+  ).toEqual([
+    { id: 'b', label: 'B', level: 2, comments: [] },
+    { id: 'a', label: 'A', level: null, comments: [comment] },
+  ]);
+  expect(gradeDimensions({ summary: '', strengths: [], comments: [] }, [{ id: 'a', label: 'A' }])).toEqual([]);
+});
+
+test('older reports without levels still show their comments and preserve their order', () => {
+  const comment: packageTypes.GradeComment = {
+    category: 'a',
+    observation: '遗漏错误处理',
+    betterWay: '显式处理返回值',
+    file: null,
+    line: null,
+    repeated: false,
+  };
+  expect(gradeDimensions({ summary: '', strengths: [], comments: [comment, { ...comment, observation: '命名含糊' }] }, [{ id: 'a', label: 'A' }])).toEqual([
+    { id: 'a', label: 'A', level: null, comments: [comment, { ...comment, observation: '命名含糊' }] },
+  ]);
 });

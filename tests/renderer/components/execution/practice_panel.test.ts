@@ -206,8 +206,9 @@ describe('PracticePanel', () => {
     });
     const groups = wrapper.findAll('[data-category]');
     expect(groups.map((group) => group.attributes('data-category'))).toEqual(['mechanism', 'concept']);
-    // Each heading carries its comment count.
-    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现 1', '原理 1']);
+    // Each compact row keeps the label and comment count separate.
+    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现', '原理']);
+    expect(groups.map((group) => group.get('.grade-comment-count').text())).toEqual(['1 条点评', '1 条点评']);
     expect(wrapper.get('[data-category="concept"]').text()).toContain('锁拿晚了。');
     await wrapper.get('[data-category="concept"] [data-action="save-note"]').trigger('click');
     await flushPromises();
@@ -288,7 +289,10 @@ describe('PracticePanel', () => {
     expect(quality).toContain('74');
     expect(quality).toContain('3/4 通过，30/40 分');
     expect(quality).toContain('通过，20/20 分');
-    expect(quality).toContain('思路3/4 级');
+    expect(quality).not.toContain('思路');
+    expect(wrapper.get('[data-category="thinking"] [data-dimension-level]').attributes('aria-label')).toBe('3/4 级');
+    expect(wrapper.get('[data-category="writing"] [data-dimension-level]').attributes('aria-label')).toBe('2/4 级');
+    expect(wrapper.get('[data-category="writing"]').element.tagName).toBe('SECTION');
     const independence = wrapper.get('[data-score="independence"]').text();
     expect(independence).toContain('45');
     expect(independence).toContain('用了 L3 提示−5');
@@ -296,6 +300,27 @@ describe('PracticePanel', () => {
     expect(independence).toContain('测试全过之前看了参考答案−40');
     expect(independence).toContain('和看过的代码雷同 34%−10');
     expect(wrapper.get('[data-independence-note]').text()).toContain('独立完成度只统计 TaskPilot 内的辅助');
+  });
+
+  test('dimension rows start collapsed, open to the full feedback and reset for a new grade', async () => {
+    const wrapper = await mountPanel({ grade: { ...GRADE, report: { ...GRADE.report!, levels: { thinking: 2, style: 3 } } } });
+    const dimension = wrapper.get('[data-category="thinking"]');
+    const details = dimension.element as HTMLDetailsElement;
+    expect(details.tagName).toBe('DETAILS');
+    expect(details.open).toBe(false);
+    expect(dimension.get('summary').text()).toContain('没有考虑空密码。');
+    expect(dimension.get('summary [data-dimension-level]').attributes('aria-label')).toBe('2/4 级');
+    details.open = true;
+    await dimension.trigger('toggle');
+    expect(details.open).toBe(true);
+    expect(dimension.get('.grade-better').text()).toContain('先列出输入的几种情况再写代码。');
+    await dimension.get('[data-action="save-note"]').trigger('click');
+    await flushPromises();
+    expect(dimension.get('[data-action="save-note"]').text()).toBe('已存为笔记');
+    expect(dimension.get('[data-action="save-note"]').attributes('disabled')).toBeDefined();
+    await wrapper.setProps({ task: { ...current.task, grade: { ...GRADE, id: 'g2' } } });
+    expect((wrapper.get('[data-category="thinking"]').element as HTMLDetailsElement).open).toBe(false);
+    wrapper.unmount();
   });
 
   test('explaining: each difference takes an answer, skipped ones go as null, then the result can be saved', async () => {

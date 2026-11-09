@@ -54,6 +54,8 @@ const elapsed = computed(() => elapsedSince(advice.value?.since, now.value));
 const practising = computed(() => task.value?.mode === 'practice');
 // While a package is being worked on, the Coding Agent leads the page.
 const codingFirst = computed(() => task.value?.status === 'in_progress' && !practising.value);
+// Done: the steps and acceptance are history, so they start folded.
+const finished = computed(() => task.value?.status === 'done');
 
 const back = () => {
   app
@@ -172,15 +174,18 @@ onBeforeUnmount(() => execution.close());
 
       <div class="exec-columns">
         <div class="exec-column">
+          <!-- A finished practice package leads with its grade; the commit and
+               QA's review are already behind the learner. -->
+          <PracticePanel v-if="practising && finished" :task="task" />
           <!-- Accepted work goes into git before the next package starts. -->
           <CommitPanel v-if="task.status === 'accepting' || task.status === 'done'" :task="task" />
           <ReviewPanel v-if="task.review" :task="task" :review="task.review" />
-          <PracticePanel v-if="practising" :task="task" />
-          <StepsPanel :task="task" />
-          <AcceptancePanel :task="task" />
+          <PracticePanel v-if="practising && !finished" :task="task" />
+          <StepsPanel :task="task" :folded="finished" />
+          <AcceptancePanel :task="task" :folded="finished" />
           <DeviationPanel :task="task" />
         </div>
-        <div class="exec-column">
+        <div class="exec-column exec-side">
           <ScopePanel :task="task" />
           <CodingPanel v-if="!codingFirst && !practising && task.codingRun" :task="task" />
           <VerifyPanel :task="task" />

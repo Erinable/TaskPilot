@@ -203,9 +203,11 @@ code {
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  /* Opaque: the strong glass colour laid over the canvas, so text scrolling
+   * under the top bar cannot show through an unblurred surface. */
   .glass,
   .glass-strong {
-    background: var(--glass-bg-strong);
+    background: linear-gradient(var(--glass-bg-strong), var(--glass-bg-strong)), var(--canvas);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
