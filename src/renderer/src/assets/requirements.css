@@ -6,8 +6,7 @@ body.vibrancy {
 body.vibrancy .backdrop {
   display: none;
 }
-body.vibrancy .glass,
-body.vibrancy .glass-strong {
+body.vibrancy .glass {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
@@ -83,7 +82,7 @@ body.vibrancy .glass-strong {
   color: var(--accent);
 }
 .nav-count.attention {
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--warning);
 }
 .nav-count[hidden] {
@@ -337,7 +336,7 @@ body.vibrancy .glass-strong {
   font-size: var(--text-sm);
 }
 .agent-message.failed {
-  border-color: var(--danger-border);
+  border-color: rgba(207, 58, 50, 0.25);
 }
 .agent-message.failed .agent-message-icon {
   color: var(--danger);
@@ -377,13 +376,6 @@ body.vibrancy .glass-strong {
 .question-card {
   padding: 14px 16px;
   border-radius: var(--radius-lg);
-}
-/* Cards repeated in a list are opaque: one blurred layer per card adds up,
- * and the card sits on a page that is already glass. */
-.question-card.glass {
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
 }
 .question-card > .link-button {
   margin-top: 6px;

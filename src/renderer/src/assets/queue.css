@@ -362,9 +362,7 @@
   color: var(--accent-strong);
   background: var(--accent-soft);
 }
-/* Repeated queue, requirement and setup rows keep static status dots.
- * Only the package currently open for execution needs a pulsing indicator. */
-.exec-heading .status-badge.in_progress::before {
+.status-pill.in_progress::before {
   animation: pulse 1.8s ease-in-out infinite;
 }
 .status-pill.in_review,

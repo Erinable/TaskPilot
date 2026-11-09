@@ -152,11 +152,6 @@ onMounted(() => feed.open());
 .activity-panel {
   padding: 8px 24px 16px;
 }
-/* Days off screen skip layout and paint until scrolled to. */
-.activity-day {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 240px;
-}
 .activity-day + .activity-day {
   margin-top: 8px;
 }

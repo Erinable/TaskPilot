@@ -176,9 +176,6 @@
 }
 .post-group {
   margin-bottom: var(--space-8);
-  /* Months off screen skip layout and paint until scrolled to. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 320px;
 }
 .post-group h3 {
   margin: 0 0 var(--space-3);

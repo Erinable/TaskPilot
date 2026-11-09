@@ -94,27 +94,27 @@ select.field-input {
 .avatar.sunset,
 .avatar-swatch.sunset,
 .group-avatar.sunset {
-  background: var(--avatar-sunset);
+  background: linear-gradient(135deg, #f6a96b, #e8678a);
 }
 .avatar.ocean,
 .avatar-swatch.ocean,
 .group-avatar.ocean {
-  background: var(--avatar-ocean);
+  background: linear-gradient(135deg, #5bb8f5, #3f6bf5);
 }
 .avatar.violet,
 .avatar-swatch.violet,
 .group-avatar.violet {
-  background: var(--avatar-violet);
+  background: linear-gradient(135deg, #b18cf5, #6c5bf5);
 }
 .avatar.forest,
 .avatar-swatch.forest,
 .group-avatar.forest {
-  background: var(--avatar-forest);
+  background: linear-gradient(135deg, #5fd3a0, #1f8f63);
 }
 .avatar.graphite,
 .avatar-swatch.graphite,
 .group-avatar.graphite {
-  background: var(--avatar-graphite);
+  background: linear-gradient(135deg, #8b93a7, #4a5162);
 }
 button.avatar {
   padding: 0;

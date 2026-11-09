@@ -461,12 +461,6 @@ const verifyProgress = computed(() => {
   padding: var(--space-2) var(--space-3);
   border-radius: 12px;
 }
-/* One per path entry: opaque instead of one blurred layer each. */
-.course-path-item.glass {
-  background: var(--glass-bg-strong);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
 .course-path-item[data-status='known'],
 .course-path-item[data-status='skipped'] {
   opacity: 0.72;

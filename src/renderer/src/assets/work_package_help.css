@@ -200,11 +200,11 @@
   font-variant-numeric: tabular-nums;
 }
 .onboarding-step.next .onboarding-mark {
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--accent-gradient);
 }
 .onboarding-step.done .onboarding-mark {
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--success);
 }
 .onboarding-mark .icon {

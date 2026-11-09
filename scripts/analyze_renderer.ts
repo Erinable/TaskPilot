@@ -144,14 +144,16 @@ const hooks = registerHooks({
 // deliberately share the module cache and therefore measure incremental loads.
 const defaultFirst = process.argv.includes('--default-first');
 const defaultGraph = masteryGraph.replace(/^---\n[\s\S]*?\n---\n/, '');
+// Dagre is an analysis-only candidate. The product keeps its original layout.
+const dagreCandidate = `---\nconfig:\n  layout: dagre\n---\n${defaultGraph}`;
 const graphScenarios = defaultFirst
   ? [
-      ['note-default-flowchart', defaultGraph],
-      ['mastery-flowchart', masteryGraph],
+      ['mastery-original-layout', masteryGraph],
+      ['candidate-dagre-flowchart', dagreCandidate],
     ]
   : [
-      ['mastery-flowchart', masteryGraph],
-      ['note-default-flowchart', defaultGraph],
+      ['candidate-dagre-flowchart', dagreCandidate],
+      ['mastery-original-layout', masteryGraph],
     ];
 const results: { name: string; outcome: string; loaded: string[]; bytes: number; elk: boolean; cytoscape: boolean }[] = [];
 try {

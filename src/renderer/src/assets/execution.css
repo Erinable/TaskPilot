@@ -131,13 +131,13 @@
   color: var(--text-tertiary);
   background: var(--fill-hover);
   border-radius: 50%;
-  font-size: var(--text-xs);
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
 }
 .term-mark:hover,
 .term-mark:focus-visible {
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--accent);
 }
 .term-tooltip {
@@ -231,7 +231,7 @@
   stroke-width: 2.5;
 }
 .step-item input:checked + .step-check {
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--accent-gradient);
   border-color: transparent;
 }
@@ -528,8 +528,8 @@
   overflow: auto;
   margin: 10px 0 0;
   padding: 12px 14px;
-  color: var(--terminal-text);
-  background: var(--terminal-bg);
+  color: #c9d1e4;
+  background: #12141c;
   border-radius: var(--radius-md);
   font: var(--text-xs)/1.65 var(--font-mono);
   white-space: pre-wrap;
@@ -579,30 +579,30 @@
   overflow: auto;
   margin: 2px 0 6px;
   padding: 8px 0;
-  background: var(--terminal-bg);
+  background: #12141c;
   border-radius: var(--radius-md);
   font: var(--text-xs)/1.7 var(--font-mono);
 }
 .diff-line {
   padding: 0 14px;
-  color: var(--terminal-line);
+  color: #a9b1c6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .diff-line.add {
-  color: var(--terminal-added);
-  background: var(--terminal-added-bg);
+  color: #8ce0a8;
+  background: rgba(46, 160, 90, 0.16);
 }
 .diff-line.del {
-  color: var(--terminal-removed);
-  background: var(--terminal-removed-bg);
+  color: #ff9c94;
+  background: rgba(220, 70, 60, 0.16);
 }
 .diff-line.hunk {
-  color: var(--terminal-hunk);
-  background: var(--terminal-hunk-bg);
+  color: #8fb0ff;
+  background: rgba(90, 130, 255, 0.1);
 }
 .diff-line.meta {
-  color: var(--terminal-muted);
+  color: #6c7489;
 }
 
 /* Deviations */

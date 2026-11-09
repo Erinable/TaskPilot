@@ -202,7 +202,6 @@ test('a pack without a skeleton says so; another pack can be picked', async () =
 
 test('graph labels never become mermaid syntax, and links follow the course', () => {
   const graph = conceptGraph([concept('x', 'a"]; click c0 "http://x', [], 'learning'), concept('y', 'B', ['x', 'gone'], 'mastered')], 'y');
-  expect(graph).toMatch(/^---\nconfig:\n {2}layout: dagre\n---\nflowchart LR\n/);
   expect(graph).toContain('c0["a ]  click c0  http://x"]');
   expect(graph).not.toContain('gone');
   expect(graph).toContain('style c1 stroke-width:3px');

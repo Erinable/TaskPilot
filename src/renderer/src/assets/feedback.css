@@ -93,7 +93,7 @@
   display: grid;
   place-items: center;
   flex: 0 0 26px;
-  color: var(--text-on-color);
+  color: #fff;
   background: var(--success);
   border-radius: var(--radius-md);
 }
