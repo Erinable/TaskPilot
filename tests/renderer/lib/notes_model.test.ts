@@ -93,6 +93,30 @@ test('the archive groups by the business-day month written, newest first, and co
   expect(model.formatDay('2026-09-30T17:00:00Z', 'Asia/Shanghai')).toBe('2026-10-01');
 });
 
+test('the index excerpt drops the opening the title already shows', () => {
+  // A title cut from a grade comment, with the characters a file name cannot hold removed.
+  const cut = note('a.md', {
+    title: 'QA 已经指出 filter_map( h h.join().ok()) 会丢掉 panic 的线程。这里换个角度说…',
+    excerpt: 'QA 已经指出 filter_map(|h| h.join().ok()) 会丢掉 panic 的线程。这里换个角度说：用 .ok() 把 Result 变成 Option 再丢掉',
+  });
+  expect(model.indexExcerpt(cut)).toBe('用 .ok() 把 Result 变成 Option 再丢掉');
+  // A title cut inside a word shows that word again in full.
+  const midWord = note('f.md', {
+    title: 'run_processes 的整个函数体都包在 std env current_exe().and_then( e…',
+    excerpt: 'run_processes 的整个函数体都包在 std::env::current_exe().and_then(|exe_path| { ... }) 闭包里',
+  });
+  expect(model.indexExcerpt(midWord)).toBe('(|exe_path| { ... }) 闭包里');
+  // The whole comment is the title: nothing is left to show.
+  const whole = note('b.md', { title: '提交只改了实现，没有加任何测试。', excerpt: '提交只改了实现，没有加任何测试。' });
+  expect(model.indexExcerpt(whole)).toBeNull();
+  // A title of its own keeps the summary, which wins over the excerpt.
+  const own = note('c.md', { title: '逻辑回归推导', summary: '用 sigmoid 输出概率', excerpt: '正文' });
+  expect(model.indexExcerpt(own)).toBe('用 sigmoid 输出概率');
+  // A short title that happens to start the text is not cut.
+  expect(model.indexExcerpt(note('d.md', { title: '逻辑回归', excerpt: '逻辑回归先算 z' }))).toBe('逻辑回归先算 z');
+  expect(model.indexExcerpt(note('e.md', { title: '空', excerpt: '' }))).toBeNull();
+});
+
 test('thousands of notes group in one pass and the index shows them a page at a time', () => {
   const list = Array.from({ length: 5000 }, (_, index) => note(`n${index}`, { createdAt: new Date(Date.UTC(2026, 0, 1) + index * 3_600_000).toISOString() }));
   const groups = model.groupByMonth(list, 'Asia/Shanghai');

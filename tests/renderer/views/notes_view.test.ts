@@ -105,7 +105,8 @@ describe('NotesView', () => {
     // 2026-09-30T20:00Z is already October in Shanghai.
     expect(wrapper.findAll('.post-group h3').map((heading) => heading.text())).toEqual(['2026 年 10 月']);
     const item = wrapper.get('[data-note="用例要有断言.md"]');
-    expect(item.get('time').text()).toBe('2026-10-24');
+    expect(item.get('time').attributes('datetime')).toBe('2026-10-24');
+    expect(item.get('.post-day-number').text()).toBe('24');
     expect(item.text()).toContain('写法');
     expect(item.text()).toContain('#测试');
     await item.get('.post-tag').trigger('click');
