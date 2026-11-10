@@ -232,7 +232,7 @@ export class ActivityLog {
     try {
       return parseRollup(await readStoredJson(path.join(this.#dir, ROLLUP_FILENAME), 1));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
     }
   }

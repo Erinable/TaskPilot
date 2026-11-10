@@ -19,6 +19,8 @@ if (typeof Element !== 'undefined') {
 
 beforeEach(() => {
   if (typeof window === 'undefined') return;
+  // A test may simulate a restart within itself; separate tests start clean.
+  for (const key of Object.keys(localStorage)) if (key.startsWith('taskpilot:draft:')) localStorage.removeItem(key);
   let api: Record<string, unknown> = {};
   Object.defineProperty(window, 'taskpilot', {
     configurable: true,

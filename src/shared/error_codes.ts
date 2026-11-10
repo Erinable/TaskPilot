@@ -161,6 +161,7 @@ export const ERROR_CODES = [
   'toolchain_unset',
   'unknown_note',
   'unsupported_version',
+  'storage_corrupt',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

@@ -7,4 +7,5 @@ export const appContract = {
   onFullScreen: event<boolean>('window:full-screen'),
   // Every other call waits for this: the stores load after the window opens.
   ready: invoke<[retry: boolean], boolean>('startup:ready'),
+  restoreBackup: invoke<[], boolean>('startup:restore-backup'),
 } satisfies Contract;

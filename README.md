@@ -14,7 +14,7 @@
 </p>
 
 > [!NOTE]
-> 早期阶段：只支持 macOS，没有公开下载，安装包未签名，需要从源码运行或自己打包。
+> 早期阶段：只支持 macOS，尚无已发布的公开下载。可以从源码运行或自行生成无需开发者账号的临时签名安装包；安装、校验与手工更新见[分发说明](docs/distribution.md)。
 
 ## 它是什么
 
@@ -90,9 +90,9 @@ npm run dev
 
 `npm run dev` 和 `npm start` 会检查 Electron 二进制，并在启动时清除继承的 `ELECTRON_RUN_AS_NODE`。如果直接运行 `electron-vite` 遇到 `electron does not provide an export named 'BrowserWindow'`，先执行 `unset ELECTRON_RUN_AS_NODE`，再重试。
 
-打包成 App：`npm run dist`，在 `dist/` 生成 dmg 和 zip。安装包未签名，第一次打开时在「访达」里右键选「打开」。
+打包成 App：`npm run dist`，在 `dist/` 生成本机架构的 dmg 和 zip；传入 `-- --arm64` 或 `-- --x64` 指定架构，`-- --arm64 --x64` 同时生成两种。运行 `npm run dist:checksums` 生成 SHA-256 清单。DMG 本身不需要付费 Apple 开发者账号，当前安装包没有 Developer ID 签名或公证。首次打开请按[分发说明](docs/distribution.md)中的 macOS「隐私与安全 → 仍要打开」步骤操作；更新前先备份本地数据与外部笔记。
 
-打开后，首页的「开始使用」会带你走完：检查 CLI 登录、选择项目文件夹（git 仓库）、设置检查命令、写第一个需求。
+打开后，首页的「开始使用」先选择「做项目」或「学编程」。项目路径会检查所选 CLI、项目仓库和有效检查步骤；学习路径检查 Tutor 后直接进入学习目标访谈。
 
 > [!TIP]
 > CLI 装在 nvm 这类版本管理器里时，应用可能找不到它。到「设置 → 运行环境」把 PATH 来源改成「从登录 shell 读取」。
@@ -110,6 +110,8 @@ npm run dev
 ## 数据与隐私
 
 - 数据在 `~/Library/Application Support/taskpilot`：全局偏好、笔记、掌握度，以及每个仓库在 `repos/<id>/` 下的需求、工作包和活动记录。
+- 「设置 → 数据」可创建带 SHA-256 清单的备份、预览并准备恢复、复制诊断信息或打开日志目录。恢复在重启时执行并保留原数据；应用无法启动时，也可在错误页选择备份。外部笔记库和项目源代码需单独备份，详见[恢复与更新说明](docs/distribution.md)。
+- 未提交的需求、访谈回答和课程编辑草稿保存在本机，重新打开相应表单后可恢复或丢弃；正式内容已更新的旧草稿不会覆盖新内容。
 - 只有这些操作会改你的仓库：应用补丁、本机提交、把更新说明写进你指定的 `.md` 文件、创建 lab 仓库，以及你点击运行的环境步骤和检查命令。
 - TaskPilot 自己只在一处联网：成本页点「同步价格」时下载 [models.dev](https://models.dev) 的价格表。没有遥测，也没有自动更新。
 - 统计的日界默认按 `Asia/Shanghai` 划分，可以用环境变量 `TASKPILOT_TIME_ZONE` 改。

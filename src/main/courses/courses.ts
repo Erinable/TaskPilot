@@ -101,7 +101,6 @@ const readTrust = async (dir: string): Promise<Record<string, Confirmation>> => 
     raw = (await readStoredJson(path.join(dir, TRUST_FILENAME), TRUST_VERSION)) as LooseJson;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    if (error instanceof SyntaxError) return {};
     throw error;
   }
   const confirmed = raw?.confirmed && typeof raw.confirmed === 'object' ? (raw.confirmed as LooseJson) : {};

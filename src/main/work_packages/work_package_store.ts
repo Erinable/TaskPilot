@@ -94,7 +94,7 @@ export class WorkPackageStore {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     return this;
   }
@@ -228,7 +228,7 @@ export class WorkPackageStore {
     try {
       await readStoredJson(this.#file, 1);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     this.#claims.clear();
     this.#state = new Map(this.#tasks.map((task) => [task.id, initialState(task)]));

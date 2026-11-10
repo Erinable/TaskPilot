@@ -149,10 +149,15 @@ test('a pack with concepts loads, and a change to its concepts needs confirming 
   assert.equal(changed.pack, PROGRAMMING_COURSE);
 });
 
-test('a broken trust file confirms nothing', async () => {
+test('a broken trust file refuses resolution and confirmation without replacing the original', async () => {
   const { root, dataDir } = await setup({ 'oslab.toml': packText('oslab') });
-  await fs.writeFile(path.join(dataDir, courses.TRUST_FILENAME), '{ not json');
-  assert.equal((await courses.resolveCourse({ root, dataDir, configDir: null, builtin: BUILTIN }, { local: 'oslab', project: null })).state.status, 'pending');
+  const file = path.join(dataDir, courses.TRUST_FILENAME);
+  const places = { root, dataDir, configDir: null, builtin: BUILTIN };
+  await fs.writeFile(file, '{ not json');
+  await assert.rejects(courses.resolveCourse(places, { local: 'oslab', project: null }), { code: 'storage_corrupt' });
+  const { pack, ref } = await courses.readRepositoryCourse(root, 'oslab');
+  await assert.rejects(courses.confirm(places, pack, ref), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{ not json');
 });
 
 test('a broken repository pack is reported with its field, and programming is used', async () => {

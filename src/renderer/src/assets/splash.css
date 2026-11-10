@@ -47,7 +47,8 @@
   border-radius: 50%;
   animation: splash-spin 0.9s linear infinite;
 }
-.splash-retry {
+.splash-retry,
+.splash-recovery {
   display: none;
   height: 36px;
   padding: 0 18px;
@@ -61,7 +62,8 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.splash-retry:focus-visible {
+.splash-retry:focus-visible,
+.splash-recovery:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -75,9 +77,16 @@
   user-select: text;
   -webkit-app-region: no-drag;
 }
-.splash.failed .splash-retry {
+.splash.failed .splash-retry,
+.splash.failed .splash-recovery {
   display: inline-flex;
   align-items: center;
+}
+
+.splash-recovery {
+  color: var(--text);
+  background: var(--fill);
+  border: 1px solid var(--line-soft);
 }
 
 @keyframes splash-spin {

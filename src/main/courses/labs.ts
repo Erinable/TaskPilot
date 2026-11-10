@@ -287,7 +287,7 @@ export const writePrivate = async (dataDir: string, labId: string, secret: LabPr
       await readStoredJson(path.join(dir, name));
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      if (code !== 'ENOENT') throw error;
     }
   }
   await fs.rm(dir, { recursive: true, force: true });
@@ -324,7 +324,7 @@ export const readHints = async (dataDir: string, labId: string): Promise<LabHint
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return [];
-    if ((error as { code?: string }).code === 'unsupported_version') throw error;
+    if (code === 'unsupported_version' || code === 'storage_corrupt') throw error;
     logger.error('[labs] hints unreadable', error);
     return [];
   }

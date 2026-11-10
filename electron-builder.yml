@@ -1,6 +1,6 @@
 # Local macOS packaging: npm run dist -> dist/.
-# Unsigned and unpublished for now (no Developer ID, no release host);
-# auto-update waits for both.
+# Ad-hoc signed without Developer ID or notarization; no release host yet.
+# Automatic updates remain disabled until a trusted release channel exists.
 appId: com.taskpilot.app
 productName: TaskPilot
 directories:
@@ -26,10 +26,12 @@ extraResources:
 mac:
   icon: assets/icon/icon.icns
   category: public.app-category.developer-tools
-  identity: null
+  # A local signature keeps Apple Silicon bundles valid without an account.
+  identity: '-'
+  # The ad-hoc channel has no Developer ID runtime entitlements. Enable and
+  # validate hardened runtime when adding a notarized Developer ID channel.
+  hardenedRuntime: false
   target:
-    - target: dmg
-      arch: [arm64, x64]
-    - target: zip
-      arch: [arm64, x64]
+    - dmg
+    - zip
 publish: null

@@ -93,10 +93,12 @@ test('load() returns an empty config when the file is absent', async () => {
   assert.deepEqual(config, workspace.emptyConfig());
 });
 
-test('load() reports invalid JSON instead of throwing a SyntaxError', async () => {
+test('load() reports the corrupt workspace file without exposing a SyntaxError', async () => {
   const dir = await tempDir();
-  await fs.writeFile(path.join(dir, workspace.CONFIG_FILENAME), '{ not json');
-  await assert.rejects(() => workspace.load(dir), { code: 'invalid_json' });
+  const file = path.join(dir, workspace.CONFIG_FILENAME);
+  await fs.writeFile(file, '{ not json');
+  await assert.rejects(workspace.load(dir), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{ not json');
 });
 
 test('isInside() accepts paths within the root', () => {

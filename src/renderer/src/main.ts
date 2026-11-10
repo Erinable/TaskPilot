@@ -14,6 +14,7 @@ let app = new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolv
 
 // Nothing may call the main process before its stores are loaded, so the app
 // mounts only once startupReady resolves.
+let startupFailure = '';
 const start = async (retry: boolean) => {
   splash.showSplashLoading();
   try {
@@ -23,9 +24,18 @@ const start = async (retry: boolean) => {
     console.error('[startup] TaskPilot could not start', error);
     // A bundle that failed to load is fetched again on retry.
     app = app.catch(loadApp);
-    splash.showSplashError(describeError(error));
+    startupFailure = describeError(error);
+    splash.showSplashError(startupFailure);
   }
 };
 
+splash.onSplashRecovery(() => {
+  splash.showSplashLoading();
+  call(window.taskpilot.app.restoreBackup())
+    .then((restored) => {
+      if (!restored) splash.showSplashError(startupFailure);
+    })
+    .catch((error) => splash.showSplashError(describeError(error)));
+});
 splash.onSplashRetry(() => start(true).catch((error) => console.error(error)));
 start(false).catch((error) => console.error(error));

@@ -321,7 +321,7 @@ describe('course interview', () => {
     expect(wrapper.get<HTMLInputElement>('[data-field="title"] input').element.value).toBe(OS_COURSE.title);
     await wrapper.get('[data-field="title"] input').setValue('访谈课程草稿');
     expect(useCoursesStore().drafts['user:lexing'].title).toBe('全局课程的未保存标题');
-    expect(useCoursesStore().drafts['requirement:none:r1:h'].title).toBe('访谈课程草稿');
+    expect(useCoursesStore().drafts[JSON.stringify(['requirement', null, 'r1', 'lexing'])].title).toBe('访谈课程草稿');
     store.stopWatching();
     wrapper.unmount();
   });

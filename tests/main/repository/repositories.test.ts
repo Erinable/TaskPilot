@@ -86,6 +86,22 @@ test('an interrupted migration finishes on the next start', async () => {
   assert.equal(registry.current?.root, '/work/app');
 });
 
+test('legacy workspace corruption and newer versions stop migration before moving original files', async () => {
+  for (const [before, code] of [
+    ['{ broken', 'storage_corrupt'],
+    [JSON.stringify({ version: workspace.CONFIG_VERSION + 1, root: '/keep/future' }), 'unsupported_version'],
+  ] as const) {
+    const configDir = await tempDir('tp-repos-');
+    const file = path.join(configDir, workspace.CONFIG_FILENAME);
+    await fs.writeFile(file, before);
+    await fs.writeFile(path.join(configDir, 'requirements.json'), '[]');
+    await assert.rejects(new RepositoryRegistry(configDir).load(), { code });
+    assert.equal(await fs.readFile(file, 'utf8'), before);
+    assert.equal(await fs.readFile(path.join(configDir, 'requirements.json'), 'utf8'), '[]');
+    await assert.rejects(fs.access(path.join(configDir, REGISTRY_FILENAME)), { code: 'ENOENT' });
+  }
+});
+
 test('adding the same root twice returns the existing repository', async () => {
   const configDir = await tempDir('tp-repos-');
   const registry = await new RepositoryRegistry(configDir).load();

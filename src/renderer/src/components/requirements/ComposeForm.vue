@@ -5,6 +5,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import DraftNotice from '@/components/DraftNotice.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
@@ -15,6 +16,7 @@ const textInput = ref<{ focus: () => void } | null>(null);
 
 const count = computed(() => countChars(store.composeText));
 const course = computed(() => store.composeKind === 'course');
+const draftBlocked = computed(() => store.composeDraftState.pending || store.composeDraftState.conflict);
 const needsRuntime = computed(() => !course.value && store.composeContext?.agentAvailable === false);
 const runtimeBlocked = computed(() => !course.value && (store.composeContextLoading || Boolean(store.composeContextError) || needsRuntime.value));
 const configureRuntime = () =>
@@ -46,14 +48,15 @@ const onKeydown = (event: Event | KeyboardEvent) => {
 };
 
 const onSubmit = () => {
-  if (store.submitting || runtimeBlocked.value || (course.value && !store.composeForm.toolchain)) return;
+  if (store.submitting || draftBlocked.value || runtimeBlocked.value || (course.value && !store.composeForm.toolchain)) return;
   store.submitNew().catch((error) => console.error(error));
 };
 </script>
 
 <template>
   <form class="req-pane" data-pane="new" novalidate @submit.prevent="onSubmit">
-    <div class="req-kind-switch">
+    <DraftNotice :state="store.composeDraftState" :busy="store.submitting" @restore="store.restoreComposeDraft" @discard="store.discardComposeDraft" />
+    <div class="req-kind-switch" :inert="draftBlocked">
       <el-radio-group v-model="store.composeKind" size="small" aria-label="想做什么">
         <el-radio-button value="project" data-kind="project">我想做…</el-radio-button>
         <el-radio-button value="course" data-kind="course">我想学…</el-radio-button>
@@ -78,7 +81,7 @@ const onSubmit = () => {
       <h2>描述你的需求</h2>
       <p>写下要做什么、为什么做。Product Lead 会先提出澄清问题，再把需求拆成可执行的工作包，你确认后才会进入工作队列。</p>
     </header>
-    <div class="settings-card glass req-form-card">
+    <div class="settings-card glass req-form-card" :inert="draftBlocked">
       <div v-if="!course" class="setting-row stacked">
         <label class="setting-label" for="reqTitle">
           <strong>标题（可选）</strong>
@@ -175,7 +178,7 @@ const onSubmit = () => {
           </li>
           <li>
             <AppIcon name="terminal" />
-            通过本机的 Claude Code CLI 运行，不启用任何工具，花费计入 AI 团队页的本周统计。
+            通过所选的本机规划 CLI 运行，不启用任何工具，花费计入 AI 团队页的本周统计。
           </li>
         </ul>
       </template>
@@ -209,7 +212,7 @@ const onSubmit = () => {
         v-else
         class="primary-button"
         type="submit"
-        :disabled="store.submitting || runtimeBlocked || (course && !store.composeForm.toolchain)"
+        :disabled="store.submitting || draftBlocked || runtimeBlocked || (course && !store.composeForm.toolchain)"
         :aria-busy="store.submitting || (!course && store.composeContextLoading)"
       >
         <AppIcon

@@ -108,11 +108,8 @@ export class RepositoryRegistry {
       const backup = path.join(this.#configDir, BACKUP_DIRNAME);
       await fs.mkdir(backup, { recursive: true });
       for (const name of legacy) await fs.cp(path.join(this.#configDir, name), path.join(backup, name), { recursive: true, force: false });
-      // A broken workspace.json still moves; it just names no repository.
-      root = await workspace.load(this.#configDir).then(
-        (config) => config.root,
-        () => null,
-      );
+      // Refuse before moving files when the legacy workspace needs recovery.
+      root = (await workspace.load(this.#configDir)).root;
     }
     const entry = root ? this.#newEntry(root) : null;
     const target = this.dataDir(entry?.id ?? UNASSIGNED_ID);
@@ -210,7 +207,7 @@ export class RepositoryRegistry {
   // Keeps workspace.json's root readable for anyone opening the file by hand.
   async #syncRoot(entry: RepositoryEntry) {
     const dir = this.dataDir(entry.id);
-    const config = await workspace.load(dir).catch(() => workspace.emptyConfig());
+    const config = await workspace.load(dir);
     await workspace.save(dir, { ...config, root: entry.root });
   }
 }

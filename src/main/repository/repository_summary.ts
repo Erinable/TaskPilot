@@ -42,7 +42,7 @@ export const readCounts = async (dataDir: string): Promise<RepositoryCounts | nu
       .flatMap((item) => item.packages as { id: string; status: WorkPackageStatus }[]);
     return countStatuses(packages.map((pkg) => saved[pkg.id]?.status ?? pkg.status));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
+    if (['unsupported_version', 'storage_corrupt'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
     logger.error('[repositories] could not count work', error);
     return null;
   }

@@ -15,6 +15,8 @@ import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
 import { draftOf } from '@/lib/course_model.ts';
 import type { CourseDraft } from '@/lib/course_model.ts';
+import * as localDraft from '@/lib/local_draft.ts';
+import { isCourseDraft } from '@/lib/draft_models.ts';
 import { createStateWatcher } from './state_watcher.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
@@ -34,8 +36,41 @@ export const useCoursesStore = defineStore('courses', () => {
   // User packs are global. Keep their drafts across view and repository resets;
   // requirement drafts use a repository/requirement key supplied by the editor.
   const drafts = ref<Record<string, CourseDraft>>({});
-  const editDraft = (key: string, pack: CoursePack) => (drafts.value[key] ??= draftOf(pack));
+  const draftSessions = new Map<string, { baseline: string; draft: localDraft.LocalDraft<CourseDraft> }>();
+  const editSession = (key: string, pack: CoursePack) => {
+    const initial = draftOf(pack);
+    const baseline = localDraft.draftFingerprint(initial);
+    let session = draftSessions.get(key);
+    if (!session || session.baseline !== baseline) {
+      session?.draft.stop();
+      session = { baseline, draft: localDraft.createLocalDraft({ key: localDraft.draftKey(['course', key]), initial, validate: isCourseDraft }) };
+      draftSessions.set(key, session);
+      drafts.value[key] = session.draft.value.value;
+    }
+    return session.draft;
+  };
+  const editDraft = (key: string, pack: CoursePack) => editSession(key, pack).value.value;
+  const editDraftState = (key: string, pack: CoursePack) => editSession(key, pack).state;
+  const restoreDraft = (key: string, pack: CoursePack) => editSession(key, pack).restore();
+  const hasDraft = (key: string) => {
+    if (drafts.value[key]) return true;
+    try {
+      return (globalThis.localStorage?.getItem(localDraft.draftKey(['course', key])) ?? null) !== null;
+    } catch {
+      return false;
+    }
+  };
+  const acceptDraft = (key: string, saved: CourseDraft) => {
+    const session = draftSessions.get(key);
+    if (!session) return;
+    session.draft.accept(saved);
+    session.baseline = localDraft.draftFingerprint(saved);
+  };
   const discardDraft = (key: string) => {
+    const session = draftSessions.get(key);
+    session?.draft.clear();
+    session?.draft.stop();
+    draftSessions.delete(key);
     delete drafts.value[key];
   };
   const current = computed(() => list.value?.current ?? null);
@@ -341,6 +376,10 @@ export const useCoursesStore = defineStore('courses', () => {
     viewedId,
     drafts,
     editDraft,
+    editDraftState,
+    acceptDraft,
+    restoreDraft,
+    hasDraft,
     discardDraft,
     current,
     load,

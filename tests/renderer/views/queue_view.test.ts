@@ -10,7 +10,7 @@ import { useRequirementsStore } from '../../../src/renderer/src/stores/requireme
 import { useAppStore } from '../../../src/renderer/src/stores/app.ts';
 import { installApi, requirement } from '../requirements_fakes.ts';
 import { taskView, testStepWorkspace } from '../execution_fakes.ts';
-import { ok } from '../ipc_fakes.ts';
+import { fail, ok } from '../ipc_fakes.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
@@ -42,6 +42,32 @@ describe('QueueView', () => {
 
     await empty.find('button').trigger('click');
     expect(open).toHaveBeenCalledWith({ compose: true });
+  });
+
+  test('first read failure is a persistent error with an in place retry instead of an empty queue', async () => {
+    const api = installApi({ list: [] });
+    const store = useTasksStore();
+    api.tasks.list.mockImplementationOnce(() => fail('unknown', '读取失败'));
+    await expect(store.reloadQueue()).rejects.toThrow('读取失败');
+    const wrapper = render();
+    expect(wrapper.get('[data-error="queue"]').text()).toContain('读取失败');
+    expect(wrapper.find('[data-empty="queue"]').exists()).toBe(false);
+    await wrapper.get('[data-action="retry-queue"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-error="queue"]').exists()).toBe(false);
+    expect(wrapper.find('[data-empty="queue"]').exists()).toBe(true);
+  });
+
+  test('refresh errors keep visible packages while a retry is pending', async () => {
+    const store = useTasksStore();
+    store.tasks = [taskView({ title: '已知工作包' })];
+    store.error = '连接中断';
+    store.loading = true;
+    const wrapper = render();
+    expect(wrapper.get('[data-error="queue"]').text()).toContain('保留上次读取的工作包');
+    expect(wrapper.get('[data-action="retry-queue"]').attributes('disabled')).toBeDefined();
+    expect(wrapper.findAll('.task-item')).toHaveLength(1);
+    expect(wrapper.find('[data-empty="queue"]').exists()).toBe(false);
   });
 
   test('the empty state goes away once packages are published', async () => {

@@ -178,11 +178,11 @@ test('an unassigned pending choice does not appear as a repository selection or 
   expect(wrapper.get('[data-course="programming"]').text()).toContain('默认课程');
 });
 
-test('switching courses, leaving the view and switching repositories retain the full user draft until explicit cancel', async () => {
+test('switching courses, leaving the view and switching repositories retain the full user draft until explicit discard', async () => {
   let wrapper = await openMine();
   await fieldOf(wrapper, 'title').get('input').setValue('未保存的标题');
   await fieldOf(wrapper, 'labGuide[0]').get('textarea').setValue('未保存的实验指引');
-  expect(wrapper.get('[data-field="draft-status"]').text()).toContain('草稿会保留');
+  expect(wrapper.get('[data-field="draft-status"]').text()).toContain('保留草稿');
   await wrapper.get('[data-course="os"]').trigger('click');
   await flushPromises();
   expect(wrapper.find('form.course-editor').exists()).toBe(false);
@@ -198,6 +198,25 @@ test('switching courses, leaving the view and switching repositories retain the 
   expect(fieldOf(wrapper, 'labGuide[0]').get<HTMLTextAreaElement>('textarea').element.value).toBe('未保存的实验指引');
   await wrapper.get('.course-editor-actions .secondary-button').trigger('click');
   await wrapper.get('[data-action="edit"]').trigger('click');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('未保存的标题');
+  await wrapper.get('[data-action="discard-draft"]').trigger('click');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe(MINE.title);
+});
+
+test('restarting a course editor offers recovery, shows restored status and supports explicit discard', async () => {
+  const first = await openMine();
+  await fieldOf(first, 'title').get('input').setValue('重启前的输入');
+  first.unmount();
+  const wrapper = await openView();
+  await wrapper.get('[data-course="mine"]').trigger('click');
+  await flushPromises();
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe(MINE.title);
+  expect(wrapper.get('[data-action="restore-draft"]').text()).toBe('恢复草稿');
+  expect(wrapper.get('[data-action="save-course"]').attributes('disabled')).toBeDefined();
+  await wrapper.get('[data-action="restore-draft"]').trigger('click');
+  expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe('重启前的输入');
+  expect(wrapper.get('[data-draft-notice]').text()).toContain('已恢复');
+  await wrapper.get('[data-action="discard-draft"]').trigger('click');
   expect(fieldOf(wrapper, 'title').get<HTMLInputElement>('input').element.value).toBe(MINE.title);
 });
 
@@ -210,7 +229,10 @@ test('a delayed save preserves edits made after its snapshot and does not reopen
   await fieldOf(wrapper, 'title').get('input').setValue('提交后继续写');
   await wrapper.get('[data-course="os"]').trigger('click');
   await flushPromises();
-  held.resolve({ ok: true, data: { list: withMine(), preview: minePreview({ pack: { ...MINE, title: '提交的标题' } }) } });
+  const savedPack = { ...MINE, title: '提交的标题' };
+  held.resolve({ ok: true, data: { list: withMine(), preview: minePreview({ pack: savedPack }) } });
+  // Subsequent reads reflect the content the successful save wrote.
+  api.courses.preview.mockImplementation((id: string) => ok(id === 'mine' ? minePreview({ pack: savedPack }) : coursePreview(id)));
   await flushPromises();
   expect(wrapper.get('[data-detail]').attributes('data-detail')).toBe('os');
   await wrapper.get('[data-course="mine"]').trigger('click');

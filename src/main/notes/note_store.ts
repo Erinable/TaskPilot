@@ -139,7 +139,7 @@ export class NoteStore {
     const chosen = await readStoredJson(path.join(this.#configDir, LOCATION_FILENAME), 1)
       .then((value) => (value && typeof value === 'object' && !Array.isArray(value) ? (value as { directory?: unknown }).directory : undefined))
       .catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
+        if (['unsupported_version', 'storage_corrupt'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logger.error('[notes] notes_location.json could not be read', error);
         return null;
       });
@@ -147,7 +147,7 @@ export class NoteStore {
     try {
       return await this.open(chosen);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
+      if (['unsupported_version', 'storage_corrupt'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
       logger.error(`[notes] the chosen notes folder could not be opened: ${chosen}`, error);
       this.#unavailable = chosen;
       return this.open(null);
@@ -161,7 +161,7 @@ export class NoteStore {
       try {
         await readStoredJson(file);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       await this.#open(directory);
       this.#unavailable = null;

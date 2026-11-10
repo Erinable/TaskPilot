@@ -4,6 +4,7 @@
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import DraftNotice from '@/components/DraftNotice.vue';
 import InlineCode from '@/components/InlineCode.vue';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
@@ -21,6 +22,8 @@ const props = defineProps<{ item: requirementTypes.Requirement }>();
 const store = useRequirementsStore();
 
 const answers = computed(() => store.answerDraft(props.item).answers);
+const answerState = computed(() => store.answerDraftState(props.item));
+const draftBlocked = computed(() => answerState.value.pending || answerState.value.conflict);
 // Questions handed back to Product Lead: a blank answer tells it to pick a
 // sensible default and say so in the plan (see product_lead.planPrompt).
 const defaults = computed(() => store.answerDraft(props.item).defaults);
@@ -164,7 +167,16 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
         </div>
       </template>
 
-      <CourseInterview v-else-if="course" :item="item" :course="course" />
+      <template v-else-if="course">
+        <DraftNotice
+          v-if="item.status === 'answering' || item.status === 'draft'"
+          :state="answerState"
+          :busy="store.acting !== null"
+          @restore="store.restoreAnswers(item)"
+          @discard="store.discardAnswers(item)"
+        />
+        <div :inert="(item.status === 'answering' || item.status === 'draft') && draftBlocked"><CourseInterview :item="item" :course="course" /></div>
+      </template>
 
       <template v-else-if="item.status === 'answering' || item.status === 'draft'">
         <AgentBubble v-if="item.summary" :text="`我理解的需求：${item.summary}`" />
@@ -173,7 +185,8 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
           v-else
           :text="`开始拆解前，我有 ${item.questions.length} 个问题。看不懂或拿不准的，点「不确定，用推荐做法」，我会选一个简单稳妥的做法并在计划里写明。`"
         />
-        <form class="req-questions" novalidate @submit.prevent="onSubmitAnswers">
+        <DraftNotice :state="answerState" :busy="store.acting !== null" @restore="store.restoreAnswers(item)" @discard="store.discardAnswers(item)" />
+        <form class="req-questions" novalidate :inert="draftBlocked" @submit.prevent="onSubmitAnswers">
           <div v-for="(question, index) in item.questions" :key="index" class="question-card glass">
             <label class="question-text" :for="`reqAnswer${index}`">
               <span class="question-index">{{ index + 1 }}</span>

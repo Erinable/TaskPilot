@@ -1,0 +1,44 @@
+name: Build macOS packages without Developer ID
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: macOS (${{ matrix.arch }}, ad-hoc)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # Packaging needs the Electron binary, unlike the source-check CI job.
+      - run: npm ci
+      - name: Build ad-hoc signed DMG and ZIP
+        run: npm run dist -- --${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Generate SHA-256 checksums
+        run: node scripts/artifact_checksums.ts dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TaskPilot-macos-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

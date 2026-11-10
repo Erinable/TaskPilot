@@ -201,10 +201,24 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) =>
   });
 
 // agent:status for a ready machine: analysis CLI signed in, coding CLI installed and signed in.
-export const agentStatus = (overrides: Partial<settingsTypes.AgentStatus> = {}): settingsTypes.AgentStatus => ({
-  available: true,
-  command: 'claude',
-  signIn: { state: 'signed_in', source: 'claude auth status' },
-  coding: { cli: 'codex', installed: true, signIn: { state: 'signed_in', source: 'codex login status' } },
-  ...overrides,
-});
+export const agentStatus = (overrides: Partial<settingsTypes.AgentStatus> = {}): settingsTypes.AgentStatus => {
+  const available = overrides.available ?? true;
+  const signIn = overrides.signIn === undefined ? { state: 'signed_in' as const, source: 'claude auth status' } : overrides.signIn;
+  const analysis = {
+    cli: 'claude' as const,
+    installed: available,
+    available,
+    command: available ? 'claude' : null,
+    reason: available ? null : 'missing',
+    signIn,
+  };
+  return {
+    available,
+    command: 'claude',
+    signIn,
+    analysis: { 'product-lead': { ...analysis }, architect: { ...analysis } },
+    tutor: { ...analysis },
+    coding: { cli: 'codex', installed: true, signIn: { state: 'signed_in', source: 'codex login status' } },
+    ...overrides,
+  };
+};

@@ -11,6 +11,7 @@ const parts = () => {
 };
 
 export const onSplashRetry = (listener: () => void) => parts()?.retry.addEventListener('click', listener);
+export const onSplashRecovery = (listener: () => void) => parts()?.root.querySelector('.splash-recovery')?.addEventListener('click', listener);
 
 export const showSplashLoading = () => {
   const splash = parts();

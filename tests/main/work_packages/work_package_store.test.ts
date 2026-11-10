@@ -143,11 +143,13 @@ test('hint levels are recorded once per step, survive a reload and load empty fr
   assert.equal(reloaded.snippetCopies, 1);
 });
 
-test('a corrupt state file falls back to seeded defaults', async () => {
+test('a corrupt state file refuses load and reset while preserving the original', async () => {
   const configDir = await tempDir('taskpilot-store-');
-  await fs.writeFile(path.join(configDir, STATE_FILENAME), '{ broken');
-  const { store } = await newStore(configDir);
-  assert.equal(store.get('a').status, 'pending');
+  const file = path.join(configDir, STATE_FILENAME);
+  await fs.writeFile(file, '{ broken');
+  await assert.rejects(newStore(configDir), { code: 'storage_corrupt' });
+  await assert.rejects(new WorkPackageStore(configDir).reset(), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{ broken');
 });
 
 test('reset() returns every package to its seed state and removes the file', async () => {

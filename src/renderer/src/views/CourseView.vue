@@ -62,7 +62,7 @@ const editing = ref(false);
 watch(
   () => viewed.value?.ref.id,
   (id) => {
-    editing.value = Boolean(id && viewed.value?.ref.source === 'user' && courses.drafts[`user:${id}`]);
+    editing.value = Boolean(id && viewed.value?.ref.source === 'user' && courses.hasDraft(`user:${id}`));
   },
   { immediate: true },
 );
@@ -179,7 +179,7 @@ onBeforeUnmount(() => courses.leave());
           >
             <span class="course-item-title">
               <strong>{{ entry.title ?? entry.id }}</strong>
-              <span v-if="entry.source === 'user' && courses.drafts[`user:${entry.id}`]" class="scope-badge selected">编辑草稿</span>
+              <span v-if="entry.source === 'user' && courses.hasDraft(`user:${entry.id}`)" class="scope-badge selected">编辑草稿</span>
               <span v-if="isDefault(entry)" class="scope-badge">默认课程</span>
               <span v-else-if="inUse(entry)" class="scope-badge in-use">正在使用</span>
               <span v-else-if="isSelected(entry)" class="scope-badge selected">已选，待确认</span>
