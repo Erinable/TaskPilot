@@ -36,9 +36,9 @@ TaskPilot 的 profile 包住整个 CLI 进程，所以 CLI 自己的工具和它
   （`<id>-home`，HOME、XDG 目录和 npm 缓存都指向它）、临时目录，以及用户在
   设置里添加的可写文件夹。所选 CLI 真实的状态目录（`~/.claude`、`~/.codex`
   等）和 `~/.npm` 不可读也不可写；
-- 读：主目录以外的文件；主目录内只有上面这些、PATH 上工具所在的顶层目录
-  （如 `~/.nvm`，但 `~/.ssh`、`~/Library` 等敏感目录从不因此放开），以及用户
-  添加的可读文件夹。主目录里的文件名和大小仍可见（Node 需要 lstat）；
+- 读：主目录以外的文件；主目录内只有上面这些、实际工具入口及具体安装目录、
+  选中的 Node 版本和所需 npm 包目录，以及用户添加的可读文件夹。认证目录及其
+  祖先不因 PATH 项被放开；主目录里的文件名和大小仍可见（Node 需要 lstat）；
 - 网络：允许。CLI 要连模型 API，Seatbelt 分不清 CLI 的请求和它执行的命令；
 - 环境变量：只传 HOME、PATH、语言设置和模型服务商的 key（按名字匹配），不传
   SSH agent socket、云服务或 GitHub token；git 全局配置指向 `/dev/null`。
@@ -74,8 +74,8 @@ not permitted`，已实测），因此沙箱模式下 Codex 用 `--sandbox dange
 Product Lead、Architect、QA、Release Manager、Environment Steward、Tutor 始终通过
 对应 CLI 的受限、无工具 profile 运行：
 
-- 不读取工作区外文件；
-- 不执行 shell、MCP、编辑、搜索工具；
+- 不向模型开放工作区外文件读取工具；
+- 不向模型开放 shell、MCP、编辑或搜索工具；
 - 代码内容只来自 `repo_reader` 或 `review_diff`；
 - QA 把 diff 当不可信数据，不能因为 diff 中的文本而获得工具；
 - 现有结构化输出 validator 继续生效。
@@ -154,14 +154,31 @@ prompt 走 stdin。Codex 在独立 OS 用户自己的 HOME 中登录，不复用
 
 ### Analysis profile
 
-Codex 不进入受限分析层：没有已验证的全工具关闭能力。QA、Architect、Product Lead、
-Release Manager、Environment Steward、Tutor 可分别选择 Claude Code、Pi、Grok、OpenCode 1.x；
-分析层关闭工具并隔离 hooks、MCP、扩展。Pi / Grok / OpenCode 从主账号原生配置中
-仅投影 provider、模型、默认推理设置与所需连接凭据，并复制固定认证 JSON（如有）。
-文件保存在 0700 临时目录内且权限为 0600，结束后删除；不加载完整用户配置或
-凭据 helper 命令，OpenCode 只允许已审查的 SDK。Claude 保留 restricted 与无工具模式，
-仅从原生配置提取白名单中的推理环境变量。模型目录 IPC 只返回名称、ID、provider、
-variant 和默认值，不返回认证、endpoint、headers 或配置原文。
+Product Lead、Architect、QA、Release Manager、Environment Steward、Tutor 可分别选择
+Claude Code、Pi、Grok、Codex、OpenCode 1.x。分析层禁用工具并隔离 hooks、MCP、扩展，
+CLI 状态检查会探测实际版本和受限分析能力；模型输出仍经过对应的结构与业务校验。
+
+Codex 分析要求兼容的 CLI（最低 0.164），使用独立临时 cwd、HOME 和 CODEX_HOME。
+只投影原生 model/provider 的推理与连接设置并复制固定 `auth.json`，不复制完整用户
+配置、hooks、MCP、skills、rules、项目或用户 instructions。临时目录权限 0700、
+文件权限 0600，运行后删除；认证信息不会进入模型目录 IPC。
+
+TaskPilot 为每次分析构造仅含一个模型的本地 `model_catalog_json`，移除 apply_patch 和
+实验工具元数据，防止远端目录刷新重新引入工具。模型来自原生配置、本机缓存或用户
+显式填写的 ID；没有可用 ID 时提示填写，不猜测模型。固定参数关闭 shell、unified_exec、
+apps、plugins、multiagent、browser、image、view_image 等能力，并设置 read-only、
+approval never、ephemeral；系统指令与 JSON Schema 写入临时文件，任务内容通过 stdin。
+JSONL 解析会实时拒绝工具调用、未知 item 和失败终态；只有完整成功终态才接受最终结构化结果。
+
+Codex 分析的工具限制来自 TaskPilot 控制的 CLI 功能、模型目录与协议校验，并非新增的
+外层 OS 沙箱。CLI 仍需联网访问模型服务；它可以读到临时复制的登录凭据。系统级托管
+策略可能改变 CLI 行为，探测无法确认兼容时会报不可用，不自动降低分析约束。
+
+Pi / Grok / OpenCode 从主账号原生配置中仅投影 provider、模型、默认推理设置与所需连接
+凭据，并复制固定认证 JSON（如有）。不加载完整用户配置或凭据 helper 命令，OpenCode
+只允许已审查的 SDK。Claude 保留 restricted 与无工具模式，仅从原生配置提取白名单中的
+推理环境变量。模型目录 IPC 只返回名称、ID、provider、variant 和默认值，不返回认证、
+endpoint、headers 或配置原文。
 
 ## 生命周期
 

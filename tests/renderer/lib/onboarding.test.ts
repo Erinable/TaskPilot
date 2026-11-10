@@ -90,6 +90,23 @@ describe('onboarding steps', () => {
     expect(JSON.stringify(help)).not.toContain('Claude');
   });
 
+  test('Codex sign-in help applies to planning and learning roles', () => {
+    const agent = agentStatus();
+    const codex = { ...agent.tutor, cli: 'codex' as const, signIn: { state: 'signed_out' as const, source: null } };
+    agent.analysis['product-lead'] = { ...codex };
+    agent.analysis.architect = { ...codex, signIn: { state: 'signed_in', source: 'codex login status' } };
+    agent.tutor = { ...codex };
+    const project = buildSteps(facts({ agent, requirementCount: 0 }));
+    const planning = project.find((step) => step.id === 'cli')!;
+    expect(planning.title).toBe('登录 Codex');
+    expect(planning.help![0]).toMatchObject({ role: 'Product Lead', commands: ['codex login'] });
+    expect(state(project).requirement).toBe('waiting');
+    const course = buildSteps(facts({ agent, path: 'course' as const, courseRequirementCount: 0 }));
+    expect(course.find((step) => step.id === 'cli')!.help![0]).toMatchObject({ role: 'Tutor', commands: ['codex login'] });
+    agent.tutor.signIn = { state: 'signed_in', source: 'codex login status' };
+    expect(buildSteps(facts({ agent, path: 'course' as const, courseRequirementCount: 0 })).find((step) => step.id === 'requirement')!.waiting).toBe(false);
+  });
+
   test('an installed incompatible CLI shows its reason instead of installation instructions', () => {
     const agent = agentStatus();
     agent.analysis.architect = { ...agent.analysis.architect, cli: 'opencode', available: false, reason: 'Requires OpenCode version 1.x' };

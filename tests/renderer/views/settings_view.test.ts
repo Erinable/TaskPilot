@@ -11,6 +11,7 @@ import { mountView } from '../mount_view.ts';
 import { envState, fail, installApi, ok, preferences } from '../settings_fakes.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type { Preferences } from '@shared/ipc/settings.ts';
+import { AGENT_IDS } from '@shared/agent_runtime.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { until } from '../../fixtures/until.ts';
 
@@ -80,7 +81,8 @@ test('visited pages retain local expansion and unsaved drafts when switching', a
 test('agent configuration saves a custom model without changing other roles', async () => {
   const wrapper = await openView('agents');
   const codex = wrapper.get('#agent-product-lead-cli').find('option[value="codex"]');
-  expect(codex.attributes('disabled')).toBeDefined();
+  expect(codex.attributes('disabled')).toBeUndefined();
+  expect(codex.text()).toBe('Codex');
   await chooseModel(wrapper, 'product-lead', 'provider/model-x');
   expect(isShown(wrapper.get('#settingsSavebar'))).toBe(true);
   await wrapper.get('#saveSettings').trigger('click');
@@ -90,6 +92,56 @@ test('agent configuration saves a custom model without changing other roles', as
   expect(wrapper.get('[data-agent="product-lead"] .el-select__placeholder').text()).toBe('provider/model-x');
   expect(useSettingsStore().preferencesDraft!.agents.qa.model).toBe('');
   expect(isShown(wrapper.get('#settingsSavebar'))).toBe(false);
+  wrapper.unmount();
+});
+
+test('an analysis role selects Codex, reads its catalog and becomes available after saving', async () => {
+  api.agent.models.mockImplementation((request) =>
+    ok({
+      cli: request.cli,
+      scope: request.scope,
+      models: [{ id: 'codex-analysis-model', label: 'codex-analysis-model', provider: 'openai', variants: ['high'], source: 'config' }],
+      defaultModel: 'codex-analysis-model',
+      defaultThinking: 'high',
+      issues: [],
+    }),
+  );
+  api.agent.runtimes.mockImplementation(async () => {
+    const saved = await api.preferences.get();
+    if (!saved.ok) return saved;
+    return ok(
+      AGENT_IDS.map((agent) => ({
+        agent,
+        config: saved.data.agents[agent],
+        command: saved.data.agents[agent].cli,
+        available: true,
+        version: '0.200 fixture',
+        reason: null,
+      })),
+    );
+  });
+  const wrapper = await openView('agents');
+  for (const role of AGENT_IDS) expect(wrapper.get(`#agent-${role}-cli option[value="codex"]`).attributes('disabled')).toBeUndefined();
+  await wrapper.get('#agent-product-lead-cli').setValue('codex');
+  await flushPromises();
+  expect(api.agent.models).toHaveBeenCalledWith({ cli: 'codex', scope: 'analysis', refresh: false });
+  expect(wrapper.get('[data-agent="product-lead"] .runtime-state').text()).toBe('保存后检查');
+  await chooseModel(wrapper, 'product-lead', 'codex-analysis-model');
+  await wrapper.get('#agent-product-lead-thinking').setValue('high');
+  await wrapper.get('#saveSettings').trigger('click');
+  await flushPromises();
+  expect(api.preferences.set).toHaveBeenCalledWith(
+    expect.objectContaining({
+      agents: expect.objectContaining({
+        'product-lead': { cli: 'codex', model: 'codex-analysis-model', thinking: 'high' },
+      }),
+    }),
+  );
+  expect(wrapper.get('[data-agent="product-lead"] .runtime-state').text()).toBe('可用');
+  expect(useSettingsStore().modelsForAgent('product-lead')?.scope).toBe('analysis');
+  expect(useSettingsStore().preferencesDraft!.agents.qa.cli).toBe('claude');
+  await useSettingsStore().load();
+  expect((wrapper.get('#agent-product-lead-cli').element as HTMLSelectElement).value).toBe('codex');
   wrapper.unmount();
 });
 

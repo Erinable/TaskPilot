@@ -5,6 +5,7 @@
 //   pi       message_end / turn_end: message.{provider, model, usage{input, output, cacheRead, cacheWrite, cost.total}}
 //   grok     system / assistant: model; result: usage (Anthropic counts)
 //   opencode step_finish per step: part.{tokens{input, output, cache{read, write}}, cost}, providerID/modelID
+//   codex    turn.completed / turn.failed: usage.{input_tokens, cached_input_tokens, output_tokens}
 // A reported cost of 0 is treated as unknown: CLIs report 0 for providers
 // they have no price for, not only for free ones.
 import type { ModelCall, TokenUsage } from '../../shared/ipc/activity.ts';
@@ -71,7 +72,38 @@ const updateOpenCodeCall = (call: ModelCall, type: string, event: Json): number 
   return count(part.cost);
 };
 
-export const streamCall = (cli: Exclude<CliId, 'claude' | 'codex'>, stdout: string): ModelCall => {
+// Codex includes cache reads in input_tokens; normalize them once here for
+// analysis validation and billing, so an invalid count never becomes a free call.
+export const codexTokens = (usage: unknown): TokenUsage | null => {
+  if (!isObject(usage)) return null;
+  const values = [usage.input_tokens, usage.cached_input_tokens, usage.output_tokens];
+  if (!values.every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) return null;
+  const input = usage.input_tokens as number;
+  const cached = usage.cached_input_tokens as number;
+  if (cached > input) return null;
+  return { input: input - cached, output: usage.output_tokens as number, cacheRead: cached, cacheWrite: 0 };
+};
+
+export const codexCall = (stdout: string, model?: string): ModelCall => {
+  const call: ModelCall = { cli: 'codex', provider: 'openai', model: text(model), costUsd: null, tokens: null };
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isObject(event)) continue;
+    const metadata = isObject(event.metadata) ? event.metadata : {};
+    call.model = text(event.model) ?? text(event.model_id) ?? text(metadata.model) ?? call.model;
+    if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'error') call.tokens = codexTokens(event.usage) ?? call.tokens;
+  }
+  return call;
+};
+
+export const streamCall = (cli: Exclude<CliId, 'claude'>, stdout: string): ModelCall => {
+  if (cli === 'codex') return codexCall(stdout);
   const call: ModelCall = { cli, provider: cli === 'grok' ? 'xai' : null, model: null, costUsd: null, tokens: null };
   let opencodeCost = 0;
   for (const line of stdout.split(/\r?\n/)) {

@@ -44,21 +44,55 @@ test('OpenCode tool initialization fails closed', () => {
   assert.throws(() => parseStructuredOutput('{"type":"step_start","tools":["read"]}'), { code: 'agent_unavailable' });
 });
 
-test('Codex structured analysis is rejected before process launch', async () => {
-  const config = { cli: 'codex', model: '', thinking: 'default' } satisfies AgentRuntimeConfig;
-  await assert.rejects(
-    () =>
-      runStructured(
-        {
-          ...options,
-          spawnFn: () => {
-            throw new Error('must not launch');
-          },
-        },
-        config,
-      ),
-    { code: 'agent_unavailable' },
+test('Codex structured analysis reaches the isolated runner for a planning role', async () => {
+  const child = fakeChild();
+  let command = '';
+  let argumentsPassed: string[] = [];
+  const spawnFn: SpawnFn = ((executable: string, args: string[]) => {
+    command = executable;
+    argumentsPassed = args;
+    setImmediate(() => {
+      child.stdout.end(
+        [
+          { type: 'turn.started' },
+          { type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: '{"ready":true}' } },
+          { type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3 } },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join('\n'),
+      );
+      child.emit('close', 0);
+    });
+    return child;
+  }) as unknown as SpawnFn;
+  const result = await runStructured({ ...options, spawnFn }, { cli: 'codex', model: 'gpt-5.4', thinking: 'high' });
+  assert.equal(command, 'codex');
+  assert.ok(argumentsPassed.includes('--output-schema'));
+  assert.ok(argumentsPassed.includes('--ephemeral'));
+  assert.ok(!argumentsPassed.includes('private prompt'));
+  assert.deepEqual(result.output, { ready: true });
+  assert.equal(result.call?.cli, 'codex');
+  assert.equal(result.call?.tokens?.cacheRead, 2);
+});
+
+test('Codex capability probing ignores startup warnings before its version', async () => {
+  const bin = await tempDir('taskpilot-codex-capability-');
+  const executable = path.join(bin, 'codex');
+  await fs.writeFile(
+    executable,
+    `#!/bin/sh
+case "$1" in
+  --version) printf 'WARNING: temporary helper directory unavailable\\ncodex-cli 0.164.0\\n' ;;
+  exec) printf '%s\\n' '--json --ephemeral --ignore-rules --strict-config --output-schema --sandbox' ;;
+  features) printf '%s\\n' 'shell_tool stable true' 'unified_exec stable true' 'view_image stable true' 'multi_agent stable true' 'apps stable true' 'plugins stable true' 'hooks stable true' ;;
+  *) exit 99 ;;
+esac
+`,
+    { mode: 0o755 },
   );
+  const status = await probeCli({ cli: 'codex', model: 'gpt-5.4', thinking: 'high' }, bin);
+  assert.equal(status.available, true);
+  assert.equal(status.version, 'codex-cli 0.164.0');
 });
 
 test('Grok probe reports missing supported credentials without launching model', async () => {

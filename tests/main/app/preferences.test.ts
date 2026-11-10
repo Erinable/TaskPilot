@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tempDir as createTempDir } from '../../fixtures/temp_dir.ts';
 import * as preferences from '../../../src/main/app/preferences.ts';
+import { AGENT_IDS } from '../../../src/shared/agent_runtime.ts';
 
 const tempDir = () => createTempDir('taskpilot-prefs-');
 
@@ -124,10 +125,24 @@ test('legacy preferences gain independent default role configurations', async ()
   assert.equal(loaded.agents['coding-agent'].cli, 'codex');
 });
 
-test('saving rejects unsafe role capability and malformed model or thinking', async () => {
+test('Codex configurations survive validation and disk reload for every role and supported thinking level', async () => {
+  const dir = await tempDir();
+  for (const thinking of ['default', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+    const input = valid();
+    for (const role of AGENT_IDS) input.agents[role] = { cli: 'codex', model: 'gpt-6.1-sol', thinking };
+    const saved = await preferences.save(dir, input);
+    const loaded = await preferences.load(dir);
+    for (const role of AGENT_IDS) {
+      assert.deepEqual(saved.agents[role], input.agents[role]);
+      assert.deepEqual(loaded.agents[role], input.agents[role]);
+    }
+  }
+});
+
+test('saving rejects unsupported thinking and malformed CLI or model configuration', async () => {
   const dir = await tempDir();
   const cases = [
-    { cli: 'codex', model: '', thinking: 'default' },
+    { cli: 'unknown-cli', model: '', thinking: 'default' },
     { cli: 'claude', model: '', thinking: 'off' },
     { cli: 'pi', model: '--tools=bash', thinking: 'high' },
     { cli: 'pi', model: 'model\n--flag', thinking: 'high' },

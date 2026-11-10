@@ -11,6 +11,7 @@ import { streamCall } from './model_usage.ts';
 import { loadNativeModelProfile, nativeClaudeInferenceEnv, nativeInferenceDefaults } from './native_model_profile.ts';
 import { argsFor, commandFor, copyAuthFile, ensureConfig, envFor, hasGrokAuth, probeCli, redact } from './cli_environment.ts';
 import { assertAnalysisEvent, parseStructuredOutput } from './structured_output.ts';
+import { runCodexAnalysis } from './codex_analysis.ts';
 
 const MAX_OUTPUT = 4 * 1024 * 1024;
 const MAX_STDERR = 16 * 1024;
@@ -141,8 +142,7 @@ export const runStructured = async (options: RunStructuredOptions, config: Agent
     const status = await probeCli(config, options.envPath);
     if (!status.available) throw new AgentRunError(status.reason ?? 'OpenCode CLI is unavailable for isolated analysis', 'agent_unavailable');
   }
-  if (config.cli === 'codex')
-    throw new AgentRunError('Codex analysis is unavailable: Codex CLI does not provide a verified no-tools mode', 'agent_unavailable');
+  if (config.cli === 'codex') return runCodexAnalysis(options, config);
   if (config.cli === 'claude') {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-claude-config-'));
     try {
