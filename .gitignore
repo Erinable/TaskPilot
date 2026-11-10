@@ -15,8 +15,9 @@ evals/*/reports/
 # Local preview server config
 .claude/launch.json
 
-# Impeccable platform engine and local runtime state; keep shared design artifacts tracked
-/.dsh/skills/impeccable/scripts/bin/
+# Local DSH tooling stays on this machine.
+/.dsh/
+# Local design review runtime state; keep shared design artifacts tracked.
 **/.impeccable/config.local.json
 **/.impeccable/hook.cache.json
 **/.impeccable/hook.pending.json
