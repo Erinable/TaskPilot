@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import TopBar from './components/TopBar.vue';
 import SideBar from './components/SideBar.vue';
@@ -17,9 +17,11 @@ import { useNotificationsStore } from './stores/notifications.ts';
 import { useRepositoriesStore } from './stores/repositories.ts';
 import { useCodingActivityStore } from './stores/coding_activity.ts';
 import { useCoursesStore } from './stores/courses.ts';
+import { useDataManagementStore } from './stores/data_management.ts';
 import { describeError } from './lib/errors.ts';
 import { openDialogs, showToast } from './lib/feedback.ts';
 import { hideSplash } from './lib/splash.ts';
+import { recoverBackupDrafts } from './lib/local_draft.ts';
 
 // Views most sessions never open load when first shown, keeping them out of
 // the startup bundle.
@@ -46,6 +48,17 @@ const settings = useSettingsStore();
 const execution = useExecutionStore();
 const repositories = useRepositoriesStore();
 const codingActivity = useCodingActivityStore();
+const dataManagement = useDataManagementStore();
+const restoreButton = ref<HTMLButtonElement | null>(null);
+watch(
+  () => dataManagement.rollbackPath,
+  async (pending) => {
+    if (pending) {
+      await nextTick();
+      restoreButton.value?.focus();
+    }
+  },
+);
 
 // Settings mounts the first time it is shown and then stays mounted (v-show),
 // so unsaved drafts survive leaving it without every page mounting at startup.
@@ -60,7 +73,7 @@ watch(
 
 // Dialogs (Element Plus) handle their own Escape; these are the page shortcuts.
 const onKeydown = (event: KeyboardEvent) => {
-  if (openDialogs.value > 0 || repositories.switching) return;
+  if (openDialogs.value > 0 || repositories.switching || dataManagement.rollbackPath) return;
   if (event.key === 'Escape' && app.view === 'execution' && !execution.deviationOpen) {
     app
       .navigate('queue')
@@ -76,6 +89,13 @@ const onKeydown = (event: KeyboardEvent) => {
 };
 
 onMounted(async () => {
+  try {
+    if (await recoverBackupDrafts()) {
+      showToast('备份中的未提交草稿已恢复到本机。打开对应表单后可选择恢复或丢弃。', 'info');
+    }
+  } catch (error) {
+    showToast(`备份草稿尚未恢复：${describeError(error)}。恢复文件仍保留，重新打开应用会再次尝试。`, 'error');
+  }
   document.addEventListener('keydown', onKeydown);
   app.startActivity();
   codingActivity.start();
@@ -115,7 +135,11 @@ onBeforeUnmount(() => {
     <span class="orb orb-c"></span>
   </div>
 
-  <div class="window-shell" :inert="repositories.switching" :aria-busy="repositories.switching">
+  <div
+    class="window-shell"
+    :inert="repositories.switching || Boolean(dataManagement.rollbackPath)"
+    :aria-busy="repositories.switching || Boolean(dataManagement.rollbackPath)"
+  >
     <TopBar />
     <!-- :style goes through the CSSOM, which the page CSP allows (unlike style attributes). -->
     <div class="app-grid" :class="{ 'sidebar-collapsed': app.sidebarCollapsed }" :style="{ '--sidebar-width': `${app.sidebarWidth}px` }">
@@ -145,10 +169,39 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <p v-if="repositories.switching" class="repository-switch-notice glass-strong" role="status">正在准备切换仓库…</p>
-  <CommandPalette />
+  <div v-if="dataManagement.rollbackPath" class="restore-overlay" role="dialog" aria-modal="true" aria-labelledby="restore-pending-title">
+    <section class="restore-panel glass-strong">
+      <h2 id="restore-pending-title">备份已准备好，请重新启动</h2>
+      <p>为保留当前草稿，恢复前已暂停编辑。重启后换入备份，并保留当前数据作为恢复历史。</p>
+      <p v-if="dataManagement.error" role="alert">{{ dataManagement.error }}</p>
+      <button ref="restoreButton" type="button" class="primary-button" :disabled="dataManagement.busy" @click="dataManagement.restart">重新启动并恢复</button>
+    </section>
+  </div>
+  <CommandPalette v-else />
 </template>
 
 <style scoped>
+.restore-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: var(--fill);
+}
+.restore-panel {
+  max-width: 540px;
+  padding: var(--space-6);
+  border-radius: var(--radius-lg);
+  line-height: 1.6;
+}
+.restore-panel h2 {
+  margin-top: 0;
+}
+.restore-panel p {
+  margin-block: var(--space-4);
+}
 .repository-switch-notice {
   position: fixed;
   bottom: var(--space-5);

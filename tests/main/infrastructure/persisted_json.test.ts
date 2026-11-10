@@ -1,4 +1,4 @@
-import { onTestFinished, test, vi } from 'vitest';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -118,25 +118,46 @@ test('future private lab manifests refuse reads and replacement before deleting 
   assert.equal(await fs.readFile(path.join(privateDir, 'reference.patch'), 'utf8'), 'private original');
 });
 
-test('a path is checked once: a second write does not reread the file', async () => {
+test('corrupt JSON refuses reads and saves before load, preserving the original bytes and permissions', async () => {
   const file = path.join(await directory(), 'state.json');
-  await fs.writeFile(file, JSON.stringify({ version: 1, items: [] }));
-  const reads = vi.spyOn(fs, 'readFile');
-  onTestFinished(() => reads.mockRestore());
-  await writeStoredJson(file, { version: 1, items: ['first'] });
-  await writeStoredJson(file, { version: 1, items: ['second'] });
-  assert.equal(reads.mock.calls.filter(([target]) => target === file).length, 1);
-  assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { version: 1, items: ['second'] });
+  const before = '{"privateValue":"do not expose this in an error';
+  await fs.writeFile(file, before, { mode: 0o600 });
+  await assert.rejects(readStoredJson(file), (error: Error & { code?: string }) => {
+    assert.equal(error.code, 'storage_corrupt');
+    assert.ok(error.message.includes(file));
+    assert.ok(error.message.includes('原文件保持不变'));
+    assert.ok(error.message.includes('备份'));
+    assert.ok(!error.message.includes('privateValue'));
+    return true;
+  });
+  await assert.rejects(writeStoredJson(file, { version: 1, items: [] }), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+  assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
 });
 
-test('a path read by a load is not reread by the following write', async () => {
+test('every save refuses corrupt or future replacements made after a successful load and write', async () => {
   const file = path.join(await directory(), 'state.json');
-  await fs.writeFile(file, JSON.stringify({ version: 1, items: [] }));
+  await writeStoredJson(file, { version: 1, items: ['original'] });
   await readStoredJson(file);
-  const reads = vi.spyOn(fs, 'readFile');
-  onTestFinished(() => reads.mockRestore());
-  await writeStoredJson(file, { version: 1, items: ['saved'] });
-  assert.equal(reads.mock.calls.filter(([target]) => target === file).length, 0);
+  for (const [before, code] of [
+    ['{ broken', 'storage_corrupt'],
+    [JSON.stringify({ version: 2, untouched: 'newer application data' }), 'unsupported_version'],
+  ] as const) {
+    await fs.writeFile(file, before);
+    await assert.rejects(writeStoredJson(file, { version: 1, items: ['must not overwrite'] }), { code });
+    assert.equal(await fs.readFile(file, 'utf8'), before);
+  }
+});
+
+test('repairing the original lets a rejected read and save be retried without restarting', async () => {
+  const file = path.join(await directory(), 'state.json');
+  await fs.writeFile(file, '{ broken');
+  await assert.rejects(readStoredJson(file), { code: 'storage_corrupt' });
+  await assert.rejects(writeStoredJson(file, { version: 1 }), { code: 'storage_corrupt' });
+  await fs.writeFile(file, JSON.stringify({ version: 1, items: ['recovered'] }));
+  assert.deepEqual(await readStoredJson(file), { version: 1, items: ['recovered'] });
+  await writeStoredJson(file, { version: 1, items: ['continued'] });
+  assert.deepEqual(await readStoredJson(file), { version: 1, items: ['continued'] });
 });
 
 test('a refused write is not remembered, so the next write checks again', async () => {

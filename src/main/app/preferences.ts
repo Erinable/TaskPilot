@@ -227,7 +227,7 @@ export const load = async (configDir: string): Promise<Preferences> => {
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return defaults();
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return defaults();
     throw error;
   }
 };

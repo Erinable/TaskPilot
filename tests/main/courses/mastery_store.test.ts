@@ -4,7 +4,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { tempDir } from '../../fixtures/temp_dir.ts';
-import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import type { Review, ReviewCheck } from '../../../src/shared/ipc/packages.ts';
 import * as mastery from '../../../src/main/courses/mastery_store.ts';
 
@@ -194,12 +193,13 @@ test('a package done by Coding Agent, or one without concepts, writes nothing', 
   await assert.rejects(fs.stat(path.join(configDir, mastery.MASTERY_FILENAME)), { code: 'ENOENT' }, 'nothing written at all');
 });
 
-test('a broken mastery.json starts empty instead of failing startup', async () => {
-  captureExpectedErrors((error) => error instanceof SyntaxError);
+test('a broken mastery.json fails startup without replacing its contents', async () => {
   const configDir = await dir();
-  await fs.writeFile(path.join(configDir, mastery.MASTERY_FILENAME), '{not json');
-  assert.deepEqual((await new mastery.MasteryStore(configDir).load()).list(), []);
-  await fs.writeFile(path.join(configDir, mastery.MASTERY_FILENAME), JSON.stringify({ records: [{ course: 'os' }, null], seen: [1] }));
+  const file = path.join(configDir, mastery.MASTERY_FILENAME);
+  await fs.writeFile(file, '{not json');
+  await assert.rejects(new mastery.MasteryStore(configDir).load(), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{not json');
+  await fs.writeFile(file, JSON.stringify({ records: [{ course: 'os' }, null], seen: [1] }));
   assert.deepEqual((await new mastery.MasteryStore(configDir).load()).list(), []);
 });
 

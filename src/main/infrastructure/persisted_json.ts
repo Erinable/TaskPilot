@@ -1,8 +1,7 @@
 // Shared guarded persistence for application-owned JSON files.
-// Legacy files without a version are accepted as version 1. Before replacing an
-// existing file, writes inspect it so a future format can never be destroyed.
-// The check is made once per path: a read or write that saw the file's version
-// remembers it, so later writes of that version or newer skip the reread.
+// Legacy files without a version are accepted as version 1. Every replacement
+// checks the file on disk, including changes made after the store was loaded.
+// Corrupt files remain untouched so the user can recover them before retrying.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -12,9 +11,6 @@ import { codedError } from './coded_error.ts';
 export type StoredJsonWriteOptions = { mode?: number };
 
 type Versioned = { version?: unknown };
-
-// The version each path was last read or written with in this process.
-const knownVersions = new Map<string, number>();
 
 const unsupported = (file: string, detail: string): Error => codedError(`Unsupported storage version in ${file}: ${detail}`, 'unsupported_version');
 
@@ -26,28 +22,29 @@ export const assertStorageVersion = (value: unknown, supported: number, file: st
 };
 
 export const readStoredJson = async (file: string, supported = 1): Promise<unknown> => {
-  const value = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
-  knownVersions.set(path.resolve(file), assertStorageVersion(value, supported, file));
+  const text = await fs.readFile(file, 'utf8');
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    throw codedError(
+      `应用数据文件已损坏，已停止读取或覆盖，原文件保持不变：${path.resolve(file)}。请先复制原文件留存，再从有效备份恢复或修复 JSON，完成后点击「重试」。请勿删除原文件或重置进度。`,
+      'storage_corrupt',
+    );
+  }
+  assertStorageVersion(value, supported, file);
   return value;
 };
 
 export const writeStoredJson = async (file: string, value: unknown, { mode }: StoredJsonWriteOptions = {}): Promise<void> => {
   const supplied = value && typeof value === 'object' && !Array.isArray(value) ? (value as Versioned).version : undefined;
   if (!Number.isInteger(supplied) || (supplied as number) < 1) throw unsupported(file, String(supplied));
-  const supported = supplied as number;
-  const key = path.resolve(file);
-  const known = knownVersions.get(key);
-  if (known === undefined || known > supported) {
-    try {
-      const existing = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
-      // Existing unversioned files are legacy v1 and may be replaced. A malformed
-      // JSON file is likewise recoverable, matching each store's old behavior.
-      assertStorageVersion(existing, supported, file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-    }
+  try {
+    await readStoredJson(file, supplied as number);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   await fs.mkdir(path.dirname(file), { recursive: true });
   await writeFileAtomic(file, jsonText(value), { mode });
-  knownVersions.set(key, supported);
 };

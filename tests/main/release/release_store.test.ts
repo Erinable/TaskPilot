@@ -103,10 +103,10 @@ test('history keeps the newest releases, but released package ids outlive it', a
   assert.equal(reopened.history().length, MAX_HISTORY);
 });
 
-test('a corrupt file loads as empty', async () => {
+test('a corrupt release file fails visibly and remains available for recovery', async () => {
   const { dir } = await makeStore();
-  await fs.writeFile(path.join(dir, RELEASES_FILENAME), '{not json');
-  const store = await new ReleaseStore(dir).load();
-  assert.equal(store.draft(), null);
-  assert.deepEqual(store.history(), []);
+  const file = path.join(dir, RELEASES_FILENAME);
+  await fs.writeFile(file, '{not json');
+  await assert.rejects(new ReleaseStore(dir).load(), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{not json');
 });

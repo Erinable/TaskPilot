@@ -7,9 +7,10 @@
 // until this machine confirms it again; the form says so before saving.
 // `save` replaces saving over the pack's file, for a drafted pack that has
 // none yet (the requirement center's course interview).
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import DraftNotice from '@/components/DraftNotice.vue';
 import { FIELD_LABELS, GUIDE_FIELDS, draftOf, fieldErrorText, packOf } from '@/lib/course_model.ts';
 import { useCoursesStore } from '@/stores/courses.ts';
 import ConceptEditor from './ConceptEditor.vue';
@@ -28,13 +29,29 @@ const emit = defineEmits<{ close: [] }>();
 const courses = useCoursesStore();
 
 const draftKey = props.draftKey ?? (props.save ? null : `user:${props.pack.id}`);
-const draft = ref(draftKey ? courses.editDraft(draftKey, props.pack) : draftOf(props.pack));
+const sourcePack = shallowRef(props.pack);
+const draft = ref(draftKey ? courses.editDraft(draftKey, sourcePack.value) : draftOf(sourcePack.value));
+const draftState = computed(() => (draftKey ? courses.editDraftState(draftKey, sourcePack.value) : null));
+const draftBlocked = computed(() => draftState.value?.pending || draftState.value?.conflict);
 const saving = ref(false);
+watch(
+  () => props.pack,
+  (pack) => {
+    if (saving.value || JSON.stringify(pack) === JSON.stringify(sourcePack.value) || !draftState.value) return;
+    draftState.value.conflict = true;
+    draftState.value.error = '正式课程内容已更新，当前草稿已保留。请丢弃旧草稿后从最新内容重新编辑。';
+  },
+);
+const discard = () => {
+  if (!draftKey) return;
+  courses.discardDraft(draftKey);
+  sourcePack.value = props.pack;
+  draft.value = courses.editDraft(draftKey, props.pack);
+};
 const form = ref<HTMLFormElement | null>(null);
 const errorSummary = ref<HTMLElement | null>(null);
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(draftOf(props.pack)));
 const cancel = () => {
-  if (draftKey) courses.discardDraft(draftKey);
   emit('close');
 };
 // Errors show once saving was tried, then follow the edits.
@@ -185,7 +202,7 @@ const removeExample = (index: number, exampleIndex: number) => {
 };
 
 const save = async () => {
-  if (saving.value || courses.busy) return;
+  if (saving.value || courses.busy || draftBlocked.value) return;
   tried.value = true;
   serverError.value = null;
   if (!checked.value.pack) {
@@ -193,13 +210,17 @@ const save = async () => {
     return;
   }
   const snapshot = JSON.stringify(draft.value);
+  const submittedPack = checked.value.pack;
   saving.value = true;
   try {
-    const refused = await (props.save ?? courses.save)(checked.value.pack);
+    const refused = await (props.save ?? courses.save)(submittedPack);
     if (refused) {
       serverError.value = refused;
       await focusError();
-    } else if (JSON.stringify(draft.value) === snapshot) {
+    } else {
+      if (draftKey) courses.acceptDraft(draftKey, draftOf(submittedPack));
+      sourcePack.value = submittedPack;
+      if (JSON.stringify(draft.value) !== snapshot) return;
       if (draftKey && courses.drafts[draftKey] === draft.value) courses.discardDraft(draftKey);
       emit('close');
     }
@@ -211,218 +232,227 @@ const save = async () => {
 
 <template>
   <form ref="form" class="course-editor" novalidate aria-label="编辑课程包" @submit.prevent="save().catch((error) => console.error(error))" @input="edited">
+    <DraftNotice v-if="draftState && draftKey" :state="draftState" :busy="saving" @restore="courses.restoreDraft(draftKey, sourcePack)" @discard="discard" />
     <p v-if="dirty && draftKey" class="course-path-note" role="status" data-field="draft-status">
-      有未保存修改。草稿会保留，切课程、离页或切仓后可以继续编辑；取消会丢弃草稿。
+      有未保存修改。取消或离开会保留草稿；需要重新填写时点「丢弃草稿」。
     </p>
-    <p class="course-editor-note" role="note">
-      <AppIcon name="info" />
-      <span>保存后内容就变了：要在本机重新确认，确认之前规划和判卷不会用这个课程包。</span>
-    </p>
+    <div class="course-editor-fields" :inert="draftBlocked">
+      <p class="course-editor-note" role="note">
+        <AppIcon name="info" />
+        <span>保存后内容就变了：要在本机重新确认，确认之前规划和判卷不会用这个课程包。</span>
+      </p>
 
-    <div class="course-editor-field" data-field="id">
-      <span class="course-editor-label">id</span>
-      <code class="path-chip">{{ draft.id }}</code>
-      <small>id 是文件名，不能改。想换 id 就复制一份。</small>
-    </div>
-
-    <label v-for="field in TEXT_FIELDS" :key="field.key" class="course-editor-field" :data-field="field.key">
-      <span class="course-editor-label">{{ FIELD_LABELS[field.key] }}</span>
-      <textarea
-        v-if="field.multiline"
-        v-model="draft[field.key]"
-        class="field-input"
-        rows="2"
-        :aria-invalid="invalid(field.key)"
-        :aria-describedby="describedBy(field.key)"
-      ></textarea>
-      <input v-else v-model="draft[field.key]" class="field-input" type="text" :aria-invalid="invalid(field.key)" :aria-describedby="describedBy(field.key)" />
-      <small v-if="errorOf(field.key)" :id="errorId(field.key)" class="course-field-error" role="alert">{{ errorOf(field.key) }}</small>
-    </label>
-
-    <div class="course-editor-field" data-field="appliesTo">
-      <span class="course-editor-label">{{ FIELD_LABELS.appliesTo }}</span>
-      <el-select
-        v-model="draft.languages"
-        multiple
-        filterable
-        allow-create
-        default-first-option
-        :reserve-keyword="false"
-        placeholder="不限"
-        aria-label="适用语言"
-        @change="edited"
-      >
-        <el-option v-for="language in languageOptions" :key="language" :label="language" :value="language" />
-      </el-select>
-      <div class="course-editor-toolchains">
-        <span>工具链：</span>
-        <el-checkbox-group v-model="draft.toolchains" aria-label="适用工具链" @change="edited">
-          <el-checkbox v-for="toolchain in LAB_TOOLCHAINS" :key="toolchain" :value="toolchain">{{ TOOLCHAIN_LABELS[toolchain] }}</el-checkbox>
-        </el-checkbox-group>
-        <small v-if="!draft.toolchains.length">不限</small>
+      <div class="course-editor-field" data-field="id">
+        <span class="course-editor-label">id</span>
+        <code class="path-chip">{{ draft.id }}</code>
+        <small>id 是文件名，不能改。想换 id 就复制一份。</small>
       </div>
-      <template v-for="(_, index) in draft.languages" :key="index">
-        <small v-if="errorOf(`appliesTo.languages[${index}]`)" class="course-field-error" role="alert">
-          {{ draft.languages[index] }}：{{ errorOf(`appliesTo.languages[${index}]`) }}
-        </small>
-      </template>
-      <small v-if="errorOf('appliesTo.languages')" class="course-field-error" role="alert">{{ errorOf('appliesTo.languages') }}</small>
-    </div>
 
-    <fieldset v-for="guide in GUIDE_FIELDS" :key="guide" class="course-editor-group" :data-field="guide">
-      <legend>{{ FIELD_LABELS[guide] }}</legend>
-      <div v-for="(_, index) in draft[guide]" :key="index" class="course-editor-line" :data-field="`${guide}[${index}]`">
+      <label v-for="field in TEXT_FIELDS" :key="field.key" class="course-editor-field" :data-field="field.key">
+        <span class="course-editor-label">{{ FIELD_LABELS[field.key] }}</span>
         <textarea
-          v-model="draft[guide][index]"
+          v-if="field.multiline"
+          v-model="draft[field.key]"
           class="field-input"
           rows="2"
-          :aria-label="`${FIELD_LABELS[guide]}第 ${index + 1} 行`"
-          :aria-invalid="invalid(`${guide}[${index}]`)"
-          :aria-describedby="describedBy(`${guide}[${index}]`)"
+          :aria-invalid="invalid(field.key)"
+          :aria-describedby="describedBy(field.key)"
         ></textarea>
-        <button class="icon-button small" type="button" :aria-label="`删除第 ${index + 1} 行`" @click="removeLine(guide, index)">
-          <AppIcon name="trash" />
-        </button>
-        <small v-if="errorOf(`${guide}[${index}]`)" :id="errorId(`${guide}[${index}]`)" class="course-field-error" role="alert">
-          {{ errorOf(`${guide}[${index}]`) }}
-        </small>
-      </div>
-      <button v-if="draft[guide].length < COURSE_LIMITS.guideLines" class="link-button" type="button" data-action="add-line" @click="addLine(guide)">
-        <AppIcon name="plus" />
-        加一行
-      </button>
-      <small v-if="errorOf(guide)" class="course-field-error" role="alert">{{ errorOf(guide) }}</small>
-    </fieldset>
+        <input
+          v-else
+          v-model="draft[field.key]"
+          class="field-input"
+          type="text"
+          :aria-invalid="invalid(field.key)"
+          :aria-describedby="describedBy(field.key)"
+        />
+        <small v-if="errorOf(field.key)" :id="errorId(field.key)" class="course-field-error" role="alert">{{ errorOf(field.key) }}</small>
+      </label>
 
-    <label class="course-editor-field" data-field="referenceGuide">
-      <span class="course-editor-label">{{ FIELD_LABELS.referenceGuide }}</span>
-      <textarea
-        v-model="draft.referenceGuide"
-        class="field-input"
-        rows="3"
-        :aria-invalid="invalid('referenceGuide')"
-        :aria-describedby="describedBy('referenceGuide')"
-      ></textarea>
-      <small v-if="errorOf('referenceGuide')" :id="errorId('referenceGuide')" class="course-field-error" role="alert">{{ errorOf('referenceGuide') }}</small>
-    </label>
-
-    <fieldset class="course-editor-group" data-field="rubric">
-      <legend>判卷维度（{{ COURSE_LIMITS.minRubric }} 到 {{ COURSE_LIMITS.maxRubric }} 项）</legend>
-      <div v-for="(item, index) in draft.rubric" :key="index" class="course-editor-item" :data-field="`rubric[${index}]`">
-        <div class="course-editor-item-head">
-          <strong>第 {{ index + 1 }} 项</strong>
-          <button class="icon-button small" type="button" :aria-label="`上移第 ${index + 1} 项`" :disabled="index === 0" @click="moveItem(index, -1)">
-            <AppIcon name="arrow-left" class="quarter-turn" />
-          </button>
-          <button
-            class="icon-button small"
-            type="button"
-            :aria-label="`下移第 ${index + 1} 项`"
-            :disabled="index === draft.rubric.length - 1"
-            @click="moveItem(index, 1)"
-          >
-            <AppIcon name="arrow-right" class="quarter-turn" />
-          </button>
-          <button class="icon-button small" type="button" :aria-label="`删除第 ${index + 1} 项`" @click="removeItem(index)"><AppIcon name="trash" /></button>
+      <div class="course-editor-field" data-field="appliesTo">
+        <span class="course-editor-label">{{ FIELD_LABELS.appliesTo }}</span>
+        <el-select
+          v-model="draft.languages"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          :reserve-keyword="false"
+          placeholder="不限"
+          aria-label="适用语言"
+          @change="edited"
+        >
+          <el-option v-for="language in languageOptions" :key="language" :label="language" :value="language" />
+        </el-select>
+        <div class="course-editor-toolchains">
+          <span>工具链：</span>
+          <el-checkbox-group v-model="draft.toolchains" aria-label="适用工具链" @change="edited">
+            <el-checkbox v-for="toolchain in LAB_TOOLCHAINS" :key="toolchain" :value="toolchain">{{ TOOLCHAIN_LABELS[toolchain] }}</el-checkbox>
+          </el-checkbox-group>
+          <small v-if="!draft.toolchains.length">不限</small>
         </div>
-        <label v-for="key in ['id', 'label'] as const" :key="key" class="course-editor-field" :data-field="`rubric[${index}].${key}`">
-          <span class="course-editor-label">{{ key === 'id' ? 'id' : FIELD_LABELS.label }}</span>
-          <input
-            v-model="item[key]"
-            class="field-input"
-            :class="{ mono: key === 'id' }"
-            type="text"
-            :aria-invalid="invalid(`rubric[${index}].${key}`)"
-            :aria-describedby="describedBy(`rubric[${index}].${key}`)"
-          />
-          <small v-if="key === 'id'">笔记的分类记的是这个 id，改了以后旧笔记会对不上。</small>
-          <small v-if="errorOf(`rubric[${index}].${key}`)" :id="errorId(`rubric[${index}].${key}`)" class="course-field-error" role="alert">
-            {{ errorOf(`rubric[${index}].${key}`) }}
+        <template v-for="(_, index) in draft.languages" :key="index">
+          <small v-if="errorOf(`appliesTo.languages[${index}]`)" class="course-field-error" role="alert">
+            {{ draft.languages[index] }}：{{ errorOf(`appliesTo.languages[${index}]`) }}
           </small>
-        </label>
-        <div class="course-editor-field" :data-field="`rubric[${index}].dimension`">
-          <span class="course-editor-label">{{ FIELD_LABELS.dimension }}</span>
-          <el-radio-group v-model="item.dimension" :aria-label="`第 ${index + 1} 项的通用维度`" @change="edited">
-            <el-radio-button v-for="option in DIMENSION_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
-          </el-radio-group>
-          <small v-if="errorOf(`rubric[${index}].dimension`)" class="course-field-error" role="alert">{{ errorOf(`rubric[${index}].dimension`) }}</small>
-        </div>
-        <label class="course-editor-field" :data-field="`rubric[${index}].description`">
-          <span class="course-editor-label">{{ FIELD_LABELS.description }}</span>
+        </template>
+        <small v-if="errorOf('appliesTo.languages')" class="course-field-error" role="alert">{{ errorOf('appliesTo.languages') }}</small>
+      </div>
+
+      <fieldset v-for="guide in GUIDE_FIELDS" :key="guide" class="course-editor-group" :data-field="guide">
+        <legend>{{ FIELD_LABELS[guide] }}</legend>
+        <div v-for="(_, index) in draft[guide]" :key="index" class="course-editor-line" :data-field="`${guide}[${index}]`">
           <textarea
-            v-model="item.description"
+            v-model="draft[guide][index]"
             class="field-input"
             rows="2"
-            :aria-invalid="invalid(`rubric[${index}].description`)"
-            :aria-describedby="describedBy(`rubric[${index}].description`)"
+            :aria-label="`${FIELD_LABELS[guide]}第 ${index + 1} 行`"
+            :aria-invalid="invalid(`${guide}[${index}]`)"
+            :aria-describedby="describedBy(`${guide}[${index}]`)"
           ></textarea>
-          <small v-if="errorOf(`rubric[${index}].description`)" :id="errorId(`rubric[${index}].description`)" class="course-field-error" role="alert">
-            {{ errorOf(`rubric[${index}].description`) }}
+          <button class="icon-button small" type="button" :aria-label="`删除第 ${index + 1} 行`" @click="removeLine(guide, index)">
+            <AppIcon name="trash" />
+          </button>
+          <small v-if="errorOf(`${guide}[${index}]`)" :id="errorId(`${guide}[${index}]`)" class="course-field-error" role="alert">
+            {{ errorOf(`${guide}[${index}]`) }}
           </small>
-        </label>
-        <div class="course-editor-field">
-          <span class="course-editor-label">{{ FIELD_LABELS.examples }}（最多 {{ COURSE_LIMITS.examples }} 条）</span>
-          <div v-for="(example, exampleIndex) in item.examples" :key="exampleIndex" class="course-editor-example">
-            <label v-for="key in ['observation', 'betterWay'] as const" :key="key" :data-field="`rubric[${index}].examples[${exampleIndex}].${key}`">
-              <span class="course-editor-label">{{ key === 'observation' ? '看到的写法' : '更好的写法' }}</span>
-              <textarea
-                v-model="example[key]"
-                class="field-input"
-                rows="2"
-                :aria-invalid="invalid(`rubric[${index}].examples[${exampleIndex}].${key}`)"
-                :aria-describedby="describedBy(`rubric[${index}].examples[${exampleIndex}].${key}`)"
-              ></textarea>
-              <small
-                v-if="errorOf(`rubric[${index}].examples[${exampleIndex}].${key}`)"
-                :id="errorId(`rubric[${index}].examples[${exampleIndex}].${key}`)"
-                class="course-field-error"
-                role="alert"
-              >
-                {{ errorOf(`rubric[${index}].examples[${exampleIndex}].${key}`) }}
-              </small>
-            </label>
-            <button class="icon-button small" type="button" :aria-label="`删除示例 ${exampleIndex + 1}`" @click="removeExample(index, exampleIndex)">
-              <AppIcon name="trash" />
+        </div>
+        <button v-if="draft[guide].length < COURSE_LIMITS.guideLines" class="link-button" type="button" data-action="add-line" @click="addLine(guide)">
+          <AppIcon name="plus" />
+          加一行
+        </button>
+        <small v-if="errorOf(guide)" class="course-field-error" role="alert">{{ errorOf(guide) }}</small>
+      </fieldset>
+
+      <label class="course-editor-field" data-field="referenceGuide">
+        <span class="course-editor-label">{{ FIELD_LABELS.referenceGuide }}</span>
+        <textarea
+          v-model="draft.referenceGuide"
+          class="field-input"
+          rows="3"
+          :aria-invalid="invalid('referenceGuide')"
+          :aria-describedby="describedBy('referenceGuide')"
+        ></textarea>
+        <small v-if="errorOf('referenceGuide')" :id="errorId('referenceGuide')" class="course-field-error" role="alert">{{ errorOf('referenceGuide') }}</small>
+      </label>
+
+      <fieldset class="course-editor-group" data-field="rubric">
+        <legend>判卷维度（{{ COURSE_LIMITS.minRubric }} 到 {{ COURSE_LIMITS.maxRubric }} 项）</legend>
+        <div v-for="(item, index) in draft.rubric" :key="index" class="course-editor-item" :data-field="`rubric[${index}]`">
+          <div class="course-editor-item-head">
+            <strong>第 {{ index + 1 }} 项</strong>
+            <button class="icon-button small" type="button" :aria-label="`上移第 ${index + 1} 项`" :disabled="index === 0" @click="moveItem(index, -1)">
+              <AppIcon name="arrow-left" class="quarter-turn" />
+            </button>
+            <button
+              class="icon-button small"
+              type="button"
+              :aria-label="`下移第 ${index + 1} 项`"
+              :disabled="index === draft.rubric.length - 1"
+              @click="moveItem(index, 1)"
+            >
+              <AppIcon name="arrow-right" class="quarter-turn" />
+            </button>
+            <button class="icon-button small" type="button" :aria-label="`删除第 ${index + 1} 项`" @click="removeItem(index)"><AppIcon name="trash" /></button>
+          </div>
+          <label v-for="key in ['id', 'label'] as const" :key="key" class="course-editor-field" :data-field="`rubric[${index}].${key}`">
+            <span class="course-editor-label">{{ key === 'id' ? 'id' : FIELD_LABELS.label }}</span>
+            <input
+              v-model="item[key]"
+              class="field-input"
+              :class="{ mono: key === 'id' }"
+              type="text"
+              :aria-invalid="invalid(`rubric[${index}].${key}`)"
+              :aria-describedby="describedBy(`rubric[${index}].${key}`)"
+            />
+            <small v-if="key === 'id'">笔记的分类记的是这个 id，改了以后旧笔记会对不上。</small>
+            <small v-if="errorOf(`rubric[${index}].${key}`)" :id="errorId(`rubric[${index}].${key}`)" class="course-field-error" role="alert">
+              {{ errorOf(`rubric[${index}].${key}`) }}
+            </small>
+          </label>
+          <div class="course-editor-field" :data-field="`rubric[${index}].dimension`">
+            <span class="course-editor-label">{{ FIELD_LABELS.dimension }}</span>
+            <el-radio-group v-model="item.dimension" :aria-label="`第 ${index + 1} 项的通用维度`" @change="edited">
+              <el-radio-button v-for="option in DIMENSION_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
+            </el-radio-group>
+            <small v-if="errorOf(`rubric[${index}].dimension`)" class="course-field-error" role="alert">{{ errorOf(`rubric[${index}].dimension`) }}</small>
+          </div>
+          <label class="course-editor-field" :data-field="`rubric[${index}].description`">
+            <span class="course-editor-label">{{ FIELD_LABELS.description }}</span>
+            <textarea
+              v-model="item.description"
+              class="field-input"
+              rows="2"
+              :aria-invalid="invalid(`rubric[${index}].description`)"
+              :aria-describedby="describedBy(`rubric[${index}].description`)"
+            ></textarea>
+            <small v-if="errorOf(`rubric[${index}].description`)" :id="errorId(`rubric[${index}].description`)" class="course-field-error" role="alert">
+              {{ errorOf(`rubric[${index}].description`) }}
+            </small>
+          </label>
+          <div class="course-editor-field">
+            <span class="course-editor-label">{{ FIELD_LABELS.examples }}（最多 {{ COURSE_LIMITS.examples }} 条）</span>
+            <div v-for="(example, exampleIndex) in item.examples" :key="exampleIndex" class="course-editor-example">
+              <label v-for="key in ['observation', 'betterWay'] as const" :key="key" :data-field="`rubric[${index}].examples[${exampleIndex}].${key}`">
+                <span class="course-editor-label">{{ key === 'observation' ? '看到的写法' : '更好的写法' }}</span>
+                <textarea
+                  v-model="example[key]"
+                  class="field-input"
+                  rows="2"
+                  :aria-invalid="invalid(`rubric[${index}].examples[${exampleIndex}].${key}`)"
+                  :aria-describedby="describedBy(`rubric[${index}].examples[${exampleIndex}].${key}`)"
+                ></textarea>
+                <small
+                  v-if="errorOf(`rubric[${index}].examples[${exampleIndex}].${key}`)"
+                  :id="errorId(`rubric[${index}].examples[${exampleIndex}].${key}`)"
+                  class="course-field-error"
+                  role="alert"
+                >
+                  {{ errorOf(`rubric[${index}].examples[${exampleIndex}].${key}`) }}
+                </small>
+              </label>
+              <button class="icon-button small" type="button" :aria-label="`删除示例 ${exampleIndex + 1}`" @click="removeExample(index, exampleIndex)">
+                <AppIcon name="trash" />
+              </button>
+            </div>
+            <button v-if="item.examples.length < COURSE_LIMITS.examples" class="link-button" type="button" @click="addExample(index)">
+              <AppIcon name="plus" />
+              加一条示例
             </button>
           </div>
-          <button v-if="item.examples.length < COURSE_LIMITS.examples" class="link-button" type="button" @click="addExample(index)">
-            <AppIcon name="plus" />
-            加一条示例
-          </button>
         </div>
-      </div>
-      <button v-if="draft.rubric.length < COURSE_LIMITS.maxRubric" class="link-button" type="button" data-action="add-rubric" @click="addItem">
-        <AppIcon name="plus" />
-        加一项判卷维度
-      </button>
-      <small v-if="errorOf('rubric')" class="course-field-error" role="alert">{{ errorOf('rubric') }}</small>
-    </fieldset>
+        <button v-if="draft.rubric.length < COURSE_LIMITS.maxRubric" class="link-button" type="button" data-action="add-rubric" @click="addItem">
+          <AppIcon name="plus" />
+          加一项判卷维度
+        </button>
+        <small v-if="errorOf('rubric')" class="course-field-error" role="alert">{{ errorOf('rubric') }}</small>
+      </fieldset>
 
-    <fieldset class="course-editor-group" data-field="concepts">
-      <legend>知识点（可选，最多 {{ COURSE_LIMITS.concepts }} 个）</legend>
-      <ConceptEditor v-if="conceptsOpen" v-model="draft.concepts" :errors="conceptFieldErrors" @update:model-value="edited" />
-      <button v-else class="link-button" type="button" data-action="open-concepts" @click="conceptsOpen = true">
-        <AppIcon name="sliders" />
-        编辑知识点（{{ draft.concepts.length }} 个）
-      </button>
-      <small v-if="!conceptsOpen && conceptFieldErrors.concepts" class="course-field-error" role="alert">{{ conceptFieldErrors.concepts }}</small>
-    </fieldset>
+      <fieldset class="course-editor-group" data-field="concepts">
+        <legend>知识点（可选，最多 {{ COURSE_LIMITS.concepts }} 个）</legend>
+        <ConceptEditor v-if="conceptsOpen" v-model="draft.concepts" :errors="conceptFieldErrors" @update:model-value="edited" />
+        <button v-else class="link-button" type="button" data-action="open-concepts" @click="conceptsOpen = true">
+          <AppIcon name="sliders" />
+          编辑知识点（{{ draft.concepts.length }} 个）
+        </button>
+        <small v-if="!conceptsOpen && conceptFieldErrors.concepts" class="course-field-error" role="alert">{{ conceptFieldErrors.concepts }}</small>
+      </fieldset>
 
-    <p v-for="[field, message] in otherErrors" :key="field" class="course-field-error" role="alert">{{ message }}</p>
+      <p v-for="[field, message] in otherErrors" :key="field" class="course-field-error" role="alert">{{ message }}</p>
 
-    <section v-if="errors.size" ref="errorSummary" class="course-error-summary" role="alert" aria-label="保存未完成" tabindex="-1" data-error="save-summary">
-      <strong>尚未保存，有 {{ errors.size }} 项需要修改。</strong>
-      <p>输入和草稿已保留。选择下面的问题可跳到对应位置。</p>
-      <ul>
-        <li v-for="[field, message] in errors" :key="field">
-          <button class="link-button" type="button" :data-error-field="field" @click="focusError(field)">{{ fieldLabel(field) }}：{{ message }}</button>
-        </li>
-      </ul>
-    </section>
-
+      <section v-if="errors.size" ref="errorSummary" class="course-error-summary" role="alert" aria-label="保存未完成" tabindex="-1" data-error="save-summary">
+        <strong>尚未保存，有 {{ errors.size }} 项需要修改。</strong>
+        <p>输入和草稿已保留。选择下面的问题可跳到对应位置。</p>
+        <ul>
+          <li v-for="[field, message] in errors" :key="field">
+            <button class="link-button" type="button" :data-error-field="field" @click="focusError(field)">{{ fieldLabel(field) }}：{{ message }}</button>
+          </li>
+        </ul>
+      </section>
+    </div>
     <div class="course-editor-actions">
       <button class="secondary-button" type="button" :disabled="saving" @click="cancel">取消</button>
-      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy || saving" :aria-busy="saving">
+      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy || saving || draftBlocked" :aria-busy="saving">
         <AppIcon name="check" />
         保存
       </button>
@@ -431,7 +461,8 @@ const save = async () => {
 </template>
 
 <style scoped>
-.course-editor {
+.course-editor,
+.course-editor-fields {
   display: grid;
   gap: var(--space-3);
   font-size: var(--text-sm);

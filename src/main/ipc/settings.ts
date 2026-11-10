@@ -8,7 +8,8 @@ import * as workspace from '../repository/workspace.ts';
 import { REGISTRY_FILENAME, REPO_FILES } from '../repository/repositories.ts';
 import { env as appEnv } from '../infrastructure/env.ts';
 import { AGENT_IDS, CLI_IDS } from '../../shared/agent_runtime.ts';
-import { registerContract } from './handler.ts';
+import { registerContract, withDataMaintenance } from './handler.ts';
+import { createDataService } from '../app/data_service.ts';
 import { preferencesContract, environmentContract, dataContract, agentContract } from '../../shared/ipc/settings.ts';
 import type * as agentRuntimeTypes from '../../shared/agent_runtime.ts';
 import type * as settingsTypes from '../../shared/ipc/settings.ts';
@@ -65,7 +66,16 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       };
     },
   });
+  const data = createDataService(ctx);
   registerContract(ipcMain, dataContract, {
+    backup: (drafts) => withDataMaintenance(ipcMain, () => data.backup(drafts)),
+    previewRestore: data.previewRestore,
+    restore: (id, drafts) => withDataMaintenance(ipcMain, () => data.restore(id, drafts)),
+    restart: data.restart,
+    restoredDrafts: data.restoredDrafts,
+    acknowledgeDrafts: data.acknowledgeDrafts,
+    diagnostics: data.diagnostics,
+    revealLogs: data.revealLogs,
     info: (): settingsTypes.DataInfo => {
       const repoDir = path.relative(configDir, ctx.repositories.dataDir());
       return {
@@ -99,24 +109,39 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const codingCli = settings['coding-agent'].cli;
-      const [product, architect, codingInstalled] = await Promise.all([
-        probeAgent(settings['product-lead'], envPath),
-        probeAgent(settings.architect, envPath),
-        workspace.resolveExecutable(codingCli, { envPath }).then(Boolean),
+      const probes = new Map<string, Promise<CliProbeResult>>();
+      const installations = new Map<agentRuntimeTypes.CliId, Promise<boolean>>();
+      const signIns = new Map<agentRuntimeTypes.CliId, Promise<settingsTypes.CliSignIn>>();
+      const installed = (cli: agentRuntimeTypes.CliId) =>
+        installations.get(cli) ?? installations.set(cli, workspace.resolveExecutable(cli, { envPath }).then(Boolean)).get(cli)!;
+      const signInOf = (cli: agentRuntimeTypes.CliId) => signIns.get(cli) ?? signIns.set(cli, checkSignIn(cli, { envPath })).get(cli)!;
+      const roleStatus = async (config: agentRuntimeTypes.AgentRuntimeConfig): Promise<settingsTypes.AgentCliStatus> => {
+        const key = JSON.stringify(config);
+        const probe = await (probes.get(key) ?? probes.set(key, probeAgent(config, envPath)).get(key)!);
+        const present = probe.available || (await installed(config.cli));
+        return {
+          cli: config.cli,
+          installed: present,
+          available: probe.available,
+          command: probe.command,
+          reason: probe.reason,
+          signIn: present ? await signInOf(config.cli) : null,
+        };
+      };
+      const [product, architect, tutor, codingInstalled] = await Promise.all([
+        roleStatus(settings['product-lead']),
+        roleStatus(settings.architect),
+        roleStatus(settings.tutor),
+        installed(codingCli),
       ]);
       const available = product.available && architect.available;
-      // One check per CLI, shared when analysis and coding use the same one.
-      const signIns = new Map<string, Promise<settingsTypes.CliSignIn>>();
-      const signInOf = (cli: typeof codingCli) => signIns.get(cli) ?? signIns.set(cli, checkSignIn(cli, { envPath })).get(cli)!;
-      const [analysisSignIn, codingSignIn] = await Promise.all([
-        available ? signInOf(settings['product-lead'].cli) : null,
-        codingInstalled ? signInOf(codingCli) : null,
-      ]);
       return {
         available,
         command: product.available ? product.command : null,
-        signIn: analysisSignIn,
-        coding: { cli: codingCli, installed: codingInstalled, signIn: codingSignIn },
+        signIn: available ? (architect.signIn?.state === 'signed_out' ? architect.signIn : product.signIn) : null,
+        analysis: { 'product-lead': product, architect },
+        tutor,
+        coding: { cli: codingCli, installed: codingInstalled, signIn: codingInstalled ? await signInOf(codingCli) : null },
       };
     },
 

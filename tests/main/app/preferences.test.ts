@@ -15,11 +15,14 @@ const valid = (overrides: { profile?: Record<string, unknown>; appearance?: Reco
   coding: preferences.defaults().coding,
 });
 
-test('load() returns defaults when the file is missing or corrupt', async () => {
+test('load() defaults only for an absent file and preserves corrupt preferences', async () => {
   const dir = await tempDir();
   assert.deepEqual(await preferences.load(dir), preferences.defaults());
-  await fs.writeFile(path.join(dir, preferences.PREFERENCES_FILENAME), '{ broken');
-  assert.deepEqual(await preferences.load(dir), preferences.defaults());
+  const file = path.join(dir, preferences.PREFERENCES_FILENAME);
+  await fs.writeFile(file, '{ broken');
+  await assert.rejects(preferences.load(dir), { code: 'storage_corrupt' });
+  await assert.rejects(preferences.save(dir, valid()), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{ broken');
 });
 
 test('save() then load() round-trips, trimming the name', async () => {

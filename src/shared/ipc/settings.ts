@@ -7,6 +7,7 @@ import type { ErrorInfo } from './envelope.ts';
 import { invoke } from './contract.ts';
 import type { Contract } from './contract.ts';
 import type * as agentRuntimeTypes from '../agent_runtime.ts';
+import type * as backupTypes from '../data_backup.ts';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type AvatarColor = SharedAvatarColor;
@@ -48,12 +49,23 @@ export type DataInfo = { configDir: string; files: string[]; packages: PackageSu
 // offline check and no credential file was found; it may still work.
 export type CliSignIn = { state: 'signed_in' | 'signed_out' | 'unknown'; source: string | null };
 
-// The analysis CLI (Product Lead and Architect) and the coding CLI: installed
-// and usable, and signed in. Sign-in is null when the CLI is not installed.
+// Installation, restricted-runtime compatibility and sign-in are separate:
+// an installed CLI can still need authentication or a compatible version.
+export type AgentCliStatus = {
+  cli: CliId;
+  installed: boolean;
+  available: boolean;
+  command: string | null;
+  reason: string | null;
+  signIn: CliSignIn | null;
+};
+
 export type AgentStatus = {
   available: boolean;
   command: string | null;
   signIn: CliSignIn | null;
+  analysis: { 'product-lead': AgentCliStatus; architect: AgentCliStatus };
+  tutor: AgentCliStatus;
   coding: { cli: CliId; installed: boolean; signIn: CliSignIn | null };
 };
 
@@ -70,6 +82,14 @@ export const dataContract = {
   info: invoke<[], DataInfo>('data:info'),
   resetProgress: invoke<[], PackageSummary>('data:reset-progress'),
   reveal: invoke<[], true>('data:reveal'),
+  backup: invoke<[drafts?: Record<string, string>], backupTypes.BackupResult | null>('data:backup'),
+  previewRestore: invoke<[], backupTypes.BackupPreview | null>('data:preview-restore'),
+  restore: invoke<[id: string, drafts?: Record<string, string>], backupTypes.RestorePrepared>('data:restore'),
+  restart: invoke<[], true>('data:restart'),
+  restoredDrafts: invoke<[], backupTypes.RestoredDrafts | null>('data:restored-drafts'),
+  acknowledgeDrafts: invoke<[token: string], true>('data:acknowledge-drafts'),
+  diagnostics: invoke<[], string>('data:diagnostics'),
+  revealLogs: invoke<[], true>('data:reveal-logs'),
 } satisfies Contract;
 
 export const agentContract = {

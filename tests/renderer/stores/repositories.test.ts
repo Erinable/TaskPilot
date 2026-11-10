@@ -110,7 +110,7 @@ describe('repositories store', () => {
     expect(feed.days).toHaveLength(1);
     expect(commit.preview).toEqual(preview);
     expect(engineeringMap.map).toEqual(map);
-    expect(onboarding.testCommand).toBe('npm test');
+    expect(onboarding.checksReady).toBe(true);
     expect(tutor.stateOf('p1', 0)).toEqual(tutorState);
 
     const store = useRepositoriesStore();
@@ -122,7 +122,7 @@ describe('repositories store', () => {
     expect(commit.message).toBe('');
     expect(engineeringMap.map).toBeNull();
     expect(onboarding.agent).toBeNull();
-    expect(onboarding.testCommand).toBeNull();
+    expect(onboarding.checksReady).toBeNull();
     expect(tutor.stateOf('p1', 0)).toBeNull();
   });
 

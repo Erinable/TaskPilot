@@ -79,7 +79,7 @@ export const loadPrices = async (configDir: string): Promise<PriceTable | null> 
       : null;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
 };

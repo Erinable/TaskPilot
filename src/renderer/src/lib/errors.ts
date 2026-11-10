@@ -4,6 +4,7 @@ import type { ErrorCode } from '@shared/error_codes.ts';
 import type { ErrorInfo } from '@shared/ipc/envelope.ts';
 
 export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
+  storage_corrupt: '应用数据文件已损坏，原文件已保留。请先复制原文件，再从有效备份恢复或修复后重试；请勿重置进度。',
   no_workspace: '还没有仓库，请先在顶栏的仓库菜单里添加。',
   unknown_repository: '找不到这个仓库，它可能已被移除。',
   repository_exists: '这个目录已经添加过了。',
@@ -82,9 +83,12 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   lab_outdated: '这个 lab 创建于工具链切换前，请在新的实验仓库中重新生成。',
 };
 
+// Storage errors name the preserved file and recovery steps, including on the startup splash.
 // agent_failed covers lost connections, logins and quotas alike, so its hint keeps the CLI's own message.
-const hintFor = (code: ErrorCode | undefined, message: string | undefined) =>
-  code === 'agent_failed' && message ? `智能体运行失败：${message}` : code ? ERROR_HINTS[code] : undefined;
+const hintFor = (code: ErrorCode | undefined, message: string | undefined) => {
+  if (code === 'storage_corrupt' && message) return message;
+  return code === 'agent_failed' && message ? `智能体运行失败：${message}` : code ? ERROR_HINTS[code] : undefined;
+};
 
 export const describeError = (error: unknown) => (error instanceof Error ? (hintFor((error as IpcError).code, error.message) ?? error.message) : String(error));
 

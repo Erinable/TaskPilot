@@ -61,6 +61,8 @@ export type ShellDeps = {
   openUrl?: (url: string) => Promise<void>;
   // Replaces how open_file.ts starts the editor (tests).
   launchEditor?: (file: string, args: string[]) => Promise<void>;
+  // Relaunches after the normal shutdown flush, e.g. to apply a staged restore.
+  restart?: () => void;
 };
 
 // The analysis agents' CLIs; injectable so tests never run a real CLI.

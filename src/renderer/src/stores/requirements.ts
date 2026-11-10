@@ -17,10 +17,11 @@ import { useRepositoryIdentityStore } from './repository_identity.ts';
 import { createStateWatcher } from './state_watcher.ts';
 import type * as requirementTypes from '@shared/ipc/requirements.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
-import type { GoalForm } from '@shared/course_plan.ts';
+import * as localDraft from '@/lib/local_draft.ts';
+import { isAnswerDraft, isComposeDraft } from '@/lib/draft_models.ts';
+import type { AnswerDraft, ComposeDraft } from '@/lib/draft_models.ts';
 
 export type RequirementPane = 'new' | 'detail' | 'empty';
-type AnswerDraft = { questions: string[]; answers: string[]; defaults: boolean[]; choice: string | null };
 
 // What the compose form tells the user up front about what agents will see.
 export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAvailable: boolean };
@@ -72,21 +73,82 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const detailRevision = ref(0);
   // Navigation requests alone move focus; background state updates keep it.
   const selectionRevision = ref(0);
-  const answerDrafts = ref<Record<string, AnswerDraft>>({});
-  const answerKey = (id: string) => JSON.stringify([useRepositoryIdentityStore().currentId, id]);
-  const answerDraft = (item: requirementTypes.Requirement) => {
+  const answerSessions = new Map<string, { baseline: string; draft: localDraft.LocalDraft<AnswerDraft> }>();
+  const answerKey = (id: string) => localDraft.draftKey(['answers', useRepositoryIdentityStore().currentId, id]);
+  const answerBaseline = (item: requirementTypes.Requirement) => ({
+    questions: item.questions,
+    choice: item.course?.choice ?? null,
+    pick: item.course?.pick ?? null,
+  });
+  const answerSession = (item: requirementTypes.Requirement) => {
     const key = answerKey(item.id);
-    const questions = item.questions.map((question) => question.text);
-    const existing = answerDrafts.value[key];
-    if (!existing || JSON.stringify(existing.questions) !== JSON.stringify(questions)) {
-      answerDrafts.value[key] = {
-        questions,
-        answers: item.questions.map((question) => question.answer ?? ''),
-        defaults: questions.map(() => false),
-        choice: null,
-      };
+    const initial: AnswerDraft = {
+      questions: item.questions.map((question) => question.text),
+      answers: item.questions.map((question) => question.answer ?? ''),
+      defaults: item.questions.map(() => false),
+      choice: null,
+    };
+    const baseline = answerBaseline(item);
+    const fingerprint = localDraft.draftFingerprint(baseline);
+    let session = answerSessions.get(key);
+    if (!session || session.baseline !== fingerprint) {
+      session?.draft.stop();
+      session = { baseline: fingerprint, draft: localDraft.createLocalDraft({ key, initial, baseline, validate: isAnswerDraft }) };
+      answerSessions.set(key, session);
     }
-    return answerDrafts.value[key];
+    return session.draft;
+  };
+  const answerDraft = (item: requirementTypes.Requirement) => answerSession(item).value.value;
+  const answerDraftState = (item: requirementTypes.Requirement) => answerSession(item).state;
+  const restoreAnswers = (item: requirementTypes.Requirement) => answerSession(item).restore();
+  const discardAnswers = (item: requirementTypes.Requirement) => {
+    const draft = answerSession(item);
+    draft.discard();
+    if (draft.state.error) return;
+    const latest = items.value.find((candidate) => candidate.id === item.id);
+    if (latest && localDraft.draftFingerprint(answerBaseline(latest)) !== localDraft.draftFingerprint(answerBaseline(item))) {
+      clearAnswers(item);
+      renderDetail(latest);
+    }
+  };
+  const clearAnswers = (item: requirementTypes.Requirement) => {
+    const key = answerKey(item.id);
+    const session = answerSessions.get(key);
+    if (!session) return;
+    session.draft.clear();
+    session.draft.stop();
+    answerSessions.delete(key);
+  };
+
+  const submittedAnswers = (item: requirementTypes.Requirement) => {
+    const draft = answerSession(item);
+    const latest = items.value.find((candidate) => candidate.id === item.id);
+    if (latest && localDraft.draftFingerprint(answerBaseline(latest)) !== localDraft.draftFingerprint(answerBaseline(item))) {
+      draft.state.conflict = true;
+      draft.state.error = '访谈的正式内容已更新，当前草稿已保留。请重新打开这个需求，再选择恢复或丢弃草稿。';
+    }
+    return draft;
+  };
+  const acceptAnswers = (
+    item: requirementTypes.Requirement,
+    next: requirementTypes.Requirement,
+    draft: localDraft.LocalDraft<AnswerDraft>,
+    snapshot: string | null,
+  ) => {
+    if (localDraft.draftFingerprint(draft.value.value) === snapshot) {
+      clearAnswers(item);
+      return;
+    }
+    const accepted: AnswerDraft = {
+      questions: next.questions.map((question) => question.text),
+      answers: next.questions.map((question) => question.answer ?? ''),
+      defaults: next.questions.map(() => false),
+      choice: null,
+    };
+    const baseline = answerBaseline(next);
+    draft.accept(accepted, baseline);
+    const session = answerSessions.get(answerKey(item.id));
+    if (session) session.baseline = localDraft.draftFingerprint(baseline);
   };
 
   const renderDetail = (item: requirementTypes.Requirement) => {
@@ -115,10 +177,47 @@ export const useRequirementsStore = defineStore('requirements', () => {
 
   // ========== Compose ==========
   // What the form asks for: work on the repository, or something to learn.
-  const composeKind = ref<requirementTypes.RequirementKind>('project');
-  const composeForm = ref<GoalForm>({ level: 'basic', target: 'implement', environment: '', weeklyHours: 4 });
-  const composeTitle = ref('');
-  const composeText = ref('');
+  const composeSessions = new Map<string, localDraft.LocalDraft<ComposeDraft>>();
+  const composeSession = () => {
+    const key = localDraft.draftKey(['compose', useRepositoryIdentityStore().currentId]);
+    let session = composeSessions.get(key);
+    if (!session) {
+      session = localDraft.createLocalDraft<ComposeDraft>({
+        key,
+        initial: { kind: 'project', title: '', text: '', form: { level: 'basic', target: 'implement', environment: '', weeklyHours: 4 } },
+        validate: isComposeDraft,
+      });
+      composeSessions.set(key, session);
+    }
+    return session;
+  };
+  const composeKind = computed({
+    get: () => composeSession().value.value.kind,
+    set: (kind: requirementTypes.RequirementKind) => {
+      composeSession().value.value.kind = kind;
+    },
+  });
+  const composeForm = computed({
+    get: () => composeSession().value.value.form,
+    set: (form: ComposeDraft['form']) => {
+      composeSession().value.value.form = form;
+    },
+  });
+  const composeTitle = computed({
+    get: () => composeSession().value.value.title,
+    set: (title: string) => {
+      composeSession().value.value.title = title;
+    },
+  });
+  const composeText = computed({
+    get: () => composeSession().value.value.text,
+    set: (text: string) => {
+      composeSession().value.value.text = text;
+    },
+  });
+  const composeDraftState = computed(() => composeSession().state);
+  const restoreComposeDraft = () => composeSession().restore();
+  const discardComposeDraft = () => composeSession().discard();
   const composeStatus = ref<{ text: string; error: boolean }>({ text: '', error: false });
   const composeInvalid = ref(false);
   const submitting = ref(false);
@@ -148,7 +247,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const startCompose = (kind: requirementTypes.RequirementKind = 'project') => {
-    composeKind.value = kind;
+    if (!composeDraftState.value.pending && !composeDraftState.value.conflict) composeKind.value = kind;
     composing.value = true;
     selectedId.value = null;
     pane.value = 'new';
@@ -170,9 +269,13 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const submitNew = async () => {
     if (
       submitting.value ||
+      composeDraftState.value.pending ||
+      composeDraftState.value.conflict ||
       (composeKind.value === 'project' && (composeContextLoading.value || composeContextError.value || composeContext.value?.agentAvailable === false))
     )
       return;
+    const submittedDraft = composeSession();
+    const submittedSnapshot = localDraft.draftFingerprint(submittedDraft.value.value);
     const text = composeText.value;
     const invalid = model.validateText(text);
     composeStatus.value = { text: invalid ?? '', error: Boolean(invalid) };
@@ -189,6 +292,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
       const item = await call(window.taskpilot.requirements.create({ title: composeTitle.value, text, ...course }));
       if (repositoryId !== useRepositoryIdentityStore().currentId) return;
       upsert(item);
+      if (localDraft.draftFingerprint(submittedDraft.value.value) !== submittedSnapshot) {
+        showToast('需求已提交，提交后继续输入的草稿仍保留。', 'info');
+        return;
+      }
+      submittedDraft.discard();
       if (token !== contextGeneration || !composing.value) return;
       composeTitle.value = '';
       composeText.value = '';
@@ -219,6 +327,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     choice?: requirementTypes.CourseChoice,
   ) => {
     if (acting.value) return;
+    const draft = answers ? submittedAnswers(item) : null;
+    if (draft?.state.pending || draft?.state.conflict) return;
+    const snapshot = draft ? localDraft.draftFingerprint(draft.value.value) : null;
     acting.value = step;
     const token = watcher.session();
     try {
@@ -226,6 +337,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
       const planned = () => (choice ? window.taskpilot.requirements.plan(item.id, answers, choice) : window.taskpilot.requirements.plan(item.id, answers));
       const next = await call(step === 'plan' ? planned() : window.taskpilot.requirements.clarify(item.id));
       if (token !== watcher.session()) return;
+      if (draft) acceptAnswers(item, next, draft, snapshot);
       upsert(next);
       renderDetail(next);
       startWatching();
@@ -316,7 +428,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     try {
       await call(window.taskpilot.requirements.remove(item.id));
       if (token !== watcher.session()) return;
-      delete answerDrafts.value[answerKey(item.id)];
+      clearAnswers(item);
       await refreshList();
       if (selectedId.value === item.id) {
         selectedId.value = null;
@@ -457,8 +569,14 @@ export const useRequirementsStore = defineStore('requirements', () => {
     detailRevision,
     selectionRevision,
     answerDraft,
+    answerDraftState,
+    restoreAnswers,
+    discardAnswers,
     select,
     // Compose
+    composeDraftState,
+    restoreComposeDraft,
+    discardComposeDraft,
     composeKind,
     composeForm,
     composeTitle,

@@ -12,6 +12,7 @@ import { describeErrorInfo } from '../../../src/renderer/src/lib/errors.ts';
 import { inlineCodeParts } from '../../../src/renderer/src/lib/inline_code.ts';
 import { agentStatus, installApi, requirement } from '../requirements_fakes.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
+import { collectLocalDrafts, draftKey } from '../../../src/renderer/src/lib/local_draft.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -110,6 +111,69 @@ describe('requirements store', () => {
 
   afterEach(() => {
     useRequirementsStore().stopWatching();
+  });
+
+  test('compose drafts recover across restart, stay isolated by repository, and clear only after successful submit', async () => {
+    useRepositoryIdentityStore().currentId = 'repo-a';
+    const first = useRequirementsStore();
+    await first.startCompose('course');
+    first.composeText = '我想学调度';
+    first.composeTitle = '学习目标';
+    first.composeForm.toolchain = 'c';
+    setActivePinia(createPinia());
+    useRepositoryIdentityStore().currentId = 'repo-b';
+    const restarted = useRequirementsStore();
+    await restarted.startCompose();
+    expect(restarted.composeText).toBe('');
+    useRepositoryIdentityStore().currentId = 'repo-a';
+    await restarted.startCompose();
+    expect(restarted.composeDraftState.pending).toBe(true);
+    expect(restarted.composeText).toBe('');
+    restarted.restoreComposeDraft();
+    expect(restarted.composeKind).toBe('course');
+    expect(restarted.composeText).toBe('我想学调度');
+    expect(restarted.composeForm.toolchain).toBe('c');
+    api.requirements.create.mockResolvedValueOnce({ ok: false, error: { code: 'unknown', message: '暂时失败', field: 'text' } });
+    await restarted.submitNew();
+    expect(collectLocalDrafts()[draftKey(['compose', 'repo-a'])]).toBeDefined();
+    await restarted.submitNew();
+    expect(collectLocalDrafts()[draftKey(['compose', 'repo-a'])]).toBeUndefined();
+  });
+
+  test('interview answers restore only for the same official questions and answers', () => {
+    useRepositoryIdentityStore().currentId = 'a';
+    const item = requirement({ questions: [{ text: '你的目标？', answer: '' }] });
+    const first = useRequirementsStore();
+    first.answerDraft(item).answers[0] = '学会调度';
+    first.answerDraft(item).choice = 'os';
+    setActivePinia(createPinia());
+    useRepositoryIdentityStore().currentId = 'a';
+    const restarted = useRequirementsStore();
+    expect(restarted.answerDraftState(item).pending).toBe(true);
+    expect(restarted.answerDraft(item).answers).toEqual(['']);
+    restarted.restoreAnswers(item);
+    expect(restarted.answerDraft(item).answers).toEqual(['学会调度']);
+    expect(restarted.answerDraft(item).choice).toBe('os');
+    const changed = requirement({ questions: [{ text: '你的目标？', answer: '其他窗口的新回答' }] });
+    expect(restarted.answerDraft(changed).answers).toEqual(['其他窗口的新回答']);
+    expect(restarted.answerDraftState(changed).conflict).toBe(true);
+    restarted.restoreAnswers(changed);
+    expect(restarted.answerDraft(changed).answers).toEqual(['其他窗口的新回答']);
+  });
+
+  test('successful answer submission clears its local draft but preserves edits made while submitting', async () => {
+    const item = requirement({ questions: [{ text: '目标？', answer: '' }] });
+    const store = useRequirementsStore();
+    store.answerDraft(item).answers[0] = '提交的回答';
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.requirements.plan>>>();
+    api.requirements.plan.mockReturnValueOnce(held.promise);
+    const running = store.runStep(item, 'plan', ['提交的回答']);
+    store.answerDraft(item).answers[0] = '后续输入';
+    held.resolve({ ok: true, data: requirement({ status: 'planning', questions: item.questions }) });
+    await running;
+    expect(collectLocalDrafts()[draftKey(['answers', null, item.id])]).toContain('后续输入');
+    await store.runStep(item, 'plan', ['后续输入']);
+    expect(collectLocalDrafts()[draftKey(['answers', null, item.id])]).toBeUndefined();
   });
 
   test('attentionCount counts answering, reviewing and failed', async () => {

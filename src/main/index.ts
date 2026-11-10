@@ -21,6 +21,9 @@ import * as courses from './courses/courses.ts';
 import { CHANNELS } from '../shared/ipc_channels.ts';
 import { appContract } from '../shared/ipc/app.ts';
 import { initializeLogging, flushLogs, logger } from './infrastructure/logger.ts';
+import { applyPendingRestore } from './infrastructure/data_backup.ts';
+import { restoreAtStartup } from './app/startup_recovery.ts';
+import { codedError } from './infrastructure/coded_error.ts';
 
 // Matches --canvas in tokens.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
@@ -37,7 +40,15 @@ let ipcHandle: IpcHandle | null = null;
 
 // The packaged app is named TaskPilot, development runs as taskpilot; on a
 // case-sensitive volume those are two directories. Both use this one.
-app.setPath('userData', path.join(app.getPath('appData'), 'taskpilot'));
+if (env.dataDir !== null && !path.isAbsolute(env.dataDir)) throw new Error('TASKPILOT_DATA_DIR must be an absolute path');
+app.setPath('userData', env.dataDir ?? path.join(app.getPath('appData'), 'taskpilot'));
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+app.on('second-instance', () => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window?.isMinimized()) window.restore();
+  window?.focus();
+});
 
 // Native vibrancy (macOS only) lets the desktop show through the window. The
 // page's own backdrop is made transparent at the same time (see the
@@ -86,6 +97,31 @@ const createWindow = (appearance: Appearance) => {
   window.on('enter-full-screen', sendFullScreen);
   window.on('leave-full-screen', sendFullScreen);
   window.webContents.on('did-finish-load', sendFullScreen);
+  let recoveryPromptOpen = false;
+  window.webContents.on('render-process-gone', (_event, details) => {
+    if (shuttingDown || window.isDestroyed() || recoveryPromptOpen || details.reason === 'clean-exit') return;
+    logger.error('[window] renderer exited', { reason: details.reason, exitCode: details.exitCode });
+    recoveryPromptOpen = true;
+    dialog
+      .showMessageBox(window, {
+        type: 'error',
+        title: '界面意外退出',
+        message: 'TaskPilot 的界面意外退出。',
+        detail: '已保存的数据会保留。重新加载界面后，可以查看任务状态并继续操作。',
+        buttons: ['重新加载界面', '关闭窗口'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (window.isDestroyed()) return;
+        if (response === 0) window.webContents.reload();
+        else window.close();
+      })
+      .catch((error) => logger.error('[window] recovery prompt failed', error))
+      .finally(() => {
+        recoveryPromptOpen = false;
+      });
+  });
 
   if (env.rendererUrl) window.loadURL(env.rendererUrl);
   else window.loadFile(path.join(import.meta.dirname, '..', 'renderer', 'index.html'));
@@ -93,6 +129,7 @@ const createWindow = (appearance: Appearance) => {
 };
 
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   // TaskPilot uses its own in-window controls. Removing Electron's default
   // application menu avoids AppKit representedObject warnings on macOS.
   Menu.setApplicationMenu(null);
@@ -111,7 +148,12 @@ app.whenReady().then(async () => {
   // follows the setting without the page needing to know about it.
   nativeTheme.themeSource = prefs.appearance.theme;
 
+  const restart = () => {
+    app.relaunch();
+    app.quit();
+  };
   const initialize = async () => {
+    await applyPendingRestore(configDir, app.getVersion());
     // The packs that ship with the app; a broken one fails startup, on the splash.
     // electron-builder copies resources/courses/ into the bundle (extraResources).
     const builtinCourses = await courses.loadBuiltinCourses(
@@ -131,10 +173,11 @@ app.whenReady().then(async () => {
     const activity = new ActivityLog(repoDir, { timeZone: env.businessTimeZone });
     const releases = await new ReleaseStore(repoDir).load();
     const tutor = await new TutorStore(repoDir).load();
+    // Load mastery before opening the notes watcher, so a damaged global file
+    // cannot leave an orphan watcher behind when startup is retried.
+    const mastery = await new MasteryStore(configDir).load();
     // Notes follow the developer, not the repository.
     const notes = await new NoteStore(configDir, { trash: (file) => shell.trashItem(file) }).load();
-    // So does mastery.
-    const mastery = await new MasteryStore(configDir).load();
     // Expired day files go at startup; a failure only leaves old files behind.
     activity.prune().catch((error) => logger.error('[activity] prune failed', error));
 
@@ -173,6 +216,7 @@ app.whenReady().then(async () => {
         }
       },
       shell: {
+        restart,
         // openPath only receives configDir (app.getPath('userData')), never a
         // path from the renderer.
         revealPath: async (dir) => {
@@ -206,6 +250,28 @@ app.whenReady().then(async () => {
   const startup = createStartupGate(initialize);
   // The renderer waits on this before any other call.
   registerContract(ipcMain, appContract, {
+    restoreBackup: async () => {
+      if (ipcHandle) throw codedError('请在设置的数据页恢复备份。', 'invalid_state');
+      return restoreAtStartup(configDir, {
+        pickDirectory: async () => {
+          const result = await dialog.showOpenDialog({ title: '选择 TaskPilot 备份文件夹', properties: ['openDirectory'] });
+          return result.canceled ? null : (result.filePaths[0] ?? null);
+        },
+        confirm: async (summary) =>
+          (
+            await dialog.showMessageBox({
+              type: 'warning',
+              title: '恢复备份并重启？',
+              message: '恢复 TaskPilot 数据',
+              detail: summary,
+              buttons: ['取消', '恢复并重启'],
+              defaultId: 0,
+              cancelId: 0,
+            })
+          ).response === 1,
+        restart,
+      });
+    },
     ready: async (retry) => {
       await startup.ready(retry === true);
       return true;

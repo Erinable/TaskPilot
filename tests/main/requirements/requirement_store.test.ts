@@ -164,7 +164,7 @@ test('concurrent writes do not collide on the temp file', async () => {
   assert.equal(reloaded.list().length, 20);
 });
 
-test('list() is newest first and survives a reload; corrupt files load empty', async () => {
+test('list() is newest first and survives a reload; corruption refuses further writes', async () => {
   const { store, configDir } = await newStore();
   await store.create({ text: 'first' });
   await store.create({ text: 'second' });
@@ -175,9 +175,11 @@ test('list() is newest first and survives a reload; corrupt files load empty', a
   const { store: reloaded } = await newStore(configDir);
   assert.equal(reloaded.list().length, 2);
 
-  await fs.writeFile(path.join(configDir, REQUIREMENTS_FILENAME), '{ nope');
-  const { store: empty } = await newStore(configDir);
-  assert.deepEqual(empty.list(), []);
+  const file = path.join(configDir, REQUIREMENTS_FILENAME);
+  await fs.writeFile(file, '{ nope');
+  await assert.rejects(newStore(configDir), { code: 'storage_corrupt' });
+  await assert.rejects(store.create({ text: 'must not replace the original' }), { code: 'storage_corrupt' });
+  assert.equal(await fs.readFile(file, 'utf8'), '{ nope');
 });
 
 // Runs a requirement up to reviewing, ready to publish.

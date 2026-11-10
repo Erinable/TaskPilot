@@ -243,7 +243,7 @@ export class RequirementStore implements TaskCatalog {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     this.#rebuildCatalog();
     return this;

@@ -10,6 +10,8 @@ import { courseList, coursePreview, courseSaved, defaultCourse, fail, installApi
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
+import { collectLocalDrafts, draftKey } from '@/lib/local_draft.ts';
+import { draftOf } from '@/lib/course_model.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -115,6 +117,37 @@ test('global user drafts survive repository reset and are separate from requirem
   expect(courses.editDraft('requirement:repo-b:r1:h', OS_COURSE).title).toBe(OS_COURSE.title);
   courses.discardDraft('user:os');
   expect(courses.editDraft('user:os', OS_COURSE).title).toBe(OS_COURSE.title);
+});
+
+test('course edits recover after restart and refuse drafts based on changed official content', () => {
+  const pack = { ...OS_COURSE, id: 'mine' };
+  const first = useCoursesStore();
+  first.editDraft('user:mine', pack).title = '未提交的课程名';
+  setActivePinia(createPinia());
+  const restarted = useCoursesStore();
+  expect(restarted.editDraft('user:mine', pack).title).toBe(pack.title);
+  expect(restarted.editDraftState('user:mine', pack).pending).toBe(true);
+  restarted.restoreDraft('user:mine', pack);
+  expect(restarted.editDraft('user:mine', pack).title).toBe('未提交的课程名');
+  const changed = { ...pack, summary: '外部更新' };
+  expect(restarted.editDraft('user:mine', changed).summary).toBe('外部更新');
+  expect(restarted.editDraftState('user:mine', changed).conflict).toBe(true);
+  expect(collectLocalDrafts()[draftKey(['course', 'user:mine'])]).toContain('未提交的课程名');
+});
+
+test('saved course snapshots clear old input and retain later edits against the accepted baseline', () => {
+  const pack = { ...OS_COURSE, id: 'mine' };
+  const courses = useCoursesStore();
+  courses.editDraft('user:mine', pack).title = '继续编辑';
+  const saved = { ...pack, title: '已保存标题' };
+  courses.acceptDraft('user:mine', draftOf(saved));
+  setActivePinia(createPinia());
+  const restarted = useCoursesStore();
+  expect(restarted.editDraftState('user:mine', saved).pending).toBe(true);
+  restarted.restoreDraft('user:mine', saved);
+  expect(restarted.editDraft('user:mine', saved).title).toBe('继续编辑');
+  restarted.discardDraft('user:mine');
+  expect(collectLocalDrafts()[draftKey(['course', 'user:mine'])]).toBeUndefined();
 });
 
 test('a save returning after selecting another course or switching repositories cannot replace that view', async () => {

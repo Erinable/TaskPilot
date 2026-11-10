@@ -451,7 +451,7 @@ const verifyProgress = computed(() => {
         <CourseEditor
           v-if="editing"
           :pack="draft.pack"
-          :draft-key="`requirement:${repositories.current?.id ?? 'none'}:${item.id}:${draft.contentHash}`"
+          :draft-key="JSON.stringify(['requirement', repositories.currentId, item.id, draft.pack.id])"
           :save="onSaveDraft"
           @close="editing = false"
         />

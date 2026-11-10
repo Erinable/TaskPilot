@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import { readCounts } from '../../../src/main/repository/repository_summary.ts';
 import { countStatuses } from '../../../src/shared/repository_counts.ts';
@@ -42,8 +41,7 @@ test('a closed repository counts its published packages, with saved status over 
   assert.deepEqual(await readCounts(dir), { pending: 1, active: 1, accepting: 1 });
 });
 
-test('a repository with no saved data counts nothing, and unreadable data counts as unknown', async () => {
+test('a repository with no saved data counts nothing, while corrupt data reports its recovery error', async () => {
   assert.deepEqual(await readCounts(await dataDir({})), { pending: 0, active: 0, accepting: 0 });
-  captureExpectedErrors((error) => error instanceof SyntaxError && error.message.includes('JSON'));
-  assert.equal(await readCounts(await dataDir({ 'requirements.json': '{not json' })), null);
+  await assert.rejects(readCounts(await dataDir({ 'requirements.json': '{not json' })), { code: 'storage_corrupt' });
 });

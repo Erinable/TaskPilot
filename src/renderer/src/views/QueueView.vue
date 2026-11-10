@@ -24,6 +24,7 @@ const PRIORITY_LABELS: Record<string, string> = { high: '高优先级', medium: 
 
 const app = useAppStore();
 const tasks = useTasksStore();
+const retryQueue = () => tasks.reloadQueue().catch(() => undefined);
 const requirements = useRequirementsStore();
 const execution = useExecutionStore();
 const repositories = useRepositoriesStore();
@@ -187,10 +188,24 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
             </el-dropdown>
           </div>
         </div>
+        <div v-if="tasks.error" class="queue-load-error" role="alert" data-error="queue">
+          <AppIcon name="alert" />
+          <span>
+            读取工作队列失败：{{ tasks.error }}
+            <template v-if="tasks.tasks.length">。保留上次读取的工作包。</template>
+          </span>
+          <button class="secondary-button small" type="button" data-action="retry-queue" :disabled="tasks.loading" @click="retryQueue">
+            {{ tasks.loading ? '正在重试…' : '重试读取' }}
+          </button>
+        </div>
+        <p v-if="tasks.loading && !tasks.tasks.length" class="empty-hint" role="status" data-loading="queue">
+          <AppIcon name="spinner" class="spin" />
+          正在读取工作队列…
+        </p>
         <QueueBoard v-if="layout === 'board' && tasks.tasks.length" :tasks="boardTasks" />
         <div v-else class="task-list">
           <!-- The queue only holds published packages, so point an empty one at the requirement center. -->
-          <div v-if="tasks.tasks.length === 0" class="req-empty" data-empty="queue">
+          <div v-if="tasks.tasks.length === 0 && !tasks.loading && !tasks.error" class="req-empty" data-empty="queue">
             <span class="req-empty-icon"><AppIcon name="inbox" /></span>
             <h2>还没有工作包</h2>
             <p>在需求中心描述需求，Product Lead 拆解并经你确认后，工作包会出现在这里。</p>
@@ -199,7 +214,7 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
               去写需求
             </button>
           </div>
-          <p v-else-if="visibleTasks.length === 0" class="empty-hint" data-empty="filter">
+          <p v-else-if="tasks.tasks.length > 0 && visibleTasks.length === 0" class="empty-hint" data-empty="filter">
             <AppIcon name="filter" />
             没有「{{ filterLabel }}」的工作包
             <button class="empty-action" type="button" @click="filter = 'all'">查看全部</button>
@@ -291,6 +306,20 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
 </template>
 
 <style scoped>
+.queue-load-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  color: var(--danger);
+  line-height: 1.6;
+}
+.queue-load-error span {
+  flex: 1;
+  min-width: 220px;
+}
+
 /* A falling trend, and the presence chip when the team is unreachable. */
 .metric-trend.down {
   color: var(--danger);

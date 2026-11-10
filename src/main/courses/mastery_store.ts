@@ -210,8 +210,7 @@ export class MasteryStore {
       this.#restoreReviews(saved);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-      if (error instanceof SyntaxError) logger.error('[mastery] mastery.json is not valid JSON; starting empty', error);
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     return this;
   }
@@ -328,23 +327,16 @@ export class MasteryStore {
   }
 
   #persist = async () => {
-    await this.#writes.enqueue(async () => {
-      // Recheck replacements made after load; the generic writer may already
-      // know this path's older version and otherwise skip its preflight read.
-      try {
-        await readStoredJson(this.#file, MASTERY_VERSION);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-      }
-      await writeStoredJson(this.#file, {
+    await this.#writes.enqueue(() =>
+      writeStoredJson(this.#file, {
         version: MASTERY_VERSION,
         records: [...this.#records.values()],
         seen: [...this.#seen],
         reviews: [...this.#reviews.values()],
         legacyReviews: [...this.#legacyReviews.values()],
         legacyVaultId: this.#legacyVaultId,
-      } satisfies SavedState);
-    });
+      } satisfies SavedState),
+    );
     this.#notify();
   };
 }

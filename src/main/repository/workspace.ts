@@ -97,8 +97,6 @@ export const load = async (configDir: string): Promise<WorkspaceConfig> => {
     return normalize(await readStoredJson(file, CONFIG_VERSION));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyConfig();
-    if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
-    if (error instanceof SyntaxError) throw new WorkspaceError(`${CONFIG_FILENAME} is not valid JSON`, 'invalid_json');
     throw error;
   }
 };

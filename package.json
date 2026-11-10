@@ -9,6 +9,7 @@
     "dev": "bash scripts/check_electron.sh electron-vite dev",
     "build": "electron-vite build",
     "dist": "electron-vite build && electron-builder --mac",
+    "dist:checksums": "node scripts/artifact_checksums.ts dist",
     "typecheck": "vue-tsc --build --noEmit tsconfig.json tsconfig.test.json",
     "pretest": "bash tests/scripts/coding_wrapper.test.sh",
     "test": "vitest run",
