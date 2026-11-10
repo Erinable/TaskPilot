@@ -52,9 +52,9 @@ export const CLI_OPTIONS: readonly { id: CliId; label: string; analysis: boolean
   {
     id: 'codex',
     label: 'Codex',
-    analysis: false,
+    analysis: true,
     thinking: ['default', 'minimal', 'low', 'medium', 'high', 'xhigh'],
-    note: '仅编码执行：CLI 没有已验证的全工具关闭模式，不能用于受限分析或 QA。',
+    note: '规划、审查与编码均可选择；受限分析由 TaskPilot 控制工具与配置，模型目录读取 CLI 原生配置。',
   },
   {
     id: 'opencode',

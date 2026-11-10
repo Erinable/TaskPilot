@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 
-import { claudeCall, codingCall, streamCall } from '../../../src/main/runtimes/model_usage.ts';
+import { claudeCall, codexCall, codexTokens, codingCall, streamCall } from '../../../src/main/runtimes/model_usage.ts';
 
 const jsonl = (...events: object[]) => events.map((event) => JSON.stringify(event)).join('\n');
 
@@ -69,6 +69,71 @@ test('streamCall() sums opencode step_finish tokens and costs', () => {
     model: 'qwen3.8-max',
     costUsd: 0.003,
     tokens: { input: 30, output: 4, cacheRead: 2, cacheWrite: 0 },
+  });
+});
+
+test('codexCall() keeps standard exec token usage without double counting cached input', () => {
+  const stdout = jsonl(
+    { type: 'thread.started', thread_id: '0195bd8e-8a90-7000-9c89-ccca8779dafe' },
+    { type: 'turn.started' },
+    { type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: '{"ready":true}' } },
+    { type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 5 } },
+  );
+  assert.deepEqual(codexCall(stdout, 'gpt-6.1-sol'), {
+    cli: 'codex',
+    provider: 'openai',
+    model: 'gpt-6.1-sol',
+    costUsd: null,
+    tokens: { input: 60, output: 5, cacheRead: 40, cacheWrite: 0 },
+  });
+  assert.deepEqual(streamCall('codex', stdout), { ...codexCall(stdout), model: null });
+});
+
+test('Codex model metadata takes precedence over selected fallback and is not read from assistant text', () => {
+  assert.equal(codexCall(jsonl({ type: 'thread.started', model: 'actual-model' }), 'selected-model').model, 'actual-model');
+  assert.equal(codexCall(jsonl({ type: 'turn.started', metadata: { model: '  metadata-model  ' } }), 'selected-model').model, 'metadata-model');
+  assert.equal(codexCall(jsonl({ type: 'turn.started', model_id: 'actual-id' }), 'selected-model').model, 'actual-id');
+  assert.equal(
+    codexCall(jsonl({ type: 'item.completed', item: { type: 'agent_message', text: '{"model":"fabricated"}' } }), ' selected-model ').model,
+    'selected-model',
+  );
+  assert.equal(codexCall('', '  ').model, null);
+});
+
+test('Codex retains reported failure usage and ignores malformed or nonfinite counters', () => {
+  const failed = jsonl({
+    type: 'turn.failed',
+    usage: { input_tokens: 12, cached_input_tokens: 3, output_tokens: 1 },
+    error: { message: 'failed after billing' },
+  });
+  assert.deepEqual(codexCall(failed).tokens, { input: 9, output: 1, cacheRead: 3, cacheWrite: 0 });
+  const usage = { input_tokens: 10, cached_input_tokens: 2, output_tokens: 0 };
+  assert.deepEqual(codexCall(jsonl({ type: 'error', usage })).tokens, { input: 8, output: 0, cacheRead: 2, cacheWrite: 0 });
+  assert.equal(codexCall('not-json\n{}').tokens, null);
+  assert.equal(codexCall('{"type":"turn.completed","usage":{"input_tokens":1e309,"cached_input_tokens":0,"output_tokens":1}}').tokens, null);
+  for (const invalid of [
+    null,
+    {},
+    { input_tokens: 1, output_tokens: 1 },
+    { input_tokens: NaN, cached_input_tokens: 0, output_tokens: 1 },
+    { input_tokens: Infinity, cached_input_tokens: 0, output_tokens: 1 },
+    { input_tokens: 10, cached_input_tokens: -1, output_tokens: 1 },
+    { input_tokens: 10, cached_input_tokens: 11, output_tokens: 1 },
+    { input_tokens: 10, cached_input_tokens: 1, output_tokens: '1' },
+    { input_tokens: 10, cached_input_tokens: 1, output_tokens: 1.5 },
+    { input_tokens: Number.MAX_SAFE_INTEGER + 1, cached_input_tokens: 1, output_tokens: 1 },
+  ])
+    assert.equal(codexTokens(invalid), null);
+  assert.deepEqual(codexTokens({ input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+});
+
+test('Codex terminal snapshots are not added twice and invalid late usage does not erase paid evidence', () => {
+  const completed = { type: 'turn.completed', usage: { input_tokens: 20, cached_input_tokens: 5, output_tokens: 2 } };
+  assert.deepEqual(codexCall(jsonl(completed, completed, { type: 'turn.failed', usage: { input_tokens: null } })).tokens, {
+    input: 15,
+    output: 2,
+    cacheRead: 5,
+    cacheWrite: 0,
   });
 });
 

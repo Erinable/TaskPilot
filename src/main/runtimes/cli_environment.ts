@@ -12,6 +12,8 @@ import { AgentRunError } from './claude_cli.ts';
 import type { RunStructuredOptions } from './claude_cli.ts';
 import { loadNativeModelProfile } from './native_model_profile.ts';
 import { nodeRuntimeProblem } from './runtime_locations.ts';
+import { validateCodexAnalysisVersion } from './codex_config.ts';
+import { assertCodexHostConfig } from './codex_host_config.ts';
 
 export type CliProbeResult = { command: string; available: boolean; version: string | null; reason: string | null };
 type Cli = AgentRuntimeConfig['cli'];
@@ -126,7 +128,7 @@ export const hasGrokAuth = async (nativeConfigured = false): Promise<boolean> =>
 export const ensureConfig = (config: AgentRuntimeConfig): void => {
   const capability = config && CLI_OPTIONS.find((entry) => entry.id === config.cli);
   if (!capability) throw new AgentRunError('Unsupported agent CLI configuration', 'agent_unavailable');
-  if (!capability.analysis) throw new AgentRunError('Codex CLI lacks a verified no-tools analysis mode; select it only for Coding Agent', 'agent_unavailable');
+  if (!capability.analysis) throw new AgentRunError('The selected CLI does not support restricted analysis', 'agent_unavailable');
   if (!capability.thinking.includes(config.thinking))
     throw new AgentRunError(`Unsupported ${config.cli} thinking level: ${config.thinking}`, 'agent_unavailable');
 };
@@ -175,7 +177,7 @@ export const argsFor = (options: RunStructuredOptions, config: AgentRuntimeConfi
       if (config.thinking !== 'default') args.push('--variant', config.thinking);
       break;
     case 'codex':
-      throw new AgentRunError('Codex analysis is unavailable: Codex CLI does not provide a verified no-tools mode', 'agent_unavailable');
+      throw new AgentRunError('Codex analysis arguments are assembled by the isolated Codex runner', 'agent_unavailable');
     case 'claude':
       break;
   }
@@ -231,6 +233,20 @@ const runProbeCommand = async (command: string, args: string[], cwd: string, env
   return promise;
 };
 
+const probeCodex = async (command: string, cwd: string, environment: NodeJS.ProcessEnv): Promise<CliProbeResult> => {
+  await assertCodexHostConfig();
+  const problem = await nodeRuntimeProblem(command, environment.PATH);
+  if (problem) return { command, available: false, version: null, reason: problem };
+  const versionOutput = await runProbeCommand(command, ['--version'], cwd, environment);
+  const version = /codex(?:-cli)?\s+\d+\.\d+\.\d+(?:[-+][\w.-]+)?/i.exec(versionOutput)?.[0] ?? versionOutput.trim().split(/\r?\n/)[0] ?? '';
+  const [help, features] = await Promise.all([
+    runProbeCommand(command, ['exec', '--help'], cwd, environment),
+    runProbeCommand(command, ['features', 'list'], cwd, environment),
+  ]);
+  validateCodexAnalysisVersion(version, help, features);
+  return { command, available: true, version, reason: null };
+};
+
 export const probeCli = async (config: AgentRuntimeConfig, envPath?: string | null): Promise<CliProbeResult> => {
   const command = commandFor(config.cli);
   try {
@@ -238,10 +254,9 @@ export const probeCli = async (config: AgentRuntimeConfig, envPath?: string | nu
   } catch (error) {
     return { command, available: false, version: null, reason: (error as Error).message };
   }
-  if (config.cli === 'codex')
-    return { command, available: false, version: null, reason: 'Codex analysis is unavailable: Codex CLI lacks a verified no-tools mode' };
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-probe-'));
   try {
+    if (config.cli === 'codex') return await probeCodex(command, cwd, envFor(config.cli, cwd, envPath));
     const profile = await loadNativeModelProfile(config.cli, cwd);
     if (config.cli === 'grok' && !(await hasGrokAuth(profile.grokConfiguredApiKey)))
       return {

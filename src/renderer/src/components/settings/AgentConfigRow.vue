@@ -63,7 +63,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
             @change="setSelectValue($event, 'cli')"
           >
             <option v-for="option in agentRuntime.CLI_OPTIONS" :key="option.id" :value="option.id" :disabled="agent !== 'coding-agent' && !option.analysis">
-              {{ option.label }}{{ agent !== 'coding-agent' && !option.analysis ? ' · 仅编码' : '' }}
+              {{ option.label }}
             </option>
           </select>
           <AppIcon name="chevron-down" />

@@ -3,6 +3,7 @@
 // shared, a refresh drops an older read's answer, and switching a role's CLI
 // resets only what the new CLI cannot do.
 import { beforeEach, expect, test } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
 import { ref } from 'vue';
 import type { Ref } from 'vue';
 
@@ -10,6 +11,7 @@ import { useAgentSettings } from '@/stores/settings_agents.ts';
 import { installFakeApi, ok } from '../ipc_fakes.ts';
 import { preferences } from '../settings_fakes.ts';
 import type * as agentRuntime from '@shared/agent_runtime.ts';
+import { AGENT_IDS } from '@shared/agent_runtime.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type * as settingsTypes from '@shared/ipc/settings.ts';
 
@@ -26,7 +28,7 @@ let api: ReturnType<typeof installFakeApi>;
 let draft: Ref<settingsTypes.PreferencesInput | null>;
 
 beforeEach(() => {
-  api = installFakeApi({ agent: { models: (request) => ok(catalog(request.cli, `${request.cli}-model`)) } });
+  api = installFakeApi({ agent: { models: (request) => ok({ ...catalog(request.cli, `${request.cli}-model`), scope: request.scope }) } });
   draft = ref<settingsTypes.PreferencesInput | null>(preferences());
 });
 
@@ -75,13 +77,30 @@ test('switching CLI keeps a thinking level the new CLI supports and resets one i
   expect(agents.agentConfigNotices.value.qa).toContain('已重置为默认');
 });
 
-test('an analysis role cannot pick a coding-only CLI; the coding agent can', () => {
+test('every role can select Codex while analysis and coding retain separate model catalogs', async () => {
   const agents = useAgentSettings(draft);
-  const before = draft.value!.agents.qa.cli;
-  agents.setAgentCli('qa', 'codex');
-  expect(draft.value!.agents.qa.cli).toBe(before);
-  agents.setAgentCli('coding-agent', 'codex');
-  expect(draft.value!.agents['coding-agent'].cli).toBe('codex');
+  for (const role of AGENT_IDS) {
+    draft.value!.agents[role].thinking = 'high';
+    agents.setAgentCli(role, 'codex');
+    expect(draft.value!.agents[role]).toMatchObject({ cli: 'codex', thinking: 'high' });
+  }
+  await flushPromises();
+  expect(api.agent.models).toHaveBeenCalledWith({ cli: 'codex', scope: 'analysis', refresh: false });
+  expect(api.agent.models).toHaveBeenCalledWith({ cli: 'codex', scope: 'coding', refresh: false });
+  expect(api.agent.models).toHaveBeenCalledTimes(2);
+  expect(agents.modelsForAgent('qa')?.defaultModel).toBe('codex-model');
+});
+
+test('switching an analysis role to Codex resets only unsupported thinking levels', () => {
+  const agents = useAgentSettings(draft);
+  draft.value!.agents.tutor.thinking = 'max';
+  agents.setAgentCli('tutor', 'codex');
+  expect(draft.value!.agents.tutor).toMatchObject({ cli: 'codex', thinking: 'default' });
+  expect(agents.agentConfigNotices.value.tutor).toContain('已重置为默认');
+  agents.setAgentThinking('tutor', 'xhigh');
+  expect(draft.value!.agents.tutor.thinking).toBe('xhigh');
+  agents.setAgentThinking('tutor', 'off');
+  expect(draft.value!.agents.tutor.thinking).toBe('xhigh');
 });
 
 test('editing a role clears its field error', () => {

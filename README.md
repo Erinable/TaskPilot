@@ -66,18 +66,18 @@ AI 团队
 | Release Manager | 起草发布 | 提交标题和改动路径，不含内容 |
 | Environment Steward | 推荐环境配置 | 清单、锁文件和 CI 配置 |
 
-每个成员可以单独选 CLI（Claude Code、Pi、Grok、Codex、OpenCode）、模型和思考强度。Codex 只能做 Coding Agent。QA 的结论由 TaskPilot 复核：阻塞检查失败或关联测试没通过，模型怎么说都驳回。
+每个成员可以单独选 CLI（Claude Code、Pi、Grok、Codex、OpenCode）、模型和思考强度，Codex 可用于全部角色。规划与审查角色会检查所选 CLI 的受限分析能力，并继续校验结构化输出。QA 的结论由 TaskPilot 复核：阻塞检查失败或关联测试没通过，模型怎么说都驳回。
 
 ## 快速开始
 
-需要 macOS、git、Node.js 22.18 或更高版本，以及登录好的 Claude Code（分析类角色默认用它）：
+需要 macOS、git、Node.js 22.18 或更高版本，以及已安装并登录的所选 CLI。分析类角色默认使用 Claude Code，例如：
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude   # 运行一次完成登录
 ```
 
-想用 Coding Agent，再装一个编码 CLI，默认是 Codex。TaskPilot 不保存 API Key，认证由各 CLI 自己管理。
+也可以安装并登录 Codex，在「设置 → 模型与智能体」将规划、审查、导师及编码角色分别切换为 Codex。Coding Agent 默认使用 Codex；角色可共用已登录的 CLI，不必为每个角色另装一份。TaskPilot 不保存 API Key，认证由各 CLI 自己管理。
 
 从源码运行：
 
