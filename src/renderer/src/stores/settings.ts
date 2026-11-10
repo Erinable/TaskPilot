@@ -63,6 +63,8 @@ export const NAV_GROUPS: NavGroup[] = [
 export const FIELD_INPUTS: Record<string, string> = {
   root: 'settingsRoot',
   displayName: 'profileName',
+  pathSource: 'environmentPathSource',
+  extraPaths: 'extraCommandPaths',
 };
 // The command input of a step, which its errors point at.
 export const stepInputId = (id: string) => `step-${id.replace(':', '-')}-command`;
@@ -75,13 +77,14 @@ const FIELD_PAGES: Record<string, SettingsPage> = {
   theme: 'preferences',
   vibrancy: 'preferences',
   pathSource: 'environment',
+  extraPaths: 'environment',
 };
 
 const PATH_ERROR_HINTS: Record<string, string> = {
-  shell_timeout: '登录 shell 5 秒内没有响应，已退回继承的 PATH。',
-  shell_no_path: '登录 shell 没有输出 PATH，已退回继承的 PATH。',
-  unsupported_shell: '不支持你的登录 shell，已退回继承的 PATH。',
-  no_shell: '没有找到登录 shell（SHELL 未设置），已退回继承的 PATH。',
+  shell_timeout: '登录 shell 超时，已使用本机工具自动检测结果。可切换为「自动检测」避免等待 shell。',
+  shell_no_path: '登录 shell 没有输出 PATH，已补充本机已安装工具目录。',
+  unsupported_shell: '无法读取这个 shell，已使用本机工具自动检测结果。',
+  no_shell: '没有找到可用的登录 shell，已使用本机工具自动检测结果。',
 };
 
 export type FieldTone = 'ok' | 'warn' | 'error';
@@ -123,7 +126,7 @@ const preferencesForm = (value: settingsTypes.PreferencesInput): settingsTypes.P
   return {
     profile: { displayName: prefs.profile.displayName, avatarColor: prefs.profile.avatarColor },
     appearance: { ...toRaw(prefs.appearance) },
-    environment: { ...toRaw(prefs.environment) },
+    environment: { ...toRaw(prefs.environment), ...(prefs.environment.extraPaths ? { extraPaths: [...toRaw(prefs.environment.extraPaths)] } : {}) },
     agents: Object.fromEntries(Object.entries(toRaw(prefs.agents)).map(([id, config]) => [id, { ...toRaw(config) }])) as agentRuntimeTypes.AgentSettings,
     coding: { ...coding, extraRead: [...toRaw(coding.extraRead)], extraWrite: [...toRaw(coding.extraWrite)] },
   };
@@ -344,22 +347,54 @@ export const useSettingsStore = defineStore('settings', () => {
   // Entries of the inherited PATH, to mark what the login shell added.
   const inheritedEntries = ref<Set<string>>(new Set());
 
+  let environmentGeneration = 0;
+  const runtimeActionError = ref<string | null>(null);
+  const selectingRuntime = ref(false);
   const renderEnvironment = async ({ refresh = false } = {}) => {
-    const source = preferencesDraft.value?.environment.pathSource ?? 'inherit';
+    const generation = ++environmentGeneration;
+    const source = preferencesDraft.value?.environment.pathSource ?? 'auto';
+    const extraPaths = [...(preferencesDraft.value?.environment.extraPaths ?? [])];
     environmentLoading.value = true;
     environmentError.value = null;
     try {
       const [info, inherited] = await Promise.all([
-        call(window.taskpilot.environment.info({ source, refresh })),
-        source === 'login-shell' ? call(window.taskpilot.environment.info({ source: 'inherit' })) : null,
+        call(window.taskpilot.environment.info({ source, extraPaths, refresh })),
+        source !== 'inherit' ? call(window.taskpilot.environment.info({ source: 'inherit', extraPaths: [] })) : null,
       ]);
+      if (generation !== environmentGeneration) return;
       environment.value = info;
       inheritedEntries.value = new Set(inherited?.entries ?? info.entries);
     } catch (error) {
-      console.error(error);
-      environmentError.value = describeError(error);
+      if (generation === environmentGeneration) environmentError.value = describeError(error);
     } finally {
-      environmentLoading.value = false;
+      if (generation === environmentGeneration) environmentLoading.value = false;
+    }
+  };
+  const extraPathText = computed({
+    get: () => (preferencesDraft.value?.environment.extraPaths ?? []).join('\n'),
+    set: (value: string) => {
+      if (!preferencesDraft.value) return;
+      preferencesDraft.value.environment.extraPaths = value
+        .split(/\r?\n/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    },
+  });
+  const selectRuntimeExecutable = async (tool: agentRuntimeTypes.CliId | 'node') => {
+    if (selectingRuntime.value || !preferencesDraft.value) return;
+    selectingRuntime.value = true;
+    runtimeActionError.value = null;
+    const isCurrent = settingsIdentity();
+    try {
+      const picked = await call(window.taskpilot.environment.pickExecutable(tool));
+      if (!picked || !isCurrent() || !preferencesDraft.value) return;
+      const previous = preferencesDraft.value.environment.extraPaths ?? [];
+      preferencesDraft.value.environment.extraPaths = [picked.directory, ...previous.filter((entry) => entry !== picked.directory)];
+      await renderEnvironment({ refresh: true });
+    } catch (error) {
+      if (isCurrent()) runtimeActionError.value = describeError(error);
+    } finally {
+      selectingRuntime.value = false;
     }
   };
 
@@ -368,9 +403,13 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!info) return { text: '', warn: false };
     if (info.error) return { text: PATH_ERROR_HINTS[info.error.code] ?? `读取失败：${info.error.message}`, warn: true };
     const added = info.entries.filter((entry) => !inheritedEntries.value.has(entry)).length;
-    const source = preferencesDraft.value?.environment.pathSource;
     return {
-      text: source === 'login-shell' ? `${info.entries.length} 个目录，其中 ${added} 个是登录 shell 新增的` : `${info.entries.length} 个目录`,
+      text:
+        info.requested === 'auto'
+          ? `自动检测到 ${info.entries.length} 个命令目录，其中 ${added} 个来自本机安装或你的补充目录。`
+          : info.requested === 'login-shell'
+            ? `${info.entries.length} 个目录，已补充本机安装位置。`
+            : `${info.entries.length} 个目录；使用启动环境及你的补充目录。`,
       warn: false,
     };
   });
@@ -637,6 +676,10 @@ export const useSettingsStore = defineStore('settings', () => {
     inheritedEntries,
     pathNote,
     renderEnvironment,
+    extraPathText,
+    selectingRuntime,
+    runtimeActionError,
+    selectRuntimeExecutable,
     // Data
     dataInfo,
     renderData,

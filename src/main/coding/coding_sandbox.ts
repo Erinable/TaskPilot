@@ -142,23 +142,78 @@ const real = (target: string): string => {
 const quote = (value: string) => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 const within = (parent: string, child: string) => child === parent || child.startsWith(`${parent}${path.sep}`);
 
-// The first folder under home holding `target`, unless it is sensitive.
-const homeRootOf = (home: string, target: string): string | null => {
+// PATH discovery is not permission to read a version manager's whole home.
+// Reject both a private path and an ancestor that would reopen it.
+const toolchainReadPath = (home: string, target: string): string | null => {
   const resolved = real(target);
   if (!within(home, resolved) || resolved === home) return null;
-  const relative = path.relative(home, resolved).split(path.sep);
-  const top = relative[0];
-  if (SENSITIVE.some((name) => name.split('/')[0] === top)) return null;
-  return path.join(home, top);
+  const privatePaths = [
+    ...SENSITIVE,
+    ...Object.values(CLI_STATE_ROOT),
+    ...Object.values(CLI_HOME_FILES)
+      .flat()
+      .flatMap((file) => (path.dirname(file.path) === '.' ? [file.path] : [file.path, path.dirname(file.path)])),
+    '.npm',
+    '.npmrc',
+    '.git-credentials',
+  ].map((entry) => real(path.join(home, entry)));
+  if (privatePaths.some((entry) => within(entry, resolved) || within(resolved, entry))) return null;
+  const versionDirectories = [
+    '.nvm/versions/node',
+    '.asdf/installs/nodejs',
+    '.volta/tools/image/node',
+    '.local/share/mise/installs/node',
+    '.local/share/fnm/node-versions',
+    '.local/share/pnpm/nodejs',
+  ];
+  if (versionDirectories.some((entry) => within(resolved, path.join(home, entry)))) return null;
+  return resolved;
 };
 
-// Folders under home the toolchain lives in: each PATH entry, and where the
-// CLI's executable really is (an nvm install, say).
+// Node distributions need their adjacent shared libraries and npm packages.
+// Open only the selected version, never every version or manager config.
+const nodeInstallationRoot = (home: string, target: string): string | null => {
+  const relative = path.relative(home, real(target)).split(path.sep).join('/');
+  const match =
+    /^(\.nvm\/versions\/node\/[^/]+|\.asdf\/installs\/nodejs\/[^/]+|\.volta\/tools\/image\/node\/[^/]+|\.local\/share\/mise\/installs\/node\/[^/]+|\.local\/share\/fnm\/node-versions\/[^/]+\/installation|\.local\/share\/pnpm\/nodejs\/[^/]+)(?:\/|$)/.exec(
+      relative,
+    );
+  return match ? path.join(home, match[1]) : null;
+};
+
+// An npm-installed CLI may be a symlink from bin to its package. Its package
+// directory is sufficient; other global packages and user state stay private.
+const executablePackageRoot = (target: string): string | null => {
+  const parts = real(target).split(path.sep);
+  const modules = parts.indexOf('node_modules');
+  if (modules < 0 || !parts[modules + 1]) return null;
+  const end = modules + (parts[modules + 1].startsWith('@') ? 3 : 2);
+  return parts.length > end ? parts.slice(0, end).join(path.sep) : null;
+};
+
 export const toolchainRoots = (home: string, pathEntries: string[], executable: string | null): string[] => {
+  const canonicalHome = real(home);
   const roots = new Set<string>();
-  for (const entry of [...pathEntries, ...(executable ? [executable] : [])]) {
-    const root = homeRootOf(home, entry);
-    if (root) roots.add(root);
+  const add = (target: string) => {
+    const allowed = toolchainReadPath(canonicalHome, target);
+    if (allowed) roots.add(allowed);
+  };
+  for (const entry of pathEntries.filter(path.isAbsolute)) {
+    // Executable folders may be read without exposing their siblings, e.g.
+    // ~/.local/bin never grants ~/.local/share/opencode/auth.json.
+    if (['bin', 'sbin'].includes(path.basename(entry))) add(entry);
+    const installation = nodeInstallationRoot(canonicalHome, entry);
+    if (installation) add(installation);
+  }
+  const node = findCli('node', pathEntries);
+  for (const target of [executable, node]) {
+    if (!target) continue;
+    add(target);
+    const installation = nodeInstallationRoot(canonicalHome, target);
+    const packageRoot = executablePackageRoot(target);
+    if (installation) add(installation);
+    else if (packageRoot) add(packageRoot);
+    else add(path.dirname(target));
   }
   return [...roots];
 };
@@ -454,11 +509,12 @@ export const clean = async (runName: string, { context }: { context: SandboxCont
 // ========== CLI ==========
 
 // The CLI's real path on the run's PATH, or null.
-export const findCli = (cli: CliId, pathEntries: string[]): string | null => {
+export const findCli = (cli: CliId | 'node', pathEntries: string[]): string | null => {
   for (const entry of pathEntries) {
     const candidate = path.join(entry, cli);
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
+      if (!fs.statSync(candidate).isFile()) continue;
       return fs.realpathSync(candidate);
     } catch {
       // Not on this entry.

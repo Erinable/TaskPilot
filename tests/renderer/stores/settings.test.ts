@@ -534,8 +534,8 @@ test('opening the environment page previews the draft PATH source', async () => 
   settings.openPage('environment');
   await flushPromises();
   expect(settings.environment).not.toBeNull();
-  expect(api.environment.info).toHaveBeenCalledWith({ source: 'login-shell', refresh: false });
-  expect(api.environment.info).toHaveBeenCalledWith({ source: 'inherit' });
+  expect(api.environment.info).toHaveBeenCalledWith({ source: 'login-shell', extraPaths: [], refresh: false });
+  expect(api.environment.info).toHaveBeenCalledWith({ source: 'inherit', extraPaths: [] });
 });
 
 test('setup cannot apply commands over unsaved settings edits', async () => {

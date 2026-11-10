@@ -25,6 +25,26 @@ test('load() defaults only for an absent file and preserves corrupt preferences'
   assert.equal(await fs.readFile(file, 'utf8'), '{ broken');
 });
 
+test('new installs use automatic discovery and older explicit choices remain intact', () => {
+  assert.equal(preferences.defaults().environment.pathSource, 'auto');
+  for (const source of ['inherit', 'login-shell', 'auto'])
+    assert.equal(preferences.normalize({ environment: { pathSource: source } }).environment.pathSource, source);
+});
+
+test('local command directories roundtrip in order and reject unsafe PATH entries', async () => {
+  const dir = await tempDir();
+  const saved = await preferences.save(
+    dir,
+    valid({ environment: { pathSource: 'auto', extraPaths: ['/custom/tools/bin', '/custom/node/bin', '/custom/tools/bin'] } }),
+  );
+  assert.deepEqual(saved.environment.extraPaths, ['/custom/tools/bin', '/custom/node/bin']);
+  assert.deepEqual((await preferences.load(dir)).environment, saved.environment);
+  for (const value of [['relative'], ['/tmp/tool:other'], ['/tmp/tool\nother'], ['/'], 'not-an-array', Array(21).fill('/tmp/bin')]) {
+    assert.throws(() => preferences.validate(valid({ environment: { extraPaths: value } })), { field: 'extraPaths' });
+  }
+  assert.deepEqual(preferences.normalize({ environment: { extraPaths: ['relative', '/valid/bin'] } }).environment.extraPaths, ['/valid/bin']);
+});
+
 test('save() then load() round-trips, trimming the name', async () => {
   const dir = await tempDir();
   const saved = await preferences.save(dir, valid({ profile: { displayName: '  Ada  ' } }));

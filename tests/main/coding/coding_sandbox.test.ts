@@ -32,13 +32,93 @@ test('buildProfile() quotes paths so a folder name cannot add rules', () => {
   assert.equal((profile.match(/^\(allow file-read\* /gm) ?? []).length, 1);
 });
 
-test('toolchainRoots() opens the top folder of each PATH entry under home, never a sensitive one', () => {
+test('toolchainRoots() opens executable folders and the selected Node version without their private siblings', () => {
   const roots = sandbox.toolchainRoots(
     HOME,
-    [`${HOME}/.nvm/versions/node/v24/bin`, '/usr/bin', `${HOME}/.ssh/bin`, `${HOME}/Library/bin`, `${HOME}/.local/bin`],
+    [`${HOME}/.nvm/versions/node/v24/bin`, '/usr/bin', `${HOME}/.ssh/bin`, `${HOME}/Library/bin`, `${HOME}/.local/bin`, `${HOME}/.config`, `${HOME}/.local`],
     null,
   );
-  assert.deepEqual(roots, [`${HOME}/.nvm`, `${HOME}/.local`]);
+  assert.deepEqual(roots, [`${HOME}/.nvm/versions/node/v24/bin`, `${HOME}/.nvm/versions/node/v24`, `${HOME}/.local/bin`]);
+});
+
+test('toolchainRoots() resolves scoped npm packages without reopening the global install prefix', async () => {
+  const home = await tempDir('taskpilot-toolchain-roots-');
+  const bin = path.join(home, '.local', 'bin');
+  const install = path.join(home, '.npm-global', 'lib', 'node_modules', '@vendor', 'coding-cli');
+  const executable = path.join(install, 'cli.js');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(install, { recursive: true });
+  fs.writeFileSync(executable, '#!/usr/bin/env node\n', { mode: 0o755 });
+  fs.symlinkSync(executable, path.join(bin, 'claude'));
+  const roots = sandbox.toolchainRoots(home, [bin], sandbox.findCli('claude', [bin]));
+  assert.deepEqual(roots, [fs.realpathSync(bin), fs.realpathSync(executable), fs.realpathSync(install)]);
+  assert.ok(!roots.includes(path.join(home, '.npm-global')));
+  assert.ok(!roots.includes(path.join(home, '.npm-global', 'lib', 'node_modules')));
+});
+
+test('toolchainRoots() permits a selected custom installation but never a real CLI state folder or its ancestors', async () => {
+  const home = await tempDir('taskpilot-toolchain-custom-');
+  const install = path.join(home, 'custom-tools');
+  const executable = path.join(install, 'claude');
+  fs.mkdirSync(install);
+  fs.writeFileSync(executable, '#!/bin/sh\n', { mode: 0o755 });
+  assert.deepEqual(sandbox.toolchainRoots(home, [install], executable), [fs.realpathSync(executable), fs.realpathSync(install)]);
+  const privateDirectories = ['.local', '.config', '.local/share/opencode', '.config/opencode', '.config/gh', '.claude', '.codex', '.pi', '.grok', '.ssh'];
+  for (const directory of privateDirectories) {
+    const privateRoot = path.join(home, directory);
+    fs.mkdirSync(path.join(privateRoot, 'bin'), { recursive: true });
+    const target = path.join(privateRoot, 'bin', 'claude');
+    fs.writeFileSync(target, '#!/bin/sh\n', { mode: 0o755 });
+    const reads = sandbox.toolchainRoots(home, [privateRoot, path.join(privateRoot, 'bin')], target);
+    if (directory === '.local' || directory === '.config') {
+      // Their bin children do not contain the auth/config siblings.
+      assert.ok(
+        reads.every((entry) => entry !== fs.realpathSync(privateRoot)),
+        directory,
+      );
+    } else assert.deepEqual(reads, [], directory);
+  }
+});
+
+test('toolchainRoots() reads the actual Node version when a PATH shim links to it', async () => {
+  const home = await tempDir('taskpilot-toolchain-node-');
+  const bin = path.join(home, '.local', 'bin');
+  const nodeRoot = path.join(home, '.nvm', 'versions', 'node', 'v24.12.0');
+  const executable = path.join(nodeRoot, 'bin', 'node');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(path.dirname(executable), { recursive: true });
+  fs.writeFileSync(executable, '#!/bin/sh\n', { mode: 0o755 });
+  fs.symlinkSync(executable, path.join(bin, 'node'));
+  const roots = sandbox.toolchainRoots(home, [bin], null);
+  assert.deepEqual(roots, [fs.realpathSync(bin), fs.realpathSync(executable), fs.realpathSync(nodeRoot)]);
+});
+
+test('toolchainRoots() never opens every Node version through an executable installed at a manager prefix', () => {
+  for (const directory of [
+    '.nvm',
+    '.nvm/versions/node',
+    '.asdf/installs/nodejs',
+    '.volta/tools/image',
+    '.local/share/mise',
+    '.local/share/fnm',
+    '.local/share/pnpm',
+  ]) {
+    const install = path.join(HOME, directory);
+    const roots = sandbox.toolchainRoots(HOME, [install], path.join(install, 'claude'));
+    assert.ok(!roots.includes(install), directory);
+  }
+});
+
+test('toolchainRoots() does not follow a PATH directory link into private state', async () => {
+  const home = await tempDir('taskpilot-toolchain-private-');
+  const secrets = path.join(home, '.config', 'opencode');
+  fs.mkdirSync(secrets, { recursive: true });
+  fs.mkdirSync(path.join(home, 'custom'), { recursive: true });
+  const link = path.join(home, 'custom', 'bin');
+  fs.symlinkSync(secrets, link);
+  assert.deepEqual(sandbox.toolchainRoots(home, [link], null), []);
+  fs.mkdirSync(path.join(home, 'custom', 'node'));
+  assert.equal(sandbox.findCli('node', [path.join(home, 'custom')]), null);
 });
 
 test('profileFor() never opens a real CLI state folder; the run has its own home', () => {
@@ -188,6 +268,64 @@ test.skipIf(process.platform !== 'darwin' || !fs.existsSync(sandbox.SANDBOX_EXEC
   await sandbox.clean(run.runName, { context });
   assert.equal(fs.existsSync(run.directory), false);
 });
+
+test.skipIf(process.platform !== 'darwin' || !fs.existsSync(sandbox.SANDBOX_EXEC_PATH))(
+  'discovered CLI and Node paths never expose private siblings inside the sandbox',
+  { tags: ['e2e'] },
+  async () => {
+    const home = fs.mkdtempSync(path.join(os.homedir(), '.taskpilot-toolchain-home-'));
+    // This unique temporary home is owned by the test and never contains the
+    // developer's real CLI configuration or shell startup files.
+    onTestFinished(() => fs.rmSync(home, { recursive: true, force: true }));
+    const bin = path.join(home, '.local', 'bin');
+    const nodeRoot = path.join(home, '.nvm', 'versions', 'node', 'v24.12.0');
+    const cli = path.join(bin, 'claude');
+    const runDir = path.join(home, 'runs', 'r1');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.mkdirSync(path.join(nodeRoot, 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(nodeRoot, 'lib'), { recursive: true });
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(nodeRoot, 'lib', 'runtime.txt'), 'runtime library\n');
+    fs.writeFileSync(path.join(nodeRoot, 'bin', 'node'), '#!/bin/sh\nprintf "fake-node-runtime\\n"\n', { mode: 0o755 });
+    fs.symlinkSync(path.join(nodeRoot, 'bin', 'node'), path.join(bin, 'node'));
+    fs.writeFileSync(cli, '#!/usr/bin/env node\n', { mode: 0o755 });
+    const secretNames = [
+      '.local/share/opencode/auth.json',
+      '.config/opencode/opencode.json',
+      '.config/gh/hosts.yml',
+      '.claude/.credentials.json',
+      '.codex/auth.json',
+      '.nvm/manager-secret.txt',
+    ];
+    for (const relative of secretNames) {
+      const file = path.join(home, relative);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'private contents\n');
+    }
+    fs.symlinkSync(path.join(home, '.local', 'share', 'opencode', 'auth.json'), path.join(bin, 'linked-credentials'));
+    const context: sandbox.SandboxContext = {
+      home,
+      runRoot: path.dirname(runDir),
+      probeFile: '',
+      pathEntries: [bin, path.join(nodeRoot, 'bin'), path.join(home, '.local'), path.join(home, '.config'), '/usr/bin', '/bin'],
+      extraRead: [],
+      extraWrite: [],
+    };
+    const profile = sandbox.buildProfile(sandbox.profileFor(context, 'claude', runDir, cli));
+    const execute = (command: string, args: string[]) =>
+      spawnSync(sandbox.SANDBOX_EXEC_PATH, ['-p', profile, command, ...args], {
+        cwd: runDir,
+        env: sandbox.sandboxEnv(context, {}, sandbox.agentHomeOf(runDir)),
+        encoding: 'utf8',
+      });
+    for (const relative of secretNames) assert.notEqual(execute('/bin/cat', [path.join(home, relative)]).status, 0, `private sibling ${relative}`);
+    assert.notEqual(execute('/bin/cat', [path.join(bin, 'linked-credentials')]).status, 0, 'symlink from bin to private credentials');
+    assert.equal(execute('/bin/cat', [path.join(nodeRoot, 'lib', 'runtime.txt')]).stdout, 'runtime library\n');
+    const version = execute(cli, ['--version']);
+    assert.equal(version.status, 0, version.stderr);
+    assert.equal(version.stdout, 'fake-node-runtime\n');
+  },
+);
 
 // A fake home with a Claude login, its settings (with a hook) and a config file.
 const fakeHome = async () => {

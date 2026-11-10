@@ -12,7 +12,8 @@ import type { LooseJson } from '../infrastructure/loose_json.ts';
 export const PREFERENCES_FILENAME = 'preferences.json';
 export const THEMES = ['system', 'light', 'dark'] as const;
 export const AVATAR_COLORS = avatar.AVATAR_COLORS;
-export const PATH_SOURCES = ['inherit', 'login-shell'] as const;
+export const PATH_SOURCES = ['auto', 'inherit', 'login-shell'] as const;
+export const MAX_EXTRA_PATHS = 20;
 export const MAX_NAME_LENGTH = 40;
 // C0/C1 controls, plus bidi overrides that could visually reorder a name.
 // Display names refuse all C0/C1 controls and bidi overrides.
@@ -28,7 +29,7 @@ export type PathSource = (typeof PATH_SOURCES)[number];
 export interface Preferences {
   profile: { displayName: string; avatarColor: AvatarColor };
   appearance: { theme: Theme; vibrancy: boolean };
-  environment: { pathSource: PathSource };
+  environment: { pathSource: PathSource; extraPaths?: string[] };
   agents: agentRuntime.AgentSettings;
   coding: CodingPreferences;
 }
@@ -67,7 +68,7 @@ export class PreferencesError extends Error {
 export const defaults = (): Preferences => ({
   profile: { displayName: '', avatarColor: 'sunset' },
   appearance: { theme: 'system', vibrancy: false },
-  environment: { pathSource: 'inherit' },
+  environment: { pathSource: 'auto' },
   agents: agentRuntime.defaultAgentSettings(),
   // [人工决策-2026-10-14] 新用户默认沙箱模式，独立账号模式作为更严的可选项。
   coding: { isolation: 'sandbox', extraRead: [], extraWrite: [], timeoutMinutes: 30 },
@@ -154,6 +155,41 @@ const agentSettings = (input: unknown, strict: boolean): agentRuntime.AgentSetti
   return settings;
 };
 
+// Extra command folders are local to this machine and never read from a repo.
+// Preserve order: a folder chosen by the user takes precedence over discovery.
+export const extraCommandPaths = (value: unknown, strict = true): string[] => {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_EXTRA_PATHS) {
+    if (strict) throw new PreferencesError(`最多添加 ${MAX_EXTRA_PATHS} 个命令目录。`, 'invalid_choice', 'extraPaths');
+    return [];
+  }
+  const entries: string[] = [];
+  for (const entry of value as unknown[]) {
+    if (
+      typeof entry !== 'string' ||
+      !path.isAbsolute(entry) ||
+      entry.length > 2048 ||
+      [...entry].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ||
+      entry.includes(path.delimiter)
+    ) {
+      if (strict) throw new PreferencesError('命令目录必须是绝对路径，且不能包含 PATH 分隔符。', 'invalid_choice', 'extraPaths');
+      continue;
+    }
+    const resolved = path.resolve(entry);
+    if (resolved === path.parse(resolved).root || resolved === os.homedir()) {
+      if (strict) throw new PreferencesError('请选择工具所在的目录，不要添加根目录或整个主目录。', 'invalid_choice', 'extraPaths');
+      continue;
+    }
+    if (!entries.includes(resolved)) entries.push(resolved);
+  }
+  return entries;
+};
+const environmentPreferences = (value: unknown, source: PathSource, strict: boolean): Preferences['environment'] => {
+  const raw = value && typeof value === 'object' ? (value as { extraPaths?: unknown }) : {};
+  const extraPaths = extraCommandPaths(raw.extraPaths, strict);
+  return { pathSource: source, ...(extraPaths.length ? { extraPaths } : {}) };
+};
+
 // Lenient: a hand-edited or older file falls back to defaults field by field.
 export const normalize = (input: unknown): Preferences => {
   const base = defaults();
@@ -169,9 +205,7 @@ export const normalize = (input: unknown): Preferences => {
       theme: pick(raw.appearance?.theme, THEMES, base.appearance.theme),
       vibrancy: raw.appearance?.vibrancy === true,
     },
-    environment: {
-      pathSource: pick(raw.environment?.pathSource, PATH_SOURCES, base.environment.pathSource),
-    },
+    environment: environmentPreferences(raw.environment, pick(raw.environment?.pathSource, PATH_SOURCES, base.environment.pathSource), false),
     agents: agentSettings(raw.agents, false),
     coding: codingPreferences(raw.coding, false),
   };
@@ -202,7 +236,7 @@ export const validate = (input: unknown): Preferences => {
   return {
     profile: { displayName: trimmed, avatarColor: oneOf(raw.profile?.avatarColor, AVATAR_COLORS, 'avatarColor') },
     appearance: { theme: oneOf(raw.appearance?.theme, THEMES, 'theme'), vibrancy: raw.appearance.vibrancy },
-    environment: { pathSource: oneOf(raw.environment?.pathSource, PATH_SOURCES, 'pathSource') },
+    environment: environmentPreferences(raw.environment, oneOf(raw.environment?.pathSource, PATH_SOURCES, 'pathSource'), true),
     agents: agentSettings(raw.agents, true),
     coding: codingPreferences(raw.coding, true),
   };
