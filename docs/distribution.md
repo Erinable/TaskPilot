@@ -1,6 +1,6 @@
 # macOS 安装包、数据恢复与手工更新
 
-TaskPilot 目前只支持 macOS，尚无已发布的公开下载。仓库可生成 Apple Silicon（arm64）和 Intel（x64）的 DMG、ZIP；当前使用不需要开发者账号的 ad-hoc 临时签名，没有 Developer ID 签名或 Apple 公证。本文描述分发准备和验收要求，不代表各机型已经实机验收。
+TaskPilot 目前只支持 macOS，公开预览安装包见 [GitHub Releases](https://github.com/Erinable/TaskPilot/releases)。仓库可生成 Apple Silicon（arm64）和 Intel（x64）的 DMG、ZIP，文件名明确包含版本与架构；当前使用不需要开发者账号的 ad-hoc 临时签名，没有 Developer ID 签名或 Apple 公证。各版本实机验收范围见对应 Release 说明。
 
 ## DMG、签名与公证
 

@@ -1,8 +1,9 @@
 # Local macOS packaging: npm run dist -> dist/.
-# Ad-hoc signed without Developer ID or notarization; no release host yet.
-# Automatic updates remain disabled until a trusted release channel exists.
+# Ad-hoc signed without Developer ID or notarization.
+# Automatic updates remain disabled until a trusted update channel exists.
 appId: com.taskpilot.app
 productName: TaskPilot
+artifactName: TaskPilot-${version}-${arch}.${ext}
 directories:
   output: dist
   buildResources: assets

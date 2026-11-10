@@ -14,7 +14,7 @@
 </p>
 
 > [!NOTE]
-> 早期阶段：只支持 macOS，尚无已发布的公开下载。可以从源码运行或自行生成无需开发者账号的临时签名安装包；安装、校验与手工更新见[分发说明](docs/distribution.md)。
+> 早期预览：只支持 macOS。安装包可从 [GitHub Releases](https://github.com/Erinable/TaskPilot/releases) 下载；使用无需开发者账号的 ad-hoc 临时签名，没有 Apple 公证。安装、校验与手工更新见[分发说明](docs/distribution.md)。
 
 ## 它是什么
 
