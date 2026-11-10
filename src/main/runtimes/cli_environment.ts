@@ -11,6 +11,7 @@ import { processEnv } from '../infrastructure/env.ts';
 import { AgentRunError } from './claude_cli.ts';
 import type { RunStructuredOptions } from './claude_cli.ts';
 import { loadNativeModelProfile } from './native_model_profile.ts';
+import { nodeRuntimeProblem } from './runtime_locations.ts';
 
 export type CliProbeResult = { command: string; available: boolean; version: string | null; reason: string | null };
 type Cli = AgentRuntimeConfig['cli'];
@@ -250,6 +251,8 @@ export const probeCli = async (config: AgentRuntimeConfig, envPath?: string | nu
         reason: 'Grok isolated analysis requires XAI_API_KEY, a native model credential, or ~/.grok/auth.json',
       };
     const env = envFor(config.cli, cwd, envPath, profile.grokEnvironment);
+    const problem = await nodeRuntimeProblem(command, env.PATH);
+    if (problem) return { command, available: false, version: null, reason: problem };
     const versionOutput = await runProbeCommand(command, ['--version'], cwd, env);
     const version = versionOutput.trim().split(/\r?\n/)[0] ?? '';
     const helpArgs = config.cli === 'opencode' ? ['run', '--help'] : ['--help'];
@@ -274,7 +277,11 @@ export const probeCli = async (config: AgentRuntimeConfig, envPath?: string | nu
       return { command, available: false, version: version || null, reason: 'Restricted analysis requires OpenCode version 1.x' };
     return { command, available: true, version: version || null, reason: null };
   } catch (error) {
-    return { command, available: false, version: null, reason: redact((error as Error).message) };
+    const reason =
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? `未在当前命令目录找到 ${command}，或它的解释器不可用。请在「运行环境」使用自动检测，或选择 ${command} 和 node 可执行文件，保存后重试。`
+        : redact((error as Error).message);
+    return { command, available: false, version: null, reason };
   } finally {
     await fs.rm(cwd, { recursive: true, force: true });
   }

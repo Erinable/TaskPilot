@@ -11,13 +11,14 @@ import type * as backupTypes from '../data_backup.ts';
 
 export type Theme = 'system' | 'light' | 'dark';
 export type AvatarColor = SharedAvatarColor;
-export type PathSource = 'inherit' | 'login-shell';
+export type PathSource = 'auto' | 'inherit' | 'login-shell';
+export type EnvironmentPreferences = { pathSource: PathSource; extraPaths?: string[] };
 
 // What preferences:set accepts.
 export type PreferencesInput = {
   profile: { displayName: string; avatarColor: AvatarColor };
   appearance: { theme: Theme; vibrancy: boolean };
-  environment: { pathSource: PathSource };
+  environment: EnvironmentPreferences;
   agents: AgentSettings;
   // How the Coding Agent is isolated (the folders only apply to sandbox mode),
   // and how long one coding round may run.
@@ -28,15 +29,25 @@ export type PreferencesInput = {
 export type Preferences = PreferencesInput & { profile: { initials: string } };
 
 // `source` previews a choice before saving; `refresh` re-reads the login shell.
-export type EnvironmentInfoOptions = { source?: PathSource; refresh?: boolean };
+export type EnvironmentInfoOptions = { source?: PathSource; extraPaths?: string[]; refresh?: boolean };
+export type RuntimeTool = {
+  id: CliId | 'node';
+  label: string;
+  path: string | null;
+  realPath: string | null;
+  requiresNode: boolean;
+  problem: string | null;
+};
+export type PickedExecutable = { path: string; directory: string };
 
 export type EnvironmentInfo = {
   requested: PathSource;
-  // What was used: login-shell falls back to inherit on error.
+  // The selected mode; a failed login shell uses local discovery as fallback.
   source: PathSource;
   error: ErrorInfo | null;
   shell: string | null;
   entries: string[];
+  tools?: RuntimeTool[];
   inheritedCount: number;
   platform: string;
   versions: { app: string | null; electron: string | null; node: string };
@@ -76,6 +87,7 @@ export const preferencesContract = {
 
 export const environmentContract = {
   info: invoke<[options?: EnvironmentInfoOptions], EnvironmentInfo>('environment:info'),
+  pickExecutable: invoke<[tool: CliId | 'node'], PickedExecutable | null>('environment:pick-executable'),
 } satisfies Contract;
 
 export const dataContract = {
@@ -94,6 +106,6 @@ export const dataContract = {
 
 export const agentContract = {
   status: invoke<[], AgentStatus>('agent:status'),
-  runtimes: invoke<[], agentRuntimeTypes.AgentRuntimeStatus[]>('agent:runtimes'),
+  runtimes: invoke<[options?: { refresh?: boolean }], agentRuntimeTypes.AgentRuntimeStatus[]>('agent:runtimes'),
   models: invoke<[request: agentRuntimeTypes.CliModelsRequest], agentRuntimeTypes.CliModelCatalog>('agent:models'),
 } satisfies Contract;

@@ -99,7 +99,7 @@ export const workspaceDraft = (form: WorkspaceDraft) => {
 export const preferencesDraft = (prefs: Partial<PreferencesDraft>) => ({
   profile: { displayName: (prefs.profile?.displayName ?? '').trim(), avatarColor: prefs.profile?.avatarColor },
   appearance: { theme: prefs.appearance?.theme, vibrancy: prefs.appearance?.vibrancy === true },
-  environment: { pathSource: prefs.environment?.pathSource },
+  environment: { pathSource: prefs.environment?.pathSource, extraPaths: prefs.environment?.extraPaths ?? [] },
   agents: prefs.agents,
   coding: prefs.coding,
 });

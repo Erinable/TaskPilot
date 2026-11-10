@@ -1,5 +1,5 @@
 /** @module-tag integration */
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { tempDir } from '../../fixtures/temp_dir.ts';
@@ -63,7 +63,7 @@ test('the resolver passes the inherited PATH through for "inherit"', async () =>
 
 test('the resolver caches the login-shell PATH until refreshed', async () => {
   let calls = 0;
-  const resolver = shellEnv.createPathResolver({ inherited: '/usr/bin', read: async () => `/shell/${++calls}` });
+  const resolver = shellEnv.createPathResolver({ inherited: '/usr/bin', read: async () => `/shell/${++calls}`, discover: async () => [] });
   const [a, b] = await Promise.all([resolver.resolve('login-shell'), resolver.resolve('login-shell')]);
   assert.equal(a.path, '/shell/1');
   assert.equal(b.path, '/shell/1');
@@ -75,6 +75,7 @@ test('the resolver caches the login-shell PATH until refreshed', async () => {
 test('the resolver falls back to the inherited PATH when the shell fails', async () => {
   const resolver = shellEnv.createPathResolver({
     inherited: '/usr/bin',
+    discover: async () => [],
     read: async () => {
       throw new shellEnv.ShellEnvError('nope', 'shell_timeout');
     },
@@ -83,4 +84,128 @@ test('the resolver falls back to the inherited PATH when the shell fails', async
   assert.equal(result.source, 'inherit');
   assert.equal(result.path, '/usr/bin');
   assert.equal(result.error!.code, 'shell_timeout');
+});
+
+test('login shell failure is cached and still discovers installed tools', async () => {
+  let calls = 0;
+  let discoveries = 0;
+  const resolver = shellEnv.createPathResolver({
+    inherited: '/usr/bin:/bin',
+    read: async () => {
+      calls += 1;
+      throw new shellEnv.ShellEnvError('timed out', 'shell_timeout');
+    },
+    discover: async () => {
+      discoveries += 1;
+      return ['/installed/node/bin'];
+    },
+  });
+  const [first, second] = await Promise.all([resolver.resolve('login-shell'), resolver.resolve('login-shell', ['/manual/bin'])]);
+  assert.equal(first.path, '/usr/bin:/bin:/installed/node/bin');
+  assert.equal(second.path, '/manual/bin:/usr/bin:/bin:/installed/node/bin');
+  assert.equal(second.error?.code, 'shell_timeout');
+  await resolver.resolve('login-shell');
+  assert.equal(calls, 1);
+  assert.equal(discoveries, 1);
+  resolver.refresh();
+  await resolver.resolve('login-shell');
+  assert.equal(calls, 2);
+  assert.equal(discoveries, 2);
+});
+
+test('auto caches discovery across modes and preserves explicit path precedence', async () => {
+  let discoveries = 0;
+  const resolver = shellEnv.createPathResolver({
+    inherited: '/usr/bin:/bin:/usr/bin',
+    read: async () => '/shell/bin:/usr/bin',
+    discover: async () => {
+      discoveries += 1;
+      return ['/usr/bin', '/installed/bin'];
+    },
+  });
+  assert.deepEqual(await resolver.resolve('auto', ['/manual/bin', '/manual/bin']), {
+    source: 'auto',
+    path: '/manual/bin:/usr/bin:/bin:/installed/bin',
+    error: null,
+  });
+  assert.equal((await resolver.resolve('login-shell', ['/manual/bin'])).path, '/manual/bin:/shell/bin:/usr/bin:/installed/bin');
+  assert.equal(discoveries, 1);
+  assert.deepEqual(await resolver.resolve('inherit'), { source: 'inherit', path: '/usr/bin:/bin:/usr/bin', error: null });
+  assert.equal((await resolver.resolve('inherit', ['/manual/bin'])).path, '/manual/bin:/usr/bin:/bin:/usr/bin');
+});
+
+test('refresh during a pending shell read cannot poison the new cached generation', async () => {
+  let finishOld: (value: string) => void = () => assert.fail('old shell read did not start');
+  let calls = 0;
+  const resolver = shellEnv.createPathResolver({
+    inherited: '/usr/bin',
+    discover: async () => [],
+    read: () => {
+      calls += 1;
+      return calls === 1
+        ? new Promise((resolve) => {
+            finishOld = resolve;
+          })
+        : Promise.resolve('/new/bin');
+    },
+  });
+  const old = resolver.resolve('login-shell');
+  await Promise.resolve();
+  resolver.refresh();
+  assert.equal((await resolver.resolve('login-shell')).path, '/new/bin');
+  finishOld('/old/bin');
+  assert.equal((await old).path, '/old/bin');
+  assert.equal((await resolver.resolve('login-shell')).path, '/new/bin');
+  assert.equal(calls, 2);
+});
+
+test('refresh during failed discovery cannot replace the newer successful cache', async () => {
+  let failOld: (error: Error) => void = () => assert.fail('old discovery did not start');
+  let calls = 0;
+  const resolver = shellEnv.createPathResolver({
+    inherited: '/usr/bin',
+    read: () => assert.fail('auto must not launch shell'),
+    discover: () => {
+      calls += 1;
+      return calls === 1
+        ? new Promise((_resolve, reject) => {
+            failOld = reject;
+          })
+        : Promise.resolve(['/new/bin']);
+    },
+  });
+  const old = resolver.resolve('auto');
+  await Promise.resolve();
+  resolver.refresh();
+  assert.equal((await resolver.resolve('auto')).path, '/usr/bin:/new/bin');
+  failOld(new Error('old discovery failed'));
+  assert.equal((await old).error?.message, 'old discovery failed');
+  assert.equal((await resolver.resolve('auto')).path, '/usr/bin:/new/bin');
+  assert.equal(calls, 2);
+});
+
+test('login shell deadline cleans up its isolated process and ignores late output', async () => {
+  vi.useFakeTimers();
+  try {
+    const killed: NodeJS.Signals[] = [];
+    let callback: Parameters<shellEnv.RunFile>[3] = () => assert.fail('shell did not start');
+    const read = shellEnv.readLoginShellPath({
+      shell: '/bin/sh',
+      timeoutMs: 100,
+      run: (_file, _args, options, done) => {
+        assert.equal(options.detached, process.platform !== 'win32');
+        assert.equal(options.killSignal, 'SIGKILL');
+        callback = done;
+        return { kill: (signal: NodeJS.Signals) => killed.push(signal) };
+      },
+    });
+    const rejected = assert.rejects(read, { code: 'shell_timeout' });
+    await vi.advanceTimersByTimeAsync(100);
+    await rejected;
+    callback(null, `${MARKER}/too-late/bin${MARKER}`);
+    assert.deepEqual(killed, ['SIGKILL']);
+    assert.equal(vi.getTimerCount(), 0);
+  } finally {
+    vi.useRealTimers();
+  }
 });

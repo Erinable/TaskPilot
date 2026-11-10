@@ -29,6 +29,7 @@ const emit = defineEmits<{
   thinking: [value: agentRuntime.ThinkingLevel];
   restore: [];
   toggle: [];
+  locate: [];
 }>();
 
 const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
@@ -131,6 +132,7 @@ const setSelectValue = (event: Event, kind: 'cli' | 'thinking') => {
         </p>
         <p v-if="runtimeStatus?.version" class="runtime-version">{{ runtimeStatus.command }} · {{ runtimeStatus.version }}</p>
         <pre v-if="runtimeStatus?.reason" class="runtime-diagnostic">{{ runtimeStatus.reason }}</pre>
+        <button v-if="state.tone === 'unavailable'" class="secondary-button small" type="button" @click="emit('locate')">检查工具位置…</button>
         <p v-if="catalog?.defaultModel">CLI 原生默认模型：{{ catalog.defaultModel }}</p>
         <p v-for="issue in catalog?.issues ?? []" :key="issue" class="model-catalog-issue">{{ issue }}</p>
       </div>

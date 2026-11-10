@@ -63,7 +63,7 @@ export const useAgentSettings = (preferencesDraft: Ref<settingsTypes.Preferences
     agentRuntimeLoading.value = true;
     agentRuntimeError.value = null;
     try {
-      const statuses = await call(window.taskpilot.agent.runtimes());
+      const statuses = await call(window.taskpilot.agent.runtimes({ refresh: true }));
       if (generation === agentRuntimeGeneration) agentRuntimes.value = statuses;
     } catch (error) {
       if (generation === agentRuntimeGeneration) agentRuntimeError.value = describeError(error);

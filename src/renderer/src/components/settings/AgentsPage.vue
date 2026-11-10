@@ -97,6 +97,7 @@ const {
         @thinking="settings.setAgentThinking(agent, $event)"
         @restore="restore(agent)"
         @toggle="toggleExpanded(agent)"
+        @locate="settings.openPage('environment')"
       />
       <CodingIsolation v-if="group.id === 'coding'" />
     </section>

@@ -10,6 +10,7 @@ import { env as appEnv } from '../infrastructure/env.ts';
 import { AGENT_IDS, CLI_IDS } from '../../shared/agent_runtime.ts';
 import { registerContract, withDataMaintenance } from './handler.ts';
 import { createDataService } from '../app/data_service.ts';
+import { runtimeTools, selectedExecutable, RUNTIME_TOOL_IDS } from '../runtimes/runtime_locations.ts';
 import { preferencesContract, environmentContract, dataContract, agentContract } from '../../shared/ipc/settings.ts';
 import type * as agentRuntimeTypes from '../../shared/agent_runtime.ts';
 import type * as settingsTypes from '../../shared/ipc/settings.ts';
@@ -37,22 +38,29 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       const saved = await preferences.save(configDir, raw);
       ctx.setPreferences(saved);
       // Switching the PATH source should take effect without a restart.
-      if (saved.environment.pathSource !== previous.environment.pathSource) pathResolver.refresh();
+      if (JSON.stringify(saved.environment) !== JSON.stringify(previous.environment)) pathResolver.refresh();
       ctx.onPreferencesChanged?.(saved, previous);
       ctx.changed('preferences');
       return preferences.toView(saved);
     },
   });
   registerContract(ipcMain, environmentContract, {
+    pickExecutable: async (tool) => {
+      if (!(RUNTIME_TOOL_IDS as readonly unknown[]).includes(tool)) return failWith('Unknown runtime tool', 'invalid_argument');
+      if (!ctx.shell.pickFile) return failWith('当前环境无法选择文件。', 'unsupported');
+      const file = await ctx.shell.pickFile(null, []);
+      return file ? selectedExecutable(tool as agentRuntimeTypes.CliId | 'node', file) : null;
+    },
     // Reports which PATH verification commands will use and what it contains.
     // `source` lets the page preview a choice before saving it.
 
     info: async (rawOptions): Promise<settingsTypes.EnvironmentInfo> => {
-      const options = rawOptions as { source?: unknown; refresh?: unknown } | null | undefined;
+      const options = rawOptions as { source?: unknown; extraPaths?: unknown; refresh?: unknown } | null | undefined;
       const requested = options?.source ?? getPreferences().environment.pathSource;
       if (!isPathSource(requested)) return failWith(`Unknown PATH source: ${requested}`, 'invalid_argument');
       if (options?.refresh === true) pathResolver.refresh();
-      const resolved = await pathResolver.resolve(requested);
+      const extraPaths = preferences.extraCommandPaths(options?.extraPaths ?? getPreferences().environment.extraPaths);
+      const resolved = await pathResolver.resolve(requested, extraPaths);
       const entries = resolved.path.split(path.delimiter).filter(Boolean);
       return {
         requested,
@@ -60,6 +68,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
         error: resolved.error,
         shell: appEnv.shell,
         entries,
+        tools: await runtimeTools(resolved.path),
         inheritedCount: pathResolver.inherited.split(path.delimiter).filter(Boolean).length,
         platform: process.platform,
         versions: { app: ctx.appVersion ?? null, electron: process.versions.electron ?? null, node: process.versions.node },
@@ -145,7 +154,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext, { runtime }: { r
       };
     },
 
-    runtimes: async (): Promise<agentRuntimeTypes.AgentRuntimeStatus[]> => {
+    runtimes: async (options): Promise<agentRuntimeTypes.AgentRuntimeStatus[]> => {
+      if (options && typeof options === 'object' && 'refresh' in options && options.refresh === true) pathResolver.refresh();
       const settings = getPreferences().agents;
       const { path: envPath } = await ctx.commandPath();
       const probes = new Map<string, Promise<CliProbeResult>>();

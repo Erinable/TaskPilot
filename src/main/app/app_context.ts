@@ -195,7 +195,10 @@ export const createAppContext = (deps: AppDeps) => {
   const catalog: tasks.TaskCatalog = requirements ?? tasks.EMPTY_CATALOG;
 
   // The PATH verification commands run with, per the user's preference.
-  const commandPath = () => pathResolver.resolve(getPreferences().environment.pathSource);
+  const commandPath = () => {
+    const environment = getPreferences().environment;
+    return pathResolver.resolve(environment.pathSource, environment.extraPaths);
+  };
 
   // The steps the open repository runs: preset, taskpilot.toml and this
   // machine's settings merged. Read fresh each time, so an edit to the file

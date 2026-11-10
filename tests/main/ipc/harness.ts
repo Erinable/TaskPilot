@@ -79,6 +79,7 @@ export const harness = async ({
   modelCatalog,
   labGrader = undefined,
   labProbe = readyToolchain,
+  pathResolver: providedPathResolver,
 }: {
   withRepo?: boolean;
   agent?: FakeAgent | null;
@@ -89,6 +90,7 @@ export const harness = async ({
   labGrader?: Grader;
   // The lab toolchain check; never the real sandboxed one from a test.
   labProbe?: ToolchainProbe;
+  pathResolver?: ReturnType<typeof createPathResolver>;
 } = {}) => {
   const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'taskpilot-ipc-'));
   // Background agent runs must finish writing before the directories go.
@@ -132,13 +134,16 @@ export const harness = async ({
   // A fake login shell so tests never launch the user's real one.
   // What the fake login shell reports; tests can prepend a folder of fake CLIs.
   let shellPathPrefix = '/tp/shell/bin';
-  const pathResolver = createPathResolver({
-    inherited: '/usr/bin:/bin',
-    read: async () => {
-      shellReads += 1;
-      return `${shellPathPrefix}:${process.env.PATH}`;
-    },
-  });
+  const pathResolver =
+    providedPathResolver ??
+    createPathResolver({
+      inherited: '/usr/bin:/bin',
+      discover: async () => [],
+      read: async () => {
+        shellReads += 1;
+        return `${shellPathPrefix}:${process.env.PATH}`;
+      },
+    });
   ipc = registerIpcHandlers(
     { handle: (channel, handler) => handlers.set(channel, handler) },
     {
