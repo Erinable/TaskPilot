@@ -5,6 +5,7 @@ import path from 'node:path';
 import { registerIpcHandlers } from './ipc.ts';
 import { registerContract } from './ipc/handler.ts';
 import { createStartupGate } from './app/startup_gate.ts';
+import { createQuitHandler } from './app/application_quit.ts';
 import type { IpcHandle } from './ipc.ts';
 import { WorkPackageStore } from './work_packages/work_package_store.ts';
 import { RequirementStore } from './requirements/requirement_store.ts';
@@ -37,6 +38,7 @@ const vibrantWindows = new WeakSet<BrowserWindow>();
 
 // Set once the IPC handlers are registered, so quitting can shut them down.
 let ipcHandle: IpcHandle | null = null;
+let initialization: Promise<void> | null = null;
 
 // The packaged app is named TaskPilot, development runs as taskpilot; on a
 // case-sensitive volume those are two directories. Both use this one.
@@ -99,7 +101,7 @@ const createWindow = (appearance: Appearance) => {
   window.webContents.on('did-finish-load', sendFullScreen);
   let recoveryPromptOpen = false;
   window.webContents.on('render-process-gone', (_event, details) => {
-    if (shuttingDown || window.isDestroyed() || recoveryPromptOpen || details.reason === 'clean-exit') return;
+    if (quitHandler.isQuitting() || window.isDestroyed() || recoveryPromptOpen || details.reason === 'clean-exit') return;
     logger.error('[window] renderer exited', { reason: details.reason, exitCode: details.exitCode });
     recoveryPromptOpen = true;
     dialog
@@ -129,7 +131,7 @@ const createWindow = (appearance: Appearance) => {
 };
 
 app.whenReady().then(async () => {
-  if (!primaryInstance) return;
+  if (!primaryInstance || quitHandler.isQuitting()) return;
   // TaskPilot uses its own in-window controls. Removing Electron's default
   // application menu avoids AppKit representedObject warnings on macOS.
   Menu.setApplicationMenu(null);
@@ -144,6 +146,7 @@ app.whenReady().then(async () => {
     logger.error('[startup] preferences could not be read', error);
     return preferences.defaults();
   });
+  if (quitHandler.isQuitting()) return;
   // themeSource drives prefers-color-scheme in every window, so the CSS
   // follows the setting without the page needing to know about it.
   nativeTheme.themeSource = prefs.appearance.theme;
@@ -247,7 +250,10 @@ app.whenReady().then(async () => {
     });
   };
 
-  const startup = createStartupGate(initialize);
+  const startup = createStartupGate(() => {
+    initialization = initialize();
+    return initialization;
+  });
   // The renderer waits on this before any other call.
   registerContract(ipcMain, appContract, {
     restoreBackup: async () => {
@@ -280,23 +286,23 @@ app.whenReady().then(async () => {
   createWindow(prefs.appearance);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow(prefs.appearance);
+    if (!quitHandler.isQuitting() && BrowserWindow.getAllWindows().length === 0) createWindow(prefs.appearance);
   });
 });
 
 // Stop running agents and flush their writes before quitting. An interrupted
 // run is reported as failed on the next launch (see requirement_store.js).
-let shuttingDown = false;
-app.on('before-quit', (event) => {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  event.preventDefault();
-  const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
-  Promise.race([ipcHandle?.shutdown() ?? Promise.resolve(), timeout])
-    .catch((error) => logger.error('[shutdown] could not finish background runs', error))
-    .then(() => flushLogs())
-    .finally(() => app.quit());
+const quitHandler = createQuitHandler({
+  shutdown: async () => {
+    // If Quit arrives on the splash, finish acquiring the stores before draining
+    // them. A failed startup has already been logged and needs no second retry.
+    await initialization?.catch(() => {});
+    await ipcHandle?.shutdown();
+  },
+  flushLogs,
+  quit: () => app.quit(),
 });
+app.on('before-quit', quitHandler.beforeQuit);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
