@@ -55,10 +55,11 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
   <aside class="sidebar glass" :class="{ collapsed: app.sidebarCollapsed }">
     <!-- Collapsed, labels stay in the DOM for screen readers and show as native tooltips. -->
     <div class="side-section-label">工作区</div>
-    <nav class="main-nav">
+    <nav class="main-nav" aria-label="工作区导航">
       <button
         class="nav-item"
         :class="{ active: app.view === 'queue' || app.view === 'execution' }"
+        :aria-current="app.view === 'queue' || app.view === 'execution' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? `工作队列（${tasks.pendingCount} 个待办）` : undefined"
         @click="showQueue"
       >
@@ -69,6 +70,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'requirements' }"
+        :aria-current="app.view === 'requirements' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '需求中心' : undefined"
         @click="requirements.open()"
       >
@@ -76,17 +78,30 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
         <span class="nav-label">需求中心</span>
         <span v-if="requirements.attentionCount > 0" class="nav-count attention">{{ requirements.attentionCount }}</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'map' }" :title="app.sidebarCollapsed ? '工程地图' : undefined" @click="openView('map')">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'map' }"
+        :aria-current="app.view === 'map' ? 'page' : undefined"
+        :title="app.sidebarCollapsed ? '工程地图' : undefined"
+        @click="openView('map')"
+      >
         <AppIcon name="map" class="nav-icon" />
         <span class="nav-label">工程地图</span>
       </button>
-      <button class="nav-item" :class="{ active: app.view === 'release' }" :title="app.sidebarCollapsed ? '发布' : undefined" @click="openView('release')">
+      <button
+        class="nav-item"
+        :class="{ active: app.view === 'release' }"
+        :aria-current="app.view === 'release' ? 'page' : undefined"
+        :title="app.sidebarCollapsed ? '发布' : undefined"
+        @click="openView('release')"
+      >
         <AppIcon name="rocket" class="nav-icon" />
         <span class="nav-label">发布</span>
       </button>
       <button
         class="nav-item"
         :class="{ active: app.view === 'notes' }"
+        :aria-current="app.view === 'notes' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '学习笔记' : undefined"
         data-nav="notes"
         @click="openView('notes')"
@@ -97,6 +112,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'mastery' }"
+        :aria-current="app.view === 'mastery' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '掌握度' : undefined"
         data-nav="mastery"
         @click="openView('mastery')"
@@ -107,6 +123,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item"
         :class="{ active: app.view === 'courses' }"
+        :aria-current="app.view === 'courses' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '课程' : undefined"
         data-nav="courses"
         @click="openView('courses')"
@@ -121,6 +138,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="nav-item team-entry"
         :class="{ active: TEAM_VIEWS.includes(app.view), working: teamWork }"
+        :aria-current="TEAM_VIEWS.includes(app.view) ? 'page' : undefined"
         :title="app.sidebarCollapsed ? teamTitle : undefined"
         :aria-label="teamTitle"
         @click="openView('team')"
@@ -147,6 +165,7 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
       <button
         class="settings-link nav-item"
         :class="{ active: app.view === 'settings' }"
+        :aria-current="app.view === 'settings' ? 'page' : undefined"
         :title="app.sidebarCollapsed ? '设置' : undefined"
         @click="settings.open()"
       >
@@ -173,39 +192,43 @@ const teamTitle = computed(() => (teamStatus.value ? `AI 团队：${teamStatus.v
 .sidebar.collapsed .team-entry-wrap {
   margin-top: var(--space-6);
 }
-/* One small avatar per member, overlapping; working members stand out, offline ones fade. */
+/* One small dot per member in that member's colour; offline ones fade,
+ * working ones get a ring and a pulse.
+ * [人工决策-2026-11-09 19:22:13] 用户反馈七个灰色头像叠在一起不好看：改为彩色小圆点。 */
 .team-stack {
   display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
 }
 .team-stack-avatar {
   position: relative;
-  width: 18px;
-  height: 18px;
-  flex-basis: 18px;
+  width: 9px;
+  height: 9px;
+  flex-basis: 9px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--glass-border);
-}
-.team-stack-avatar + .team-stack-avatar {
-  margin-left: -4px;
+  box-shadow: none;
+  color: transparent;
+  font-size: 0;
 }
 .team-stack-avatar.offline {
-  filter: grayscale(1);
-  opacity: 0.4;
+  opacity: 0.55;
 }
 .team-stack-avatar.busy {
   z-index: 1;
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow:
+    0 0 0 2px var(--glass-bg-strong),
+    0 0 0 3.5px var(--accent);
 }
 .team-stack .presence.busy {
   position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 7px;
-  height: 7px;
+  inset: -3px;
+  width: auto;
+  height: auto;
   margin: 0;
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--glass-border);
+  border-radius: 50%;
+  background: none;
+  box-shadow: 0 0 0 1px var(--accent);
   animation: pulse 1.6s ease-in-out infinite;
 }
 .sidebar.collapsed .team-stack {

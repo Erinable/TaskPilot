@@ -9,7 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
-import NoteChart from '@/components/notes/NoteChart.vue';
+import ZoomableChart from '@/components/mastery/ZoomableChart.vue';
 import { RESULT_LABELS, STATE_LABELS, conceptGraph, conceptLinks } from '@/lib/mastery_model.ts';
 import { formatTime } from '@/lib/release_model.ts';
 import { useAppStore } from '@/stores/app.ts';
@@ -115,7 +115,7 @@ watch(
           <ul class="mastery-legend" aria-label="图例">
             <li v-for="state in STATES" :key="state" :class="`legend-${state}`">{{ STATE_LABELS[state] }}</li>
           </ul>
-          <NoteChart lang="mermaid" :source="graph" />
+          <ZoomableChart lang="mermaid" :source="graph" label="知识点图" />
           <div class="mastery-concepts" role="list">
             <button
               v-for="concept in concepts"
@@ -237,15 +237,16 @@ watch(
 </template>
 
 <style scoped>
+/* [人工决策-2026-11-09 19:22:13] 用户反馈掌握度字太大、知识点图太小：回到 12px 正文，图占满整行、按原尺寸显示可滚动，复习与错误移到图下方。 */
 .mastery-view {
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .mastery-course {
   width: 220px;
 }
 .mastery-columns {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
 }
@@ -255,6 +256,7 @@ watch(
 }
 .mastery-side {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: var(--space-4);
 }
 .mastery-graph > :not(.panel-heading),
@@ -315,16 +317,19 @@ watch(
 }
 .mastery-concept small {
   color: var(--text-secondary);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .mastery-concept.mastered {
   border-color: var(--success);
+  background: var(--success-soft);
 }
 .mastery-concept.passed {
   border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .mastery-concept.learning {
   border-color: var(--warning);
+  background: var(--warning-soft);
 }
 .mastery-concept.active {
   background: var(--accent-soft);
@@ -337,11 +342,11 @@ watch(
 }
 .mastery-detail h3 {
   margin: 0 0 var(--space-1);
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
 }
 .mastery-detail h4 {
   margin: var(--space-3) 0 var(--space-1);
-  font-size: var(--text-lg);
+  font-size: var(--text-md);
 }
 .mastery-detail p {
   margin: 0 0 var(--space-1);
@@ -405,7 +410,7 @@ watch(
 }
 .mastery-view small {
   color: var(--text-secondary);
-  font-size: var(--text-lg);
+  font-size: var(--text-sm);
 }
 .mastery-empty,
 .mastery-totals {

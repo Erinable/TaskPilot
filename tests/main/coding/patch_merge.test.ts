@@ -147,3 +147,15 @@ test('the digest changes when a file is edited between preview and apply', async
   fs.writeFileSync(path.join(s.root, 'f.txt'), 'mine\n');
   assert.notEqual(merge.mergeDigest(patch, await merge.previewMerge(s.root, s.baseline, s.files)), before);
 });
+
+test('an application invalidated while the merge runs cannot write its computed results', async () => {
+  const s = await scenario({ 'f.txt': LINES }, { 'f.txt': LINES.replace('a\n', 'A\n') }, {});
+  let current = true;
+  const applying = merge.applyMerged(s.root, s.baseline, s.files, {}, () => {
+    if (!current) throw Object.assign(new Error('The claim was released'), { code: 'coding_aborted' });
+  });
+  current = false;
+  await assert.rejects(applying, { code: 'coding_aborted' });
+  assert.equal(s.read('f.txt'), LINES);
+  assert.deepEqual(fs.readFileSync(path.join(s.root, '.git', 'index')), s.indexBefore);
+});

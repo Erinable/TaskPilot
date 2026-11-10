@@ -10,6 +10,7 @@ import { useRequirementsStore } from '../../../src/renderer/src/stores/requireme
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import { agentStatus, installApi, planPackage, requirement } from '../requirements_fakes.ts';
 import { ok } from '../ipc_fakes.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -112,6 +113,52 @@ describe('RequirementsView', () => {
     wrapper.unmount();
   });
 
+  test('answer drafts survive switching requirements and leaving the view', async () => {
+    state.list = [requirement({ id: 'a', questions: [{ text: '问题 A', answer: '' }] }), requirement({ id: 'b', questions: [{ text: '问题 B', answer: '' }] })];
+    const { wrapper, store } = await render({ id: 'a' });
+    await wrapper.get('.question-card textarea').setValue('A 尚未提交的回答');
+    await wrapper.get('.req-row[data-id="b"]').trigger('click');
+    await wrapper.get('.question-card textarea').setValue('B 的独立回答');
+    await wrapper.get('.req-row[data-id="a"]').trigger('click');
+    expect((wrapper.get('.question-card textarea').element as HTMLTextAreaElement).value).toBe('A 尚未提交的回答');
+    wrapper.unmount();
+
+    await store.open({ id: 'b' });
+    const reopened = await mountView(RequirementsView);
+    expect((reopened.get('.question-card textarea').element as HTMLTextAreaElement).value).toBe('B 的独立回答');
+    reopened.unmount();
+  });
+
+  test('selection focuses the new detail but a background refresh does not steal focus', async () => {
+    state.list = [requirement({ id: 'a', questions: [{ text: '问题 A', answer: '' }] }), requirement({ id: 'b', questions: [{ text: '问题 B', answer: '' }] })];
+    const { wrapper } = await render({ id: 'a' });
+    await wrapper.get('.req-row[data-id="b"]').trigger('click');
+    await flushPromises();
+    const heading = wrapper.get('.req-detail h2').element;
+    expect(document.activeElement).toBe(heading);
+    const input = wrapper.get('.question-card textarea');
+    (input.element as HTMLTextAreaElement).focus();
+    api.emitState({ repositoryId: null, domains: ['requirements'] });
+    await flushPromises();
+    expect(document.activeElement).toBe(input.element);
+    wrapper.unmount();
+  });
+
+  test('a failed initial read shows a persistent retry instead of an empty list', async () => {
+    api.requirements.list.mockResolvedValue({ ok: false, error: { code: 'unknown', message: '读取被拒绝' } });
+    expectConsole('error', /Failed to load requirements/);
+    const { wrapper, store } = await render();
+    expect(wrapper.get('.req-list [role="alert"]').text()).toContain('读取被拒绝');
+    expect(wrapper.find('.req-list').text()).not.toContain('还没有需求');
+    state.list = [requirement()];
+    api.requirements.list.mockImplementation(() => ok(state.list));
+    await wrapper.get('.req-list [role="alert"] button').trigger('click');
+    await flushPromises();
+    expect(store.listError).toBeNull();
+    expect(wrapper.findAll('.req-row')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
   test('"不确定，用推荐做法" clears the answer, so Product Lead picks a default', async () => {
     state.list = [
       requirement({
@@ -166,7 +213,9 @@ describe('RequirementsView', () => {
     api.workspace.info.mockResolvedValueOnce({ ok: true, data: { configured: true, root: '/Users/me/projects/app' } as never });
     const { wrapper } = await render({ compose: true });
     expect(wrapper.find('.req-context-list li').text()).toContain('Architect 会读取仓库 app 中');
-    expect(wrapper.find('.req-warning').text()).toContain('找不到 Claude Code CLI');
+    expect(wrapper.find('.req-warning').text()).toContain('需求规划所需的 CLI 还不能运行');
+    expect(wrapper.get('[data-action="configure-runtime"]').text()).toBe('配置运行环境');
+    expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
     wrapper.unmount();
   });
 

@@ -2,7 +2,7 @@
 // The notes store's own stale-answer guards: a newer search, note or
 // course load wins over an older one still in flight, and leaving drops a
 // note that arrives afterwards.
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { reactive } from 'vue';
 
@@ -12,6 +12,8 @@ import { fail, installFakeApi, ok } from '../ipc_fakes.ts';
 import { noteMeta } from '../notes_fakes.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type * as noteTypes from '@shared/ipc/notes.ts';
+
+vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(async () => true) }));
 
 const ALPHA = noteMeta({ id: 'alpha.md', title: 'alpha', tags: [], excerpt: '', source: null });
 const BETA = noteMeta({ id: 'beta.md', title: 'beta', tags: [], excerpt: '', source: null });
@@ -68,6 +70,162 @@ test('saving a note keeps dirty tracking and sends detached edit data', async ()
   expect(store.dirty).toBe(false);
   store.draft!.body += '再修改';
   expect(store.dirty).toBe(true);
+});
+
+test('a save advances the base version without discarding input made after submission', async () => {
+  const store = useNotesStore();
+  await store.load();
+  await store.goNote(ALPHA.id);
+  store.startEditing();
+  store.draft!.body = 'submitted';
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save();
+  store.draft!.body = 'submitted plus later input';
+  store.draft!.tags.push('later');
+  held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...noteOf(ALPHA), body: 'submitted', version: 'v2' } } });
+  await saving;
+  expect(store.current).toMatchObject({ id: ALPHA.id, body: 'submitted', version: 'v2' });
+  expect(store.notes.find((note) => note.id === ALPHA.id)?.version).toBe('v2');
+  expect(store.draft).toMatchObject({ body: 'submitted plus later input', tags: ['later'] });
+  expect(store.dirty).toBe(true);
+  api.notes.update.mockReturnValueOnce(ok({ revision: 3, relinked: 0, note: { ...store.current!, ...store.draft!, version: 'v3' } }));
+  await store.save();
+  expect(api.notes.update).toHaveBeenLastCalledWith(ALPHA.id, expect.objectContaining({ baseVersion: 'v2', body: 'submitted plus later input', force: false }));
+  expect(store.dirty).toBe(false);
+});
+
+test('a renamed save updates its list and history while leaving a different note and draft alone', async () => {
+  const store = useNotesStore();
+  await store.load();
+  await store.goNote(ALPHA.id);
+  store.draft!.title = 'renamed';
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save({ force: true, renameLinks: true });
+  await store.goNote(BETA.id);
+  store.startEditing();
+  store.draft!.body = 'beta unsaved';
+  held.resolve({ ok: true, data: { revision: 2, relinked: 1, note: { ...noteOf(ALPHA), id: 'renamed.md', title: 'renamed', version: 'v2' } } });
+  await saving;
+  expect(api.notes.update).toHaveBeenCalledWith(ALPHA.id, expect.objectContaining({ title: 'renamed', baseVersion: 'v1', force: true, renameLinks: true }));
+  expect(store.notes.map((note) => note.id)).toEqual(['renamed.md', BETA.id]);
+  expect(store.route).toMatchObject({ name: 'note', id: BETA.id });
+  expect(store.current?.id).toBe(BETA.id);
+  expect(store.draft?.body).toBe('beta unsaved');
+  expect(store.editing).toBe(true);
+  expect(store.dirty).toBe(true);
+  api.notes.get.mockReturnValueOnce(ok({ ...noteOf(ALPHA), id: 'renamed.md', title: 'renamed' }));
+  await store.goBack();
+  expect(store.route).toMatchObject({ name: 'note', id: 'renamed.md' });
+});
+
+test('a save cannot replace a reopened note with the same id', async () => {
+  const store = useNotesStore();
+  await store.goNote(ALPHA.id);
+  store.draft!.body = 'submitted';
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save();
+  await store.goIndex();
+  await store.goNote(ALPHA.id);
+  store.draft!.body = 'new editing session';
+  held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...noteOf(ALPHA), body: 'submitted', version: 'v2' } } });
+  await saving;
+  expect(store.current?.body).toBe('alpha body');
+  expect(store.draft?.body).toBe('new editing session');
+  expect(store.dirty).toBe(true);
+  expect(store.notes.find((note) => note.id === ALPHA.id)?.version).toBe('v2');
+});
+
+test('a conflict from a previous note does not mark the current note conflicting', async () => {
+  const store = useNotesStore();
+  await store.goNote(ALPHA.id);
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save();
+  await store.goNote(BETA.id);
+  held.resolve({ ok: false, error: { code: 'note_conflict', message: 'changed' } });
+  expect(await saving).toBeNull();
+  expect(store.current?.id).toBe(BETA.id);
+  expect(store.conflict).toBe(false);
+});
+
+test('a save from a previous notes folder cannot add its result to the new folder', async () => {
+  const store = useNotesStore();
+  await store.load();
+  await store.goNote(ALPHA.id);
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save();
+  api.notes.setDirectory.mockReturnValueOnce(ok({ ...list, directory: '/new-notes', notes: [] }));
+  await store.resetDirectory();
+  held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...noteOf(ALPHA), version: 'v2' } } });
+  await saving;
+  expect(store.notes).toEqual([]);
+  expect(store.current).toBeNull();
+  expect(store.route.name).toBe('index');
+});
+
+test('a rename keeps later title edits while the next save addresses the renamed file', async () => {
+  const store = useNotesStore();
+  await store.goNote(ALPHA.id);
+  store.draft!.title = 'renamed';
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const saving = store.save({ renameLinks: true });
+  store.draft!.title = 'another rename';
+  store.draft!.body = 'later body';
+  held.resolve({ ok: true, data: { revision: 2, relinked: 1, note: { ...noteOf(ALPHA), id: 'renamed.md', title: 'renamed', version: 'v2' } } });
+  await saving;
+  expect(store.route).toMatchObject({ id: 'renamed.md' });
+  expect(store.current?.id).toBe('renamed.md');
+  expect(store.draft).toMatchObject({ title: 'another rename', body: 'later body' });
+  expect(store.dirty).toBe(true);
+  api.notes.update.mockReturnValueOnce(ok({ revision: 3, relinked: 0, note: { ...store.current!, ...store.draft!, id: 'another rename.md', version: 'v3' } }));
+  await store.save();
+  expect(api.notes.update).toHaveBeenLastCalledWith('renamed.md', expect.objectContaining({ title: 'another rename', baseVersion: 'v2' }));
+  expect(store.dirty).toBe(false);
+});
+
+test('summarizing after saving does not continue onto another note or newer unsaved input', async () => {
+  const store = useNotesStore();
+  await store.goNote(ALPHA.id);
+  store.draft!.body = 'submitted';
+  const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.update.mockReturnValueOnce(held.promise);
+  const summarizing = store.summarize();
+  store.draft!.body = 'later input';
+  held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...noteOf(ALPHA), body: 'submitted', version: 'v2' } } });
+  await summarizing;
+  expect(api.notes.summarize).not.toHaveBeenCalled();
+  expect(store.draft?.body).toBe('later input');
+  expect(store.dirty).toBe(true);
+});
+
+test('a summary response updates only its own note and preserves later summary edits', async () => {
+  const store = useNotesStore();
+  await store.load();
+  await store.goNote(ALPHA.id);
+  const first = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.summarize.mockReturnValueOnce(first.promise);
+  const summarizing = store.summarize();
+  store.draft!.summary = 'my later summary';
+  first.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...noteOf(ALPHA), summary: 'generated', version: 'v2' } } });
+  await summarizing;
+  expect(store.current?.summary).toBe('generated');
+  expect(store.draft?.summary).toBe('my later summary');
+  await store.goNote(BETA.id);
+  const second = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+  api.notes.summarize.mockReturnValueOnce(second.promise);
+  const other = store.summarize();
+  await store.goNote(ALPHA.id);
+  store.draft!.body = 'alpha unsaved';
+  second.resolve({ ok: true, data: { revision: 3, relinked: 0, note: { ...noteOf(BETA), summary: 'beta summary', version: 'v3' } } });
+  await other;
+  expect(store.current?.id).toBe(ALPHA.id);
+  expect(store.draft?.body).toBe('alpha unsaved');
+  expect(store.notes.find((note) => note.id === BETA.id)?.version).toBe('v3');
 });
 
 test('an older body search that answers last does not filter the list', async () => {

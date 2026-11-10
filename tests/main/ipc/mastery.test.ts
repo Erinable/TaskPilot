@@ -9,7 +9,9 @@ import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { MASTERY_FILENAME, MasteryStore } from '../../../src/main/courses/mastery_store.ts';
+import { NoteStore } from '../../../src/main/notes/note_store.ts';
 import * as fixtures from './harness.ts';
+import { tempDir } from '../../fixtures/temp_dir.ts';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -56,7 +58,16 @@ test('mastery: remembered moves a note up a box, forgotten back to box 1, and th
   assert.deepEqual((await h.call(CHANNELS.masteryReview, 'RR 入队顺序.md', false)).data, { noteId: 'RR 入队顺序.md', box: 1, dueDay: '2026-11-01' });
   await h.mastery.flush();
   const saved = JSON.parse(await fs.readFile(path.join(h.configDir, MASTERY_FILENAME), 'utf8'));
-  assert.deepEqual(saved.reviews, [{ noteId: 'RR 入队顺序.md', box: 1, dueDay: '2026-11-01' }]);
+  assert.equal(saved.version, 2);
+  assert.deepEqual(saved.reviews, [
+    {
+      noteId: 'RR 入队顺序.md',
+      box: 1,
+      dueDay: '2026-11-01',
+      vaultId: h.notes.directoryIdentity.vaultId,
+      identity: h.notes.noteIdentities().get('RR 入队顺序.md'),
+    },
+  ]);
   assert.deepEqual([...(await new MasteryStore(h.configDir).load()).reviews().values()], saved.reviews);
 });
 
@@ -69,7 +80,10 @@ test('mastery: a deleted note’s schedule is dropped at the next review', async
   await h.call(CHANNELS.masteryReview, '甲.md', true);
   await h.notes.remove('甲.md');
   await h.call(CHANNELS.masteryReview, '乙.md', true);
-  assert.deepEqual([...h.mastery.reviews().keys()], ['乙.md']);
+  assert.deepEqual(
+    [...h.mastery.reviews().values()].map((schedule) => schedule.noteId),
+    ['乙.md'],
+  );
 });
 
 // One graded submission of `conceptId` in the os pack.
@@ -168,4 +182,105 @@ test('mastery:course: the os skeleton with each concept’s standing and attempt
   const inUse = (await h.call(CHANNELS.masteryCourse)).data;
   assert.deepEqual([inUse.course.id, inUse.concepts, inUse.errorTypes, inUse.repositories], ['programming', [], [], []]);
   assert.equal((await h.call(CHANNELS.masteryCourse, 'nope')).error.code, 'unknown_course');
+});
+
+test('mastery: same filenames in different vaults keep independent reviews through switches, app rename and reload', async () => {
+  at('2026-10-27T02:00:00.000Z');
+  const other = await tempDir('tp-review-vault-');
+  const h = await fixtures.harness({ coding: { pickDirectory: async () => other } });
+  const created = (await note(h, 'Shared', ['round-robin'])).note;
+  await fs.writeFile(path.join(other, 'Shared.md'), '---\ncreated: 2020-01-01T00:00:00.000Z\nconcepts: [paging]\n---\nUnrelated B');
+  at('2026-10-28T02:00:00.000Z');
+  const reviewedA = (await h.call(CHANNELS.masteryReview, created.id, true)).data;
+  assert.equal(reviewedA.box, 2);
+  await h.call(CHANNELS.notesPickDirectory);
+  assert.equal((await h.call(CHANNELS.notesSetDirectory, other)).ok, true);
+  const dueB = (await h.call(CHANNELS.masteryReviews)).data;
+  assert.equal(dueB.due.length, 1);
+  assert.equal(dueB.due[0].box, 1);
+  assert.deepEqual(dueB.due[0].concepts, ['paging']);
+  assert.equal((await h.call(CHANNELS.masteryReview, 'Shared.md', false)).data.box, 1);
+  assert.equal((await h.call(CHANNELS.notesSetDirectory, null)).ok, true);
+  assert.deepEqual((await h.call(CHANNELS.masteryReviews)).data.due, []);
+  const renamed = await h.call(CHANNELS.notesUpdate, created.id, {
+    title: 'Renamed',
+    body: created.body,
+    category: created.category,
+    tags: created.tags,
+    baseVersion: created.version,
+  });
+  assert.equal(renamed.ok, true);
+  assert.deepEqual((await h.call(CHANNELS.masteryReviews)).data.due, []);
+  await h.notes.load();
+  await h.mastery.load();
+  assert.deepEqual((await h.call(CHANNELS.masteryReviews)).data.due, []);
+  at('2026-10-31T02:00:00.000Z');
+  const dueA = (await h.call(CHANNELS.masteryReviews)).data.due;
+  assert.deepEqual(
+    dueA.map(({ noteId, box }) => ({ noteId, box })),
+    [{ noteId: 'Renamed.md', box: 2 }],
+  );
+  assert.equal((await h.call(CHANNELS.masteryReview, 'Renamed.md', true)).data.box, 3);
+  await h.call(CHANNELS.notesSetDirectory, other);
+  await h.notes.load();
+  await h.mastery.load();
+  const reloadedB = (await h.call(CHANNELS.masteryReviews)).data.due;
+  assert.deepEqual(
+    reloadedB.map(({ noteId, box }) => ({ noteId, box })),
+    [{ noteId: 'Shared.md', box: 1 }],
+  );
+  const restartedNotes = await new NoteStore(h.configDir, { watch: false }).load();
+  const restartedMastery = await new MasteryStore(h.configDir).load();
+  const restartedSchedules = await restartedMastery.schedulesFor(
+    restartedNotes.directoryIdentity.vaultId,
+    restartedNotes.noteIdentities(),
+    restartedNotes.initialVaultId,
+  );
+  assert.deepEqual(restartedSchedules.get('Shared.md'), { noteId: 'Shared.md', box: 1, dueDay: '2026-10-29' });
+  assert.equal(h.mastery.reviews().size, 2, 'reviewing and renaming A never prunes B');
+});
+
+test.each([undefined, 1])('mastery: legacy v%s reviews bind only to the startup vault and preserve unmatched entries', async (version) => {
+  at('2026-10-27T02:00:00.000Z');
+  const other = await tempDir('tp-legacy-vault-');
+  const h = await fixtures.harness({ coding: { pickDirectory: async () => other } });
+  await note(h, 'Shared', ['round-robin']);
+  const legacy = [
+    { noteId: 'Shared.md', box: 4, dueDay: '2026-12-01' },
+    { noteId: 'Missing.md', box: 5, dueDay: '2027-01-01' },
+  ];
+  await attempt(h, 'round-robin', true, 'legacy');
+  const records = h.mastery.list();
+  await fs.writeFile(path.join(h.configDir, MASTERY_FILENAME), JSON.stringify({ version, records, seen: ['old-submission'], reviews: legacy }));
+  await h.mastery.load();
+  await fs.writeFile(path.join(other, 'Shared.md'), '---\ncreated: 2020-01-01T00:00:00.000Z\nconcepts: [paging]\n---\nB');
+  await h.call(CHANNELS.notesPickDirectory);
+  await h.call(CHANNELS.notesSetDirectory, other);
+  assert.equal((await h.call(CHANNELS.masteryReviews)).data.due[0].box, 1, 'a switched-to vault cannot claim a legacy filename');
+  await h.call(CHANNELS.masteryReview, 'Shared.md', false);
+  await h.call(CHANNELS.notesSetDirectory, null);
+  assert.deepEqual((await h.call(CHANNELS.masteryReviews)).data.due, [], 'startup vault retains its box 4 future schedule');
+  const saved = JSON.parse(await fs.readFile(path.join(h.configDir, MASTERY_FILENAME), 'utf8'));
+  assert.equal(saved.version, 2);
+  assert.deepEqual(saved.records, records);
+  assert.deepEqual(saved.seen, ['old-submission']);
+  assert.deepEqual(saved.legacyReviews, [legacy[1]], 'an unavailable old note is retained, never silently dropped');
+  assert.equal(saved.reviews.length, 2);
+  await fs.writeFile(path.join(other, 'Missing.md'), '---\ncreated: 2020-01-01T00:00:00.000Z\nconcepts: [paging]\n---\nB2');
+  await h.call(CHANNELS.notesSetDirectory, other);
+  await h.notes.load();
+  await h.mastery.load();
+  const restartedNotes = await new NoteStore(h.configDir, { watch: false }).load();
+  const restartedMastery = await new MasteryStore(h.configDir).load();
+  const restartedSchedules = await restartedMastery.schedulesFor(
+    restartedNotes.directoryIdentity.vaultId,
+    restartedNotes.noteIdentities(),
+    restartedNotes.initialVaultId,
+  );
+  assert.equal(restartedSchedules.has('Missing.md'), false, 'a fresh process opening B cannot claim the unmatched legacy review pinned to A');
+  assert.equal(
+    (await h.call(CHANNELS.masteryReviews)).data.due.find((entry) => entry.noteId === 'Missing.md').box,
+    1,
+    'restarting in a different vault cannot claim a previously pinned unmatched legacy entry',
+  );
 });

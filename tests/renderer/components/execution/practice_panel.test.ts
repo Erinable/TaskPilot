@@ -8,6 +8,10 @@ import PracticePanel from '../../../../src/renderer/src/components/execution/Pra
 import { useExecutionStore } from '../../../../src/renderer/src/stores/execution.ts';
 import type * as packageTypes from '../../../../src/shared/ipc/packages.ts';
 import { installApi, taskView } from '../../execution_fakes.ts';
+import { fail, ok } from '../../ipc_fakes.ts';
+import { expectConsole } from '../../../fixtures/expected_console.ts';
+import { independenceScore } from '../../../../src/main/work_packages/grade_scores.ts';
+import type { IpcResult } from '../../../../src/shared/ipc/envelope.ts';
 
 vi.mock('../../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -58,6 +62,13 @@ const mountPanel = async (overrides: Partial<packageTypes.TaskView>) => {
   return wrapper;
 };
 
+const expandReference = async (wrapper: Awaited<ReturnType<typeof mountPanel>>, open = true) => {
+  const details = wrapper.get('[data-reference]');
+  (details.element as HTMLDetailsElement).open = open;
+  await details.trigger('toggle');
+  await flushPromises();
+};
+
 beforeEach(() => {
   current = { task: taskView() };
   api = installApi(current);
@@ -77,6 +88,10 @@ describe('PracticePanel', () => {
 
   test('once unlocked, the grade shows by category and the reference can be read beside it', async () => {
     const wrapper = await mountPanel({ referenceRun: READY, review: REVIEWED, grade: GRADE, referenceLock: OPEN });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('测试已经全部通过');
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会扣除');
+    await expandReference(wrapper);
     expect(api.practice.reference).toHaveBeenCalledWith('t1');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('先列出输入的几种情况再写代码。');
     expect(wrapper.get('[data-category="thinking"]').text()).toContain('src/auth.ts:4');
@@ -86,6 +101,87 @@ describe('PracticePanel', () => {
     expect(wrapper.find('[data-category="thinking"] [data-overall]').exists()).toBe(false);
     expect(wrapper.find('[data-category="writing"]').exists()).toBe(false);
     expect(wrapper.get('[data-reference]').text()).toContain('+export const login = () => true;');
+  });
+
+  test('L5 eligibility explains the 40 point cost before opening and records it only on explicit viewing', async () => {
+    const reference: packageTypes.ReferenceRun = { ...READY };
+    api.practice.reference.mockImplementation(async () => {
+      reference.revealedAt ??= '2026-11-09T01:00:00Z';
+      reference.revealedWith = 'hints_used';
+      return ok('diff --git a/src/auth.ts b/src/auth.ts\n+reference code\n');
+    });
+    const wrapper = await mountPanel({ referenceRun: reference, referenceLock: { unlocked: true, reason: 'hints_used' } });
+    const score = () => independenceScore({ hints: [{ level: 3 }, { level: 4 }, { level: 5 }], reference, similarity: 0 });
+    expect(wrapper.get('[data-reference]').attributes('open')).toBeUndefined();
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(reference.revealedAt).toBeNull();
+    expect(score().signals.reference.deduction).toBe(0);
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('扣 40 分');
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('等测试全部通过后再看');
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[data-reference]').text()).toContain('+reference code');
+    expect(score().signals.reference.deduction).toBe(40);
+    expect(score().independence).toBe(25);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会重复扣分');
+    wrapper.unmount();
+  });
+
+  test('a previously revealed answer stays closed until requested and gives no new deduction warning', async () => {
+    const wrapper = await mountPanel({
+      referenceRun: { ...READY, revealedAt: '2026-11-09T01:00:00Z', revealedWith: 'hints_used' },
+      referenceLock: { unlocked: true, reason: 'revealed' },
+    });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-reference-notice]').text()).toContain('不会重复扣分');
+    await expandReference(wrapper);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    wrapper.unmount();
+  });
+
+  test('an unlock or replacement run does not fetch until opened, and duplicate toggles share the pending request', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, referenceLock: { unlocked: false, reason: 'not_submitted' } });
+    const unlocked = { ...current.task, referenceLock: { unlocked: true, reason: 'hints_used' } as packageTypes.ReferenceLock };
+    useExecutionStore().adoptTask(unlocked);
+    await wrapper.setProps({ task: unlocked });
+    expect(api.practice.reference).not.toHaveBeenCalled();
+    const held = Promise.withResolvers<IpcResult<string>>();
+    api.practice.reference.mockReturnValueOnce(held.promise);
+    await expandReference(wrapper);
+    await expandReference(wrapper, false);
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    expect(wrapper.get('[role="status"]').text()).toContain('正在读取');
+    held.resolve({ ok: true, data: 'diff --git a/src/auth.ts b/src/auth.ts\n+first\n' });
+    await flushPromises();
+    const replacement = { ...unlocked, referenceRun: { ...READY, id: 'r2' } };
+    useExecutionStore().adoptTask(replacement);
+    await wrapper.setProps({ task: replacement });
+    expect(wrapper.get('[data-reference]').attributes('open')).toBeUndefined();
+    expect(wrapper.get('[data-reference]').text()).not.toContain('+first');
+    expect(api.practice.reference).toHaveBeenCalledOnce();
+    await expandReference(wrapper);
+    expect(api.practice.reference).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  test('an explicit reference read reports errors and can be retried', async () => {
+    const wrapper = await mountPanel({ referenceRun: READY, referenceLock: OPEN });
+    api.practice.reference.mockReturnValueOnce(fail('unknown', 'read failed'));
+    expectConsole('error', /read failed/);
+    await expandReference(wrapper);
+    expect(wrapper.get('.practice-error').text()).toContain('read failed');
+    await wrapper.get('[data-action="retry-reference"]').trigger('click');
+    await flushPromises();
+    expect(api.practice.reference).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('.practice-error').exists()).toBe(false);
+    expect(wrapper.get('[data-reference]').text()).toContain('+export const login');
+    wrapper.unmount();
   });
 
   test('a grade made with another course pack shows that rubric, in its order, with its labels', async () => {
@@ -110,8 +206,9 @@ describe('PracticePanel', () => {
     });
     const groups = wrapper.findAll('[data-category]');
     expect(groups.map((group) => group.attributes('data-category'))).toEqual(['mechanism', 'concept']);
-    // Each heading carries its comment count.
-    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现 1', '原理 1']);
+    // Each compact row keeps the label and comment count separate.
+    expect(groups.map((group) => group.get('h3').text())).toEqual(['实现', '原理']);
+    expect(groups.map((group) => group.get('.grade-comment-count').text())).toEqual(['1 条点评', '1 条点评']);
     expect(wrapper.get('[data-category="concept"]').text()).toContain('锁拿晚了。');
     await wrapper.get('[data-category="concept"] [data-action="save-note"]').trigger('click');
     await flushPromises();
@@ -192,7 +289,10 @@ describe('PracticePanel', () => {
     expect(quality).toContain('74');
     expect(quality).toContain('3/4 通过，30/40 分');
     expect(quality).toContain('通过，20/20 分');
-    expect(quality).toContain('思路3/4 级');
+    expect(quality).not.toContain('思路');
+    expect(wrapper.get('[data-category="thinking"] [data-dimension-level]').attributes('aria-label')).toBe('3/4 级');
+    expect(wrapper.get('[data-category="writing"] [data-dimension-level]').attributes('aria-label')).toBe('2/4 级');
+    expect(wrapper.get('[data-category="writing"]').element.tagName).toBe('SECTION');
     const independence = wrapper.get('[data-score="independence"]').text();
     expect(independence).toContain('45');
     expect(independence).toContain('用了 L3 提示−5');
@@ -200,6 +300,27 @@ describe('PracticePanel', () => {
     expect(independence).toContain('测试全过之前看了参考答案−40');
     expect(independence).toContain('和看过的代码雷同 34%−10');
     expect(wrapper.get('[data-independence-note]').text()).toContain('独立完成度只统计 TaskPilot 内的辅助');
+  });
+
+  test('dimension rows start collapsed, open to the full feedback and reset for a new grade', async () => {
+    const wrapper = await mountPanel({ grade: { ...GRADE, report: { ...GRADE.report!, levels: { thinking: 2, style: 3 } } } });
+    const dimension = wrapper.get('[data-category="thinking"]');
+    const details = dimension.element as HTMLDetailsElement;
+    expect(details.tagName).toBe('DETAILS');
+    expect(details.open).toBe(false);
+    expect(dimension.get('summary').text()).toContain('没有考虑空密码。');
+    expect(dimension.get('summary [data-dimension-level]').attributes('aria-label')).toBe('2/4 级');
+    details.open = true;
+    await dimension.trigger('toggle');
+    expect(details.open).toBe(true);
+    expect(dimension.get('.grade-better').text()).toContain('先列出输入的几种情况再写代码。');
+    await dimension.get('[data-action="save-note"]').trigger('click');
+    await flushPromises();
+    expect(dimension.get('[data-action="save-note"]').text()).toBe('已存为笔记');
+    expect(dimension.get('[data-action="save-note"]').attributes('disabled')).toBeDefined();
+    await wrapper.setProps({ task: { ...current.task, grade: { ...GRADE, id: 'g2' } } });
+    expect((wrapper.get('[data-category="thinking"]').element as HTMLDetailsElement).open).toBe(false);
+    wrapper.unmount();
   });
 
   test('explaining: each difference takes an answer, skipped ones go as null, then the result can be saved', async () => {

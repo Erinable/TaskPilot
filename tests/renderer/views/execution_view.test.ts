@@ -223,6 +223,28 @@ describe('ExecutionView', () => {
     expect(wrapper.get('[data-delivery-summary]').text()).toContain('已交付');
     wrapper.unmount();
   });
+  test('a done package folds its steps and acceptance criteria until opened', async () => {
+    current.task = taskView({ status: 'done', statusLabel: '已完成', acceptance: [{ text: '邮箱可登录', test: 'login works' }] });
+    const { wrapper } = await mountOpen();
+    const steps = wrapper.get('.step-list');
+    const criteria = wrapper.get('.acceptance-list');
+    expect((steps.element as HTMLElement).style.display).toBe('none');
+    expect((criteria.element as HTMLElement).style.display).toBe('none');
+    const toggles = wrapper.findAll('[data-action="fold"]');
+    expect(toggles.map((toggle) => toggle.attributes('aria-expanded'))).toEqual(['false', 'false']);
+    await toggles[0].trigger('click');
+    expect((steps.element as HTMLElement).style.display).toBe('');
+    expect(toggles[0].attributes('aria-expanded')).toBe('true');
+    wrapper.unmount();
+  });
+
+  test('a package in progress shows its steps unfolded', async () => {
+    const { wrapper } = await mountOpen();
+    expect((wrapper.get('.step-list').element as HTMLElement).style.display).toBe('');
+    expect(wrapper.get('[data-action="fold"]').attributes('aria-expanded')).toBe('true');
+    wrapper.unmount();
+  });
+
   test('a package still in progress has no commit panel', async () => {
     const { wrapper } = await mountOpen();
     expect(wrapper.find('[data-panel="commit"]').exists()).toBe(false);

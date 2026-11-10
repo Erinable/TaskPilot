@@ -113,6 +113,38 @@ test('a failed run records the step and can be retried', async () => {
   assert.equal(item.error, null);
 });
 
+test('failed planning can return to answers, clear the error and be planned again', async () => {
+  const { store, configDir } = await newStore();
+  const { id } = await store.create({ text: 't' });
+  await store.begin(id, 'clarifying');
+  await store.finishClarify(id, clarified);
+  await store.setAnswers(id, ['原回答', '']);
+  await store.begin(id, 'planning');
+  await store.failRun(id, 'planning', { code: 'agent_timeout', message: 'slow' });
+
+  const item = await store.setAnswers(id, ['修改后的回答', '保留登录']);
+  assert.equal(item.status, 'answering');
+  assert.equal(item.error, null);
+  assert.equal(item.failedStep, null);
+  assert.equal(item.phase, null);
+  assert.equal(item.plan, null);
+  assert.deepEqual(
+    item.questions.map((question) => question.answer),
+    ['修改后的回答', '保留登录'],
+  );
+  const { store: reloaded } = await newStore(configDir);
+  assert.equal(reloaded.get(id).status, 'answering');
+  assert.equal((await reloaded.begin(id, 'planning')).status, 'planning');
+});
+
+test('failed clarification still cannot skip directly to answering', async () => {
+  const { store } = await newStore();
+  const { id } = await store.create({ text: 't' });
+  await store.begin(id, 'clarifying');
+  await store.failRun(id, 'clarifying', { code: 'agent_timeout', message: 'slow' });
+  await assert.rejects(() => store.setAnswers(id, []), { code: 'invalid_state' });
+});
+
 test('a run interrupted by quitting loads as failed', async () => {
   const { store, configDir } = await newStore();
   const { id } = await store.create({ text: 't' });

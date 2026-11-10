@@ -20,6 +20,7 @@ import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { GoalForm } from '@shared/course_plan.ts';
 
 export type RequirementPane = 'new' | 'detail' | 'empty';
+type AnswerDraft = { questions: string[]; answers: string[]; defaults: boolean[]; choice: string | null };
 
 // What the compose form tells the user up front about what agents will see.
 export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAvailable: boolean };
@@ -27,16 +28,30 @@ export type ComposeContext = { workspace: workspaceTypes.WorkspaceInfo; agentAva
 export const useRequirementsStore = defineStore('requirements', () => {
   // ========== List ==========
   const items = ref<requirementTypes.Requirement[]>([]);
+  const listLoading = ref(false);
+  const listLoaded = ref(false);
+  const listError = ref<string | null>(null);
+  let listGeneration = 0;
   // Requirements waiting on the human, for the sidebar badge.
   const attentionCount = computed(() => items.value.filter(model.needsAttention).length);
 
   const refreshList = async () => {
     const token = watcher.session();
+    const generation = ++listGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
+    listLoading.value = true;
     try {
       const next = await call(window.taskpilot.requirements.list());
-      if (token === watcher.session()) items.value = next;
+      if (token !== watcher.session() || generation !== listGeneration || repositoryId !== useRepositoryIdentityStore().currentId) return;
+      items.value = next;
+      listLoaded.value = true;
+      listError.value = null;
     } catch (error) {
+      if (token !== watcher.session() || generation !== listGeneration || repositoryId !== useRepositoryIdentityStore().currentId) return;
       console.error('Failed to load requirements', error);
+      listError.value = describeError(error);
+    } finally {
+      if (generation === listGeneration) listLoading.value = false;
     }
   };
 
@@ -55,6 +70,24 @@ export const useRequirementsStore = defineStore('requirements', () => {
   const current = ref<requirementTypes.Requirement | null>(null);
   // Bumped on every detail render; the pane is keyed on it to reset its inputs.
   const detailRevision = ref(0);
+  // Navigation requests alone move focus; background state updates keep it.
+  const selectionRevision = ref(0);
+  const answerDrafts = ref<Record<string, AnswerDraft>>({});
+  const answerKey = (id: string) => JSON.stringify([useRepositoryIdentityStore().currentId, id]);
+  const answerDraft = (item: requirementTypes.Requirement) => {
+    const key = answerKey(item.id);
+    const questions = item.questions.map((question) => question.text);
+    const existing = answerDrafts.value[key];
+    if (!existing || JSON.stringify(existing.questions) !== JSON.stringify(questions)) {
+      answerDrafts.value[key] = {
+        questions,
+        answers: item.questions.map((question) => question.answer ?? ''),
+        defaults: questions.map(() => false),
+        choice: null,
+      };
+    }
+    return answerDrafts.value[key];
+  };
 
   const renderDetail = (item: requirementTypes.Requirement) => {
     if (selectedId.value !== item.id) return;
@@ -70,6 +103,14 @@ export const useRequirementsStore = defineStore('requirements', () => {
     contextGeneration += 1;
     selectedId.value = id;
     renderDetail(item);
+    selectionRevision.value += 1;
+  };
+
+  const retryList = async () => {
+    await refreshList();
+    if (listError.value || pane.value !== null) return;
+    if (items.value.length) select(items.value[0].id);
+    else pane.value = 'empty';
   };
 
   // ========== Compose ==========
@@ -84,19 +125,25 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // Bumped when the form should take focus (opened, or rejected locally).
   const composeFocus = ref(0);
   const composeContext = ref<ComposeContext | null>(null);
+  const composeContextLoading = ref(false);
+  const composeContextError = ref<string | null>(null);
   let contextGeneration = 0;
 
-  const loadContext = async () => {
+  const refreshComposeContext = async () => {
     const generation = ++contextGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
     composeContext.value = null;
+    composeContextLoading.value = true;
+    composeContextError.value = null;
     try {
-      const [workspace, agent] = await Promise.all([
-        call(window.taskpilot.workspace.info()),
-        call(window.taskpilot.agent.status()).catch(() => ({ available: false })),
-      ]);
-      if (generation === contextGeneration && composing.value) composeContext.value = { workspace, agentAvailable: agent.available };
+      const [workspace, agent] = await Promise.all([call(window.taskpilot.workspace.info()), call(window.taskpilot.agent.status())]);
+      if (generation === contextGeneration && composing.value && repositoryId === useRepositoryIdentityStore().currentId)
+        composeContext.value = { workspace, agentAvailable: agent.available };
     } catch (error) {
-      if (generation === contextGeneration) console.error('Failed to read requirement context', error);
+      if (generation === contextGeneration && composing.value && repositoryId === useRepositoryIdentityStore().currentId)
+        composeContextError.value = `运行环境检查失败：${describeError(error)}`;
+    } finally {
+      if (generation === contextGeneration) composeContextLoading.value = false;
     }
   };
 
@@ -107,8 +154,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pane.value = 'new';
     composeStatus.value = { text: '', error: false };
     composeInvalid.value = false;
-    loadContext().catch((error) => console.error(error));
     composeFocus.value += 1;
+    selectionRevision.value += 1;
+    return refreshComposeContext();
   };
 
   // Clears a previous "required" error once the user starts typing.
@@ -120,6 +168,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
   };
 
   const submitNew = async () => {
+    if (
+      submitting.value ||
+      (composeKind.value === 'project' && (composeContextLoading.value || composeContextError.value || composeContext.value?.agentAvailable === false))
+    )
+      return;
     const text = composeText.value;
     const invalid = model.validateText(text);
     composeStatus.value = { text: invalid ?? '', error: Boolean(invalid) };
@@ -263,6 +316,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     try {
       await call(window.taskpilot.requirements.remove(item.id));
       if (token !== watcher.session()) return;
+      delete answerDrafts.value[answerKey(item.id)];
       await refreshList();
       if (selectedId.value === item.id) {
         selectedId.value = null;
@@ -339,6 +393,10 @@ export const useRequirementsStore = defineStore('requirements', () => {
   // for it are discarded through the watcher session and contextGeneration.
   const reset = () => {
     watcher.stop();
+    listGeneration += 1;
+    listLoading.value = false;
+    listLoaded.value = false;
+    listError.value = null;
     contextGeneration += 1;
     items.value = [];
     selectedId.value = null;
@@ -346,6 +404,8 @@ export const useRequirementsStore = defineStore('requirements', () => {
     pane.value = null;
     composing.value = false;
     composeContext.value = null;
+    composeContextLoading.value = false;
+    composeContextError.value = null;
     composeStatus.value = { text: '', error: false };
     composeInvalid.value = false;
     reopen = true;
@@ -359,10 +419,11 @@ export const useRequirementsStore = defineStore('requirements', () => {
     reopen = false;
     await refreshList();
     const target = id ?? selectedId.value;
-    if (compose) startCompose(compose === true ? 'project' : compose);
+    if (compose) await startCompose(compose === true ? 'project' : compose);
+    else if (!id && composing.value && pane.value === 'new') await refreshComposeContext();
     else if (target) select(target);
     else if (items.value.length) select(items.value[0].id);
-    else pane.value = 'empty';
+    else pane.value = listError.value ? null : 'empty';
     startWatching();
   };
 
@@ -382,14 +443,20 @@ export const useRequirementsStore = defineStore('requirements', () => {
   return {
     // List
     items,
+    listLoading,
+    listLoaded,
+    listError,
     attentionCount,
     refreshList,
+    retryList,
     // Selection
     pane,
     selectedId,
     composing,
     current,
     detailRevision,
+    selectionRevision,
+    answerDraft,
     select,
     // Compose
     composeKind,
@@ -401,6 +468,9 @@ export const useRequirementsStore = defineStore('requirements', () => {
     submitting,
     composeFocus,
     composeContext,
+    composeContextLoading,
+    composeContextError,
+    refreshComposeContext,
     startCompose,
     onComposeInput,
     submitNew,
@@ -416,6 +486,7 @@ export const useRequirementsStore = defineStore('requirements', () => {
     // Course path, draft and lab actions
     courseBusy: courseActions.courseBusy,
     savePath: courseActions.savePath,
+    skipCourseConcept: courseActions.skipCourseConcept,
     confirmPath: courseActions.confirmPath,
     saveDraft: courseActions.saveDraft,
     draftSaved: courseActions.draftSaved,

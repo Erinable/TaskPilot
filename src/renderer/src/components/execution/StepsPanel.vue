@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
@@ -7,7 +7,13 @@ import StepTutor from './StepTutor.vue';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
-const props = defineProps<{ task: packageTypes.TaskView }>();
+// folded: starts with only the heading shown (a finished package's steps).
+const props = defineProps<{ task: packageTypes.TaskView; folded?: boolean }>();
+const open = ref(!props.folded);
+watch(
+  () => props.folded,
+  (folded) => (open.value = !folded),
+);
 
 const execution = useExecutionStore();
 
@@ -38,9 +44,13 @@ const onToggle = (event: Event, index: number) => {
           <p>{{ done.size }} / {{ task.steps.length }} 已完成</p>
         </div>
       </div>
+      <button class="link-button panel-fold-toggle" type="button" :aria-expanded="open" data-action="fold" @click="open = !open">
+        <AppIcon :name="open ? 'chevron-down' : 'chevron-right'" />
+        {{ open ? '收起' : '展开' }}
+      </button>
     </div>
-    <div class="progress-track" aria-hidden="true"><span class="progress-fill" :style="{ width: progress }"></span></div>
-    <ol class="step-list">
+    <div v-show="open" class="progress-track" aria-hidden="true"><span class="progress-fill" :style="{ width: progress }"></span></div>
+    <ol v-show="open" class="step-list">
       <li v-for="(step, index) in task.steps" :key="index" class="step-item" :class="{ done: done.has(index) }">
         <!-- The native checkbox stays for keyboard and screen readers; .step-check is its visual stand-in. -->
         <label>

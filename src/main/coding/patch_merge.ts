@@ -175,6 +175,7 @@ export const applyMerged = async (
   baseline: string,
   files: readonly FilePatch[],
   resolutions: Readonly<Partial<Record<string, CodingResolution>>>,
+  assertCurrent?: () => void,
 ): Promise<{ written: string[]; markers: string[]; kept: string[] }> =>
   withScratch(async (directory) => {
     const writes: Write[] = [];
@@ -207,13 +208,16 @@ export const applyMerged = async (
       throw new PatchMergeError(`${file.path} has a conflict that needs a choice`, 'merge_unresolved');
     }
     for (const write of writes) {
+      assertCurrent?.();
       const target = path.join(root, write.path);
       if (write.content === null) {
         await fs.rm(target, { force: true });
         continue;
       }
       await fs.mkdir(path.dirname(target), { recursive: true });
+      assertCurrent?.();
       await fs.writeFile(target, write.content);
+      assertCurrent?.();
       if (write.mode === '100755') await fs.chmod(target, 0o755);
       else if (write.mode === '100644') await fs.chmod(target, 0o644);
     }

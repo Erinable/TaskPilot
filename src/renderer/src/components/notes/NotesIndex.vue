@@ -68,35 +68,38 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
         <h3>{{ group.label }}</h3>
         <ul>
           <li v-for="note in group.notes" :key="note.id" class="post-item" :data-note="note.id">
-            <div class="post-line">
+            <time class="post-day" :datetime="model.formatDay(note.createdAt)">
+              <span class="post-day-number">{{ model.formatDay(note.createdAt).slice(8) }}</span>
+              <span class="visually-hidden">{{ model.formatDay(note.createdAt) }}</span>
+            </time>
+            <div class="post-body">
               <a class="post-title" role="link" tabindex="0" @click="run(notes.goNote(note.id))" @keydown.enter="run(notes.goNote(note.id))">
                 {{ note.title }}
               </a>
-              <time>{{ model.formatDay(note.createdAt) }}</time>
-            </div>
-            <p v-if="note.summary || note.excerpt" class="post-excerpt">{{ note.summary ?? note.excerpt }}</p>
-            <div v-if="note.category || model.allTags(note).length" class="post-meta">
-              <a
-                v-if="note.category"
-                class="post-category"
-                role="link"
-                tabindex="0"
-                @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
-                @keydown.enter="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
-              >
-                {{ notes.categoryLabel(note) }}
-              </a>
-              <a
-                v-for="tag in model.allTags(note)"
-                :key="tag"
-                class="post-tag"
-                role="link"
-                tabindex="0"
-                @click="run(notes.goIndex({ tag }))"
-                @keydown.enter="run(notes.goIndex({ tag }))"
-              >
-                #{{ tag }}
-              </a>
+              <p v-if="model.indexExcerpt(note)" class="post-excerpt">{{ model.indexExcerpt(note) }}</p>
+              <div v-if="note.category || model.allTags(note).length" class="post-meta">
+                <a
+                  v-if="note.category"
+                  class="post-category"
+                  role="link"
+                  tabindex="0"
+                  @click="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+                  @keydown.enter="run(notes.goIndex({ category: model.categoryFilterOf(note) }))"
+                >
+                  {{ notes.categoryLabel(note) }}
+                </a>
+                <a
+                  v-for="tag in model.allTags(note)"
+                  :key="tag"
+                  class="post-tag"
+                  role="link"
+                  tabindex="0"
+                  @click="run(notes.goIndex({ tag }))"
+                  @keydown.enter="run(notes.goIndex({ tag }))"
+                >
+                  #{{ tag }}
+                </a>
+              </div>
             </div>
           </li>
         </ul>
@@ -108,7 +111,7 @@ const run = (action: Promise<unknown>) => action.catch((error) => console.error(
 
     <aside v-if="notes.notes.length && !filtered" class="blog-aside">
       <section data-notes-rubric>
-        <h4>分类 · {{ packTitle }}</h4>
+        <h4 :title="`分类 · ${packTitle}`">分类 · {{ packTitle }}</h4>
         <ul>
           <li v-for="entry in rubricCounts" :key="entry.filter.category">
             <a

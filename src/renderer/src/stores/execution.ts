@@ -72,6 +72,10 @@ export const useExecutionStore = defineStore('execution', () => {
     if (generation !== token || !(await useAppStore().navigate('execution'))) return;
     watcher.stop();
     current.value = task;
+    reference.value = null;
+    referenceError.value = null;
+    referenceLoading.value = false;
+    referenceRequest = null;
     acceptanceOverride.value = null;
     diff.value = null;
     diffHint.value = '相对领取时的基线';
@@ -88,6 +92,10 @@ export const useExecutionStore = defineStore('execution', () => {
     generation += 1;
     watcher.stop();
     current.value = null;
+    reference.value = null;
+    referenceError.value = null;
+    referenceLoading.value = false;
+    referenceRequest = null;
     actions.deviationOpen.value = false;
   };
 
@@ -258,19 +266,35 @@ export const useExecutionStore = defineStore('execution', () => {
   };
 
   // ========== Practice ==========
-  // The reference patch, fetched once the main process allows it.
+  // Reading is an explicit learner action: the RPC also records the reveal.
   const reference = ref<{ id: string; patch: string } | null>(null);
   const referenceError = ref<string | null>(null);
+  const referenceLoading = ref(false);
+  let referenceRequest: { generation: number; runId: string } | null = null;
 
   const loadReference = async () => {
     const task = current.value;
-    if (!task?.referenceRun) return;
+    const run = task?.referenceRun;
+    if (!task || run?.status !== 'ready' || !task.referenceLock?.unlocked || reference.value?.id === run.id) return;
+    if (referenceRequest?.generation === generation && referenceRequest.runId === run.id) return;
+    const request = { generation, runId: run.id };
+    referenceRequest = request;
+    referenceLoading.value = true;
     referenceError.value = null;
+    const isCurrent = () => generation === request.generation && current.value?.id === task.id && current.value.referenceRun?.id === run.id;
     try {
-      reference.value = { id: task.referenceRun.id, patch: await call(window.taskpilot.practice.reference(task.id)) };
+      const patch = await call(window.taskpilot.practice.reference(task.id));
+      if (isCurrent()) reference.value = { id: run.id, patch };
     } catch (error) {
-      console.error(error);
-      referenceError.value = describeError(error);
+      if (isCurrent()) {
+        console.error(error);
+        referenceError.value = describeError(error);
+      }
+    } finally {
+      if (referenceRequest === request) {
+        referenceRequest = null;
+        referenceLoading.value = false;
+      }
     }
   };
 
@@ -346,6 +370,7 @@ export const useExecutionStore = defineStore('execution', () => {
     // Practice
     reference,
     referenceError,
+    referenceLoading,
     loadReference,
     regrade,
     explaining,

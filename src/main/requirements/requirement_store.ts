@@ -512,19 +512,28 @@ export class RequirementStore implements TaskCatalog {
     });
   }
 
-  // Saves answers; only allowed while questions are shown.
+  // Failed planning can return to the saved questions without rerunning clarification.
   async setAnswers(id: string, answers: unknown): Promise<Requirement> {
     const item = this.#mustGet(id);
-    this.#expect(item, ['answering', 'reviewing']);
+    if (item.status !== 'failed' || item.failedStep !== 'planning') this.#expect(item, ['answering', 'reviewing']);
     this.#expectNoRedo(item);
     if (!Array.isArray(answers) || answers.length !== item.questions.length) {
       return fail('Answers must match the questions', 'invalid_argument', 'answers');
     }
     const questions = item.questions.map((q, i) => ({ ...q, answer: userText(answers[i] ?? '', `answers[${i}]`, MAX_ANSWER, { optional: true }) }));
     // Editing answers after a plan exists sends the user back to answering.
-    const reviewed = item.status === 'reviewing';
+    const reviewed = item.status === 'reviewing' || item.status === 'failed';
     const course = item.course && reviewed ? { course: { ...item.course, plan: null, pathConcepts: [], draft: null } } : {};
-    return this.#update(id, { questions, status: 'answering', plan: reviewed ? null : item.plan, redo: null, ...course });
+    return this.#update(id, {
+      questions,
+      status: 'answering',
+      plan: reviewed ? null : item.plan,
+      redo: null,
+      error: null,
+      failedStep: null,
+      phase: null,
+      ...course,
+    });
   }
 
   // Stores the published task definitions and closes the requirement.

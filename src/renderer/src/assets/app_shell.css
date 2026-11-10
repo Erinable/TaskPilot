@@ -74,17 +74,74 @@ code {
 }
 
 /* Backdrop */
+/* Five colour fields under three drifting orbs; the hue swings around violet.
+ * Only transform and filter animate, and nothing moves under reduced motion. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+  background:
+    radial-gradient(55vw 55vh at 0% 0%, var(--orb-a), transparent 70%), radial-gradient(50vw 50vh at 100% 10%, var(--orb-b), transparent 70%),
+    radial-gradient(60vw 50vh at 85% 100%, var(--orb-d), transparent 70%), radial-gradient(50vw 50vh at 10% 100%, var(--orb-e), transparent 70%),
+    radial-gradient(40vw 40vh at 50% 50%, var(--orb-c), transparent 70%), var(--canvas);
+  animation: backdrop-hue 40s ease-in-out infinite alternate;
+}
+/* Colour reaches the middle of the window, not only its corners. */
+.backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 15% 20%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--orb-glow), transparent);
+  filter: blur(40px);
 }
 .orb {
   position: absolute;
   border-radius: 50%;
-  filter: blur(70px);
+  filter: blur(80px);
+  opacity: 0.95;
+  will-change: transform;
+  animation: orb-drift-a 34s ease-in-out infinite alternate;
+}
+@keyframes backdrop-hue {
+  from {
+    filter: hue-rotate(-35deg);
+  }
+  to {
+    filter: hue-rotate(45deg);
+  }
+}
+@keyframes orb-drift-a {
+  50% {
+    transform: translate(18vw, 14vh) scale(1.15);
+  }
+  100% {
+    transform: translate(6vw, 30vh) scale(0.95);
+  }
+}
+@keyframes orb-drift-b {
+  50% {
+    transform: translate(-22vw, 10vh) scale(1.2);
+  }
+  100% {
+    transform: translate(-8vw, -16vh) scale(1);
+  }
+}
+@keyframes orb-drift-c {
+  50% {
+    transform: translate(-16vw, -24vh) scale(0.9);
+  }
+  100% {
+    transform: translate(14vw, -10vh) scale(1.2);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .orb {
+    animation: none;
+  }
 }
 .orb-a {
   width: 46vw;
@@ -99,6 +156,9 @@ code {
   top: 18vh;
   right: -12vw;
   background: var(--orb-b);
+  animation-name: orb-drift-b;
+  animation-duration: 46s;
+  animation-delay: -12s;
 }
 .orb-c {
   width: 36vw;
@@ -106,6 +166,9 @@ code {
   bottom: -16vw;
   left: 30vw;
   background: var(--orb-c);
+  animation-name: orb-drift-c;
+  animation-duration: 52s;
+  animation-delay: -20s;
 }
 
 /* Glass surfaces */
@@ -140,9 +203,11 @@ code {
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  /* Opaque: the strong glass colour laid over the canvas, so text scrolling
+   * under the top bar cannot show through an unblurred surface. */
   .glass,
   .glass-strong {
-    background: var(--glass-bg-strong);
+    background: linear-gradient(var(--glass-bg-strong), var(--glass-bg-strong)), var(--canvas);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -488,14 +553,33 @@ code {
 }
 .nav-item.active {
   color: var(--accent-strong);
-  background: var(--accent-soft);
+  background: linear-gradient(90deg, var(--accent-soft), var(--violet-soft));
   font-weight: 600;
 }
+/* Each workspace entry keeps its own hue on the icon, active or not. */
 .nav-icon {
   color: var(--text-tertiary);
 }
-.nav-item.active .nav-icon {
-  color: var(--accent);
+.main-nav .nav-item:nth-child(1) .nav-icon {
+  color: var(--hue-blue);
+}
+.main-nav .nav-item:nth-child(2) .nav-icon {
+  color: var(--hue-violet);
+}
+.main-nav .nav-item:nth-child(3) .nav-icon {
+  color: var(--hue-teal);
+}
+.main-nav .nav-item:nth-child(4) .nav-icon {
+  color: var(--hue-orange);
+}
+.main-nav .nav-item:nth-child(5) .nav-icon {
+  color: var(--hue-amber);
+}
+.main-nav .nav-item:nth-child(6) .nav-icon {
+  color: var(--hue-green);
+}
+.main-nav .nav-item:nth-child(7) .nav-icon {
+  color: var(--hue-pink);
 }
 .nav-count {
   margin-left: auto;

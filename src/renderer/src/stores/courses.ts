@@ -13,7 +13,10 @@ import { computed, ref } from 'vue';
 import { IpcError, call } from '@/lib/ipc.ts';
 import { describeError } from '@/lib/errors.ts';
 import { showToast } from '@/lib/feedback.ts';
+import { draftOf } from '@/lib/course_model.ts';
+import type { CourseDraft } from '@/lib/course_model.ts';
 import { createStateWatcher } from './state_watcher.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
@@ -25,6 +28,16 @@ export const useCoursesStore = defineStore('courses', () => {
   // ========== List ==========
   const list = ref<courseTypes.CourseList | null>(null);
   const loading = ref(false);
+  const loadError = ref<string | null>(null);
+  const viewError = ref<string | null>(null);
+  const viewedId = ref<string | null>(null);
+  // User packs are global. Keep their drafts across view and repository resets;
+  // requirement drafts use a repository/requirement key supplied by the editor.
+  const drafts = ref<Record<string, CourseDraft>>({});
+  const editDraft = (key: string, pack: CoursePack) => (drafts.value[key] ??= draftOf(pack));
+  const discardDraft = (key: string) => {
+    delete drafts.value[key];
+  };
   const current = computed(() => list.value?.current ?? null);
   // Bumped by every list read and by reset(): only the latest answer applies.
   let listGeneration = 0;
@@ -34,11 +47,15 @@ export const useCoursesStore = defineStore('courses', () => {
     loading.value = true;
     try {
       const next = await call(window.taskpilot.courses.list());
-      if (token === listGeneration) list.value = next;
+      if (token === listGeneration) {
+        list.value = next;
+        loadError.value = null;
+      }
     } catch (error) {
       if (token !== listGeneration) return;
       console.error(error);
-      showToast(`读取课程包失败：${describeError(error)}`);
+      loadError.value = describeError(error);
+      showToast(`读取课程包失败：${loadError.value}`);
     } finally {
       if (token === listGeneration) loading.value = false;
     }
@@ -48,8 +65,14 @@ export const useCoursesStore = defineStore('courses', () => {
     watcher.stop();
     listGeneration += 1;
     viewGeneration += 1;
+    actionGeneration += 1;
+    selectionWritePending = false;
+    busy.value = false;
     list.value = null;
     loading.value = false;
+    loadError.value = null;
+    viewError.value = null;
+    viewedId.value = null;
     viewed.value = null;
     closePreview();
   };
@@ -69,6 +92,19 @@ export const useCoursesStore = defineStore('courses', () => {
   const previewMode = ref<PreviewMode>('view');
   const previewOpen = ref(false);
   const busy = ref(false);
+  let actionGeneration = 0;
+  const beginAction = () => {
+    busy.value = true;
+    const token = ++actionGeneration;
+    const repositoryId = useRepositoryIdentityStore().currentId;
+    return () => token === actionGeneration && repositoryId === useRepositoryIdentityStore().currentId;
+  };
+  const replaceList = (next: courseTypes.CourseList) => {
+    listGeneration += 1;
+    loading.value = false;
+    loadError.value = null;
+    list.value = next;
+  };
 
   const show = (data: courseTypes.CoursePreview | courseTypes.CourseImport, mode: PreviewMode) => {
     preview.value = data;
@@ -96,19 +132,22 @@ export const useCoursesStore = defineStore('courses', () => {
   // Null goes back to taskpilot.toml's choice. A pack that needs confirming
   // opens its preview right away, since it is not used until then.
   const select = async (id: string | null) => {
-    busy.value = true;
+    if (busy.value) return;
+    const isCurrent = beginAction();
     try {
-      list.value = await call(window.taskpilot.courses.select(id));
+      const next = await call(window.taskpilot.courses.select(id));
+      if (!isCurrent()) return;
+      replaceList(next);
+      const state = next.current.state;
+      if (state.status === 'pending') await openPreview(state.ref.id);
+      else if (state.status === 'ok') showToast(`之后的规划和判卷改用「${titleOf(next.current.ref.id)}」。`);
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       showToast(`切换课程包失败：${describeError(error)}`);
-      return;
     } finally {
-      busy.value = false;
+      if (isCurrent()) busy.value = false;
     }
-    const state = list.value.current.state;
-    if (state.status === 'pending') await openPreview(state.ref.id);
-    else if (state.status === 'ok') showToast(`之后的规划和判卷改用「${titleOf(list.value.current.ref.id)}」。`);
   };
 
   const titleOf = (id: string) => list.value?.entries.find((entry) => entry.id === id)?.title ?? id;
@@ -117,21 +156,23 @@ export const useCoursesStore = defineStore('courses', () => {
   // With the hash of the content shown: a file changed in between is refused.
   const confirm = async () => {
     const shown = preview.value;
-    if (!shown || previewMode.value !== 'confirm') return;
-    busy.value = true;
+    if (busy.value || !shown || previewMode.value !== 'confirm') return;
+    const isCurrent = beginAction();
     try {
       await call(window.taskpilot.workspace.confirmCourse(shown.ref.id, shown.ref.contentHash));
+      if (!isCurrent()) return;
       closePreview();
       showToast(`已确认课程包「${shown.pack.title}」，之后的规划和判卷用它。`);
       await load();
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       showToast(`确认失败：${describeError(error)}`);
       // The file may have changed: show what it says now.
       await load();
-      if (current.value?.state.status === 'pending') await openPreview(current.value.state.ref.id);
+      if (isCurrent() && current.value?.state.status === 'pending') await openPreview(current.value.state.ref.id);
     } finally {
-      busy.value = false;
+      if (isCurrent()) busy.value = false;
     }
   };
 
@@ -149,17 +190,20 @@ export const useCoursesStore = defineStore('courses', () => {
 
   const importPicked = async () => {
     const shown = preview.value;
-    if (!shown || previewMode.value !== 'import') return;
-    busy.value = true;
+    if (busy.value || !shown || previewMode.value !== 'import') return;
+    const isCurrent = beginAction();
     try {
-      list.value = await call(window.taskpilot.courses.import(shown.ref.contentHash));
+      const next = await call(window.taskpilot.courses.import(shown.ref.contentHash));
+      if (!isCurrent()) return;
+      replaceList(next);
       closePreview();
       showToast(`已导入「${shown.pack.title}」。选用并确认后才会生效。`);
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       showToast(`导入失败：${describeError(error)}`);
     } finally {
-      busy.value = false;
+      if (isCurrent()) busy.value = false;
     }
   };
 
@@ -167,23 +211,36 @@ export const useCoursesStore = defineStore('courses', () => {
   // The pack the 课程 view shows on the right.
   const viewed = ref<courseTypes.CoursePreview | null>(null);
   let viewGeneration = 0;
+  let selectionWritePending = false;
+
+  const showViewed = (next: courseTypes.CoursePreview) => {
+    viewGeneration += 1;
+    viewedId.value = next.ref.id;
+    viewed.value = next;
+    viewError.value = null;
+  };
 
   const view = async (id: string) => {
     const token = ++viewGeneration;
+    viewedId.value = id;
+    viewError.value = null;
     try {
       const next = await call(window.taskpilot.courses.preview(id));
-      if (token === viewGeneration) viewed.value = next;
+      if (token === viewGeneration) showViewed(next);
     } catch (error) {
       if (token !== viewGeneration) return;
       console.error(error);
-      showToast(`读取课程包失败：${describeError(error)}`);
+      viewError.value = describeError(error);
+      showToast(`读取课程包失败：${viewError.value}`);
     }
   };
 
-  // Opens the view's list, and the pack in use when nothing is shown yet.
+  // A refresh must not replace a selection made while its list was loading.
   const loadView = async () => {
+    const token = viewGeneration;
     await load();
-    const shown = viewed.value?.ref.id;
+    if (token !== viewGeneration || selectionWritePending) return;
+    const shown = viewedId.value;
     const id = shown && list.value?.entries.some((entry) => entry.id === shown) ? shown : list.value?.current.ref.id;
     if (id) await view(id);
   };
@@ -219,37 +276,59 @@ export const useCoursesStore = defineStore('courses', () => {
     return null;
   };
 
-  const saved = (result: courseTypes.CourseSaved) => {
-    list.value = result.list;
-    viewed.value = result.preview;
+  // Copies and saves share the view's selection generation. A newer selection
+  // wins, and applying a write invalidates every older preview and list read.
+  const saved = (result: courseTypes.CourseSaved, token: number) => {
+    replaceList(result.list);
+    if (token === viewGeneration) showViewed(result.preview);
   };
 
   // Copies a pack into the global folder as `id`, then shows the copy.
   const copy = async (sourceId: string, id: string) => {
-    busy.value = true;
+    if (busy.value) return { field: 'id', message: '正在处理课程包，请稍后再试。' };
+    const isCurrent = beginAction();
+    const token = ++viewGeneration;
+    selectionWritePending = true;
     try {
-      saved(await call(window.taskpilot.courses.copy(sourceId, id)));
+      const result = await call(window.taskpilot.courses.copy(sourceId, id));
+      if (!isCurrent()) return null;
+      saved(result, token);
       showToast(`已复制为「${id}」。可以编辑它；在仓库里用之前要先确认。`);
       return null;
     } catch (error) {
-      return fieldError(error, '复制');
+      if (!isCurrent()) return null;
+      return fieldError(error, '复制') ?? { field: 'id', message: `复制失败：${describeError(error)}` };
     } finally {
-      busy.value = false;
+      if (isCurrent()) {
+        selectionWritePending = false;
+        busy.value = false;
+      }
     }
   };
 
   // Saves an imported or copied pack. The main process validates it again;
   // a saved pack has new content, so it is pending until confirmed again.
   const save = async (pack: CoursePack) => {
-    busy.value = true;
+    if (busy.value) return { field: 'pack', message: '正在处理课程包，请稍后再试。' };
+    const isCurrent = beginAction();
+    const token = viewedId.value === pack.id ? ++viewGeneration : null;
+    selectionWritePending = token !== null;
     try {
-      saved(await call(window.taskpilot.courses.save(pack.id, pack)));
-      showToast('已保存。内容变了，要在本机重新确认后才会用于规划和判卷。', 'info');
+      const result = await call(window.taskpilot.courses.save(pack.id, pack));
+      if (isCurrent()) {
+        if (token === null) replaceList(result.list);
+        else saved(result, token);
+        showToast('已保存。内容变了，要在本机重新确认后才会用于规划和判卷。', 'info');
+      }
       return null;
     } catch (error) {
-      return fieldError(error, '保存');
+      if (!isCurrent()) return { field: 'pack', message: '仓库已切换，草稿仍保留；请在当前仓库重新保存。' };
+      return fieldError(error, '保存') ?? { field: 'pack', message: `保存失败：${describeError(error)}` };
     } finally {
-      busy.value = false;
+      if (isCurrent()) {
+        selectionWritePending = false;
+        busy.value = false;
+      }
     }
   };
 
@@ -257,6 +336,12 @@ export const useCoursesStore = defineStore('courses', () => {
     // List
     list,
     loading,
+    loadError,
+    viewError,
+    viewedId,
+    drafts,
+    editDraft,
+    discardDraft,
     current,
     load,
     reset,

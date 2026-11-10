@@ -8,6 +8,10 @@ import { flushPromises } from '@vue/test-utils';
 import { mountView } from '../mount_view.ts';
 import RequirementsView from '../../../src/renderer/src/views/RequirementsView.vue';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
+import { useNotesStore } from '@/stores/notes.ts';
+import { useAppStore } from '@/stores/app.ts';
+import { useExecutionStore } from '@/stores/execution.ts';
+import { useCoursesStore } from '@/stores/courses.ts';
 import { LAB_ESTIMATE, courseInterview, coursePathInterview, installApi, labGeneration, requirement } from '../requirements_fakes.ts';
 import { OS_COURSE } from '../../fixtures/builtin_courses.ts';
 import type * as requirementTypes from '../../../src/shared/ipc/requirements.ts';
@@ -229,6 +233,95 @@ describe('course interview', () => {
     const { wrapper, store } = await render();
     expect(wrapper.get('[data-field="verify-result"]').text()).toContain('自验证第 2 轮通过');
     expect(wrapper.get('[data-field="verify-result"]').text()).toContain('$0.50');
+    store.stopWatching();
+    wrapper.unmount();
+  });
+
+  test('stuck offers review notes and an explicit choice to retry or skip, while an unfinished lab blocks generation', async () => {
+    state.list = withLab(labGeneration({ placed: true, stage: 1 }));
+    api.requirements.labEstimate.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ...LAB_ESTIMATE,
+        stuck: { notes: [{ id: 'rr.md', title: 'RR 的复习笔记' }] },
+        previousLab: { packageId: 'lab-round-robin', title: '当前 RR lab' },
+      },
+    });
+    const { wrapper, store } = await render();
+    await store.loadLabEstimate(state.list[0]);
+    await flushPromises();
+    expect(wrapper.get('[data-field="stuck"]').text()).toContain('RR 的复习笔记');
+    expect(wrapper.get('[data-field="previous-lab"]').text()).toContain('跳过知识点不会完成这个阶段');
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeDefined();
+    await wrapper.get('[data-field="stuck"] input').setValue(true);
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeDefined();
+    const open = vi.spyOn(useExecutionStore(), 'open').mockResolvedValue(undefined);
+    await wrapper.get('[data-action="open-current-lab"]').trigger('click');
+    expect(open).toHaveBeenCalledWith('lab-round-robin');
+    const note = vi.spyOn(useNotesStore(), 'goNote').mockResolvedValue(true);
+    await wrapper.get('[data-action="review-stuck-note"]').trigger('click');
+    await flushPromises();
+    expect(useAppStore().view).toBe('notes');
+    expect(note).toHaveBeenCalledWith('rr.md');
+    api.requirements.courseSkip.mockResolvedValueOnce({
+      ok: true,
+      data: requirement({ kind: 'course', status: 'published', course: coursePathInterview([{ conceptId: 'round-robin', status: 'skipped' }]) }),
+    });
+    await wrapper.get('[data-action="skip-concept"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.courseSkip).toHaveBeenCalledWith('r1', 'round-robin');
+    expect(wrapper.find('[data-action="generate-lab"]').exists()).toBe(false);
+    expect(wrapper.get('[data-field="path-complete"]').text()).toContain('已没有待生成');
+    expect(api.requirements.labGenerate).not.toHaveBeenCalled();
+    store.stopWatching();
+    wrapper.unmount();
+  });
+
+  test('stuck without notes explains recovery and requires choosing to continue before generation', async () => {
+    state.list = [requirement({ kind: 'course', status: 'published', course: coursePathInterview() })];
+    api.requirements.labEstimate.mockResolvedValueOnce({ ok: true, data: { ...LAB_ESTIMATE, stuck: { notes: [] } } });
+    const { wrapper, store } = await render();
+    await wrapper.get('[data-action="estimate-lab"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-field="stuck"]').text()).toContain('还没有这个知识点的笔记');
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeDefined();
+    await wrapper.get('[data-field="stuck"] input').setValue(true);
+    expect(wrapper.get('[data-action="generate-lab"]').attributes('disabled')).toBeUndefined();
+    store.stopWatching();
+    wrapper.unmount();
+  });
+
+  test('a one-concept path can re-estimate and regenerate the same needs_review lab, while placement stays unavailable', async () => {
+    const course = coursePathInterview([{ conceptId: 'round-robin', status: 'planned' }]);
+    course.lab = labGeneration({ status: 'needs_review', concepts: ['round-robin'] });
+    state.list = [requirement({ kind: 'course', status: 'published', course })];
+    const { wrapper, store } = await render();
+    expect(wrapper.find('[data-action="place-lab"]').exists()).toBe(false);
+    expect(wrapper.get('[data-action="retry-same-concept"]').attributes('disabled')).toBeUndefined();
+    await wrapper.get('[data-action="retry-same-concept"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.labEstimate).toHaveBeenCalledWith('r1', 'round-robin');
+    expect(wrapper.find('[data-action="place-lab"]').exists()).toBe(false);
+    expect(api.requirements.labGenerate).not.toHaveBeenCalled();
+    await wrapper.get('[data-action="generate-lab"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.labGenerate).toHaveBeenCalledWith('r1', 'round-robin');
+    store.stopWatching();
+    wrapper.unmount();
+  });
+
+  test('interview course editor drafts are isolated from user packs with the same id', async () => {
+    const pack = { ...OS_COURSE, id: 'lexing' };
+    useCoursesStore().editDraft('user:lexing', pack).title = '全局课程的未保存标题';
+    state.list = [
+      requirement({ kind: 'course', status: 'reviewing', course: courseInterview({ choice: { draft: true }, draft: { pack, contentHash: 'h' } }) }),
+    ];
+    const { wrapper, store } = await render();
+    await wrapper.get('[data-action="edit-draft"]').trigger('click');
+    expect(wrapper.get<HTMLInputElement>('[data-field="title"] input').element.value).toBe(OS_COURSE.title);
+    await wrapper.get('[data-field="title"] input').setValue('访谈课程草稿');
+    expect(useCoursesStore().drafts['user:lexing'].title).toBe('全局课程的未保存标题');
+    expect(useCoursesStore().drafts['requirement:none:r1:h'].title).toBe('访谈课程草稿');
     store.stopWatching();
     wrapper.unmount();
   });

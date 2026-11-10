@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Requirement center. Everything Product Lead wrote is rendered as text: it
 // is model output and must never become markup.
-import { onMounted, onUnmounted } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import ComposeForm from '@/components/requirements/ComposeForm.vue';
@@ -10,6 +10,20 @@ import { useRequirementsStore } from '@/stores/requirements.ts';
 import * as model from '@/components/requirements/requirement_model.ts';
 
 const store = useRequirementsStore();
+const detail = ref<HTMLElement | null>(null);
+watch(
+  () => store.selectionRevision,
+  async () => {
+    await nextTick();
+    const heading = detail.value?.querySelector<HTMLElement>('h2');
+    if (!heading) return;
+    if (store.pane === 'detail') {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+      heading.scrollIntoView?.({ block: 'start' });
+    } else detail.value?.scrollIntoView?.({ block: 'start' });
+  },
+);
 // After a repository switch the remounted view loads the new repository's list.
 onMounted(() => store.enter().catch((error) => console.error(error)));
 onUnmounted(() => store.stopWatching());
@@ -28,7 +42,12 @@ onUnmounted(() => store.stopWatching());
         </div>
       </div>
       <div class="req-list" role="list">
-        <p v-if="store.items.length === 0" class="empty-hint">
+        <div v-if="store.listError" class="empty-hint" role="alert">
+          <p>读取需求失败：{{ store.listError }}</p>
+          <button class="secondary-button small" type="button" :disabled="store.listLoading" @click="store.retryList()">重试读取</button>
+        </div>
+        <p v-else-if="store.listLoading && !store.listLoaded" class="empty-hint" role="status">正在读取需求…</p>
+        <p v-else-if="store.listLoaded && store.items.length === 0" class="empty-hint">
           <AppIcon name="inbox" />
           还没有需求
         </p>
@@ -53,7 +72,7 @@ onUnmounted(() => store.stopWatching());
       </div>
     </aside>
 
-    <section class="req-detail" aria-live="polite">
+    <section ref="detail" class="req-detail" aria-live="polite">
       <ComposeForm v-if="store.pane === 'new'" />
       <RequirementDetail v-else-if="store.pane === 'detail' && store.current" :key="store.detailRevision" :item="store.current" />
       <div v-else-if="store.pane === 'empty'" class="req-pane req-empty" data-pane="empty">
@@ -76,6 +95,12 @@ onUnmounted(() => store.stopWatching());
 </template>
 
 <style scoped>
+.req-detail {
+  scroll-margin-top: var(--topbar-height);
+}
+.req-detail :deep(h2) {
+  scroll-margin-top: calc(var(--topbar-height) + var(--space-6));
+}
 .req-list-actions {
   display: flex;
   gap: var(--space-1);

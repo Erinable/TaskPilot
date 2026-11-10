@@ -10,6 +10,7 @@ import { useNotesStore } from '../../../src/renderer/src/stores/notes.ts';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as noteTypes from '../../../src/shared/ipc/notes.ts';
+import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
 import { installFakeApi, ok } from '../ipc_fakes.ts';
 import { noteMeta as meta } from '../notes_fakes.ts';
 
@@ -104,7 +105,8 @@ describe('NotesView', () => {
     // 2026-09-30T20:00Z is already October in Shanghai.
     expect(wrapper.findAll('.post-group h3').map((heading) => heading.text())).toEqual(['2026 年 10 月']);
     const item = wrapper.get('[data-note="用例要有断言.md"]');
-    expect(item.get('time').text()).toBe('2026-10-24');
+    expect(item.get('time').attributes('datetime')).toBe('2026-10-24');
+    expect(item.get('.post-day-number').text()).toBe('24');
     expect(item.text()).toContain('写法');
     expect(item.text()).toContain('#测试');
     await item.get('.post-tag').trigger('click');
@@ -205,6 +207,73 @@ describe('NotesView', () => {
     expect(useNotesStore().notes.map((entry) => entry.id)).toEqual(['断言.md', '命名.md']);
     expect(wrapper.find('[data-note-editor]').exists()).toBe(false);
     expect(wrapper.get('.article-head h1').text()).toBe('断言');
+  });
+
+  test.each(['save-note', 'overwrite'])('a pending %s keeps later typing visible in the editor', async (action) => {
+    const wrapper = await openView([meta()]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    const store = useNotesStore();
+    store.draft!.body = 'submitted';
+    store.conflict = action === 'overwrite';
+    await flushPromises();
+    const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+    api.notes.update.mockReturnValueOnce(held.promise);
+    await wrapper.get(`[data-action="${action}"]`).trigger('click');
+    await flushPromises();
+    store.draft!.body = 'submitted plus later input';
+    held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...NOTE, body: 'submitted', version: 'v2' } } });
+    await flushPromises();
+    expect(store.current?.version).toBe('v2');
+    expect(store.dirty).toBe(true);
+    expect(wrapper.find('[data-note-editor]').exists()).toBe(true);
+    expect(wrapper.get<HTMLTextAreaElement>('.note-textarea').element.value).toBe('submitted plus later input');
+    expect(api.notes.update).toHaveBeenCalledWith(NOTE.id, expect.objectContaining({ body: 'submitted', baseVersion: 'v1', force: action === 'overwrite' }));
+    wrapper.unmount();
+  });
+
+  test('a pending save cannot exit another note’s editor', async () => {
+    const wrapper = await openView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    const store = useNotesStore();
+    store.draft!.body = 'submitted';
+    const held = Promise.withResolvers<IpcResult<noteTypes.NoteSaved>>();
+    api.notes.update.mockReturnValueOnce(held.promise);
+    await wrapper.get('[data-action="save-note"]').trigger('click');
+    await store.goNote(LINKING.id);
+    store.startEditing();
+    store.draft!.body = 'another note input';
+    held.resolve({ ok: true, data: { revision: 2, relinked: 0, note: { ...NOTE, body: 'submitted', version: 'v2' } } });
+    await flushPromises();
+    expect(store.route).toMatchObject({ id: LINKING.id });
+    expect(wrapper.get('[data-note-editor]').attributes('data-note-open')).toBe(LINKING.id);
+    expect(wrapper.get<HTMLTextAreaElement>('.note-textarea').element.value).toBe('another note input');
+    wrapper.unmount();
+  });
+
+  test.each(['Enter', 'Tab'])('IME %s confirms composition without accepting a suggested link', async (key) => {
+    localStorage.setItem('taskpilot.noteEditorMode', 'source');
+    const wrapper = await openView([meta(), LINKING]);
+    await openFirst(wrapper);
+    await wrapper.get('[data-action="edit-note"]').trigger('click');
+    await flushPromises();
+    const textarea = wrapper.get<HTMLTextAreaElement>('.note-textarea');
+    await textarea.setValue('[[命');
+    textarea.element.setSelectionRange(3, 3);
+    await textarea.trigger('click');
+    expect(wrapper.get('.link-suggestions').text()).toContain('命名');
+    const composing = new KeyboardEvent('keydown', { key, isComposing: true, bubbles: true, cancelable: true });
+    textarea.element.dispatchEvent(composing);
+    await flushPromises();
+    expect(composing.defaultPrevented).toBe(false);
+    expect(useNotesStore().draft?.body).toBe('[[命');
+    await textarea.trigger('keydown', { key });
+    await flushPromises();
+    expect(useNotesStore().draft?.body).toBe('[[命名]]');
+    wrapper.unmount();
+    localStorage.removeItem('taskpilot.noteEditorMode');
   });
 
   test('the editor switches between source, split and preview, and remembers the choice', async () => {

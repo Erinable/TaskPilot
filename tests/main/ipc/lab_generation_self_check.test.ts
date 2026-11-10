@@ -86,6 +86,26 @@ test('a lab still failing after two repairs needs review, and another concept ca
   assert.deepEqual((await settleLab(h, id)).course.lab.concepts, ['priority-sched']);
 });
 
+test('a single-concept needs_review lab cannot be placed but can be re-estimated and regenerated with a fresh self-check', async () => {
+  const failing = { kind: 'outside_interface', detail: '参考解用了题面没给的 qsort' };
+  const h = await lab.harness({ agent: lab.team({ issues: [[failing], [failing], [failing]], repair: { solution: lab.RR_CODE.solution } }) });
+  const id = await lab.confirmedCourse(h);
+  await h.call(CHANNELS.requirementsLabGenerate, id);
+  assert.equal((await settleLab(h, id)).course.lab.status, 'needs_review');
+  assert.equal((await h.call(CHANNELS.requirementsLabPlace, id, '/unused')).error.code, 'invalid_state');
+  const calls = h.agentCalls.length;
+  const estimate = await h.call(CHANNELS.requirementsLabEstimate, id, 'round-robin');
+  assert.equal(estimate.error, undefined);
+  assert.equal(estimate.data.concepts[0].id, 'round-robin');
+  assert.equal(h.agentCalls.length, calls);
+  assert.equal((await h.call(CHANNELS.requirementsLabGenerate, id, 'round-robin')).error, undefined);
+  const retried = await settleLab(h, id);
+  assert.equal(retried.course.lab.status, 'ready');
+  assert.equal(retried.course.lab.verify.rounds.length, 1);
+  assert.deepEqual(retried.course.lab.concepts, ['round-robin']);
+  assert.ok(h.agentCalls.slice(calls).some((call) => lab.stepOf(call.schema) === 'consistency'));
+});
+
 test('cancelling during the self-check stops it and keeps what was spent', async () => {
   const { promise: gate, resolve: release } = Promise.withResolvers<void>();
   const h = await lab.harness({

@@ -16,9 +16,11 @@ import * as git from '../repository/git.ts';
 import * as gitCommit from '../repository/git_commit.ts';
 import * as labs from './labs.ts';
 import * as courses from './courses.ts';
+import { courseText } from './course_file.ts';
+import * as labCourse from './lab_course.ts';
+import { repositoryId } from '../repository/repositories.ts';
 import * as projectConfig from '../repository/project_config.ts';
 import { PRESET_IDS } from '../checking/presets/index.ts';
-import { isCourseId } from '../../shared/course_pack.ts';
 import { buildRules } from '../../shared/lab_toolchains.ts';
 import type { LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { AppContext } from '../app/app_context.ts';
@@ -49,8 +51,8 @@ export const createLabService = (ctx: LabServiceContext) => {
   const requireRequirements = () => ctx.requirements ?? failWith('Requirements are unavailable', 'unsupported');
 
   // Publishes labs in stage order, each waiting for the one before.
-  const publish = async (items: { lab: labs.LabArtifact; stage: number }[], previous: string | null) => {
-    const { pack, ref } = await ctx.course();
+  const publish = async (items: { lab: labs.LabArtifact; stage: number }[], previous: string | null, snapshot?: labCourse.LabCourse | null) => {
+    const { pack, ref } = snapshot ? await labCourse.trustedLabCourse(ctx.coursePlaces(), snapshot.ref) : await ctx.course();
     let before = previous;
     const definitions = items.map(({ lab, stage }) => {
       const definition = labs.toTaskDefinition(lab, { stage, previous: before, course: ref, requirementId: LAB_REQUIREMENT_ID });
@@ -81,6 +83,7 @@ export const createLabService = (ctx: LabServiceContext) => {
   const createRepository = async ({
     root,
     course,
+    courseSnapshot,
     toolchain,
     plan,
     labs: items,
@@ -88,15 +91,16 @@ export const createLabService = (ctx: LabServiceContext) => {
   }: {
     root: string;
     course: string;
+    courseSnapshot?: labCourse.LabCourse;
     toolchain: LabToolchainId;
     plan: labs.CoursePlan;
     labs: labs.LabArtifact[];
     beforeOpen?: (entry: RepositoryEntry) => Promise<void>;
   }): Promise<RepositoryEntry> => {
     await checkFolder(root);
-    const places = { ...ctx.coursePlaces(), root: null };
-    if (!isCourseId(course) || !(await courses.availableCourses(places)).some((entry) => entry.id === course))
-      failWith(`course: "${course}" is not a course pack`, 'unknown_course', 'course');
+    const sourcePlaces = ctx.coursePlaces();
+    const places = { ...sourcePlaces, root: null };
+    const snapshot = await labCourse.repositoryLabCourse(sourcePlaces, course, courseSnapshot);
     if (plan.course !== course) failWith('plan.course must be the course', 'invalid_lab', 'plan.course');
     if (!items.length) failWith('A lab repository needs at least one lab', 'invalid_lab', 'labs');
     const checked = items.map((lab, index) => ({ lab: labs.checkLab(lab, index + 1), stage: index + 1 }));
@@ -117,20 +121,48 @@ export const createLabService = (ctx: LabServiceContext) => {
       [projectConfig.PROJECT_FILENAME]: project,
       [labs.COURSE_PLAN_PATH]: labs.coursePlanText(plan),
     };
+    if (snapshot?.ref.source === 'repository') files[`${courses.COURSES_DIR}/${course}.toml`] = courseText(snapshot.pack);
     for (const { lab, stage } of checked)
       for (const [file, content] of Object.entries(labs.repositoryFiles(lab, stage))) {
         if (file in files) failWith(`${file} is given twice`, 'invalid_lab', 'files');
         files[file] = content;
       }
-    await writeFiles(root, files);
-    await gitCommit.initRepository(root);
-    await gitCommit.commitFiles(root, Object.keys(files), 'TaskPilot: 创建课程实验仓库');
-    const entry = await ctx.repositories.add((await ctx.validateRoot(root)).root);
-    for (const { lab } of checked) await labs.writePrivate(ctx.repositories.dataDir(entry.id), lab.id, lab.private);
+    // Prepare the entire tree before touching the picked folder or registry.
+    // In particular a failed course copy/confirmation must leave the ready
+    // draft retryable, with no source pointer or repository switch.
+    const destination = await fs.realpath(root);
+    const known = ctx.repositories.list().find((entry) => entry.root === destination);
+    const destinationId = known?.id ?? repositoryId(destination);
+    if (!known && ctx.repositories.get(destinationId)) failWith('The lab repository identity is already in use', 'invalid_state');
+    const dataDir = ctx.repositories.dataDir(destinationId);
+    if (snapshot?.ref.source === 'repository') await courses.confirmationFor({ ...places, root: destination, dataDir }, snapshot.ref);
+    const staging = await fs.mkdtemp(path.join(path.dirname(destination), '.taskpilot-lab-'));
+    try {
+      await writeFiles(staging, files);
+      await gitCommit.initRepository(staging);
+      await gitCommit.commitFiles(staging, Object.keys(files), 'TaskPilot: 创建课程实验仓库');
+      for (const { lab } of checked) await labs.writePrivate(dataDir, lab.id, lab.private);
+      if (snapshot) {
+        await labCourse.trustedLabCourse(sourcePlaces, snapshot.ref);
+        if (snapshot.ref.source === 'repository') {
+          const targetPlaces = { ...places, root: staging, dataDir };
+          const copied = await courses.readRepositoryCourse(staging, course);
+          labCourse.checkLabCourse(copied.pack, snapshot.ref);
+          // Transfer only the exact content already confirmed in the source,
+          // using the normal v2 repository trust persistence and version guard.
+          await courses.confirm(targetPlaces, copied.pack, copied.ref);
+        }
+      }
+      await checkFolder(destination);
+      await fs.rename(staging, destination);
+    } finally {
+      await fs.rm(staging, { recursive: true, force: true });
+    }
+    const entry = await ctx.repositories.add((await ctx.validateRoot(destination)).root);
     logger.debug(`[labs] created repository=${entry.id} course=${course} toolchain=${toolchain} labs=${checked.length}`);
     await beforeOpen?.(entry);
     await ctx.openRepository(entry.id);
-    await publish(checked, null);
+    await publish(checked, null, snapshot);
     return entry;
   };
 
@@ -139,11 +171,12 @@ export const createLabService = (ctx: LabServiceContext) => {
   // gets a [[labs]] table appended, so the student's own edits to it stay.
   // A repository from before toolchains has no build rules TaskPilot can
   // write, so it takes no new stage (lab_outdated).
-  const addLab = async (artifact: labs.LabArtifact) => {
+  const addLab = async (artifact: labs.LabArtifact, snapshot?: labCourse.LabCourse) => {
     const root = ctx.requireRoot();
     const text = await projectConfig.readProjectText(root);
     const project = text === null ? null : projectConfig.parseProject(text, PRESET_IDS);
     if (!text || !project?.course || !project.labs.length) return failWith('This repository is not a course lab repository', 'not_lab_repository');
+    if (snapshot) await labCourse.repositoryLabCourse(ctx.coursePlaces(), project.course, snapshot);
     const programs = project.labs.flatMap((entry) => (entry.program && entry.sources ? [{ program: entry.program, sources: entry.sources }] : []));
     if (!project.toolchain || programs.length !== project.labs.length)
       return failWith('This lab repository is from before lab toolchains; start a new one', 'lab_outdated');
@@ -165,7 +198,7 @@ export const createLabService = (ctx: LabServiceContext) => {
     await writeFiles(root, files);
     await gitCommit.commitFiles(root, Object.keys(files), `TaskPilot: 加入第 ${stage} 阶段 lab「${lab.title}」`);
     logger.debug(`[labs] added lab=${lab.id} stage=${stage}`);
-    return publish([{ lab, stage }], labs.packageId(last.id));
+    return publish([{ lab, stage }], labs.packageId(last.id), snapshot);
   };
 
   return { createRepository, addLab };

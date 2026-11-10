@@ -19,7 +19,7 @@ const currentDraft = (value: unknown): LabDraft => {
   if (!value || typeof value !== 'object' || !('version' in value) || value.version !== VERSION)
     return failWith('This lab was generated before lab toolchains; generate it again', 'lab_outdated');
   const stored = value as VersionedDraft;
-  return { requirementId: stored.requirementId, request: stored.request, lab: stored.lab, costUsd: stored.costUsd };
+  return { requirementId: stored.requirementId, request: stored.request, courseRef: stored.courseRef, lab: stored.lab, costUsd: stored.costUsd };
 };
 
 const currentReport = (value: unknown): labVerify.LabVerifyReport | null => {

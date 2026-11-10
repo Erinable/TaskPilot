@@ -16,7 +16,7 @@
 // [人工决策-2026-10-26 15:38:21] 笔记新增可选 course 字段，没有的视为 programming，旧文件不迁移；category 是课程包
 // rubric 项的 id，任意合法 id 都原样保留（不认识的包或维度也不读成 null）。
 // [人工决策-2026-10-27 00:36:21] 笔记 frontmatter 新增 concepts（课程包知识点 id），从判卷存的笔记自动带上工作包的 concepts，供复习排期用。
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -36,6 +36,14 @@ export const LOCATION_FILENAME = 'notes_location.json';
 export const MAX_NOTES = 5000;
 export const MAX_SUMMARY = 300;
 const WATCH_DEBOUNCE_MS = 200;
+export const IDENTITIES_FILENAME = 'notes_identities.json';
+
+// Application-owned identities stay outside user Markdown. A canonical folder
+// names a vault; note UUIDs survive app renames and reloads within that vault.
+// An external rename is a new note; changing the canonical folder path is a
+// different vault. Neither operation guesses identity from matching contents.
+export type NoteDirectoryIdentity = Readonly<{ vaultId: string; generation: number }>;
+type NoteIdentities = { version: 1; vaults: Record<string, Record<string, string>> };
 
 // ========== The store ==========
 
@@ -78,6 +86,24 @@ export class NoteStore {
   #trash: (file: string) => Promise<void>;
   #watch: boolean;
   #onChanged?: StateChanged;
+  #identity: NoteDirectoryIdentity = Object.freeze({ vaultId: '', generation: 0 });
+  #initialVaultId: string | null = null;
+  #identities: NoteIdentities | null = null;
+
+  get directoryIdentity(): NoteDirectoryIdentity {
+    return this.#identity;
+  }
+
+  get initialVaultId(): string | null {
+    return this.#initialVaultId;
+  }
+
+  noteIdentities(): Map<string, string> {
+    if (!this.#identities) return new Map();
+    const identities = (this.#identities.vaults[this.#identity.vaultId] ??= {});
+    for (const id of this.#entries.keys()) if (typeof identities[id] !== 'string' || !identities[id]) identities[id] = randomUUID();
+    return new Map([...this.#entries.keys()].map((id) => [id, identities[id]!]));
+  }
 
   setOnChanged(listener: StateChanged): void {
     this.#onChanged = listener;
@@ -121,6 +147,7 @@ export class NoteStore {
     try {
       return await this.open(chosen);
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
       logger.error(`[notes] the chosen notes folder could not be opened: ${chosen}`, error);
       this.#unavailable = chosen;
       return this.open(null);
@@ -128,23 +155,28 @@ export class NoteStore {
   }
 
   // Switches folders and remembers the choice; files are not moved.
-  async setDirectory(directory: string | null): Promise<noteTypes.NoteList> {
-    const file = path.join(this.#configDir, LOCATION_FILENAME);
-    try {
-      await readStoredJson(file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-    }
-    await this.open(directory);
-    this.#unavailable = null;
-    if (directory) await writeStoredJson(file, { version: 1, directory: this.#directory });
-    else await fs.rm(file, { force: true });
-    return this.list();
+  setDirectory(directory: string | null): Promise<noteTypes.NoteList> {
+    return this.#serial(async () => {
+      const file = path.join(this.#configDir, LOCATION_FILENAME);
+      try {
+        await readStoredJson(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      }
+      await this.#open(directory);
+      this.#unavailable = null;
+      if (directory) await writeStoredJson(file, { version: 1, directory: this.#directory });
+      else await fs.rm(file, { force: true });
+      return this.list();
+    });
   }
 
-  // Opens a folder: the default one (null) is created; a chosen one must
-  // already exist.
-  async open(directory: string | null = null): Promise<this> {
+  // Directory changes share the write queue: no note write can straddle one.
+  open(directory: string | null = null): Promise<this> {
+    return this.#serial(() => this.#open(directory));
+  }
+
+  async #open(directory: string | null): Promise<this> {
     const target = directory ? path.resolve(directory) : path.join(this.#configDir, DEFAULT_DIRNAME);
     if (directory) {
       const stat = await fs.stat(target).catch(() => null);
@@ -152,11 +184,37 @@ export class NoteStore {
     } else {
       await fs.mkdir(target, { recursive: true });
     }
-    await this.flush();
+    if (!this.#identities) {
+      const file = path.join(this.#configDir, IDENTITIES_FILENAME);
+      try {
+        const saved = (await readStoredJson(file, 1)) as Partial<NoteIdentities>;
+        if (
+          !saved.vaults ||
+          typeof saved.vaults !== 'object' ||
+          Array.isArray(saved.vaults) ||
+          !Object.values(saved.vaults).every(
+            (notes) =>
+              notes && typeof notes === 'object' && !Array.isArray(notes) && Object.values(notes).every((identity) => typeof identity === 'string' && identity),
+          )
+        )
+          throw new noteFile.NoteError('Invalid notes identity metadata', 'invalid_state');
+        this.#identities = { version: 1, vaults: saved.vaults };
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        this.#identities = { version: 1, vaults: {} };
+      }
+    }
+    const canonical = await fs.realpath(target);
+    const vaultId = createHash('sha256').update(canonical).digest('hex');
     this.close();
+    this.#pending.clear();
+    this.#rescanAll = false;
+    this.#entries.clear();
+    this.#identity = Object.freeze({ vaultId, generation: this.#identity.generation + 1 });
     this.#directory = target;
     this.#custom = Boolean(directory);
     await this.#scan();
+    this.#initialVaultId ??= vaultId;
     if (this.#watch) this.#startWatching();
     this.#notify();
     logger.debug(`[notes] open directory=${target} notes=${this.#entries.size} truncated=${this.#truncated}`);
@@ -240,7 +298,12 @@ export class NoteStore {
         await this.#writeFile(id, content);
         if (caseOnly) await fs.rename(this.#path(id), this.#path(nextId));
       }
-      if (renamed) this.#entries.delete(id);
+      if (renamed) {
+        this.#entries.delete(id);
+        const identities = this.#identities!.vaults[this.#identity.vaultId]!;
+        identities[nextId] = identities[id]!;
+        delete identities[id];
+      }
       await this.#reread(nextId);
       const relinked = renamed && input.renameLinks === true ? await this.#relink(current.meta.title, nextTitle, nextId) : 0;
       logger.debug(`[notes] update id=${id} next=${nextId} relinked=${relinked}`);
@@ -249,8 +312,9 @@ export class NoteStore {
   }
 
   // Writes Tutor's (or the developer's) summary without touching the body.
-  setSummary(id: string, value: string, baseVersion: string): Promise<noteTypes.NoteSaved> {
+  setSummary(id: string, value: string, baseVersion: string, directoryIdentity = this.#identity): Promise<noteTypes.NoteSaved> {
     return this.#serial(async () => {
+      if (directoryIdentity !== this.#identity) throw new noteFile.NoteError('The notes folder changed while the summary was being written', 'note_conflict');
       const current = await this.#fresh(id);
       if (current.meta.frontmatterError) throw new noteFile.NoteError('The frontmatter of this note is not valid YAML', 'frontmatter_invalid');
       if (current.meta.version !== baseVersion) throw new noteFile.NoteError('The note changed on disk since it was opened', 'note_conflict');
@@ -294,9 +358,32 @@ export class NoteStore {
 
   // Store writes run one at a time, so a rename never races another save.
   #serial<T>(task: () => Promise<T>): Promise<T> {
-    const run = this.#writes.then(task);
+    const run = this.#writes.then(async () => {
+      // Recheck even after load: a newer application may have replaced this
+      // sidecar since this instance last wrote it. Refuse before Markdown IO.
+      if (this.#identities) {
+        try {
+          await readStoredJson(path.join(this.#configDir, IDENTITIES_FILENAME), 1);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      const result = await task();
+      await this.#saveIdentities();
+      return result;
+    });
     this.#writes = run.catch(() => {});
     return run;
+  }
+
+  async #saveIdentities() {
+    if (!this.#identities) return;
+    const identities = this.#identities.vaults[this.#identity.vaultId] ?? {};
+    for (const id of this.#entries.keys()) if (typeof identities[id] !== 'string' || !identities[id]) identities[id] = randomUUID();
+    // A truncated scan cannot prove that an unseen note was deleted.
+    if (!this.#truncated) for (const id of Object.keys(identities)) if (!this.#entries.has(id)) delete identities[id];
+    this.#identities.vaults[this.#identity.vaultId] = identities;
+    await writeStoredJson(path.join(this.#configDir, IDENTITIES_FILENAME), this.#identities);
   }
 
   // Through a hidden temp file in the same folder, so other programs never
@@ -378,15 +465,17 @@ export class NoteStore {
   }
 
   #startWatching() {
+    const directoryIdentity = this.#identity;
     try {
       this.#watcher = fsSync.watch(this.#directory, (_event, name) => {
+        if (directoryIdentity !== this.#identity) return;
         if (name && (name.startsWith('.') || !name.toLowerCase().endsWith('.md'))) return;
         if (name) this.#pending.add(name);
         else this.#rescanAll = true;
         if (this.#timer) clearTimeout(this.#timer);
         this.#timer = setTimeout(() => {
           this.#timer = null;
-          this.#refreshing = this.#refreshing.then(() => this.#applyPending()).catch((error) => logger.error('[notes] refresh failed', error));
+          this.#refreshing = this.#serial(() => this.#applyPending()).catch((error) => logger.error('[notes] refresh failed', error));
         }, WATCH_DEBOUNCE_MS);
       });
       this.#watcher.on('error', (error) => logger.error('[notes] watcher failed', error));
@@ -398,7 +487,6 @@ export class NoteStore {
   }
 
   async #applyPending() {
-    await this.#writes;
     if (this.#rescanAll) {
       this.#rescanAll = false;
       this.#pending.clear();

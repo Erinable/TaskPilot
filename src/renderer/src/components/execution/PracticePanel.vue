@@ -5,13 +5,13 @@
 // two scores, explaining the differences from the reference, and the
 // reference beside the developer's diff.
 // Agent text is rendered with {{ }} only.
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import GradeExplanation from '@/components/execution/GradeExplanation.vue';
+import GradeFeedback from '@/components/execution/GradeFeedback.vue';
 import GradeScores from '@/components/execution/GradeScores.vue';
 import { describeErrorInfo } from '@/lib/errors.ts';
-import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { diffLineKind } from '@/lib/review_model.ts';
 import { splitPatch } from '@/lib/coding_patch.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
@@ -71,12 +71,6 @@ const gradeText = computed((): string | null => {
 // [人工决策-2026-10-26 15:38:21] 维度和标签来自判卷时快照的 rubric；旧记录没有快照，按内置 programming 包显示。
 // The default pack comes from the main process; until it answers an old grade lists nothing.
 const rubric = computed(() => grade.value?.course?.rubric ?? courses.defaultPack?.rubric ?? []);
-const byCategory = computed(() => {
-  const comments = grade.value?.report?.comments ?? [];
-  return rubric.value
-    .map((item) => ({ category: item.id, label: item.label, comments: comments.filter((comment) => comment.category === item.id) }))
-    .filter((group) => group.comments.length);
-});
 
 const referenceFiles = computed(() =>
   execution.reference && execution.reference.id === run.value?.id
@@ -90,14 +84,18 @@ const referenceFiles = computed(() =>
     : [],
 );
 
-// Fetched once unlocked; a new reference run replaces the old patch.
-watch(
-  () => [unlocked.value, run.value?.id],
-  () => {
-    if (unlocked.value && execution.reference?.id !== run.value?.id) execution.loadReference().catch((error) => console.error(error));
-  },
-  { immediate: true },
-);
+const referenceNotice = computed(() => {
+  if (run.value?.revealedAt || execution.reference?.id === run.value?.id) return '已经查看过，再次打开不会重复扣分。';
+  return props.task.referenceLock?.reason === 'hints_used'
+    ? '测试还没有全部通过。现在展开查看参考写法，会使独立完成度扣 40 分；等测试全部通过后再看可避免这项扣分。'
+    : '测试已经全部通过，现在展开查看参考写法不会扣除这项独立完成度分数。';
+});
+
+// Eligibility alone never reads the answer or records a scoring deduction.
+const readReference = () => execution.loadReference().catch((error) => console.error(error));
+const toggleReference = (event: Event) => {
+  if ((event.currentTarget as HTMLDetailsElement).open) readReference();
+};
 
 // Read once at startup (App.vue); asked again here in case that failed.
 onMounted(() => courses.loadDefault().catch((error) => console.error(error)));
@@ -144,7 +142,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
 
       <template v-if="grade.report">
         <!-- Grades from before scores have none; nothing is shown for them. -->
-        <GradeScores v-if="grade.scores" :scores="grade.scores" :report="grade.report" :rubric="rubric" />
+        <GradeScores v-if="grade.scores" :scores="grade.scores" />
         <p class="practice-summary">{{ grade.report.summary }}</p>
         <p v-if="recorded.length" class="practice-mastery" data-field="mastery">
           <span>这次判卷记进了掌握度：</span>
@@ -163,48 +161,30 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
             <li v-for="(strength, index) in grade.report.strengths" :key="index">{{ strength }}</li>
           </ul>
         </div>
-        <div v-for="group in byCategory" :key="group.category" class="practice-group" :data-category="group.category">
-          <h3>
-            {{ group.label }}
-            <span class="practice-count">{{ group.comments.length }}</span>
-          </h3>
-          <article v-for="(comment, index) in group.comments" :key="index" class="practice-comment">
-            <div class="practice-comment-head">
-              <button v-if="comment.file" class="practice-location" type="button" @click="openWorkspaceFile(comment.file, comment.line)">
-                <AppIcon name="file" />
-                {{ comment.line ? `${comment.file}:${comment.line}` : comment.file }}
-              </button>
-              <!-- A comment on the whole submission (no tests added, say) names no file. -->
-              <span v-else class="tag practice-overall" data-overall>整体</span>
-              <span v-if="comment.repeated" class="tag practice-repeated" data-repeated>又出现了</span>
-              <button class="link-button practice-save" type="button" data-action="save-note" :disabled="saved.has(comment)" @click="save(comment)">
-                <AppIcon :name="saved.has(comment) ? 'check' : 'plus'" />
-                {{ saved.has(comment) ? '已存为笔记' : '存为笔记' }}
-              </button>
-            </div>
-            <p>{{ comment.observation }}</p>
-            <p class="practice-better">
-              <strong>下次可以：</strong>
-              {{ comment.betterWay }}
-            </p>
-          </article>
-        </div>
+        <GradeFeedback :key="grade.id" :report="grade.report" :rubric="rubric" :saved="saved" @save="save" />
         <GradeExplanation v-if="grade.withReference && unlocked" :explanation="grade.explanation ?? null" />
       </template>
     </div>
 
-    <details v-if="unlocked" class="practice-reference" data-reference>
-      <summary>参考写法</summary>
-      <p v-if="execution.referenceError" class="practice-error">{{ execution.referenceError }}</p>
-      <div v-for="file in referenceFiles" :key="file.path" class="diff-file">
-        <div class="diff-file-header static">
-          <span class="scope-path">{{ file.path }}</span>
+    <div v-if="unlocked" class="practice-reference">
+      <p class="practice-reference-notice" data-reference-notice>{{ referenceNotice }}</p>
+      <details :key="`${task.id}:${run?.id}`" data-reference @toggle="toggleReference">
+        <summary>查看参考写法</summary>
+        <p v-if="execution.referenceLoading" role="status">正在读取参考写法…</p>
+        <p v-if="execution.referenceError" class="practice-error">
+          {{ execution.referenceError }}
+          <button class="link-button" type="button" data-action="retry-reference" :disabled="execution.referenceLoading" @click="readReference">重试</button>
+        </p>
+        <div v-for="file in referenceFiles" :key="file.path" class="diff-file">
+          <div class="diff-file-header static">
+            <span class="scope-path">{{ file.path }}</span>
+          </div>
+          <div class="diff-body">
+            <div v-for="(line, index) in file.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
+          </div>
         </div>
-        <div class="diff-body">
-          <div v-for="(line, index) in file.lines" :key="index" class="diff-line" :class="line.kind">{{ line.text }}</div>
-        </div>
-      </div>
-    </details>
+      </details>
+    </div>
   </section>
 </template>
 
@@ -239,9 +219,9 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
   padding: var(--space-3) var(--space-4);
   color: var(--text);
   background: var(--accent-soft);
-  border-left: 3px solid var(--accent);
+  border-left: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  font-size: var(--text-xl);
+  font-size: var(--text-md);
   line-height: 1.6;
 }
 .practice-mastery {
@@ -262,15 +242,7 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
   align-items: center;
   gap: var(--space-2);
   margin: 0;
-  font-size: var(--text-xl);
-}
-.practice-count {
-  padding: 0 7px;
-  color: var(--text-tertiary);
-  background: var(--fill);
-  border-radius: 999px;
-  font-size: var(--text-lg);
-  font-weight: 500;
+  font-size: var(--text-md);
 }
 .practice-strengths {
   padding: var(--space-3) var(--space-4);
@@ -288,60 +260,13 @@ const regrade = (skipReference: boolean) => execution.regrade(skipReference).cat
   padding-left: 1.2em;
   line-height: 1.6;
 }
-.practice-comment {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  background: var(--fill);
-  border-radius: var(--radius-md);
-  line-height: 1.6;
-}
-.practice-comment p {
-  margin: 0;
-}
-.practice-comment-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-.practice-location {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 0;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font: var(--text-lg) var(--font-mono);
-}
-.practice-location:hover {
-  color: var(--accent-strong);
-}
-.practice-overall {
-  font-size: var(--text-lg);
-}
-.practice-better {
-  padding-left: var(--space-3);
-  color: var(--text-secondary);
-  border-left: 3px solid var(--success);
-}
-.practice-better strong {
-  color: var(--success);
-}
-.practice-repeated {
-  color: var(--warning);
-  background: var(--warning-soft);
-}
-.practice-save {
-  margin-left: auto;
-  font-size: var(--text-lg);
-}
 .practice-reference {
   margin: 0 var(--panel-pad) var(--space-4);
+}
+.practice-reference-notice {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 .practice-reference summary {
   cursor: pointer;

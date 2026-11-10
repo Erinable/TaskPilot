@@ -24,7 +24,7 @@ import { initializeLogging, flushLogs, logger } from './infrastructure/logger.ts
 
 // Matches --canvas in tokens.css, so the first paint and any area the page
 // doesn't cover use the theme's colour rather than a white flash.
-const CANVAS = { light: '#eef1f8', dark: '#0d0f16' };
+const CANVAS = { light: '#f1edfb', dark: '#0d0f16' };
 const canvasColor = () => (nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light);
 
 type Appearance = { vibrancy: boolean };

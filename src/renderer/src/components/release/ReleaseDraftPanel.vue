@@ -77,6 +77,7 @@ const onCopy = () => {
     <div class="notes-body">
       <el-input
         :model-value="store.notesText"
+        :readonly="store.finishing"
         type="textarea"
         :autosize="{ minRows: 8, maxRows: 24 }"
         aria-label="更新说明"
@@ -98,10 +99,16 @@ const onCopy = () => {
         {{ store.finishing ? '记录中…' : '完成发布' }}
       </button>
     </div>
+    <p v-if="store.checklistPending > 0" class="checklist-hint" role="status">正在保存检查清单…</p>
+    <p v-if="store.checklistError" class="checklist-hint checklist-error" role="alert">检查项未保存：{{ store.checklistError }}。请重试未保存的勾选。</p>
     <p v-if="remaining > 0" class="checklist-hint">还有 {{ remaining }} 项未勾选，全部确认后才能完成发布。</p>
     <ul class="checklist">
       <li v-for="(item, index) in plan.checklist" :key="index" class="checklist-item">
-        <el-checkbox :model-value="draft.checked.includes(index)" @change="(value: string | number | boolean) => onCheck(index, value)">
+        <el-checkbox
+          :model-value="draft.checked.includes(index)"
+          :disabled="store.finishing"
+          @change="(value: string | number | boolean) => onCheck(index, value)"
+        >
           <InlineCode :text="item.text" />
         </el-checkbox>
         <div v-if="item.evidence.length > 0" class="evidence">
@@ -179,6 +186,9 @@ const onCopy = () => {
   padding: 0 20px 8px;
   color: var(--text-muted);
   font-size: var(--text-sm);
+}
+.checklist-error {
+  color: var(--danger);
 }
 .checklist {
   margin: 0;

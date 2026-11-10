@@ -52,6 +52,21 @@ describe('note charts', () => {
     expect(host.shadowRoot?.adoptedStyleSheets[0].cssRules.length).toBeGreaterThan(0);
   });
 
+  test('a drawing shrinks to its host unless it is mounted at its natural size', () => {
+    const drawing = () => sanitizeSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 300"><rect width="2" height="2"/></svg>');
+    const fitted = document.createElement('div');
+    mountSvg(fitted, drawing());
+    const fittedCss = [...fitted.shadowRoot!.adoptedStyleSheets[0].cssRules].map((rule) => rule.cssText).join('\n');
+    expect(fittedCss).toContain('max-width: 100%');
+
+    const natural = document.createElement('div');
+    mountSvg(natural, drawing(), true);
+    const naturalCss = [...natural.shadowRoot!.adoptedStyleSheets[0].cssRules].map((rule) => rule.cssText).join('\n');
+    expect(naturalCss).toContain('width: 2400px');
+    expect(naturalCss).toContain('height: 300px');
+    expect(naturalCss).not.toContain('max-width: 100%');
+  });
+
   test('a block without an <svg> element is refused', () => {
     expect(() => sanitizeSvg('<p>not a drawing</p>')).toThrow('<svg>');
   });

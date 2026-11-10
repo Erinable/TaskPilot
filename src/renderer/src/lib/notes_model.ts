@@ -114,6 +114,32 @@ export const completeLink = (text: string, start: number, cursor: number, title:
   return { text: `${text.slice(0, start)}${inserted}${after}`, cursor: start + inserted.length + (closing ? 0 : 2) };
 };
 
+// The text under a title in the index: the summary, else the excerpt, without
+// the opening the title already shows (a title made from a grade comment is
+// that comment's first words, cut with …). Null when nothing else is left.
+export const indexExcerpt = (note: Pick<noteTypes.NoteMeta, 'title' | 'summary' | 'excerpt'>): string | null => {
+  const text = (note.summary ?? note.excerpt ?? '').trim();
+  // Titles drop characters a file name cannot hold, so compare without them.
+  const comparable = (value: string) => value.replace(/[^\p{L}\p{N}]/gu, '');
+  // A cut title may end inside a word; that partial word is shown again.
+  const shown = note.title.endsWith('…') ? note.title.slice(0, -1).replace(/[A-Za-z0-9_]+$/, '') : note.title;
+  const head = comparable(shown);
+  if (head.length < 8) return text || null;
+  let seen = 0;
+  for (const [index, char] of [...text].entries()) {
+    if (comparable(char)) seen += 1;
+    if (seen === head.length) {
+      if (comparable(text).slice(0, head.length) !== head) break;
+      const rest = [...text]
+        .slice(index + 1)
+        .join('')
+        .replace(/^[\s，,。.；;：:、）)…]+/, '');
+      return rest || null;
+    }
+  }
+  return text || null;
+};
+
 // YYYY-MM-DD of an ISO time, in the business time zone.
 export const formatDay = (iso: string, timeZone = businessTimeZone()) => businessDay(new Date(iso), timeZone);
 

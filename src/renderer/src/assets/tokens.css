@@ -5,45 +5,61 @@
 :root {
   color-scheme: light dark;
 
-  /* Text */
-  --text: #16181d;
-  --text-secondary: #3f4350;
-  --text-muted: #5f6472;
-  --text-tertiary: #8a8f9c;
+  /* Text. Neutrals lean violet, from the backdrop, rather than slate grey.
+   * [人工决策-2026-11-09 19:22:13] 用户反馈亮色发干、组件发白、灰色不协调：中性色、填充和细线改为偏紫，玻璃更透。 */
+  --text: #1b1630;
+  --text-secondary: #3b3454;
+  --text-muted: #463e60;
+  --text-tertiary: #4a4264;
 
-  /* Glass surfaces */
-  --glass-bg: rgba(255, 255, 255, 0.58);
-  --glass-bg-strong: rgba(255, 255, 255, 0.78);
-  --glass-border: rgba(255, 255, 255, 0.7);
-  --glass-edge: rgba(15, 23, 42, 0.07);
+  /* Glass surfaces: thin enough for the moving backdrop to show through. */
+  --glass-bg: rgba(250, 247, 255, 0.36);
+  --glass-bg-strong: rgba(248, 244, 255, 0.58);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-edge: rgba(80, 50, 160, 0.08);
   --glass-highlight: rgba(255, 255, 255, 0.9);
-  --glass-shadow: 0 1px 1px rgba(15, 23, 42, 0.04), 0 10px 32px -8px rgba(15, 23, 42, 0.14);
-  --glass-blur: saturate(180%) blur(28px);
-  --line-soft: rgba(15, 23, 42, 0.07);
-  --fill: rgba(15, 23, 42, 0.045);
-  --fill-hover: rgba(15, 23, 42, 0.075);
+  --glass-shadow: 0 1px 1px rgba(60, 30, 140, 0.04), 0 12px 32px -10px rgba(80, 50, 180, 0.18);
+  --glass-blur: saturate(160%) blur(24px);
+  --line-soft: rgba(96, 70, 200, 0.12);
+  --fill: rgba(112, 84, 224, 0.07);
+  --fill-hover: rgba(112, 84, 224, 0.12);
 
-  /* Backdrop */
-  --canvas: #eef1f8;
-  --orb-a: rgba(122, 162, 255, 0.55);
-  --orb-b: rgba(196, 148, 255, 0.42);
-  --orb-c: rgba(94, 214, 196, 0.38);
+  /* Backdrop: violet-leaning colour fields that drift behind the glass.
+   * [人工决策-2026-11-09 19:22:13] 用户要求动态彩虹背景、偏紫：光球缓慢漂移，色相在紫色附近摆动。 */
+  --canvas: #f1edfb;
+  --orb-a: rgba(124, 112, 255, 0.6);
+  --orb-b: rgba(200, 110, 255, 0.55);
+  --orb-c: rgba(255, 130, 210, 0.42);
+  --orb-d: rgba(150, 90, 255, 0.45);
+  --orb-e: rgba(90, 160, 255, 0.4);
+  --orb-glow: rgba(150, 120, 255, 0.28);
+
+  /* Per-area hues: navigation icons, metrics and progress each get their own. */
+  --hue-blue: #3f5fe0;
+  --hue-violet: #8a3fc4;
+  --hue-teal: #0b7d72;
+  --hue-orange: #c2502a;
+  --hue-amber: #9a6406;
+  --hue-green: #17794d;
+  --hue-pink: #c23e72;
+  --violet-soft: rgba(176, 79, 224, 0.13);
 
   /* Accent and semantic colours */
-  --accent: #3f6bf5;
-  --accent-strong: #2a52d6;
+  --accent: #2238a0;
+  --accent-strong: #1d3190;
   --accent-soft: rgba(63, 107, 245, 0.12);
-  --accent-gradient: linear-gradient(135deg, #5b84ff 0%, #6c5bf5 100%);
-  --success: #17915b;
+  --accent-fill: #3f61d5;
+  --accent-gradient: linear-gradient(135deg, var(--accent-fill) 0%, #6250d8 100%);
+  --success: #064f2c;
   --success-soft: rgba(23, 145, 91, 0.12);
-  --warning: #c26a0b;
+  --warning: #6e3a04;
   --warning-soft: rgba(214, 129, 23, 0.14);
-  --danger: #cf3a32;
+  --danger: #8a1a16;
   --danger-soft: rgba(207, 58, 50, 0.11);
   --online: #2fbf71;
   --text-on-color: #fff;
   --danger-border: rgba(207, 58, 50, 0.25);
-  --danger-gradient: linear-gradient(135deg, #f0625a, #cf3a32);
+  --danger-gradient: linear-gradient(135deg, #b92d26, #a52723);
 
   /* Identity palettes stay fixed across themes. */
   --avatar-sunset: linear-gradient(135deg, #f6a96b, #e8678a);
@@ -110,32 +126,45 @@
   :root {
     --text: #eef0f6;
     --text-secondary: #c9ccd6;
-    --text-muted: #9ea3b2;
-    --text-tertiary: #737888;
+    --text-muted: #afb5c5;
+    --text-tertiary: #abb1c2;
 
-    --glass-bg: rgba(30, 33, 44, 0.52);
-    --glass-bg-strong: rgba(34, 37, 50, 0.8);
+    --glass-bg: rgba(24, 26, 40, 0.5);
+    --glass-bg-strong: rgba(28, 30, 46, 0.72);
     --glass-border: rgba(255, 255, 255, 0.09);
     --glass-edge: rgba(0, 0, 0, 0.3);
     --glass-highlight: rgba(255, 255, 255, 0.1);
     --glass-shadow: 0 1px 1px rgba(0, 0, 0, 0.2), 0 14px 40px -10px rgba(0, 0, 0, 0.55);
+    --glass-blur: saturate(180%) blur(28px);
     --line-soft: rgba(255, 255, 255, 0.07);
     --fill: rgba(255, 255, 255, 0.06);
     --fill-hover: rgba(255, 255, 255, 0.1);
 
     --canvas: #0d0f16;
-    --orb-a: rgba(64, 98, 230, 0.42);
-    --orb-b: rgba(132, 74, 214, 0.34);
-    --orb-c: rgba(32, 150, 136, 0.28);
+    --orb-a: rgba(100, 80, 255, 0.5);
+    --orb-b: rgba(170, 70, 255, 0.45);
+    --orb-c: rgba(235, 80, 190, 0.32);
+    --orb-d: rgba(120, 60, 240, 0.38);
+    --orb-e: rgba(60, 120, 255, 0.3);
+    --orb-glow: transparent;
 
-    --accent: #7c9cff;
-    --accent-strong: #9db4ff;
+    --hue-blue: #8fb0ff;
+    --hue-violet: #d9a2ff;
+    --hue-teal: #5fe0cf;
+    --hue-orange: #ffa07e;
+    --hue-amber: #ffd166;
+    --hue-green: #7ee2a8;
+    --hue-pink: #ff9fbd;
+    --violet-soft: rgba(176, 79, 224, 0.16);
+
+    --accent: #a6bdff;
+    --accent-strong: #b7caff;
     --accent-soft: rgba(124, 156, 255, 0.16);
-    --success: #4cd394;
+    --success: #55dfa1;
     --success-soft: rgba(76, 211, 148, 0.14);
-    --warning: #f2a948;
+    --warning: #f6b961;
     --warning-soft: rgba(242, 169, 72, 0.15);
-    --danger: #ff7a70;
+    --danger: #ffa69e;
     --danger-soft: rgba(255, 122, 112, 0.14);
   }
 }

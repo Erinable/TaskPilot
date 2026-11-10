@@ -115,7 +115,7 @@ test('a graded submission writes one attempt per concept, and survives a reload'
   assert.ok(store.get('os', 'priority-sched'));
   await store.flush();
   const saved = JSON.parse(await fs.readFile(path.join(configDir, mastery.MASTERY_FILENAME), 'utf8'));
-  assert.equal(saved.version, 1);
+  assert.equal(saved.version, 2);
   assert.deepEqual((await new mastery.MasteryStore(configDir).load()).get('os', 'round-robin'), record);
 });
 
@@ -211,4 +211,18 @@ test('an attempt carries the grade’s independence score; none is null', async 
     store.get('os', 'round-robin')!.attempts.map((attempt) => attempt.independence),
     [85, null],
   );
+});
+
+test('a future mastery envelope rejects reads and writes without discarding its reviews', async () => {
+  const configDir = await dir();
+  const file = path.join(configDir, mastery.MASTERY_FILENAME);
+  const loaded = await new mastery.MasteryStore(configDir).load();
+  await loaded.record(submission());
+  const newer = JSON.stringify({ version: 3, records: [], seen: [], reviews: [{ future: true }] });
+  await fs.writeFile(file, newer);
+  await assert.rejects(() => new mastery.MasteryStore(configDir).load(), { code: 'unsupported_version' });
+  const unloaded = new mastery.MasteryStore(configDir);
+  await assert.rejects(() => unloaded.record(submission()), { code: 'unsupported_version' });
+  await assert.rejects(() => loaded.record(submission({ diffDigest: 'd2' })), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(file, 'utf8'), newer);
 });

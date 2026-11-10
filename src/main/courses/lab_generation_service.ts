@@ -17,7 +17,7 @@
 // estimate (requirements:lab-estimate, then requirements:lab-generate).
 import { logger } from '../infrastructure/logger.ts';
 import { asAgentError, failWith } from '../infrastructure/coded_error.ts';
-import * as courses from './courses.ts';
+import { checkLabCourse, trustedLabCourse } from './lab_course.ts';
 import * as git from '../repository/git.ts';
 import * as labs from './labs.ts';
 import * as generator from '../agents/lab_generator.ts';
@@ -39,7 +39,7 @@ import type { AppContext } from '../app/app_context.ts';
 import type { LabService } from './lab_service.ts';
 import type { Requirement } from '../requirements/requirement_store.ts';
 import type { RunAgent } from '../runtimes/claude_cli.ts';
-import type { CoursePack } from '../../shared/course_pack.ts';
+import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
 import type * as requirementTypes from '../../shared/ipc/requirements.ts';
 import type { LabProgram, LabToolchainId } from '../../shared/lab_toolchains.ts';
 import type { LabEntry } from '../repository/project_config.ts';
@@ -78,18 +78,10 @@ export const createLabGenerationService = (
 
   // The confirmed course requirement and the pack its path was planned
   // from; the pack must still be trusted at the planned content.
-  const courseOf = async (id: string): Promise<{ item: Requirement; pack: CoursePack }> => {
+  const courseOf = async (id: string): Promise<{ item: Requirement; pack: CoursePack; ref: CourseRef }> => {
     const item = requireRequirements().get(id);
     if (item.kind !== 'course' || item.status !== 'published' || !item.course?.plan) return failWith('Confirm the learning path first', 'invalid_state');
-    const planned = item.course.plan.course;
-    const places = ctx.coursePlaces();
-    const entry = (await courses.availableCourses(places)).find((candidate) => candidate.id === planned.id);
-    if (!entry) return failWith(`Course pack ${planned.id} is gone`, 'unknown_course', 'course');
-    const { pack, ref } = await courses.loadCourse(places, entry);
-    if (ref.contentHash !== planned.contentHash) return failWith(`Course pack ${planned.id} changed since the path was planned`, 'course_changed', 'course');
-    if ((await courses.trustOf(places, ref)) === 'pending')
-      return failWith(`Course pack ${planned.id} is not confirmed on this machine`, 'course_not_confirmed', 'course');
-    return { item, pack };
+    return { item, ...(await trustedLabCourse(ctx.coursePlaces(), item.course.plan.course)) };
   };
 
   // The open lab repository this path's labs go into, or null before it
@@ -135,7 +127,7 @@ export const createLabGenerationService = (
   };
 
   const requestFor = async (id: string, conceptId: string | null) => {
-    const { item, pack } = await courseOf(id);
+    const { item, pack, ref } = await courseOf(id);
     const next = nextLab(item, ctx.mastery?.ofCourse(pack.id) ?? new Map(), conceptId);
     logger.debug(`[lab-gen] next requirement=${id} concept=${next.conceptId} difficulty=${next.difficulty} change=${next.change} stuck=${next.stuck}`);
     const repository = await labRepository(item);
@@ -147,7 +139,14 @@ export const createLabGenerationService = (
       toolchain: toolchainOf(item, repository),
       ...(await existingOf(repository)),
     };
-    return { request, next, course: pack.id, root: repository?.root ?? null, programs: repository?.programs ?? [] };
+    return { request, next, course: pack.id, courseRef: ref, root: repository?.root ?? null, programs: repository?.programs ?? [] };
+  };
+
+  const previousLab = async (item: Requirement) => {
+    const last = (await labRepository(item))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
+    if (!last || ctx.store.get(labs.packageId(last.id)).status === 'done') return null;
+    const generated = item.course?.lab;
+    return { packageId: labs.packageId(last.id), title: generated?.placed && generated.lab?.id === last.id ? generated.lab.title : last.id };
   };
 
   // ========== Estimate ==========
@@ -164,14 +163,17 @@ export const createLabGenerationService = (
     logger.debug(
       `[lab-gen] estimate requirement=${id} concepts=${request.concepts.map((concept) => concept.id).join(',')} model=${model ?? 'unknown'} toolchain=${request.toolchain} ready=${toolchain.ready}`,
     );
-    return estimateLab({
-      request,
-      next,
-      model,
-      price,
-      toolchain,
-      stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [],
-    });
+    return {
+      ...estimateLab({
+        request,
+        next,
+        model,
+        price,
+        toolchain,
+        stuck: next.stuck ? selectStuckNotes(ctx.notes?.list().notes ?? [], course, next.conceptId) : [],
+      }),
+      previousLab: await previousLab(requireRequirements().get(id)),
+    };
   };
 
   // ========== Generation ==========
@@ -226,15 +228,15 @@ export const createLabGenerationService = (
   // requirement shows its progress and the run is cancelled with
   // requirements:cancel (or by a repository switch).
   const start = async (id: string, conceptId: string | null = null) => {
-    const { request, root, programs } = await requestFor(id, conceptId);
+    const { request, courseRef, root, programs } = await requestFor(id, conceptId);
     const lab = requireRequirements().get(id).course?.lab;
     // Checked first: a run that just finished may still be leaving the registry.
     if (lab?.status === 'ready' && !lab.placed) return failWith('Write the lab that is ready into the lab repository first', 'lab_not_placed');
     if (lab?.status === 'running' || backgroundRuns.has('requirement', id)) return failWith('A lab is already being generated', 'invalid_state');
     // The next stage builds on the last one's code, so it waits until that
     // stage is done.
-    const last = (await labRepository(requireRequirements().get(id)))?.labs.reduce((latest, entry) => (entry.stage > latest.stage ? entry : latest));
-    if (last && ctx.store.get(labs.packageId(last.id)).status !== 'done') return failWith(`Finish lab ${last.id} first`, 'previous_lab_open');
+    const openLab = await previousLab(requireRequirements().get(id));
+    if (openLab) return failWith(`Finish lab ${openLab.title} first`, 'previous_lab_open');
     // Nothing is paid for until the toolchain runs under the sandbox.
     const { path: commandPath } = await ctx.commandPath();
     const check = await probe(request.toolchain, { envPath: commandPath });
@@ -291,7 +293,7 @@ export const createLabGenerationService = (
         await toLabArtifact(lab, request).catch((error) => {
           throw Object.assign(new Error(`The generated lab does not check: ${(error as Error).message}`), { code: 'agent_bad_output' });
         });
-        const draft = { requirementId: id, request, lab, costUsd };
+        const draft = { requirementId: id, request, courseRef, lab, costUsd };
         await saveDraft(draft);
         const generatedCost = spent;
         const checked = await verify(draft, {
@@ -361,11 +363,22 @@ export const createLabGenerationService = (
   // is the open repository's next stage. Returns the requirement as the lab
   // repository now has it.
   const place = async (id: string, root: string | null) => {
-    const { item } = await courseOf(id);
+    const { item, ref } = await courseOf(id);
     const lab = item.course!.lab;
     if (lab?.status !== 'ready') return failWith('There is no lab whose self-check passed', 'invalid_state');
     if (lab.placed) return failWith('This lab is already in the lab repository', 'invalid_state');
-    const built = await artifact(id);
+    const draft = await loadDraft(ctx.configDir, id);
+    // v2 drafts already hold the full request course; older v2 files bind it
+    // to the planned ref, while new drafts also preserve their original source.
+    const snapshot = checkLabCourse(draft.request.course, draft.courseRef ?? ref);
+    if (
+      snapshot.ref.source !== ref.source ||
+      snapshot.ref.contentHash !== ref.contentHash ||
+      snapshot.ref.id !== ref.id ||
+      snapshot.ref.version !== ref.version
+    )
+      return failWith('The generated lab course no longer matches its learning path', 'course_changed', 'course');
+    const built = await toLabArtifact(draft.lab, draft.request, await loadReport(ctx.configDir, id));
     const placed = { ...lab, placed: true };
     if (!item.course!.repositoryId) {
       if (root === null) return failWith('Pick an empty folder for the lab repository', 'required', 'root');
@@ -375,7 +388,8 @@ export const createLabGenerationService = (
       await labService.createRepository({
         root,
         course: plan.course.id,
-        toolchain: (await loadDraft(ctx.configDir, id)).request.toolchain,
+        courseSnapshot: snapshot,
+        toolchain: draft.request.toolchain,
         plan: coursePlan,
         labs: [built],
         // The repository the interview ran in keeps a pointer to the new one.
@@ -388,7 +402,7 @@ export const createLabGenerationService = (
       return requireRequirements().putCourse(moved!);
     }
     await labRepository(item);
-    await labService.addLab(built);
+    await labService.addLab(built, snapshot);
     logger.debug(`[lab-gen] placed requirement=${id} lab=${built.id} stage=${lab.stage ?? 1}`);
     return update(id, placed);
   };

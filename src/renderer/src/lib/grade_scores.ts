@@ -5,13 +5,22 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 
 export type ScoreLine = { label: string; value: string };
 
-export const qualityLines = ({ signals }: packageTypes.GradeScores): ScoreLine[] => [
+export const qualityLines = ({ signals }: packageTypes.GradeScores): (ScoreLine & { id: string; points: number; maximum: number })[] => [
   {
-    label: '测试和验收标准',
+    id: 'tests',
+    label: '测试和验收',
     value: signals.tests.total ? `${signals.tests.passed}/${signals.tests.total} 通过，${signals.tests.points}/40 分` : '没有可运行的测试，0/40 分',
+    points: signals.tests.points,
+    maximum: 40,
   },
-  { label: 'QA 结论', value: signals.qa.passed ? `通过，${signals.qa.points}/20 分` : `未通过，${signals.qa.points}/20 分` },
-  { label: 'rubric 各项', value: `${signals.rubric.points}/40 分` },
+  {
+    id: 'qa',
+    label: 'QA 结论',
+    value: signals.qa.passed ? `通过，${signals.qa.points}/20 分` : `未通过，${signals.qa.points}/20 分`,
+    points: signals.qa.points,
+    maximum: 20,
+  },
+  { id: 'rubric', label: '评分维度', value: `${signals.rubric.points}/40 分`, points: signals.rubric.points, maximum: 40 },
 ];
 
 // Only what was deducted, then a line saying nothing was when nothing was.
@@ -25,9 +34,9 @@ export const independenceLines = ({ signals }: packageTypes.GradeScores): ScoreL
   return lines.length ? lines : [{ label: '没有扣分', value: '−0' }];
 };
 
-// The level of each rubric item, by its label; `level` draws its 4-step bar.
-export const rubricLevels = (report: packageTypes.GradeReport, rubric: { id: string; label: string }[]): (ScoreLine & { level: number })[] =>
-  rubric.flatMap((item) => {
-    const level = report.levels?.[item.id];
-    return level ? [{ label: item.label, value: `${level}/4 级`, level }] : [];
-  });
+// Each dimension keeps its recorded level next to the comments it explains.
+// Older reports without levels still show every comment in rubric order.
+export const gradeDimensions = (report: packageTypes.GradeReport, rubric: { id: string; label: string }[]) =>
+  rubric
+    .map((item) => ({ ...item, level: report.levels?.[item.id] ?? null, comments: report.comments.filter((comment) => comment.category === item.id) }))
+    .filter((item) => item.level !== null || item.comments.length > 0);

@@ -4,7 +4,7 @@
 // on this machine. Typing [[ suggests titles. Saving never overwrites a
 // file another program changed without asking; renaming asks whether to
 // update [[links]] in other notes. Save or cancel returns to reading.
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, toRaw } from 'vue';
 import 'element-plus/theme-chalk/el-segmented.css';
 
 import AppIcon from '@/components/AppIcon.vue';
@@ -42,7 +42,8 @@ const exists = (title: string) => notes.findByTitle(title) !== null;
 // ========== Saving ==========
 // Resolves whether the note was saved.
 const save = async () => {
-  if (titleError.value) return false;
+  if (titleError.value) return null;
+  const before = note.value;
   let renameLinks = false;
   if (draft.value.title !== note.value.title) {
     const count = model.linkingCount(notes.notes, note.value.title, note.value.id);
@@ -53,20 +54,29 @@ const save = async () => {
         accept: '更新链接',
         alternate: '只改这篇',
       });
-      if (choice === false) return false;
+      if (choice === false) return null;
       renameLinks = choice === 'accept';
     }
   }
-  return Boolean(await notes.save({ renameLinks }));
+  if (notes.current !== before) return null;
+  return notes.save({ renameLinks });
 };
 
 const saveAndRead = async () => {
-  if (!notes.dirty || (await save())) notes.editing = false;
+  if (!notes.dirty) {
+    notes.editing = false;
+    return;
+  }
+  const saved = await save();
+  if (saved && toRaw(notes.current) === saved && !notes.dirty) notes.editing = false;
 };
 
 const overwrite = async () => {
+  const before = notes.current;
   const confirmed = await confirmAction({ title: '覆盖磁盘上的版本？', body: '别处做的修改会被你的内容替换。', accept: '覆盖', danger: true });
-  if (confirmed && (await notes.save({ force: true }))) notes.editing = false;
+  if (!confirmed || notes.current !== before) return;
+  const saved = await notes.save({ force: true });
+  if (saved && toRaw(notes.current) === saved && !notes.dirty) notes.editing = false;
 };
 
 const onKeydown = (event: KeyboardEvent) => {
@@ -104,6 +114,7 @@ const pick = async (title: string) => {
 };
 
 const onEditorKeydown = (event: KeyboardEvent) => {
+  if (event.isComposing || event.keyCode === 229) return;
   const open = completion.value;
   if (!open || !suggestions.value.length) return;
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

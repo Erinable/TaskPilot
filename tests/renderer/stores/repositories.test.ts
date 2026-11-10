@@ -8,6 +8,8 @@ import { useActivityFeedStore } from '../../../src/renderer/src/stores/activity_
 import { useCommitStore } from '../../../src/renderer/src/stores/commit.ts';
 import { useCostsStore } from '../../../src/renderer/src/stores/costs.ts';
 import { useRequirementsStore } from '../../../src/renderer/src/stores/requirements.ts';
+import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
+import { useTasksStore } from '../../../src/renderer/src/stores/tasks.ts';
 import { useEngineeringMapStore } from '../../../src/renderer/src/stores/engineering_map.ts';
 import { useOnboardingStore } from '../../../src/renderer/src/stores/onboarding.ts';
 import { useTutorStore } from '../../../src/renderer/src/stores/tutor.ts';
@@ -200,6 +202,63 @@ describe('repositories store', () => {
     expect(await store.switchTo('b')).toBe(false);
     expect(feedback.showToast).toHaveBeenCalledWith('切换仓库失败：找不到这个仓库，它可能已被移除。');
     expect(store.current?.id).toBe('a');
+  });
+
+  test('a refused switch preserves current data, selection and subscriptions', async () => {
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const tasks = useTasksStore();
+    const requirements = useRequirementsStore();
+    const oldTask = { id: 'old-task' } as (typeof tasks.tasks)[number];
+    const oldRequirement = { id: 'old-requirement' } as (typeof requirements.items)[number];
+    tasks.tasks = [oldTask];
+    requirements.items = [oldRequirement];
+    requirements.selectedId = oldRequirement.id;
+    requirements.pane = 'detail';
+    const resetTasks = vi.spyOn(tasks, 'reset');
+    const resetRequirements = vi.spyOn(requirements, 'reset');
+    const generation = store.generation;
+    api.repositories.switch.mockResolvedValueOnce({ ok: false, error: { code: 'unknown_repository', message: 'x' } });
+    expectConsole('error', /\[repositories\] switch failed/);
+
+    expect(await store.switchTo('b')).toBe(false);
+    expect(store.currentId).toBe('a');
+    expect(store.generation).toBe(generation);
+    expect(tasks.tasks).toEqual([oldTask]);
+    expect(requirements.items).toEqual([oldRequirement]);
+    expect(requirements.selectedId).toBe(oldRequirement.id);
+    expect(resetTasks).not.toHaveBeenCalled();
+    expect(resetRequirements).not.toHaveBeenCalled();
+  });
+
+  test('a failed notes flush prevents switching before any current state is reset', async () => {
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const release = useReleaseStore();
+    vi.spyOn(release, 'flushNotes').mockResolvedValueOnce(false);
+    const tasks = useTasksStore();
+    const reset = vi.spyOn(tasks, 'reset');
+
+    expect(await store.switchTo('b')).toBe(false);
+    expect(api.repositories.switch).not.toHaveBeenCalled();
+    expect(reset).not.toHaveBeenCalled();
+    expect(store.currentId).toBe('a');
+  });
+
+  test('a failed external action that already switched reloads the actual open repository', async () => {
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const generation = store.generation;
+    api.repositories.list.mockImplementation(() => ok(listOf('b')));
+    expectConsole('error', /\[repositories\] switch failed/);
+    const result = await store.switchWith(async () => {
+      throw new Error('failed after opening b');
+    }, '操作失败');
+    expect(result).toBeNull();
+    expect(store.currentId).toBe('b');
+    expect(store.generation).toBe(generation + 1);
+    expect(api.tasks.list).toHaveBeenCalled();
+    expect(api.requirements.list).toHaveBeenCalled();
   });
 
   test('adding the first repository picks a folder and opens it; a dismissed picker does nothing', async () => {

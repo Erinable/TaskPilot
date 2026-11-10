@@ -7,7 +7,7 @@
 // until this machine confirms it again; the form says so before saving.
 // `save` replaces saving over the pack's file, for a drafted pack that has
 // none yet (the requirement center's course interview).
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import { FIELD_LABELS, GUIDE_FIELDS, draftOf, fieldErrorText, packOf } from '@/lib/course_model.ts';
@@ -18,12 +18,25 @@ import { LAB_TOOLCHAINS, TOOLCHAIN_LABELS } from '@shared/lab_toolchains.ts';
 import { COURSE_LIMITS, checkCourse } from '@shared/course_rules.ts';
 import type { CoursePack } from '@shared/course_pack.ts';
 
-const props = defineProps<{ pack: CoursePack; save?: (pack: CoursePack) => Promise<{ field: string; message: string } | null> }>();
+const props = defineProps<{
+  pack: CoursePack;
+  draftKey?: string;
+  save?: (pack: CoursePack) => Promise<{ field: string; message: string } | null>;
+}>();
 const emit = defineEmits<{ close: [] }>();
 
 const courses = useCoursesStore();
 
-const draft = ref(draftOf(props.pack));
+const draftKey = props.draftKey ?? (props.save ? null : `user:${props.pack.id}`);
+const draft = ref(draftKey ? courses.editDraft(draftKey, props.pack) : draftOf(props.pack));
+const saving = ref(false);
+const form = ref<HTMLFormElement | null>(null);
+const errorSummary = ref<HTMLElement | null>(null);
+const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(draftOf(props.pack)));
+const cancel = () => {
+  if (draftKey) courses.discardDraft(draftKey);
+  emit('close');
+};
 // Errors show once saving was tried, then follow the edits.
 const tried = ref(false);
 // The concept list is mounted only when opened: os has dozens of concepts,
@@ -48,6 +61,79 @@ const errorId = (field: string) => `course-error-${field.replace(/[^a-zA-Z0-9]/g
 const describedBy = (field: string) => (errors.value.has(field) ? errorId(field) : undefined);
 // Errors on fields the form has no input for (the pack's size, a TOML line).
 const otherErrors = computed(() => [...errors.value].filter(([field]) => field === 'pack' || field === 'toml' || field === 'schemaVersion'));
+
+const fieldLabel = (field: string) =>
+  field
+    .split('.')
+    .map((part) => {
+      const [, key, index] = /^(\w+)(?:\[(\d+)\])?$/.exec(part) ?? [];
+      const label =
+        (
+          {
+            rubric: '判卷维度',
+            concepts: '知识点',
+            languages: '语言',
+            toolchains: '工具链',
+            observation: '看到的写法',
+            betterWay: '更好的写法',
+            prerequisites: '前置知识点',
+            pack: '课程包',
+            toml: '课程文件',
+            schemaVersion: '格式版本',
+          } as Record<string, string>
+        )[key] ??
+        FIELD_LABELS[key] ??
+        part;
+      return index === undefined ? label : `${label}第 ${Number(index) + 1} 项`;
+    })
+    .join(' · ');
+
+// ConceptEditor mounts lazily and exposes its row and native control labels.
+// Resolve the actual input after opening it, including indexed prerequisites.
+const targetOf = (field: string): HTMLElement | null => {
+  const concept = /^concepts\[(\d+)\](?:\.(\w+))?/.exec(field);
+  if (concept) {
+    const row = form.value?.querySelector<HTMLElement>(`[data-concept-row="${concept[1]}"]`);
+    const label = (
+      { id: '知识点 id', label: '知识点名称', summary: '知识点说明', dimension: '通用维度', prerequisites: '前置知识点' } as Record<string, string>
+    )[concept[2]];
+    if (row && label) return row.querySelector<HTMLElement>(`[aria-label="${label}"]`) ?? row;
+    if (row) return row;
+  }
+  const fields = form.value?.querySelectorAll<HTMLElement>('[data-field]') ?? [];
+  let parent = field;
+  while (parent) {
+    const target = [...fields].find((element) => element.dataset.field === parent);
+    if (target) return target;
+    const next = parent.replace(/(?:\.[^.[]+|\[\d+\])$/, '');
+    if (next === parent) break;
+    parent = next;
+  }
+  return errorSummary.value;
+};
+
+const focusError = async (field?: string) => {
+  if (field?.startsWith('concepts') || (!field && [...errors.value.keys()].some((key) => key.startsWith('concepts')))) conceptsOpen.value = true;
+  await nextTick();
+  // The validation rules run in their own order; recovery follows form order.
+  const first =
+    field ??
+    [...errors.value.keys()].sort((left, right) => {
+      const position = targetOf(left)?.compareDocumentPosition(targetOf(right) ?? errorSummary.value!);
+      if (position && position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (position && position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    })[0];
+  const target = first ? targetOf(first) : errorSummary.value;
+  if (!target) return;
+  const control = target.matches('input, textarea, button, select, [tabindex]')
+    ? target
+    : target.querySelector<HTMLElement>('input, textarea, select, button, [tabindex]');
+  const focus = control ?? target;
+  if (!control) target.tabIndex = -1;
+  focus.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'start', behavior: 'instant' });
+};
 
 const edited = () => {
   serverError.value = null;
@@ -99,23 +185,41 @@ const removeExample = (index: number, exampleIndex: number) => {
 };
 
 const save = async () => {
+  if (saving.value || courses.busy) return;
   tried.value = true;
   serverError.value = null;
-  if (!checked.value.pack) return;
-  const refused = await (props.save ?? courses.save)(checked.value.pack);
-  if (refused) serverError.value = refused;
-  else emit('close');
+  if (!checked.value.pack) {
+    await focusError();
+    return;
+  }
+  const snapshot = JSON.stringify(draft.value);
+  saving.value = true;
+  try {
+    const refused = await (props.save ?? courses.save)(checked.value.pack);
+    if (refused) {
+      serverError.value = refused;
+      await focusError();
+    } else if (JSON.stringify(draft.value) === snapshot) {
+      if (draftKey && courses.drafts[draftKey] === draft.value) courses.discardDraft(draftKey);
+      emit('close');
+    }
+  } finally {
+    saving.value = false;
+  }
 };
 </script>
 
 <template>
-  <form class="course-editor" novalidate aria-label="编辑课程包" @submit.prevent="save().catch((error) => console.error(error))" @input="edited">
+  <form ref="form" class="course-editor" novalidate aria-label="编辑课程包" @submit.prevent="save().catch((error) => console.error(error))" @input="edited">
+    <p v-if="dirty && draftKey" class="course-path-note" role="status" data-field="draft-status">
+      有未保存修改。草稿会保留，切课程、离页或切仓后可以继续编辑；取消会丢弃草稿。
+    </p>
     <p class="course-editor-note" role="note">
       <AppIcon name="info" />
       <span>保存后内容就变了：要在本机重新确认，确认之前规划和判卷不会用这个课程包。</span>
     </p>
 
-    <div class="course-editor-field">
+    <div class="course-editor-field" data-field="id">
       <span class="course-editor-label">id</span>
       <code class="path-chip">{{ draft.id }}</code>
       <small>id 是文件名，不能改。想换 id 就复制一份。</small>
@@ -306,9 +410,19 @@ const save = async () => {
 
     <p v-for="[field, message] in otherErrors" :key="field" class="course-field-error" role="alert">{{ message }}</p>
 
+    <section v-if="errors.size" ref="errorSummary" class="course-error-summary" role="alert" aria-label="保存未完成" tabindex="-1" data-error="save-summary">
+      <strong>尚未保存，有 {{ errors.size }} 项需要修改。</strong>
+      <p>输入和草稿已保留。选择下面的问题可跳到对应位置。</p>
+      <ul>
+        <li v-for="[field, message] in errors" :key="field">
+          <button class="link-button" type="button" :data-error-field="field" @click="focusError(field)">{{ fieldLabel(field) }}：{{ message }}</button>
+        </li>
+      </ul>
+    </section>
+
     <div class="course-editor-actions">
-      <button class="secondary-button" type="button" @click="emit('close')">取消</button>
-      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy">
+      <button class="secondary-button" type="button" :disabled="saving" @click="cancel">取消</button>
+      <button class="primary-button" type="submit" data-action="save-course" :disabled="courses.busy || saving" :aria-busy="saving">
         <AppIcon name="check" />
         保存
       </button>
@@ -401,6 +515,38 @@ const save = async () => {
 }
 .course-editor .course-field-error {
   color: var(--danger);
+}
+.course-editor :deep([data-field]),
+.course-editor :deep([data-concept-row]),
+.course-editor :deep(input),
+.course-editor :deep(textarea),
+.course-editor :deep([aria-label]),
+.course-error-summary {
+  scroll-margin-block-start: calc(var(--topbar-height) + var(--space-4));
+}
+.course-error-summary {
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.course-error-summary p {
+  margin: var(--space-1) 0;
+  color: var(--text-secondary);
+}
+.course-error-summary ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-4);
+}
+.course-error-summary .link-button {
+  color: inherit;
+  text-align: start;
+  white-space: normal;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .course-editor-actions {
   display: flex;

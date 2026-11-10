@@ -8,11 +8,14 @@ import * as feedback from '@/lib/feedback.ts';
 import { useAppStore } from '@/stores/app.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import { useSetupStore } from '@/stores/setup.ts';
-import { fail, installApi, ok } from '../settings_fakes.ts';
+import { useRepositoryIdentityStore } from '@/stores/repository_identity.ts';
+import { fail, installApi, ok, preferences } from '../settings_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { defaultAgentSettings } from '@shared/agent_runtime.ts';
 import type { CliModelCatalog } from '@shared/agent_runtime.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
+import type { WorkspaceCheck, WorkspaceView } from '@shared/ipc/workspace.ts';
+import type { Preferences } from '@shared/ipc/settings.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -206,6 +209,220 @@ test('a clean save writes nothing', async () => {
   expect(await settings.saveAll()).toBe(true);
   expect(api.workspace.set).not.toHaveBeenCalled();
   expect(api.preferences.set).not.toHaveBeenCalled();
+});
+
+test('a slow preferences save keeps later input dirty and a later explicit save persists it', async () => {
+  const settings = await loaded();
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  const persist = api.preferences.set.getMockImplementation()!;
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  expect(settings.saving).toBe(true);
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  settings.preferencesDraft!.coding.extraRead.push('/later');
+  const submitted = api.preferences.set.mock.calls[0][0];
+  expect(submitted.profile.displayName).toBe('Submitted');
+  expect(submitted.coding.extraRead).toEqual([]);
+  held.resolve(await persist(submitted));
+  expect(await saving).toBe(false);
+  expect(settings.saving).toBe(false);
+  expect(settings.savedPreferences!.profile.displayName).toBe('Submitted');
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Later input');
+  expect(settings.preferencesDraft!.coding.extraRead).toEqual(['/later']);
+  expect(settings.hasUnsavedChanges()).toBe(true);
+  expect(await settings.saveAll()).toBe(true);
+  expect(api.preferences.set).toHaveBeenCalledTimes(2);
+  expect(settings.savedPreferences!.profile.displayName).toBe('Later input');
+  expect(settings.hasUnsavedChanges()).toBe(false);
+});
+
+test('concurrent saves share one write and report pending later edits to every caller', async () => {
+  const settings = await loaded();
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  const first = settings.saveAll();
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  const second = settings.saveAll();
+  const third = settings.saveAll();
+  expect(api.preferences.set).toHaveBeenCalledTimes(1);
+  held.resolve({ ok: true, data: { ...preferences(), profile: { ...preferences().profile, displayName: 'Submitted' } } });
+  expect(await Promise.all([first, second, third])).toEqual([false, false, false]);
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Later input');
+  expect(settings.hasUnsavedChanges()).toBe(true);
+});
+
+test('workspace validation and save use the same snapshot and snapshot preferences before validation', async () => {
+  const settings = await loaded();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run submitted'];
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const checked = await api.workspace.check({ root: '/repo', steps: {} });
+  api.workspace.check.mockClear();
+  const held = Promise.withResolvers<IpcResult<WorkspaceCheck>>();
+  api.workspace.check.mockReturnValueOnce(held.promise);
+  const first = settings.saveAll();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run later'];
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  const second = settings.saveAll();
+  expect(api.workspace.check).toHaveBeenCalledTimes(1);
+  expect(api.workspace.set).not.toHaveBeenCalled();
+  held.resolve(checked);
+  expect(await Promise.all([first, second])).toEqual([false, false]);
+  expect(api.workspace.set).toHaveBeenCalledTimes(1);
+  expect(api.workspace.set.mock.calls[0][0]).toBe(api.workspace.check.mock.calls[0][0]);
+  expect(api.workspace.set.mock.calls[0][0].steps.test!.lines).toEqual(['npm run submitted']);
+  expect(api.preferences.set.mock.calls[0][0].profile.displayName).toBe('Submitted');
+  expect(settings.savedWorkspace!.steps.test!.lines).toEqual(['npm run submitted']);
+  expect(settings.workspaceDraft!.steps.test!.lines).toEqual(['npm run later']);
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Later input');
+  expect(settings.dirty).toEqual({ workspace: true, preferences: true });
+});
+
+test('a slow workspace write keeps changes made after validation and later edits to a previously clean store', async () => {
+  const settings = await loaded();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run submitted'];
+  const persist = api.workspace.set.getMockImplementation()!;
+  const held = Promise.withResolvers<IpcResult<WorkspaceView>>();
+  api.workspace.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  await flushPromises();
+  settings.workspaceDraft!.steps.test!.lines.push('npm run later');
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  held.resolve(await persist(api.workspace.set.mock.calls[0][0]));
+  expect(await saving).toBe(false);
+  expect(settings.savedWorkspace!.steps.test!.lines).toEqual(['npm run submitted']);
+  expect(settings.workspaceDraft!.steps.test!.lines).toEqual(['npm run submitted', 'npm run later']);
+  expect(api.preferences.set).not.toHaveBeenCalled();
+  expect(settings.dirty).toEqual({ workspace: true, preferences: true });
+});
+
+test('the leave guard stays in settings when input continues during its save', async () => {
+  const settings = await loaded();
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  vi.mocked(feedback.confirmChoice).mockResolvedValueOnce('accept');
+  const leaving = useAppStore().navigate('queue');
+  await flushPromises();
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  held.resolve({ ok: true, data: { ...preferences(), profile: { ...preferences().profile, displayName: 'Submitted' } } });
+  expect(await saving).toBe(false);
+  expect(await leaving).toBe(false);
+  expect(api.preferences.set).toHaveBeenCalledTimes(1);
+  expect(useAppStore().view).toBe('settings');
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Later input');
+});
+
+test('partial save failure advances only the successful baseline and preserves all later input for retry', async () => {
+  expectConsole('error', /preferences write failed/);
+  const settings = await loaded();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run submitted'];
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  await flushPromises();
+  expect(settings.savedWorkspace!.steps.test!.lines).toEqual(['npm run submitted']);
+  settings.workspaceDraft!.steps.test!.lines = ['npm run later'];
+  settings.preferencesDraft!.profile.displayName = 'Later input';
+  held.resolve({ ok: false, error: { code: 'unknown', message: 'preferences write failed' } });
+  expect(await saving).toBe(false);
+  expect(settings.savedPreferences!.profile.displayName).toBe('Ada');
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Later input');
+  expect(settings.workspaceDraft!.steps.test!.lines).toEqual(['npm run later']);
+  expect(settings.dirty).toEqual({ preferences: true, workspace: true });
+  expect(settings.saving).toBe(false);
+  expect(await settings.saveAll()).toBe(true);
+  expect(settings.hasUnsavedChanges()).toBe(false);
+});
+
+test('a failed workspace write preserves both drafts and never starts a preferences write', async () => {
+  expectConsole('error', /workspace write failed/);
+  const settings = await loaded();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run submitted'];
+  settings.preferencesDraft!.profile.displayName = 'Submitted';
+  const held = Promise.withResolvers<IpcResult<WorkspaceView>>();
+  api.workspace.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  await flushPromises();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run later'];
+  held.resolve({ ok: false, error: { code: 'unknown', message: 'workspace write failed' } });
+  expect(await saving).toBe(false);
+  expect(api.preferences.set).not.toHaveBeenCalled();
+  expect(settings.savedWorkspace!.steps.test!.lines).toEqual(['npm test']);
+  expect(settings.workspaceDraft!.steps.test!.lines).toEqual(['npm run later']);
+  expect(settings.preferencesDraft!.profile.displayName).toBe('Submitted');
+  expect(settings.dirty).toEqual({ preferences: true, workspace: true });
+});
+
+test.each(['check', 'set'] as const)('switching repositories during workspace %s rejects stale replies and skips remaining writes', async (stage) => {
+  const settings = await loaded();
+  settings.workspaceDraft!.steps.test!.lines = ['npm run old'];
+  settings.preferencesDraft!.profile.displayName = 'Old repository draft';
+  const view = await api.workspace.get();
+  const checked = await api.workspace.check({ root: '/repo', steps: {} });
+  api.workspace.check.mockClear();
+  const heldCheck = Promise.withResolvers<IpcResult<WorkspaceCheck>>();
+  const heldSet = Promise.withResolvers<IpcResult<WorkspaceView>>();
+  if (stage === 'check') api.workspace.check.mockReturnValueOnce(heldCheck.promise);
+  else api.workspace.set.mockReturnValueOnce(heldSet.promise);
+  const saving = settings.saveAll();
+  await flushPromises();
+  useRepositoryIdentityStore().currentId = 'new-repository';
+  if (!view.ok) throw new Error('Expected workspace fixture');
+  api.workspace.get.mockReturnValueOnce(ok({ ...view.data, root: '/new-repository' }));
+  await settings.load();
+  settings.preferencesDraft!.profile.displayName = 'New repository draft';
+  heldCheck.resolve(checked);
+  heldSet.resolve(view);
+  expect(await saving).toBe(false);
+  expect(api.workspace.set).toHaveBeenCalledTimes(stage === 'check' ? 0 : 1);
+  expect(api.preferences.set).not.toHaveBeenCalled();
+  expect(settings.savedWorkspace!.root).toBe('/new-repository');
+  expect(settings.workspaceDraft!.root).toBe('/new-repository');
+  expect(settings.workspaceView!.root).toBe('/new-repository');
+  expect(settings.preferencesDraft!.profile.displayName).toBe('New repository draft');
+  expect(settings.repoFacts).toBeNull();
+  expect(feedback.showToast).not.toHaveBeenCalledWith('设置已保存。');
+});
+
+test.each([null, 'new-repository'])('a preferences reply from an older load cannot overwrite reloaded drafts (%s)', async (repositoryId) => {
+  const settings = await loaded();
+  settings.preferencesDraft!.profile.displayName = 'Old save';
+  const held = Promise.withResolvers<IpcResult<Preferences>>();
+  api.preferences.set.mockReturnValueOnce(held.promise);
+  const saving = settings.saveAll();
+  useRepositoryIdentityStore().currentId = repositoryId;
+  await settings.load();
+  settings.preferencesDraft!.profile.displayName = 'New draft';
+  held.resolve({ ok: true, data: { ...preferences(), profile: { ...preferences().profile, displayName: 'Old save' } } });
+  expect(await saving).toBe(false);
+  expect(settings.savedPreferences!.profile.displayName).toBe('Ada');
+  expect(settings.preferencesDraft!.profile.displayName).toBe('New draft');
+  expect(useAppStore().preferences).toBeNull();
+});
+
+test('saving while a repository is loading cannot submit the previous repository drafts', async () => {
+  const settings = await loaded();
+  settings.workspaceDraft!.root = '/old-edit';
+  settings.preferencesDraft!.profile.displayName = 'Old draft';
+  const view = await api.workspace.get();
+  const held = Promise.withResolvers<IpcResult<WorkspaceView>>();
+  useRepositoryIdentityStore().currentId = 'new-repository';
+  api.workspace.get.mockReturnValueOnce(held.promise);
+  const loading = settings.load();
+  expect(await settings.saveAll()).toBe(false);
+  expect(await settings.checkWorkspace()).toBe(false);
+  expect(api.workspace.check).not.toHaveBeenCalled();
+  expect(api.workspace.set).not.toHaveBeenCalled();
+  expect(api.preferences.set).not.toHaveBeenCalled();
+  held.resolve(view);
+  await loading;
+  settings.preferencesDraft!.profile.displayName = 'New draft';
+  expect(await settings.saveAll()).toBe(true);
+  expect(api.preferences.set.mock.calls[0][0].profile.displayName).toBe('New draft');
 });
 
 test('a failed check shows the error on its field and writes nothing', async () => {

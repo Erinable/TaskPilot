@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // 课程: every course pack this repository can use (built in, the
-// repository's, imported or copied), which one is in use, and one pack's
-// whole content on the right. Any pack can be copied into the global
-// folder to edit; imported and copied packs open in the form editor.
-// Built-in packs are read-only.
+// repository's, imported or copied), which one is in use, and a learner
+// overview with the full instructions on demand. Any pack can be
+// copied into the global folder to edit; imported and copied packs open in
+// the form editor. Built-in packs are read-only.
 //
 // [人工决策-2026-10-27 00:55:52] 侧栏新增「课程」一级视图，浏览、复制再改和表单编辑都在这里；
 // 内置包只读，只显示「复制再改」。保存后 contentHash 变了，要重新确认，界面要讲清楚。
@@ -12,6 +12,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import CourseContent from '@/components/courses/CourseContent.vue';
 import CourseEditor from '@/components/courses/CourseEditor.vue';
+import CourseOverview from '@/components/courses/CourseOverview.vue';
 import CoursePreviewDialog from '@/components/courses/CoursePreviewDialog.vue';
 import { SOURCE_LABELS, TRUST_LABELS, changeText, copyIdFor, languageMismatch, sourcePath } from '@/lib/course_model.ts';
 import { STATE_LABELS, stateCounts } from '@/lib/mastery_model.ts';
@@ -20,10 +21,12 @@ import { useMasteryStore } from '@/stores/mastery.ts';
 import { useRepositoriesStore } from '@/stores/repositories.ts';
 import { useRequirementsStore } from '@/stores/requirements.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
-import { isCourseId } from '@shared/course_pack.ts';
+import { DEFAULT_COURSE_ID, isCourseId } from '@shared/course_pack.ts';
 import type * as courseTypes from '@shared/ipc/courses.ts';
 
 const courses = useCoursesStore();
+const repositories = useRepositoriesStore();
+const hasRepository = computed(() => repositories.currentId !== null);
 
 const run = (promise: Promise<unknown>) => {
   promise.catch((error) => console.error(error));
@@ -31,16 +34,17 @@ const run = (promise: Promise<unknown>) => {
 
 const current = computed(() => courses.current);
 const entries = computed(() => courses.list?.entries ?? []);
-const languages = computed(() => courses.list?.languages ?? []);
+const languages = computed(() => (hasRepository.value ? (courses.list?.languages ?? []) : []));
 const viewed = computed(() => courses.viewed);
 const viewedEntry = computed(() => entries.value.find((entry) => entry.id === viewed.value?.ref.id) ?? null);
 const location = computed(() => (viewed.value ? sourcePath(viewed.value.ref.id, viewed.value.ref.source, courses.list?.userDir ?? 'courses') : null));
 
-const inUse = (entry: courseTypes.CourseEntry) => current.value?.ref.id === entry.id;
-const isSelected = (entry: courseTypes.CourseEntry) => current.value?.selected.id === entry.id;
+const inUse = (entry: courseTypes.CourseEntry) => hasRepository.value && current.value?.ref.id === entry.id;
+const isSelected = (entry: courseTypes.CourseEntry) => hasRepository.value && current.value?.selected.id === entry.id;
+const isDefault = (entry: courseTypes.CourseEntry) => !hasRepository.value && entry.source === 'builtin' && entry.id === DEFAULT_COURSE_ID;
 // The pack picked here that waits for this machine's confirmation.
 const pendingHere = computed(() => {
-  const state = current.value?.state;
+  const state = hasRepository.value ? current.value?.state : null;
   return state?.status === 'pending' && state.ref.id === viewed.value?.ref.id ? state : null;
 });
 const editable = computed(() => viewed.value?.ref.source === 'user');
@@ -55,8 +59,15 @@ const groups = computed(() =>
 );
 
 const editing = ref(false);
+watch(
+  () => viewed.value?.ref.id,
+  (id) => {
+    editing.value = Boolean(id && viewed.value?.ref.source === 'user' && courses.drafts[`user:${id}`]);
+  },
+  { immediate: true },
+);
 const open = (id: string) => {
-  editing.value = false;
+  copying.value = false;
   run(courses.view(id));
 };
 
@@ -67,7 +78,7 @@ const copyError = ref<string | null>(null);
 const takenIds = computed(() => entries.value.map((entry) => entry.id));
 
 const startCopy = () => {
-  if (!viewed.value) return;
+  if (!viewed.value || courses.busy) return;
   copyId.value = copyIdFor(viewed.value.ref.id, takenIds.value);
   copyError.value = null;
   copying.value = true;
@@ -79,12 +90,14 @@ const copyIdProblem = (id: string) => {
 };
 
 const submitCopy = async () => {
-  if (!viewed.value) return;
-  copyError.value = copyIdProblem(copyId.value);
+  if (!viewed.value || courses.busy) return;
+  const id = copyId.value;
+  copyError.value = copyIdProblem(id);
   if (copyError.value) return;
-  const refused = await courses.copy(viewed.value.ref.id, copyId.value);
+  const refused = await courses.copy(viewed.value.ref.id, id);
+  if (!copying.value) return;
   if (refused) copyError.value = refused.message;
-  else {
+  else if (courses.viewedId === id && viewed.value?.ref.id === id) {
     copying.value = false;
     editing.value = true;
   }
@@ -93,7 +106,6 @@ const submitCopy = async () => {
 // ========== Labs and mastery ==========
 // The pack's lab repositories and how its concepts stand (mastery is global).
 const mastery = useMasteryStore();
-const repositories = useRepositoriesStore();
 const summary = computed(() => (mastery.summary && mastery.summary.course.id === viewed.value?.ref.id ? mastery.summary : null));
 const counts = computed(() => (summary.value ? stateCounts(summary.value.concepts) : null));
 const MASTERY_STATES = Object.keys(STATE_LABELS) as (keyof typeof STATE_LABELS)[];
@@ -134,6 +146,23 @@ onBeforeUnmount(() => courses.leave());
       </div>
     </div>
 
+    <div v-if="courses.loadError" class="course-state" role="alert" data-error="courses-load">
+      <AppIcon name="alert" />
+      <span>
+        读取课程包失败：{{ courses.loadError }}
+        <template v-if="courses.list">。保留上次读取的内容。</template>
+      </span>
+      <button class="secondary-button small" type="button" data-action="retry-courses" :disabled="courses.loading" @click="run(courses.loadView())">
+        重试
+      </button>
+    </div>
+    <div v-if="courses.viewError" class="course-state" role="alert" data-error="course-preview">
+      <AppIcon name="alert" />
+      <span>读取「{{ courses.viewedId }}」失败：{{ courses.viewError }}。已显示的内容和草稿仍保留。</span>
+      <button class="secondary-button small" type="button" data-action="retry-preview" @click="courses.viewedId && run(courses.view(courses.viewedId))">
+        重试
+      </button>
+    </div>
     <div v-if="courses.list" class="course-columns">
       <nav class="panel glass course-list-panel" aria-label="课程包">
         <section v-for="group in groups" :key="group.source" class="course-group" :data-group="group.source">
@@ -150,7 +179,9 @@ onBeforeUnmount(() => courses.leave());
           >
             <span class="course-item-title">
               <strong>{{ entry.title ?? entry.id }}</strong>
-              <span v-if="inUse(entry)" class="scope-badge in-use">正在使用</span>
+              <span v-if="entry.source === 'user' && courses.drafts[`user:${entry.id}`]" class="scope-badge selected">编辑草稿</span>
+              <span v-if="isDefault(entry)" class="scope-badge">默认课程</span>
+              <span v-else-if="inUse(entry)" class="scope-badge in-use">正在使用</span>
               <span v-else-if="isSelected(entry)" class="scope-badge selected">已选，待确认</span>
             </span>
             <small v-if="entry.error" class="warn-text">{{ entry.error }}</small>
@@ -177,7 +208,7 @@ onBeforeUnmount(() => courses.leave());
           </div>
           <div v-if="!editing" class="course-detail-actions">
             <button
-              v-if="current && current.selected.id !== viewed.ref.id"
+              v-if="hasRepository && current && current.selected.id !== viewed.ref.id"
               class="primary-button small"
               type="button"
               data-action="select"
@@ -191,7 +222,7 @@ onBeforeUnmount(() => courses.leave());
               <AppIcon name="sliders" />
               编辑
             </button>
-            <button class="secondary-button small" type="button" data-action="copy" @click="startCopy">
+            <button class="secondary-button small" type="button" data-action="copy" :disabled="courses.busy" @click="startCopy">
               <AppIcon name="copy" />
               复制再改
             </button>
@@ -199,7 +230,12 @@ onBeforeUnmount(() => courses.leave());
         </div>
 
         <div class="course-detail-body">
-          <p v-if="pendingHere" class="course-state pending" role="status" data-state="pending">
+          <p v-if="!hasRepository" class="course-state" role="status" data-state="no-repository">
+            <AppIcon name="info" />
+            <span v-if="viewed.ref.id === DEFAULT_COURSE_ID">未打开仓库。这是内置默认课程；打开仓库后，课程选择会按仓库配置生效。</span>
+            <span v-else>未打开仓库。可先浏览或复制课程包，打开仓库后再选择使用。</span>
+          </p>
+          <p v-else-if="pendingHere" class="course-state pending" role="status" data-state="pending">
             <AppIcon name="alert" />
             <span>这个仓库选了它，但内容还没在本机确认（或者保存后变了），规划和判卷暂时用内置的「编程」。</span>
             <button class="primary-button small" type="button" data-action="confirm" @click="run(courses.openPreview(viewed.ref.id))">查看并确认</button>
@@ -227,6 +263,7 @@ onBeforeUnmount(() => courses.leave());
               class="field-input mono"
               type="text"
               :aria-invalid="Boolean(copyError)"
+              :disabled="courses.busy"
               aria-describedby="courseCopyHint"
               @input="copyError = null"
             />
@@ -234,8 +271,8 @@ onBeforeUnmount(() => courses.leave());
               {{ copyError ?? `复制到 ${courses.list.userDir}，所有仓库都能选。复制品要在本机确认后才会用。` }}
             </small>
             <div class="course-copy-actions">
-              <button class="secondary-button small" type="button" @click="copying = false">取消</button>
-              <button class="primary-button small" type="submit" data-action="copy-submit" :disabled="courses.busy">
+              <button class="secondary-button small" type="button" :disabled="courses.busy" @click="copying = false">取消</button>
+              <button class="primary-button small" type="submit" data-action="copy-submit" :disabled="courses.busy" :aria-busy="courses.busy">
                 <AppIcon name="copy" />
                 复制并编辑
               </button>
@@ -275,13 +312,20 @@ onBeforeUnmount(() => courses.leave());
             </template>
           </section>
 
-          <CourseEditor v-if="editing && editable" :key="viewed.ref.contentHash" :pack="viewed.pack" @close="editing = false" />
-          <CourseContent v-else :pack="viewed.pack" :changes="viewed.changes" />
+          <CourseEditor v-if="editing && editable" :key="viewed.ref.id" :pack="viewed.pack" @close="editing = false" />
+          <template v-else>
+            <CourseOverview :pack="viewed.pack" :source="viewed.ref.source" />
+            <details :key="viewed.ref.id" class="course-instructions" data-section="course-instructions">
+              <summary>完整课程指令</summary>
+              <p>查看交给 Product Lead 和导师的全部课程包原文，包括讲解、难度、练习方式和参考答案指引。</p>
+              <CourseContent :pack="viewed.pack" :changes="viewed.changes" />
+            </details>
+          </template>
         </div>
       </section>
     </div>
 
-    <p v-else class="empty-hint" data-loading>
+    <p v-else-if="courses.loading || !courses.loadError" class="empty-hint" data-loading>
       <AppIcon name="spinner" class="spin" />
       正在读取课程包…
     </p>
@@ -417,8 +461,30 @@ onBeforeUnmount(() => courses.leave());
   gap: var(--space-3);
   padding: 0 20px 20px;
 }
-.course-detail-body > .course-fields {
-  margin: 0;
+.course-instructions {
+  min-width: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--text-sm);
+}
+.course-instructions summary {
+  width: fit-content;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.course-instructions summary:hover {
+  color: var(--accent-strong);
+}
+.course-instructions summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+.course-instructions > p {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 .course-state {
   display: flex;

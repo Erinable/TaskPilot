@@ -27,7 +27,15 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const requireMastery = () => ctx.mastery ?? failWith('Mastery is unavailable', 'unsupported');
   const requireNotes = () => ctx.notes ?? failWith('Notes are unavailable', 'unsupported');
   const today = () => businessDay(new Date(), appEnv.businessTimeZone);
-  const schedules = () => progress.schedulesOf(requireNotes().list().notes, requireMastery().reviews(), appEnv.businessTimeZone);
+  const schedules = async () => {
+    const store = requireNotes();
+    const directoryIdentity = store.directoryIdentity;
+    const notes = store.list().notes;
+    const identities = store.noteIdentities();
+    const saved = await requireMastery().schedulesFor(directoryIdentity.vaultId, identities, store.initialVaultId);
+    if (directoryIdentity !== store.directoryIdentity) return failWith('The notes folder changed', 'note_conflict');
+    return { directoryIdentity, notes, identities, all: progress.schedulesOf(notes, saved, appEnv.businessTimeZone) };
+  };
 
   // The registered lab repositories teaching `course`: one taskpilot.toml
   // read per repository in the registry, which the learner keeps short. A
@@ -52,14 +60,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   };
 
   registerContract(ipcMain, masteryContract, {
-    reviews: (): masteryTypes.ReviewList => {
+    reviews: async (): Promise<masteryTypes.ReviewList> => {
       const day = today();
-      const notes = new Map(
-        requireNotes()
-          .list()
-          .notes.map((note) => [note.id, note]),
-      );
-      const all = schedules();
+      const snapshot = await schedules();
+      const notes = new Map(snapshot.notes.map((note) => [note.id, note]));
+      const { all } = snapshot;
       const due = all
         .filter((schedule) => progress.isDue(schedule, day))
         .sort((a, b) => a.dueDay.localeCompare(b.dueDay))
@@ -93,12 +98,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     review: async (rawId, remembered): Promise<masteryTypes.ReviewSchedule> => {
       const noteId = requireString(rawId, 'noteId');
       if (typeof remembered !== 'boolean') return failWith('remembered must be true or false', 'invalid_argument', 'remembered');
-      const all = schedules();
+      const { all, directoryIdentity, identities } = await schedules();
       const schedule = all.find((entry) => entry.noteId === noteId) ?? failWith('This note has no concepts to review', 'not_reviewable', 'noteId');
       const day = today();
       if (!progress.isDue(schedule, day)) return failWith(`This note is due on ${schedule.dueDay}`, 'not_due', 'noteId');
       const next = progress.reviewed(schedule, remembered, day);
-      await requireMastery().setReview(next, new Set(all.map((entry) => entry.noteId)));
+      await requireMastery().setReview(next, directoryIdentity.vaultId, new Map(all.map((entry) => [entry.noteId, identities.get(entry.noteId)!])));
       return next;
     },
   });

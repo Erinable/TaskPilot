@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // An existing requirement: status, stepper, and the conversation for its
-// current step. Keyed on the store's detail revision, so local state (answers,
-// disabled buttons) resets whenever the page re-renders it.
+// current step. Keyed on the detail revision; answer drafts survive in the store.
 import { computed, ref } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
@@ -21,10 +20,10 @@ const props = defineProps<{ item: requirementTypes.Requirement }>();
 
 const store = useRequirementsStore();
 
-const answers = ref(props.item.questions.map((question) => question.answer ?? ''));
+const answers = computed(() => store.answerDraft(props.item).answers);
 // Questions handed back to Product Lead: a blank answer tells it to pick a
 // sensible default and say so in the plan (see product_lead.planPrompt).
-const defaults = ref(props.item.questions.map(() => false));
+const defaults = computed(() => store.answerDraft(props.item).defaults);
 const useDefault = (index: number) => {
   answers.value[index] = '';
   defaults.value[index] = true;

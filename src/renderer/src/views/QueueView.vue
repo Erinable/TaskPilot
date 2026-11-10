@@ -120,7 +120,7 @@ const hasHistory = computed(() => tasks.tasks.some((task) => task.status === 'do
         </small>
       </div>
       <div class="metric-card glass" title="实际用时在预计的 0.5 到 1.5 倍之间的已完成工作包占比">
-        <div class="metric-icon accent"><AppIcon name="target" /></div>
+        <div class="metric-icon violet"><AppIcon name="target" /></div>
         <div>
           <span>估时准确度</span>
           <strong>{{ accuracy ? `${Math.round(accuracy.ratio * 100)}%` : '–' }}</strong>

@@ -5,6 +5,7 @@ import { flushPromises } from '@vue/test-utils';
 
 import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import { useReleaseStore } from '../../../src/renderer/src/stores/release.ts';
+import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/repository_identity.ts';
 import * as fakes from '../release_fakes.ts';
 import type * as releaseTypes from '../../../src/shared/ipc/release.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
@@ -110,6 +111,90 @@ describe('release store', () => {
     expect(api.updateDraft).toHaveBeenCalledTimes(calls);
   });
 
+  test('rapid checklist changes preserve every selection and wait before finishing', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.updateDraft>>>();
+    api.updateDraft.mockReturnValueOnce(held.promise);
+    const first = store.setChecked(0, true);
+    const second = store.setChecked(1, true);
+    expect(store.checklistPending).toBe(2);
+    expect(store.canFinish).toBe(false);
+    expect(api.updateDraft).toHaveBeenCalledOnce();
+    state.current = { ...state.current, draft: fakes.draft({ checked: [0] }) };
+    held.resolve({ ok: true, data: state.current });
+    await Promise.all([first, second]);
+    expect(api.updateDraft.mock.calls.map(([input]) => input.checked)).toEqual([[0], [0, 1]]);
+    expect(store.draft?.checked).toEqual([0, 1]);
+    expect(store.checklistPending).toBe(0);
+    expect(store.canFinish).toBe(true);
+  });
+
+  test('queued unchecking and notes saving use the latest acknowledged checklist', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.updateDraft>>>();
+    api.updateDraft.mockReturnValueOnce(held.promise);
+    const checking = store.setChecked(1, true);
+    store.editNotes('同时编辑说明');
+    const flushing = store.flushNotes();
+    const unchecking = store.setChecked(0, false);
+    state.current = { ...state.current, draft: fakes.draft({ checked: [0, 1] }) };
+    held.resolve({ ok: true, data: state.current });
+    await Promise.all([checking, unchecking, flushing]);
+    expect(store.draft?.checked).toEqual([1]);
+    expect(store.draft?.notesText).toBe('同时编辑说明');
+    expect(store.notesStatus).toBe('saved');
+  });
+
+  test('failed checklist saves retain an error until the selection is retried', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    api.updateDraft.mockReturnValueOnce(fakes.fail('unknown', 'disk unavailable'));
+    expectConsole('error', /\[release\] save checklist failed/);
+    await store.setChecked(1, true);
+    expect(store.checklistError).toBe('disk unavailable');
+    expect(store.draft?.checked).toEqual([0]);
+    expect(await store.flushNotes()).toBe(false);
+    expect(store.canFinish).toBe(false);
+    await store.setChecked(1, true);
+    expect(store.checklistError).toBeNull();
+    expect(store.canFinish).toBe(true);
+  });
+
+  test('queued checklist writes are dropped after the repository changes', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.updateDraft>>>();
+    api.updateDraft.mockReturnValueOnce(held.promise);
+    const first = store.setChecked(0, true);
+    const second = store.setChecked(1, true);
+    useRepositoryIdentityStore().currentId = 'next';
+    held.resolve({ ok: true, data: state.current });
+    await Promise.all([first, second]);
+    expect(api.updateDraft).toHaveBeenCalledOnce();
+    expect(store.checklistPending).toBe(0);
+    expect(store.checklistError).toBeNull();
+  });
+
+  test('an old list refresh cannot undo acknowledged checklist changes', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.get>>>();
+    const old = state.current;
+    api.get.mockReturnValueOnce(held.promise);
+    const loading = store.load();
+    await store.setChecked(0, true);
+    held.resolve({ ok: true, data: old });
+    await loading;
+    expect(store.draft?.checked).toEqual([0]);
+  });
+
   test('finish needs every item checked, then confirms and records', async () => {
     state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0] }) });
     const store = useReleaseStore();
@@ -127,6 +212,146 @@ describe('release store', () => {
     await store.finish();
     expect(api.finish).toHaveBeenCalledTimes(1);
     expect(feedback.showToast).toHaveBeenLastCalledWith('已记录发布 0.2.0');
+  });
+
+  test('one finish confirmation owns the operation and freezes edits until it settles', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0, 1] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    const before = store.notesText;
+    const confirmation = Promise.withResolvers<boolean>();
+    const committed = Promise.withResolvers<Awaited<ReturnType<typeof api.finish>>>();
+    vi.mocked(feedback.confirmAction).mockReturnValueOnce(confirmation.promise);
+    api.finish.mockReturnValueOnce(committed.promise);
+    const first = store.finish();
+    await store.finish();
+    expect(feedback.confirmAction).toHaveBeenCalledOnce();
+    expect(store.finishing).toBe(true);
+    confirmation.resolve(true);
+    await flushPromises();
+    store.editNotes('不能在记录发布期间新建草稿');
+    expect(store.notesText).toBe(before);
+    expect(api.finish).toHaveBeenCalledOnce();
+    committed.resolve({ ok: true, data: fakes.release() });
+    await first;
+    expect(store.finishing).toBe(false);
+  });
+
+  test('a write waiting on flush cannot continue into a different repository', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    const writing = store.writeNotes('CHANGELOG.md');
+    useRepositoryIdentityStore().currentId = 'next-repository';
+    expect(await writing).toBe(false);
+    expect(api.writeNotes).not.toHaveBeenCalled();
+  });
+
+  test('an old confirmation cannot finish a release after switching repository', async () => {
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0, 1] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    const confirmation = Promise.withResolvers<boolean>();
+    vi.mocked(feedback.confirmAction).mockReturnValueOnce(confirmation.promise);
+    const finishing = store.finish();
+    useRepositoryIdentityStore().currentId = 'another-repository';
+    confirmation.resolve(true);
+    await finishing;
+    expect(api.finish).not.toHaveBeenCalled();
+  });
+
+  test('failed notes saves block finishing and preserve edits until a successful retry', async () => {
+    vi.useFakeTimers();
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0, 1] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    store.editNotes('尚未保存的新说明');
+    api.updateDraft.mockReturnValueOnce(fakes.fail('too_long', 'notes is too long', 'notes'));
+    expectConsole('error', /\[release\] save notes failed/);
+
+    await store.finish();
+    expect(api.finish).not.toHaveBeenCalled();
+    expect(store.notesStatus).toBe('error');
+    expect(store.notesText).toBe('尚未保存的新说明');
+    expect(store.finishing).toBe(false);
+
+    await store.finish();
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ notes: '尚未保存的新说明' });
+    expect(api.finish).toHaveBeenCalledOnce();
+  });
+
+  test('writing a file is blocked when the edited notes cannot be saved', async () => {
+    vi.useFakeTimers();
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    store.editNotes('未保存的说明');
+    api.updateDraft.mockReturnValueOnce(fakes.fail('too_long', 'notes is too long', 'notes'));
+    expectConsole('error', /\[release\] save notes failed/);
+
+    expect(await store.writeNotes('CHANGELOG.md')).toBe(false);
+    expect(api.writeNotes).not.toHaveBeenCalled();
+    expect(store.writeError).toContain('尚未保存');
+    expect(store.notesText).toBe('未保存的说明');
+  });
+
+  test('finish waits for an existing save and flushes text typed while it was pending', async () => {
+    vi.useFakeTimers();
+    state.current = fakes.releaseState({ draft: fakes.draft({ checked: [0, 1] }) });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.updateDraft>>>();
+    api.updateDraft.mockReturnValueOnce(held.promise);
+    store.editNotes('第一个版本');
+    await vi.advanceTimersByTimeAsync(800);
+    expect(store.notesStatus).toBe('saving');
+    store.editNotes('继续输入后的版本');
+    const finishing = store.finish();
+    await flushPromises();
+    expect(api.finish).not.toHaveBeenCalled();
+    expect(api.updateDraft).toHaveBeenCalledOnce();
+
+    held.resolve({ ok: true, data: state.current });
+    await finishing;
+    expect(api.updateDraft).toHaveBeenCalledTimes(2);
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ notes: '继续输入后的版本' });
+    expect(api.finish).toHaveBeenCalledOnce();
+    expect(state.current.draft?.notesText).toBe('继续输入后的版本');
+  });
+
+  test('a slow autosave still automatically saves edits whose debounce elapsed in flight', async () => {
+    vi.useFakeTimers();
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    const held = Promise.withResolvers<Awaited<ReturnType<typeof api.updateDraft>>>();
+    api.updateDraft.mockReturnValueOnce(held.promise);
+    store.editNotes('第一版');
+    await vi.advanceTimersByTimeAsync(800);
+    store.editNotes('第二版');
+    await vi.advanceTimersByTimeAsync(800);
+    expect(api.updateDraft).toHaveBeenCalledOnce();
+    held.resolve({ ok: true, data: state.current });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(800);
+    expect(api.updateDraft).toHaveBeenCalledTimes(2);
+    expect(api.updateDraft).toHaveBeenLastCalledWith({ notes: '第二版' });
+    expect(store.notesStatus).toBe('saved');
+  });
+
+  test('an autosave failure is retried by flush instead of being treated as saved', async () => {
+    vi.useFakeTimers();
+    state.current = fakes.releaseState({ draft: fakes.draft() });
+    const store = useReleaseStore();
+    await store.enter();
+    api.updateDraft.mockReturnValueOnce(fakes.fail('too_long', 'notes is too long', 'notes'));
+    expectConsole('error', /\[release\] save notes failed/);
+    store.editNotes('需要重试的说明');
+    await vi.advanceTimersByTimeAsync(800);
+    expect(store.notesStatus).toBe('error');
+    expect(await store.flushNotes()).toBe(true);
+    expect(store.notesStatus).toBe('saved');
+    expect(state.current.draft?.notesText).toBe('需要重试的说明');
   });
 
   test('writing notes validates the path and keeps failures for the dialog', async () => {

@@ -28,7 +28,7 @@ const restrictedSyntax = [
 ];
 
 export default tseslint.config(
-  { ignores: ['out/**', 'node_modules/**', 'evals/*/reports/**', '**/*.d.ts'] },
+  { ignores: ['out/**', 'node_modules/**', '.dsh/**', '.impeccable/**', 'evals/*/reports/**', '**/*.d.ts'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...vue.configs['flat/recommended'],

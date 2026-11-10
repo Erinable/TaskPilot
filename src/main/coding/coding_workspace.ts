@@ -418,17 +418,21 @@ export const applyPatch = async (
   patch: string,
   previewDigest: string,
   blocked: readonly BlockedPatch[] | boolean,
-  options: WorkspaceOptions & { baseline?: string; resolutions?: Partial<Record<string, patchMerge.Resolution>> } = {},
+  options: WorkspaceOptions & { baseline?: string; resolutions?: Partial<Record<string, patchMerge.Resolution>>; assertCurrent?: () => void } = {},
 ): Promise<{ written: string[]; markers: string[]; kept: string[] }> => {
   const digest = createHash('sha256').update(patch).digest('hex');
   if (digest !== previewDigest) throw new CodingWorkspaceError('Patch digest does not match the preview', 'workspace_digest_mismatch');
-  if (options.signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
+  const assertCurrent = () => {
+    if (options.signal?.aborted) throw new CodingWorkspaceError('Patch application was cancelled', 'workspace_aborted');
+    options.assertCurrent?.();
+  };
+  assertCurrent();
   const parsed = parsePatchFiles(patch, undefined, options.rules ?? NO_RULES);
   const blockedPaths = typeof blocked === 'boolean' ? (blocked ? [{ path: '*', reason: 'caller blocked patch application' }] : []) : blocked;
   const intrinsicBlocked = parsed.blocked.filter((entry) => entry.reason !== 'high-risk project control or test path');
   if (blockedPaths.length || intrinsicBlocked.length) throw new CodingWorkspaceError('Patch contains blocked or unsafe paths', 'workspace_blocked_patch');
   await assertPatchTargetsSafe(root, parsed.files);
-  return patchMerge.applyMerged(root, options.baseline ?? 'HEAD', filePatches(patch), options.resolutions ?? {});
+  return patchMerge.applyMerged(root, options.baseline ?? 'HEAD', filePatches(patch), options.resolutions ?? {}, assertCurrent);
 };
 
 // The part of a patch that touches `selected` paths, cut at `diff --git`

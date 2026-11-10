@@ -156,6 +156,20 @@
   gap: var(--space-4);
   min-width: 0;
 }
+/* The side column (scope, checks, changes) is short; it stays in view while
+ * the long main column scrolls, and scrolls itself when taller than the window. */
+.exec-side {
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--space-4));
+  max-height: calc(100vh - var(--topbar-height) - var(--space-8));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.panel-fold-toggle {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
 
 /* Instruction checklist */
 .progress-track {

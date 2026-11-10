@@ -25,7 +25,7 @@ import type { GradeReport } from '../../shared/ipc/packages.ts';
 import type { Review } from '../../shared/ipc/packages.ts';
 
 export const MASTERY_FILENAME = 'mastery.json';
-const MASTERY_VERSION = 1;
+const MASTERY_VERSION = 2;
 export const MAX_ATTEMPTS = 20;
 export const MAX_ERROR_TYPES = 10;
 // Records kept; the least recently attempted go first beyond this.
@@ -63,7 +63,16 @@ export type MasteryRecord = {
   errorCounts: { type: string; count: number }[];
 };
 
-type SavedState = { version: number; records: MasteryRecord[]; seen: string[]; reviews: ReviewSchedule[] };
+type ScopedReview = ReviewSchedule & { vaultId: string; identity: string };
+type SavedState = {
+  version: number;
+  records: MasteryRecord[];
+  seen: string[];
+  reviews: ScopedReview[];
+  legacyReviews: ReviewSchedule[];
+  legacyVaultId: string | null;
+};
+const reviewKey = (vaultId: string, identity: string) => `${vaultId}\u0000${identity}`;
 
 // Tests that ran in the review's blocking checks, the hidden ones included.
 const testCounts = (review: Review & { status: 'passed' | 'rejected' }) => {
@@ -167,7 +176,9 @@ export class MasteryStore {
   #file: string;
   #records = new Map<string, MasteryRecord>();
   #seen = new Set<string>();
-  #reviews = new Map<string, ReviewSchedule>();
+  #reviews = new Map<string, ScopedReview>();
+  #legacyReviews = new Map<string, ReviewSchedule>();
+  #legacyVaultId: string | null = null;
   #writes = new JsonWriteQueue();
   #onChanged?: StateChanged;
 
@@ -190,16 +201,32 @@ export class MasteryStore {
   async load(): Promise<this> {
     try {
       const saved = (await readStoredJson(this.#file, MASTERY_VERSION)) as Partial<SavedState> | null;
+      this.#records.clear();
+      this.#reviews.clear();
+      this.#legacyReviews.clear();
       for (const record of (Array.isArray(saved?.records) ? saved.records : []).filter(isRecord))
         this.#records.set(recordKey(record.course, record.conceptId), record);
       this.#seen = new Set((Array.isArray(saved?.seen) ? saved.seen : []).filter((key) => typeof key === 'string'));
-      for (const schedule of (Array.isArray(saved?.reviews) ? saved.reviews : []).filter(isSchedule)) this.#reviews.set(schedule.noteId, schedule);
+      this.#restoreReviews(saved);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'unsupported_version') throw error;
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
       if (error instanceof SyntaxError) logger.error('[mastery] mastery.json is not valid JSON; starting empty', error);
     }
     return this;
+  }
+
+  #restoreReviews(saved: Partial<SavedState> | null) {
+    this.#legacyVaultId = typeof saved?.legacyVaultId === 'string' ? saved.legacyVaultId : null;
+    for (const schedule of (Array.isArray(saved?.reviews) ? saved.reviews : []).filter(isSchedule)) {
+      if ((saved?.version ?? 1) === 1) this.#legacyReviews.set(schedule.noteId, schedule);
+      else {
+        const scoped = schedule as ScopedReview;
+        if (typeof scoped.vaultId === 'string' && typeof scoped.identity === 'string') this.#reviews.set(reviewKey(scoped.vaultId, scoped.identity), scoped);
+      }
+    }
+    for (const schedule of (Array.isArray(saved?.legacyReviews) ? saved.legacyReviews : []).filter(isSchedule))
+      this.#legacyReviews.set(schedule.noteId, schedule);
   }
 
   flush(): Promise<void> {
@@ -222,18 +249,48 @@ export class MasteryStore {
     return records;
   }
 
-  // Every note's saved review schedule, by note id.
-  reviews(): Map<string, ReviewSchedule> {
-    return new Map([...this.#reviews].map(([noteId, schedule]) => [noteId, { ...schedule }]));
+  // Every scoped schedule, keyed by vault and stable note identity.
+  reviews(): Map<string, ScopedReview> {
+    return new Map([...this.#reviews].map(([key, schedule]) => [key, { ...schedule }]));
   }
 
-  // Saves a note's schedule after a review. Schedules of notes not in
-  // `noteIds` (deleted, renamed or without concepts now) are dropped.
-  async setReview(schedule: ReviewSchedule, noteIds: Set<string>): Promise<void> {
-    for (const noteId of this.#reviews.keys()) if (!noteIds.has(noteId)) this.#reviews.delete(noteId);
-    this.#reviews.delete(schedule.noteId);
-    this.#reviews.set(schedule.noteId, { ...schedule });
-    for (const old of [...this.#reviews.keys()].slice(0, Math.max(0, this.#reviews.size - MAX_SCHEDULES))) this.#reviews.delete(old);
+  // Legacy filenames have no provenance. Only the folder opened at startup may
+  // claim a matching entry; unmatched old entries remain intact for recovery.
+  async schedulesFor(vaultId: string, identities: Map<string, string>, initialVaultId: string | null): Promise<Map<string, ReviewSchedule>> {
+    const result = new Map<string, ReviewSchedule>();
+    let migrated = false;
+    if (this.#legacyReviews.size && this.#legacyVaultId === null && initialVaultId !== null) {
+      this.#legacyVaultId = initialVaultId;
+      migrated = true;
+    }
+    for (const [noteId, identity] of identities) {
+      const key = reviewKey(vaultId, identity);
+      let schedule = this.#reviews.get(key);
+      const legacy = vaultId === this.#legacyVaultId ? this.#legacyReviews.get(noteId) : undefined;
+      if (!schedule && legacy) {
+        schedule = { ...legacy, vaultId, identity };
+        this.#reviews.set(key, schedule);
+        this.#legacyReviews.delete(noteId);
+        migrated = true;
+      }
+      if (schedule) result.set(noteId, { noteId, box: schedule.box, dueDay: schedule.dueDay });
+    }
+    if (migrated) await this.#persist();
+    return result;
+  }
+
+  // Prune only this vault's identities. Switching folders never deletes the
+  // schedules of another vault; app renames keep the same identity.
+  async setReview(schedule: ReviewSchedule, vaultId: string, identities: Map<string, string>): Promise<void> {
+    const identity = identities.get(schedule.noteId);
+    if (!identity) throw new Error('The reviewed note has no stable identity');
+    const kept = new Set(identities.values());
+    for (const [key, saved] of this.#reviews) if (saved.vaultId === vaultId && !kept.has(saved.identity)) this.#reviews.delete(key);
+    const key = reviewKey(vaultId, identity);
+    this.#reviews.set(key, { ...schedule, vaultId, identity });
+    // The limit is per vault, so using one vault cannot evict another's reviews.
+    const own = [...this.#reviews].filter(([, saved]) => saved.vaultId === vaultId);
+    for (const [old] of own.slice(0, Math.max(0, own.length - MAX_SCHEDULES))) this.#reviews.delete(old);
     await this.#persist();
     logger.debug(`[mastery] review note=${schedule.noteId} box=${schedule.box} due=${schedule.dueDay}`);
   }
@@ -271,14 +328,23 @@ export class MasteryStore {
   }
 
   #persist = async () => {
-    await this.#writes.enqueue(() =>
-      writeStoredJson(this.#file, {
+    await this.#writes.enqueue(async () => {
+      // Recheck replacements made after load; the generic writer may already
+      // know this path's older version and otherwise skip its preflight read.
+      try {
+        await readStoredJson(this.#file, MASTERY_VERSION);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      }
+      await writeStoredJson(this.#file, {
         version: MASTERY_VERSION,
         records: [...this.#records.values()],
         seen: [...this.#seen],
         reviews: [...this.#reviews.values()],
-      } satisfies SavedState),
-    );
+        legacyReviews: [...this.#legacyReviews.values()],
+        legacyVaultId: this.#legacyVaultId,
+      } satisfies SavedState);
+    });
     this.#notify();
   };
 }
