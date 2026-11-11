@@ -15,7 +15,7 @@ const dataDir = async (files: Record<string, unknown>) => {
 };
 
 test('countStatuses buckets statuses the way the sidebar reads them', () => {
-  assert.deepEqual(countStatuses(['pending', 'pending', 'in_progress', 'in_review', 'deviation', 'blocked', 'accepting', 'done', 'clarifying']), {
+  assert.deepEqual(countStatuses(['pending', 'pending', 'in_progress', 'in_review', 'deviation', 'blocked', 'accepting', 'done']), {
     pending: 2,
     active: 4,
     accepting: 1,

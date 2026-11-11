@@ -189,6 +189,9 @@ test('cliArgs() turns off Codex own sandbox, which cannot nest inside ours', () 
   const args = sandbox.cliArgs({ cli: 'codex', model: 'gpt-6', thinking: 'high' });
   assert.deepEqual(args.slice(args.indexOf('--sandbox'), args.indexOf('--sandbox') + 2), ['--sandbox', 'danger-full-access']);
   assert.deepEqual(args.slice(-3), ['-c', 'model_reasoning_effort=high', '-']);
+  // Codex 0.164 exits with status 2 on `exec --ask-for-approval`; the policy goes through -c.
+  assert.ok(!args.includes('--ask-for-approval'));
+  assert.deepEqual(args.slice(args.indexOf('approval_policy="never"') - 1, args.indexOf('approval_policy="never"') + 1), ['-c', 'approval_policy="never"']);
   assert.deepEqual(sandbox.cliArgs({ cli: 'opencode', model: '', thinking: 'default' }), ['run', '--pure', '--format', 'json']);
 });
 

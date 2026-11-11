@@ -121,6 +121,12 @@ export const register = (
 
     setStepDone: (id, stepIndex, done): Promise<packageTypes.WorkPackageState> =>
       store.setStepDone(requireString(id, 'id'), stepIndex as number, done === true).then(toWireState),
+
+    handToAi: async (rawId): Promise<packageTypes.TaskView> => {
+      const id = requireString(rawId, 'id');
+      const entry = await store.handToAi(id);
+      return ctx.viewOf(requireTask(id), entry);
+    },
   });
   registerContract(ipcMain, tasksContract, {
     list: (): packageTypes.TaskView[] => {

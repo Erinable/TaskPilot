@@ -19,7 +19,13 @@ const SKIP_LABELS: Record<commitTypes.CommitSkipReason, string> = {
 };
 
 const store = useCommitStore();
-const { preview, message, loading, committing, error, committed, canCommit } = storeToRefs(store);
+const { preview, message, extra, fileCount, loading, committing, error, committed, canCommit } = storeToRefs(store);
+// Why an optional file is offered, in plain words.
+const OPTIONAL_LABELS: Record<string, string> = {
+  'taskpilot.toml': 'TaskPilot 的项目检查配置，和后续工作包一起使用',
+  'package-lock.json': 'npm 安装生成的依赖锁文件，记录确定的依赖版本',
+  'npm-shrinkwrap.json': 'npm 的依赖锁文件，记录确定的依赖版本',
+};
 const load = () => store.load();
 const commit = () => store.commit();
 
@@ -48,6 +54,7 @@ watch(
       已提交 {{ committed.files.length }} 个文件，提交号
       <code>{{ committed.commit.slice(0, 8) }}</code>
       。要分享给别人时，再用 git push 推送到远程。
+      <button class="empty-action" type="button" :disabled="loading || committing" @click="load">重新检查未提交文件</button>
     </p>
     <p v-else-if="loading && !preview" class="empty-hint">
       <AppIcon name="spinner" class="spin" />
@@ -59,24 +66,35 @@ watch(
       <button class="empty-action" type="button" @click="load">重试</button>
     </p>
     <template v-else-if="preview">
-      <p v-if="preview.files.length === 0" class="empty-hint" data-empty="commit">
+      <p v-if="preview.files.length === 0 && preview.optional.length === 0" class="empty-hint" data-empty="commit">
         <AppIcon name="check-circle" />
         文件范围内没有未提交的改动，可能已经提交过了。
         <button class="empty-action" type="button" @click="load">重新检查</button>
       </p>
       <div v-else class="commit-body">
-        <ul class="commit-files" aria-label="将要提交的文件">
+        <p v-if="!preview.files.length" class="commit-label" data-only-companions>
+          工作包范围内的文件已提交，下面的项目配置或依赖锁文件仍未提交，可以单独保存。
+        </p>
+        <ul v-if="preview.files.length" class="commit-files" aria-label="将要提交的文件">
           <li v-for="file in preview.files" :key="file">
             <AppIcon name="file" />
             <code>{{ file }}</code>
           </li>
         </ul>
+        <div v-if="preview.optional.length" class="commit-optional">
+          <p>可一起保存的项目文件（按需勾选）：</p>
+          <label v-for="file in preview.optional" :key="file" class="commit-optional-item">
+            <input v-model="extra" type="checkbox" :value="file" :data-optional="file" />
+            <code>{{ file }}</code>
+            <span>{{ OPTIONAL_LABELS[file] ?? 'TaskPilot 的项目配置' }}</span>
+          </label>
+        </div>
         <label class="commit-label" for="commitMessage">提交说明（写给以后的自己看，说清楚这次改了什么）</label>
         <el-input id="commitMessage" v-model="message" type="textarea" :rows="3" :maxlength="2000" />
         <div class="commit-actions">
           <button class="primary-button" type="button" :disabled="!canCommit" :aria-busy="committing" @click="commit">
             <AppIcon :name="committing ? 'spinner' : 'commit'" :class="{ spin: committing }" />
-            {{ committing ? '提交中…' : `提交 ${preview.files.length} 个文件` }}
+            {{ committing ? '提交中…' : `提交 ${fileCount} 个文件` }}
           </button>
         </div>
       </div>

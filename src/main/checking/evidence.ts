@@ -89,6 +89,7 @@ export type CriterionResult = AcceptanceCriterion & {
 
 // Why a human must look at a package QA passed.
 export type AttentionItem =
+  | { code: 'no_checks' }
   | { code: 'check_unverifiable'; kind: CheckKind; reason: string | null; blocking: boolean }
   | { code: 'preexisting_failures'; kind: CheckKind; count: number }
   | { code: 'no_baseline'; kind: CheckKind }
@@ -237,6 +238,9 @@ export const criteriaStatus = (
 // Why a human must look even though nothing rejected the package.
 export const attention = (evidence: EvidenceItem[], criteria: Pick<CriterionResult, 'status' | 'alreadyPassing'>[]): AttentionItem[] => {
   const items: AttentionItem[] = [];
+  // Nothing ran, so only QA's reading of the diff vouches for the change
+  // (a new project's skeleton package, or checks not set up yet).
+  if (!evidence.some((e) => e.status !== 'skipped')) items.push({ code: 'no_checks' });
   for (const e of evidence) {
     if (e.status === 'unverifiable') items.push({ code: 'check_unverifiable', kind: e.kind, reason: e.reason, blocking: e.blocking });
     if (e.preexisting.length) items.push({ code: 'preexisting_failures', kind: e.kind, count: e.preexisting.length });

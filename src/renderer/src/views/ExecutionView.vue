@@ -24,6 +24,7 @@ import { useAppStore } from '@/stores/app.ts';
 import { useCodingStore } from '@/stores/coding.ts';
 import { useCommitStore } from '@/stores/commit.ts';
 import { ACTIONS, useExecutionStore } from '@/stores/execution.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
 const PRIORITY_LABELS: Record<packageTypes.Priority, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' };
@@ -36,15 +37,16 @@ const now = useNow();
 const backButton = ref<HTMLButtonElement | null>(null);
 
 const task = computed(() => execution.current);
+const deciding = computed(() => task.value?.status === 'accepting' && task.value.review?.status === 'passed');
 const actions = computed(() => {
   const allowed = new Set(task.value?.humanTransitions ?? []);
-  return ACTIONS.filter((action) => allowed.has(action.name));
+  return ACTIONS.filter((action) => allowed.has(action.name) && !(deciding.value && ['accepted', 'acceptance_rejected'].includes(action.name)));
 });
 // A done package is only delivered once its scope files are in git; until
 // then the header and the advice say it still waits to be saved.
 const unsavedFiles = computed(() => (task.value?.status === 'done' ? commit.unsavedFiles(task.value.id) : null));
 const statusLabel = computed(() => (unsavedFiles.value ? '待保存到 git' : task.value?.status === 'done' ? '已交付' : task.value?.statusLabel));
-const advice = computed(() => (task.value ? nextStep(task.value, unsavedFiles.value) : null));
+const advice = computed(() => (task.value ? nextStep(task.value, unsavedFiles.value, execution.missingDependencies) : null));
 // The advised action is the main button; the rest wait under "more". While
 // steps remain, the advice is to write code, so no button leads.
 const leading = computed(() => actions.value.find((action) => action.name === advice.value?.action) ?? null);
@@ -52,8 +54,11 @@ const others = computed(() => actions.value.filter((action) => action !== leadin
 const elapsed = computed(() => elapsedSince(advice.value?.since, now.value));
 // A practice package is the developer's exercise: no Coding Agent panel.
 const practising = computed(() => task.value?.mode === 'practice');
+// Written by hand: Coding Agent stays out of the way until the developer
+// hands the package over (an existing run is still shown).
+const writingSelf = computed(() => task.value?.mode === 'self' && !task.value.codingRun);
 // While a package is being worked on, the Coding Agent leads the page.
-const codingFirst = computed(() => task.value?.status === 'in_progress' && !practising.value);
+const codingFirst = computed(() => task.value?.status === 'in_progress' && !practising.value && !writingSelf.value);
 // Done: the steps and acceptance are history, so they start folded.
 const finished = computed(() => task.value?.status === 'done');
 
@@ -64,6 +69,11 @@ const back = () => {
     .catch((error) => console.error(error));
 };
 const handOff = () => coding.start().catch((error) => console.error(error));
+const handToAi = () => execution.handToAi().catch((error) => console.error(error));
+const openSetup = () =>
+  useSettingsStore()
+    .open('setup')
+    .catch((error) => console.error(error));
 const transition = (name: packageTypes.HumanTransition) => {
   execution.runTransition(name).catch((error) => console.error(error));
 };
@@ -123,8 +133,16 @@ onBeforeUnmount(() => execution.close());
         </div>
       </div>
       <div class="exec-actions">
+        <button v-if="advice?.setup" class="primary-button" type="button" data-action="open-setup" @click="openSetup">
+          <AppIcon name="wand" />
+          去安装依赖
+        </button>
+        <button v-else-if="writingSelf && task.status === 'in_progress'" class="secondary-button" type="button" data-action="hand-to-ai" @click="handToAi">
+          <AppIcon name="bot" />
+          改为交给 Coding Agent
+        </button>
         <button
-          v-if="advice?.coding"
+          v-else-if="advice?.coding"
           class="primary-button"
           type="button"
           data-action="hand-off"
@@ -172,24 +190,41 @@ onBeforeUnmount(() => execution.close());
 
       <CodingPanel v-if="codingFirst" :task="task" />
 
-      <div class="exec-columns">
+      <ReviewPanel v-if="deciding && task.review" class="acceptance-focus" :task="task" :review="task.review" />
+      <div class="exec-columns" :class="{ 'exec-accepting': deciding }">
         <div class="exec-column">
           <!-- A finished practice package leads with its grade; the commit and
                QA's review are already behind the learner. -->
           <PracticePanel v-if="practising && finished" :task="task" />
           <!-- Accepted work goes into git before the next package starts. -->
-          <CommitPanel v-if="task.status === 'accepting' || task.status === 'done'" :task="task" />
-          <ReviewPanel v-if="task.review" :task="task" :review="task.review" />
+          <CommitPanel v-if="task.status === 'done'" :task="task" />
+          <ReviewPanel v-if="task.review && !deciding" :task="task" :review="task.review" />
           <PracticePanel v-if="practising && !finished" :task="task" />
-          <StepsPanel :task="task" :folded="finished" />
-          <AcceptancePanel :task="task" :folded="finished" />
+          <StepsPanel :task="task" :folded="finished || deciding" />
+          <AcceptancePanel v-if="!deciding" :task="task" :folded="finished" />
           <DeviationPanel :task="task" />
         </div>
         <div class="exec-column exec-side">
-          <ScopePanel :task="task" />
-          <CodingPanel v-if="!codingFirst && !practising && task.codingRun" :task="task" />
-          <VerifyPanel :task="task" />
-          <DiffPanel :task="task" />
+          <details v-if="deciding" class="execution-history">
+            <summary>文件范围 · {{ task.fileScope.length }} 个文件</summary>
+            <ScopePanel :task="task" />
+          </details>
+          <ScopePanel v-else :task="task" />
+          <details v-if="deciding && !practising && task.codingRun" class="execution-history">
+            <summary>编码记录 · 第 {{ task.codingRun.attempt }} 轮</summary>
+            <CodingPanel :task="task" />
+          </details>
+          <CodingPanel v-else-if="!codingFirst && !practising && task.codingRun" :task="task" />
+          <details v-if="deciding" class="execution-history">
+            <summary>手动复查 · 查看历史或重新运行检查</summary>
+            <VerifyPanel :task="task" />
+          </details>
+          <VerifyPanel v-else :task="task" />
+          <details v-if="deciding" class="execution-history">
+            <summary>查看项目改动</summary>
+            <DiffPanel :task="task" />
+          </details>
+          <DiffPanel v-else :task="task" />
         </div>
       </div>
 

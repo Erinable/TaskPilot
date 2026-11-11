@@ -6,7 +6,7 @@ import { gitRepo } from '../../../fixtures/git_repo.ts';
 import * as envSetup from '../../../../src/main/checking/presets/typescript_setup.ts';
 // Setup facts with a valid manifest defining only `scripts`, and nothing else detected.
 const factsWith = (scripts: Record<string, string>, installScripts: string[] = []): envSetup.EnvFacts => ({
-  manifest: { valid: true, name: null, scripts, engines: {}, packageManager: null },
+  manifest: { valid: true, name: null, scripts, engines: {}, packageManager: null, dependencies: {}, devDependencies: {} },
   lockfiles: [],
   managers: [],
   nodeModules: false,
@@ -14,6 +14,7 @@ const factsWith = (scripts: Record<string, string>, installScripts: string[] = [
   workflows: [],
   tools: { node: null, npm: null },
   installScripts,
+  configFiles: [],
 });
 
 const repo = async (files: Record<string, string>, { untracked = {} as Record<string, string> } = {}) =>
@@ -132,14 +133,15 @@ test('a scripts-off install is followed by a rebuild of only those packages', ()
 test('the adapter only builds commands for its kinds and valid script names', () => {
   const setup = envSetup.typescriptSetup;
   assert.deepEqual(setup.commandFor('lint', 'lint:js'), { command: 'npm', args: ['run', 'lint:js'] });
-  assert.throws(() => setup.commandFor('typecheck', 'tsc'), { code: 'invalid_kind' });
+  assert.deepEqual(setup.commandFor('typecheck', 'typecheck'), { command: 'npm', args: ['run', 'typecheck'] });
+  assert.throws(() => setup.commandFor('setup', 'test'), { code: 'invalid_kind' });
   assert.throws(() => setup.commandFor('test', '--global'), { code: 'invalid_script' });
   assert.throws(() => setup.commandFor('test', 'a b'), { code: 'invalid_script' });
   const facts = factsWith({ test: 'x' });
   assert.throws(() => setup.buildSteps({ install: 'skip', scripts: { test: 'nope' } }, facts, { allowScripts: false }), { code: 'invalid_script' });
   assert.throws(() => setup.buildSteps({ install: 'exec', scripts: {} }, facts, { allowScripts: false }), { code: 'invalid_mode' });
   // Kinds outside the adapter's are never turned into steps.
-  assert.deepEqual(setup.buildSteps({ install: 'skip', scripts: { typecheck: 'test' } }, facts, { allowScripts: false }), []);
+  assert.deepEqual(setup.buildSteps({ install: 'skip', scripts: { setup: 'test' } }, facts, { allowScripts: false }), []);
 });
 
 test('only the npm preset has a setup adapter', async () => {
@@ -148,4 +150,35 @@ test('only the npm preset has a setup adapter', async () => {
   assert.equal(presets.setupOf(['rust']), null);
   assert.equal(presets.setupOf(['python']), null);
   assert.equal(presets.setupOf([]), null);
+});
+
+test('probe includes framework dependencies and tracked configuration but no secrets or untracked contents', async () => {
+  const root = await repo(
+    {
+      'package.json': JSON.stringify({ dependencies: { expo: '~58.0.0' }, devDependencies: { typescript: '~6.0.0' } }),
+      'tsconfig.json': '{"extends":"expo/tsconfig.base"}',
+      '.env': 'API_TOKEN=private',
+    },
+    { untracked: { 'eslint.config.js': 'do not read this' } },
+  );
+  const facts = await envSetup.probe(root, { version: fakeVersions() });
+  assert.deepEqual(facts.manifest?.dependencies, { expo: '~58.0.0' });
+  assert.deepEqual(facts.manifest?.devDependencies, { typescript: '~6.0.0' });
+  assert.deepEqual(facts.configFiles, [{ path: 'tsconfig.json', content: '{"extends":"expo/tsconfig.base"}' }]);
+});
+
+test('the setup adapter recognizes typecheck, check-only format and coverage scripts', () => {
+  const scripts = { typecheck: 'tsc --noEmit', 'format:check': 'prettier --check .', coverage: 'jest --coverage' };
+  const choice = envSetup.typescriptSetup.validate(
+    { install: 'skip', scripts: { typecheck: 'typecheck', format: 'format:check', coverage: 'coverage' } },
+    factsWith(scripts),
+  );
+  assert.deepEqual(
+    envSetup.buildSteps(choice, factsWith(scripts)).map((step) => [step.id, step.args]),
+    [
+      ['typecheck', ['run', 'typecheck']],
+      ['format', ['run', 'format:check']],
+      ['coverage', ['run', 'coverage']],
+    ],
+  );
 });

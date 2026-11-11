@@ -57,6 +57,10 @@ const installApi = () =>
       switch: (id: string) => ok(listOf(id)),
       add: (root: string) => ok({ current: 'c', repositories: [repo('c', { root, current: true })] }),
       relocate: (id: string, root: string) => ok({ current: 'a', repositories: [repo(id, { root, current: true })] }),
+      create: (root: string) =>
+        ok({ current: 'c', repositories: [...listOf('a').repositories.map((entry) => ({ ...entry, current: false })), repo('c', { root, current: true })] }),
+      remove: (id: string) =>
+        ok(id === 'a' ? { current: 'b', repositories: [repo('b', { current: true })] } : { current: 'a', repositories: [repo('a', { current: true })] }),
     },
     workspace: {
       pickRoot: () => ok<string | null>('/work/c'),
@@ -91,7 +95,7 @@ describe('repositories store', () => {
 
   test('switching clears what the views read for the old repository', async () => {
     const tutorState: tutorTypes.TutorState = { status: 'done', levels: [], pending: null, opened: 1, maxLevel: 5, error: null };
-    const preview: commitTypes.CommitPreview = { files: ['a.ts'], skipped: [], message: 'feat: a' };
+    const preview: commitTypes.CommitPreview = { files: ['a.ts'], optional: [], skipped: [], message: 'feat: a' };
     const map: activityTypes.EngineeringMap = { modules: [], conventions: [], gaps: [], files: ['a.ts'], truncated: false };
     api.activity.page.mockImplementation(() =>
       ok({ days: [{ day: '2026-10-25', records: [] }], nextBefore: '2026-10-24', timeZone: 'Asia/Shanghai', retentionDays: 30 }),
@@ -296,6 +300,56 @@ describe('repositories store', () => {
     expect(api.repositories.relocate).toHaveBeenCalledWith('a', '/work/c');
     expect(feedback.confirmAction).not.toHaveBeenCalled();
     expect(store.current?.root).toBe('/work/c');
+  });
+
+  test('creating a project picks a folder and switches to it after confirming running work', async () => {
+    busy = [{ kind: 'review', label: '邮箱登录' }];
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const before = store.generation;
+    expect(await store.create()).toBe(true);
+    expect(api.repositories.create).toHaveBeenCalledWith('/work/c');
+    expect(feedback.confirmAction).toHaveBeenCalledTimes(1);
+    expect(store.current?.id).toBe('c');
+    expect(store.generation).toBe(before + 1);
+
+    api.workspace.pickRoot.mockResolvedValueOnce({ ok: true, data: null });
+    expect(await store.create()).toBe(false);
+    expect(api.repositories.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('a refused create names the reason', async () => {
+    api.repositories.create.mockResolvedValueOnce({ ok: false, error: { code: 'root_not_empty', message: 'x' } });
+    expectConsole('error', /\[repositories\] switch failed/);
+    const store = useRepositoriesStore();
+    await store.refresh();
+    expect(await store.create()).toBe(false);
+    expect(feedback.showToast).toHaveBeenCalledWith('新建项目失败：请选择一个空文件夹。');
+    expect(store.current?.id).toBe('a');
+  });
+
+  test('removing another repository asks first and reloads nothing', async () => {
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const before = store.generation;
+    vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+    expect(await store.remove('b')).toBe(false);
+    expect(api.repositories.remove).not.toHaveBeenCalled();
+
+    expect(await store.remove('b')).toBe(true);
+    expect(api.repositories.remove).toHaveBeenCalledWith('b');
+    expect(store.repositories.map((entry) => entry.id)).toEqual(['a']);
+    expect(store.generation).toBe(before);
+  });
+
+  test('removing the open repository switches to the one the main process opened', async () => {
+    const store = useRepositoriesStore();
+    await store.refresh();
+    const before = store.generation;
+    expect(await store.remove('a')).toBe(true);
+    expect(api.repositories.busy).toHaveBeenCalled();
+    expect(store.current?.id).toBe('b');
+    expect(store.generation).toBe(before + 1);
   });
 
   test('notification read state follows the open repository', async () => {

@@ -63,28 +63,24 @@ test('available() narrows transitions by actor', () => {
   assert.deepEqual(status.available('in_progress', 'agent'), []);
 });
 
-test('done is terminal and clarifying is not human-actionable', () => {
+test('done is terminal and in_review is not human-actionable', () => {
   assert.deepEqual(status.available('done'), []);
-  assert.equal(status.STATUSES.clarifying.humanActionable, false);
+  assert.equal(status.STATUSES.in_review.humanActionable, false);
   assert.equal(status.STATUSES.pending.humanActionable, true);
 });
 
-test('every status except clarifying is reachable', () => {
+test('every status except pending is reachable, and pending (the entry point) is reached by a release or replan', () => {
   const reachable = new Set(status.TRANSITIONS.map((t) => t.to));
-  for (const name of Object.keys(status.STATUSES)) {
-    if (name === 'clarifying') continue; // the entry point
-    assert.ok(reachable.has(name as status.WorkPackageStatus), `${name} is unreachable`);
-  }
+  for (const name of Object.keys(status.STATUSES)) assert.ok(reachable.has(name as status.WorkPackageStatus), `${name} is unreachable`);
 });
 
-test('the full happy path runs clarifying through done', () => {
+test('the full happy path runs pending through done', () => {
   const path = [
-    ['breakdown_done', 'agent'],
     ['claim', 'human'],
     ['submit_for_review', 'human'],
     ['review_accepted', 'agent'],
   ];
-  let current: string = 'clarifying';
+  let current: string = 'pending';
   for (const [name, actor] of path) current = status.apply(current, name, actor as status.Actor);
   assert.equal(current, 'done');
 });

@@ -46,9 +46,14 @@ export const billableCodingUsage = (error: unknown) => {
   const spent = error instanceof CodingExecError ? error.usage : null;
   return spent && (spent.costUsd !== null || spent.inputTokens !== null || spent.outputTokens !== null) ? spent : null;
 };
+// The CLI's own words (already redacted by the executor), so "exited with
+// status 2" shows why, e.g. an argument the installed version rejects.
+const MAX_STDERR_SHOWN = 1500;
 export const codingFailure = (error: unknown): envelopeTypes.ErrorInfo => {
   const info = asAgentError(error);
-  return { code: info.code === 'unknown' ? 'coding_failed' : info.code, message: info.message };
+  const stderr = error instanceof CodingExecError ? error.stderr.trim() : '';
+  const tail = stderr.length > MAX_STDERR_SHOWN ? `…${stderr.slice(-MAX_STDERR_SHOWN)}` : stderr;
+  return { code: info.code === 'unknown' ? 'coding_failed' : info.code, message: tail ? `${info.message}\n${tail}` : info.message };
 };
 
 // What of the project profile Coding Agent prompts show; empty until a later change

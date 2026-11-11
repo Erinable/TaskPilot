@@ -9,7 +9,7 @@ import ExecutionView from '../../../src/renderer/src/views/ExecutionView.vue';
 import { useExecutionStore } from '../../../src/renderer/src/stores/execution.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../../src/shared/ipc/tutor.ts';
-import { installApi, taskView } from '../execution_fakes.ts';
+import { installApi, taskView, testStepWorkspace, passedReview, codingRun } from '../execution_fakes.ts';
 
 vi.mock('../../../src/renderer/src/lib/feedback.ts', () => {
   const showToast = vi.fn();
@@ -188,9 +188,43 @@ describe('ExecutionView', () => {
     await panel.get('#commitMessage').setValue('登录：支持邮箱');
     await panel.get('.commit-actions button').trigger('click');
     await flushPromises();
-    expect(api.commit.create).toHaveBeenCalledWith('t1', '登录：支持邮箱', ['src/auth.ts']);
+    expect(api.commit.create).toHaveBeenCalledWith('t1', '登录：支持邮箱', ['src/auth.ts'], []);
     expect(wrapper.get('.commit-done').text()).toContain('c0ffee12');
     expect(wrapper.get('[data-status-label]').text()).toBe('已交付');
+    wrapper.unmount();
+  });
+  test('rechecking a saved skeleton offers a newly generated lockfile as a standalone commit', async () => {
+    current.task = taskView({ status: 'done', statusLabel: '已完成' });
+    const { wrapper } = await mountOpen();
+    await wrapper.get('.commit-actions button').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.commit-done').exists()).toBe(true);
+    api.commit.preview.mockReturnValueOnce(
+      Promise.resolve({ ok: true as const, data: { files: [], optional: ['package-lock.json'], skipped: [], message: '保存依赖锁文件' } }),
+    );
+    await wrapper.get('.commit-done .empty-action').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('.commit-done').exists()).toBe(false);
+    expect(wrapper.get('[data-only-companions]').text()).toContain('仍未提交');
+    expect(wrapper.get('.commit-optional').text()).toContain('npm 安装生成的依赖锁文件');
+    expect((wrapper.get('[data-optional="package-lock.json"]').element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.get('.commit-actions button').text()).toBe('提交 1 个文件');
+    expect(wrapper.get('[data-status-label]').text()).toBe('待保存到 git');
+    expect(wrapper.get('[data-next-step]').text()).toContain('提交这 1 个文件');
+    await wrapper.get('.commit-actions button').trigger('click');
+    await flushPromises();
+    expect(api.commit.create).toHaveBeenLastCalledWith('t1', '保存依赖锁文件', [], ['package-lock.json']);
+    wrapper.unmount();
+  });
+  test('a saved package in a checkout without node_modules leads with installing dependencies', async () => {
+    current.task = taskView({ status: 'done', statusLabel: '已完成' });
+    api.workspace.get.mockImplementation(
+      () => Promise.resolve({ ok: true, data: { ...testStepWorkspace('/repo'), missingDependencies: ['node_modules'] } }) as never,
+    );
+    api.commit.preview.mockImplementation(() => Promise.resolve({ ok: true, data: { files: [], optional: [], skipped: [], message: 'm' } }) as never);
+    const { wrapper } = await mountOpen();
+    expect(wrapper.get('[data-next-step]').text()).toContain('没有 node_modules');
+    expect(wrapper.find('[data-action="open-setup"]').exists()).toBe(true);
     wrapper.unmount();
   });
   test('a passed review opens with a delivery summary that follows the commit', async () => {
@@ -253,7 +287,7 @@ describe('ExecutionView', () => {
 
   test('an accepted package with no changed files explains why it cannot commit', async () => {
     current.task = taskView({ status: 'done', statusLabel: '已完成' });
-    api.commit.preview.mockReturnValueOnce(Promise.resolve({ ok: true as const, data: { files: [], skipped: [], message: '' } }));
+    api.commit.preview.mockReturnValueOnce(Promise.resolve({ ok: true as const, data: { files: [], optional: [], skipped: [], message: '' } }));
     const { wrapper } = await mountOpen();
     expect(wrapper.get('[data-empty="commit"]').text()).toContain('没有未提交的改动');
     expect(wrapper.find('.commit-actions').exists()).toBe(false);
@@ -377,4 +411,28 @@ describe('ExecutionView', () => {
     expect(wrapper.get('.verify-result .verify-output').text()).toContain('Cannot find module');
     wrapper.unmount();
   });
+});
+
+test('acceptance leads with one confirmation flow, folds execution history and exposes no bypass button', async () => {
+  current.task = taskView({
+    status: 'accepting',
+    mode: 'ai',
+    review: passedReview(),
+    codingRun: codingRun({ status: 'submitted' }),
+    acceptance: [{ text: '断网时仍能阅读' }],
+    humanTransitions: ['accepted', 'acceptance_rejected'],
+  });
+  const { wrapper } = await mountOpen();
+  expect(wrapper.find('.view > .acceptance-focus').exists()).toBe(true);
+  expect(wrapper.findAll('[data-acceptance-review]')).toHaveLength(1);
+  expect(wrapper.find('.acceptance-list').exists()).toBe(false);
+  expect(wrapper.find('.exec-actions [data-transition="accepted"]').exists()).toBe(false);
+  expect(wrapper.find('.exec-actions [data-transition="acceptance_rejected"]').exists()).toBe(false);
+  expect(wrapper.get('[data-transition="accepted"]').attributes('disabled')).toBeDefined();
+  expect(wrapper.get('.step-list').isVisible()).toBe(false);
+  expect(wrapper.findAll('.execution-history').every((details) => details.attributes('open') === undefined)).toBe(true);
+  expect(wrapper.find('#codingInstruction').exists()).toBe(false);
+  await wrapper.get('[data-confirm-criterion="0"]').setValue(true);
+  expect(wrapper.get('[data-transition="accepted"]').attributes('disabled')).toBeUndefined();
+  wrapper.unmount();
 });

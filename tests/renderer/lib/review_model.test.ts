@@ -168,3 +168,23 @@ test('deliverySummary() counts evidence, what is left to judge and the next step
   assert.equal(bare.evidence, null);
   assert.equal(bare.judge, '没有需要你额外确认的项');
 });
+
+test('review test counts distinguish exit-code success, failure, timeout and parsed cases', () => {
+  const run = {
+    kind: 'test' as const,
+    command: 'npm test',
+    exitCode: 0,
+    timedOut: false,
+    durationMs: 1,
+    summary: { total: 0, passed: 0, failed: 0, skipped: 0, ok: true },
+    report: null,
+    failing: [],
+    outputTail: null,
+  };
+  assert.equal(model.reviewTestLine(run), '测试命令通过，用例数量未解析（退出码 0）');
+  assert.doesNotMatch(model.reviewTestLine(run), /0\/0/);
+  assert.match(model.reviewTestLine({ ...run, exitCode: 1, summary: { ...run.summary, ok: false } }), /测试命令失败/);
+  assert.equal(model.reviewTestLine({ ...run, timedOut: true }), '测试命令超时');
+  assert.equal(model.reviewTestLine({ ...run, summary: { ...run.summary, total: 38, passed: 38 } }), '测试 38/38 通过');
+  assert.match(model.reviewTestLine({ error: { code: 'command_missing', message: 'npm absent' } }), /测试运行失败/);
+});

@@ -19,7 +19,6 @@ export const COLUMNS: { id: ColumnId; label: string; hint: string }[] = [
 
 // Deviation and blocked stay with the developer's work, marked on the card.
 const COLUMN_OF: Record<packageTypes.WorkPackageStatus, ColumnId> = {
-  clarifying: 'todo',
   pending: 'todo',
   in_progress: 'doing',
   deviation: 'doing',
@@ -39,8 +38,6 @@ export const actionOf = (task: Pick<packageTypes.TaskView, 'status' | 'dependenc
     case 'pending':
       if ((task.dependencies ?? []).some((dependency) => dependency.blocking)) return { kind: 'wait', label: '等待前置' };
       return (task.humanTransitions ?? []).includes('claim') ? { kind: 'claim', label: '开始执行' } : { kind: 'open', label: '查看' };
-    case 'clarifying':
-      return { kind: 'wait', label: 'Product Lead 拆解中' };
     case 'in_progress':
       return { kind: 'open', label: '继续' };
     case 'deviation':

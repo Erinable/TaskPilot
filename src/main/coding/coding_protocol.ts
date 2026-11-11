@@ -1,5 +1,5 @@
 import type { AgentRuntimeConfig } from '../../shared/agent_runtime.ts';
-import type { CodingEvent, CodingUsage } from '../../shared/coding_types.ts';
+import type { CodingEvent, CodingItem, CodingUsage } from '../../shared/coding_types.ts';
 import { CodingExecError, MAX_OUTPUT_BYTES, MAX_TRANSCRIPT_BYTES } from './coding_process.ts';
 
 export type EventSink = (event: CodingEvent) => void;
@@ -36,13 +36,13 @@ const textOf = (value: unknown): string => {
 
 const eventAt = () => new Date().toISOString();
 
-const addEvent = (events: CodingEvent[], type: CodingEvent['type'], text: string, sink?: EventSink, transcript?: Transcript) => {
+const addEvent = (events: CodingEvent[], type: CodingEvent['type'], text: string, sink?: EventSink, transcript?: Transcript, item?: CodingItem) => {
   if (!text) return;
   const remaining = MAX_TRANSCRIPT_BYTES - (transcript?.bytes ?? 0);
   if (remaining <= 0) return;
   const bounded = Buffer.byteLength(text) <= remaining ? text : Buffer.from(text).subarray(0, remaining).toString('utf8');
   if (transcript) transcript.bytes += Buffer.byteLength(bounded);
-  const event = { sequence: events.length, at: eventAt(), type, text: bounded } satisfies CodingEvent;
+  const event: CodingEvent = { sequence: events.length, at: eventAt(), type, text: bounded, ...(item ? { item } : {}) };
   events.push(event);
   try {
     sink?.(event);
@@ -158,10 +158,61 @@ const parseNativeRecord = (type: string, value: Record<string, unknown>, context
   return {};
 };
 
+// A command's output as shown in the transcript: the tail, which is where
+// errors and results are.
+const MAX_ITEM_OUTPUT = 4000;
+const itemStatus = (item: Record<string, unknown>, exitCode: number | null = null): 'running' | 'done' | 'failed' =>
+  item.status === 'in_progress'
+    ? 'running'
+    : item.status === 'failed' || item.status === 'declined' || (exitCode !== null && exitCode !== 0)
+      ? 'failed'
+      : 'done';
+const FILE_CHANGES = new Set(['add', 'delete', 'update']);
+
+// Codex's command and file steps as structured items; anything else stays a one-line tool event.
+const codexItem = (item: Record<string, unknown>): CodingItem | null => {
+  const id = typeof item.id === 'string' ? item.id : '';
+  if (!id) return null;
+  if (item.type === 'command_execution') {
+    const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
+    const output = redact(textOf(item.aggregated_output));
+    const truncated = output.length > MAX_ITEM_OUTPUT;
+    return {
+      id,
+      kind: 'command',
+      status: itemStatus(item, exitCode),
+      command: redact(textOf(item.command)),
+      exitCode,
+      output: truncated ? output.slice(-MAX_ITEM_OUTPUT) : output,
+      outputTruncated: truncated,
+    };
+  }
+  if (item.type === 'file_change') {
+    const files = (Array.isArray(item.changes) ? item.changes : []).flatMap((change) => {
+      const entry = objectOf(change);
+      const kind = typeof entry.kind === 'string' && FILE_CHANGES.has(entry.kind) ? (entry.kind as 'add' | 'delete' | 'update') : 'update';
+      return typeof entry.path === 'string' ? [{ path: entry.path, change: kind }] : [];
+    });
+    return { id, kind: 'files', status: itemStatus(item), files };
+  }
+  // Item-level errors are warnings (e.g. ignored config keys); turn.failed ends a run.
+  if (item.type === 'error') return { id, kind: 'notice', message: redact(textOf(item.message)) };
+  return null;
+};
+
 const parseCodexItem = (type: string, item: Record<string, unknown>, context: RecordContext) => {
   const { events, sink, transcript } = context;
   const itemType = typeof item.type === 'string' ? item.type : '';
-  if (itemType === 'agent_message') {
+  const structured = codexItem(item);
+  if (structured) {
+    const summary =
+      structured.kind === 'command'
+        ? structured.command
+        : structured.kind === 'files'
+          ? structured.files.map((file) => file.path).join(', ')
+          : structured.message;
+    addEvent(events, structured.kind === 'notice' ? 'status' : 'tool', summary || itemType, sink, transcript, structured);
+  } else if (itemType === 'agent_message') {
     const text = textOf(item.text ?? item.content);
     if (type === 'item.completed') appendOutput(text, context);
     else addEvent(events, 'text', text, sink, transcript);

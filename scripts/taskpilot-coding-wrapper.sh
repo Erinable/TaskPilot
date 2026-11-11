@@ -227,7 +227,7 @@ case "$1" in
     args=()
     case "$cli" in
       codex)
-        args=(exec --json --sandbox workspace-write --ask-for-approval never)
+        args=(exec --json --sandbox workspace-write -c 'approval_policy="never"')
         [[ -z "$model" ]] || args+=(--model "$model")
         [[ "$thinking" == default ]] || args+=(-c "model_reasoning_effort=$thinking")
         args+=(-)

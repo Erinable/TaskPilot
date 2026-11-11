@@ -24,6 +24,7 @@ const hint = computed(() => STEP_HINTS[props.id as StepKind] ?? '项目自定义
 const inputId = computed(() => stepInputId(props.id));
 const statusId = computed(() => stepStatusId(props.id));
 const status = computed(() => settings.statusOf(props.id));
+const commandFound = computed(() => status.value.tone === 'ok' && draft.value?.mode !== 'off');
 
 const MODES: { value: StepMode; label: string; hint: string }[] = [
   { value: 'inherit', label: '用项目配置', hint: '按 taskpilot.toml 和预设运行' },
@@ -66,7 +67,8 @@ const sourceText = computed(() => (view.value?.source ? SOURCE_LABELS[view.value
 const effectiveMeta = computed(() => {
   const effective = view.value?.effective;
   if (!effective) return '';
-  return [effective.blocking ? '失败会拒绝审查' : '失败只提示', `结果按${PARSER_LABELS[effective.parser.format]}读取`].join(' · ');
+  const parser = effective.parser.format === 'exitcode' ? '按退出码判断结果' : `结果解析：${PARSER_LABELS[effective.parser.format]}`;
+  return [effective.blocking ? '失败会拒绝审查' : '失败只提示', parser].join(' · ');
 });
 
 // Options for the command picker: the preset's suggestions plus whatever
@@ -116,11 +118,19 @@ const setTimeout = (value: number | null | undefined) => {
         <strong>{{ label }}</strong>
         <small>{{ hint }}</small>
       </span>
-      <code class="step-command" :title="effectiveText">{{ draft.mode === 'override' && draft.lines.length ? draft.lines.join(' && ') : effectiveText }}</code>
+      <span class="step-command-summary">
+        <code class="step-command" :title="effectiveText">
+          {{ draft.mode === 'override' && draft.lines.length ? draft.lines.join(' && ') : effectiveText }}
+        </code>
+        <span v-if="commandFound" class="step-command-found" title="已找到可执行文件；不代表此项检查已经运行或通过。">
+          <AppIcon name="check-circle" />
+          命令已找到
+        </span>
+      </span>
       <span class="status-pill" :class="state.tone">{{ state.text }}</span>
       <AppIcon :name="expanded ? 'chevron-down' : 'chevron-right'" class="step-chevron" />
     </button>
-    <FieldStatus v-if="!expanded && status.tone" :id="statusId" :status="status" />
+    <FieldStatus v-if="!expanded && (status.tone === 'warn' || status.tone === 'error')" :id="statusId" class="step-feedback" :status="status" />
     <div v-if="expanded" :id="`${inputId}-panel`" class="step-panel">
       <div class="step-effective">
         <span>现在运行：</span>
@@ -162,7 +172,7 @@ const setTimeout = (value: number | null | undefined) => {
         >
           <el-option v-for="line in options" :key="line" :label="line" :value="line" />
         </el-select>
-        <FieldStatus :id="statusId" :status="status" />
+        <FieldStatus v-if="status.tone !== 'ok'" :id="statusId" class="step-field-feedback" :status="status" />
         <div class="check-options" role="group" :aria-label="`${label}的运行方式`">
           <label class="check-option">
             <span>什么时候运行</span>
@@ -256,22 +266,33 @@ const setTimeout = (value: number | null | undefined) => {
           </label>
         </div>
       </template>
-      <FieldStatus v-else :id="statusId" :status="status" />
+      <FieldStatus v-else-if="status.tone !== 'ok'" :id="statusId" class="step-field-feedback" :status="status" />
+      <div v-if="commandFound" :id="statusId" class="step-executable" role="status">
+        <span>可执行文件</span>
+        <code>{{ status.message }}</code>
+        <small>此处只检测命令是否可用，不代表检查已通过。</small>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.step-row {
+  container-type: inline-size;
+  --step-inset: var(--space-4);
+  --step-icon-width: 20px;
+  --step-content-inset: calc(var(--step-inset) + var(--step-icon-width) + var(--space-3));
+}
 .step-row + .step-row {
   border-top: 1px solid var(--line-soft);
 }
 .step-summary {
   display: grid;
-  grid-template-columns: 20px minmax(140px, 220px) minmax(0, 1fr) auto 14px;
+  grid-template-columns: var(--step-icon-width) minmax(140px, 220px) minmax(0, 1fr) auto 14px;
   gap: var(--space-3);
   align-items: center;
   width: 100%;
-  padding: 12px 16px;
+  padding: var(--space-3) var(--step-inset);
   color: var(--text);
   text-align: left;
   background: none;
@@ -303,6 +324,25 @@ const setTimeout = (value: number | null | undefined) => {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.step-command-summary {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.step-command-found {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+.step-command-found .icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--success);
+}
 .step-command {
   overflow: hidden;
   color: var(--text-secondary);
@@ -317,7 +357,35 @@ const setTimeout = (value: number | null | undefined) => {
 .step-panel {
   display: grid;
   gap: var(--space-3);
-  padding: 0 16px 16px 48px;
+  min-width: 0;
+  padding: 0 var(--step-inset) var(--space-4) var(--step-content-inset);
+}
+.step-feedback {
+  margin: 0 var(--step-inset) var(--space-3) var(--step-content-inset);
+  min-height: 0;
+}
+.step-field-feedback {
+  margin: 0;
+  min-height: 0;
+}
+.step-executable {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.step-executable code {
+  color: var(--text-muted);
+  font: inherit;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.step-executable small {
+  grid-column: 2;
+  color: var(--text-tertiary);
+  font-size: inherit;
 }
 .step-effective {
   display: flex;
@@ -402,15 +470,42 @@ const setTimeout = (value: number | null | undefined) => {
   flex: 1;
   min-width: 0;
 }
-@media (max-width: 820px) {
+/* Settings has a sidebar: respond to the card's available width, not only
+   the window. Keep the command visible on its own line in narrow columns. */
+@container (max-width: 720px) {
   .step-summary {
-    grid-template-columns: 20px 1fr auto 14px;
+    grid-template-columns: var(--step-icon-width) minmax(0, 1fr) auto 14px;
+    row-gap: var(--space-2);
   }
-  .step-command {
-    display: none;
+  .step-command-summary {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+  .step-summary > .status-pill {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .step-chevron {
+    grid-column: 4;
+    grid-row: 1;
   }
   .step-modes {
     grid-template-columns: 1fr;
+  }
+}
+@container (max-width: 420px) {
+  .step-panel {
+    padding-left: var(--step-inset);
+  }
+  .step-name small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .step-executable {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .step-executable small {
+    grid-column: 1;
   }
 }
 </style>

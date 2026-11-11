@@ -15,6 +15,7 @@ const PATH_STORAGE_KEY = 'taskpilot.onboarding.path';
 export const useOnboardingStore = defineStore('onboarding', () => {
   const agent = ref<settingsTypes.AgentStatus | null>(null);
   const checksReady = ref<boolean | null>(null);
+  const blank = ref(false);
   const checking = ref(false);
   const loadError = ref<string | null>(null);
   const path = ref<OnboardingPath>('project');
@@ -43,6 +44,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
         if (!isCurrent()) return;
         agent.value = status;
         checksReady.value = hasBlockingChecks(view.steps);
+        blank.value = view.blank;
         loadError.value = null;
       } catch (error) {
         if (!isCurrent()) return;
@@ -62,9 +64,10 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     watcher.invalidate();
     agent.value = null;
     checksReady.value = null;
+    blank.value = false;
     checking.value = false;
     loadError.value = null;
   };
 
-  return { agent, checksReady, checking, loadError, path, choosePath, recheck: watcher.refresh, start: watcher.start, stop, reset };
+  return { agent, checksReady, blank, checking, loadError, path, choosePath, recheck: watcher.refresh, start: watcher.start, stop, reset };
 });

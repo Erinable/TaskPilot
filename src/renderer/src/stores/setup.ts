@@ -6,12 +6,13 @@ import { computed, ref, watch } from 'vue';
 
 import { call } from '@/lib/ipc.ts';
 import type { IpcError } from '@/lib/ipc.ts';
-import { ERROR_HINTS, describeError } from '@/lib/errors.ts';
+import { describeError, describeErrorInfo } from '@/lib/errors.ts';
 import { confirmAction, showToast } from '@/lib/feedback.ts';
 import { STEP_LABELS } from '@/lib/check_steps.ts';
 import type { IconName } from '@/lib/icons.ts';
 import { useAppStore } from './app.ts';
 import { useSettingsStore } from './settings.ts';
+import { useExecutionStore } from './execution.ts';
 import { useRepositoryIdentityStore } from './repository_identity.ts';
 import { createStateWatcher } from './state_watcher.ts';
 import type * as envelopeTypes from '@shared/ipc/envelope.ts';
@@ -19,8 +20,8 @@ import type * as envTypes from '@shared/ipc/environment.ts';
 
 // [人工决策-2026-10-25 23:51:35] 非 TS 仓库本期只显示「暂不支持自动环境规划」，不调用模型。
 const BLOCKER_TEXT: Record<string, string> = {
-  setup_unsupported:
-    '这个仓库暂不支持自动环境规划，目前只支持根目录有 package.json 的 Node/npm 项目。依赖请按项目说明手动安装，检查步骤可以在「检查步骤」里设置。',
+  no_skeleton: '项目还没有骨架，暂时没有要安装的依赖。先写下第一个需求，第一个工作包会搭好项目骨架；骨架提交后再回来初始化环境。',
+  setup_unsupported: '环境管家目前只会规划 Node/npm 项目（根目录有 package.json）。这个项目的依赖请按项目说明手动安装，检查步骤可以在「检查步骤」里设置。',
   no_manifest: '仓库里没有已提交的 package.json，目前只支持 Node/npm 项目。',
   invalid_manifest: 'package.json 不是合法的 JSON。',
   unsupported_manager: '仓库使用了 npm 以外的包管理器（yarn/pnpm/bun），安装步骤已禁用，脚本仍可运行。',
@@ -64,6 +65,7 @@ export const useSetupStore = defineStore('setup', () => {
 
   const busy = computed(() => acting.value || view.value?.status === 'planning' || Boolean(view.value?.running));
   const ready = computed(() => view.value?.status === 'ready');
+  const installationOnly = computed(() => Boolean(view.value?.configurationPackage?.installPending && !view.value.stepKinds.length));
   const showCancel = computed(() => view.value?.status === 'planning' || Boolean(view.value?.running));
   const planLabel = computed(() => (view.value && view.value.status !== 'idle' ? '重新分析' : '分析环境'));
   const statusWarn = computed(() => view.value?.status === 'failed' || view.value?.stale === true);
@@ -73,9 +75,9 @@ export const useSetupStore = defineStore('setup', () => {
     const current = view.value;
     if (!current || current.status === 'idle') return '还没有分析过这个仓库。';
     if (current.status === 'planning') return '环境管家正在读取仓库并制定步骤…';
-    if (current.status === 'failed') return `分析失败：${current.error ? (ERROR_HINTS[current.error.code] ?? current.error.message) : ''}`;
+    if (current.status === 'failed') return `分析失败：${describeErrorInfo(current.error)}`;
     const parts: string[] = [];
-    if (current.stale) parts.push('工作区已切换，这份计划已过期，请重新分析。');
+    if (current.stale) parts.push('仓库内容已变化，这份计划已过期，请重新分析。');
     else if (current.plan) parts.push(current.plan.summary);
     else parts.push('无法制定步骤。');
     if (current.costUsd > 0) parts.push(`（本次分析 $${current.costUsd.toFixed(3)}）`);
@@ -105,16 +107,23 @@ export const useSetupStore = defineStore('setup', () => {
     ].map((fact) => ({ term: fact.term, value: fact.value || '—' }));
   });
 
+  const installScriptPackages = computed(() => (installationOnly.value ? [] : (view.value?.facts?.installScripts ?? [])));
   const notices = computed(() => {
     const current = view.value;
     if (!current) return [];
     const items: SetupNotice[] = [];
-    for (const code of current.blockers) items.push({ tone: 'danger', icon: 'alert', text: BLOCKER_TEXT[code] ?? code, detail: null });
+    // A missing skeleton is a step still to come, not a fault.
+    for (const code of current.blockers)
+      items.push(
+        code === 'no_skeleton'
+          ? { tone: 'info', icon: 'info', text: BLOCKER_TEXT[code], detail: null }
+          : { tone: 'danger', icon: 'alert', text: BLOCKER_TEXT[code] ?? code, detail: null },
+      );
     for (const adjustment of current.plan?.adjustments ?? []) items.push({ tone: 'info', icon: 'info', text: adjustmentText(adjustment), detail: null });
     for (const issue of current.plan?.issues ?? []) items.push({ tone: 'warning', icon: 'alert', text: issue.text, detail: issue.fix || null });
     if (current.plan?.installReason) items.push({ tone: 'info', icon: 'box', text: `安装方式：${current.plan.installReason}`, detail: null });
     // Packages that are installed but unusable until their scripts run.
-    const needed = current.facts?.installScripts ?? [];
+    const needed = installScriptPackages.value;
     if (needed.length && current.plan?.install !== 'skip')
       items.push(
         current.allowScripts
@@ -133,6 +142,7 @@ export const useSetupStore = defineStore('setup', () => {
   const retryText = computed(() => {
     const failed = failedStep.value;
     if (!failed) return '';
+    if (installationOnly.value) return '本机依赖安装失败，请查看输出后重试；需要排查建议或运行安装脚本时，可显式重新分析环境。';
     if (failed.kind === 'rebuild') return '有依赖的安装脚本运行失败了。展开输出看看是哪个包；常见原因是网络下载失败，可以再运行一次。';
     return failed.kind === 'install' && !view.value?.allowScripts
       ? '安装失败了。如果错误来自原生模块编译，可以打开上面的「允许依赖的安装脚本」再试；也可以让环境管家看看输出。'
@@ -158,9 +168,13 @@ export const useSetupStore = defineStore('setup', () => {
   });
 
   // ========== Actions ==========
-  // Every new view resets the apply ticks to their defaults, as a repaint did.
+  // A package progress event must not reset the user's command selection.
   const setView = (next: envTypes.EnvState) => {
+    const selectionKey = (state: envTypes.EnvState | null) =>
+      JSON.stringify(state && [state.root, state.plan?.scripts, state.configured, state.steps.map((step) => [step.id, step.result?.ok])]);
+    const resetSelection = selectionKey(view.value) !== selectionKey(next);
     view.value = next;
+    if (!resetSelection) return;
     selectedKinds.value = next.stepKinds.filter((kind) => {
       const step = next.steps.find((candidate) => candidate.id === kind);
       return Boolean(next.plan?.scripts[kind]) && !next.configured[kind] && step?.result?.ok === true;
@@ -171,7 +185,7 @@ export const useSetupStore = defineStore('setup', () => {
 
   const watcher = createStateWatcher({
     name: 'setup',
-    domains: ['environment', 'workspace'],
+    domains: ['environment', 'workspace', 'packages'],
     read: async (isCurrent) => {
       if (!visible()) return;
       try {
@@ -209,6 +223,30 @@ export const useSetupStore = defineStore('setup', () => {
     }
   };
 
+  const createConfiguration = async () => {
+    if (busy.value || view.value?.stale || !view.value?.plan?.configuration) return false;
+    const repositoryId = repository.currentId;
+    acting.value = true;
+    try {
+      const result = await call(window.taskpilot.env.createConfiguration());
+      if (repository.currentId !== repositoryId) return false;
+      if (view.value) view.value.configurationPackage = result;
+      showToast('配置工作包已加入队列，可以打开后交给 Coding Agent。');
+      return true;
+    } catch (error) {
+      console.error(error);
+      showToast(`生成配置工作包失败：${describeError(error)}`, 'error');
+      return false;
+    } finally {
+      acting.value = false;
+      await render();
+    }
+  };
+  const openConfiguration = async () => {
+    const id = view.value?.configurationPackage?.id;
+    if (id) await useExecutionStore().open(id);
+  };
+
   const plan = () => act(window.taskpilot.env.plan(), '分析失败');
   const replan = () => act(window.taskpilot.env.plan({ withFailure: true }), '分析失败');
   const cancel = async () => {
@@ -218,6 +256,7 @@ export const useSetupStore = defineStore('setup', () => {
 
   // The switch reflects view.allowScripts, so declining leaves it off.
   const setAllowScripts = async (allow: boolean) => {
+    if (installationOnly.value) return false;
     if (allow) {
       const confirmed = await confirmAction({
         title: '允许依赖运行安装脚本？',
@@ -300,6 +339,7 @@ export const useSetupStore = defineStore('setup', () => {
     selectedKinds,
     busy,
     ready,
+    installationOnly,
     showCancel,
     planLabel,
     statusWarn,
@@ -312,6 +352,8 @@ export const useSetupStore = defineStore('setup', () => {
     applyItems,
     // Actions
     render,
+    createConfiguration,
+    openConfiguration,
     plan,
     replan,
     cancel,

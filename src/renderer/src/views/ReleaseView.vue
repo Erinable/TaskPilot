@@ -13,6 +13,7 @@ import * as model from '@/lib/release_model.ts';
 import { useReleaseStore } from '@/stores/release.ts';
 import { useSettingsStore } from '@/stores/settings.ts';
 import type * as releaseTypes from '@shared/ipc/release.ts';
+import { FROM_FIRST_COMMIT } from '@shared/ipc/release.ts';
 
 const store = useReleaseStore();
 const settings = useSettingsStore();
@@ -23,7 +24,11 @@ const draft = computed(() => store.draft);
 const readyDraft = computed(() =>
   draft.value?.status === 'ready' && draft.value.plan ? (draft.value as releaseTypes.ReleaseDraft & { plan: releaseTypes.ReleasePlan }) : null,
 );
-const commitOptions = computed(() => (store.commits ?? []).map((commit) => ({ value: commit.sha, label: model.commitOptionLabel(commit) })));
+// The first release can cover everything committed so far.
+const commitOptions = computed(() => [
+  { value: FROM_FIRST_COMMIT, label: '从项目的第一个提交开始（首次发版）' },
+  ...(store.commits ?? []).map((commit) => ({ value: commit.sha, label: model.commitOptionLabel(commit) })),
+]);
 
 const run = (action: () => Promise<unknown>) => {
   action().catch((error) => console.error(error));

@@ -7,7 +7,7 @@
 import type { QaReport } from '../../shared/ipc/packages.ts';
 import type { CheckRun, Evidence } from '../../shared/ipc/workspace.ts';
 import { MAX_AUTO_ATTEMPTS } from '../../shared/coding_types.ts';
-import type { CodingPatchPreview, CodingRound, CodingRun } from '../../shared/coding_types.ts';
+import type { CodingPatchPreview, CodingRound, CodingRun, CodingTrigger } from '../../shared/coding_types.ts';
 
 const MAX_OUTPUT_TAIL = 4000;
 const MAX_LISTED_TESTS = 20;
@@ -70,3 +70,10 @@ export const autoApply = (preview: Pick<CodingPatchPreview, 'files' | 'blocked'>
   const blocked = new Set(preview.blocked.map((entry) => entry.path));
   return { files: preview.files.map((file) => file.path).filter((filePath) => !blocked.has(filePath)), highRisk: false };
 };
+
+// An empty automatic patch has nothing a developer can review; publishing
+// ready would invite readers to race cleanup. Human rounds remain inspectable.
+export const patchState = (trigger: CodingTrigger, preview: Pick<CodingPatchPreview, 'files' | 'blocked'>): Pick<CodingRun, 'status' | 'halt'> =>
+  trigger !== 'human' && preview.files.length === 0 && preview.blocked.length === 0
+    ? { status: 'discarded', halt: 'no_changes' }
+    : { status: 'ready', halt: null };

@@ -39,4 +39,13 @@ describe('nextStep', () => {
     expect(nextStep(taskView({ status: 'done' }), 0).text).toContain('已交付');
     expect(nextStep(taskView({ status: 'done' })).text).toContain('已交付');
   });
+
+  test('a done package in a checkout without dependencies says to install them, after saving', () => {
+    const install = nextStep(taskView({ status: 'done' }), 0, ['node_modules']);
+    expect(install.text).toContain('没有 node_modules');
+    expect(install.setup).toBe(true);
+    const save = nextStep(taskView({ status: 'done' }), 2, ['node_modules']);
+    expect(save.text).toMatch(/提交这 2 个文件.*然后.*环境初始化/);
+    expect(save.setup).toBeFalsy();
+  });
 });

@@ -27,6 +27,7 @@ import type { AcceptanceCriterion } from '../work_packages/tasks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 
 import { normalizeErrorCode } from '../../shared/error_codes.ts';
+import { compareVersions } from '../../shared/semver.ts';
 import type { ErrorCode } from '../../shared/error_codes.ts';
 
 export interface AgentError {
@@ -388,12 +389,15 @@ export const collectReleaseInput = async (
     endCommit,
     packages,
     readVersion,
+    lastReleased = null,
   }: {
     startCommit: string;
     startLabel: string;
     endCommit: string;
     packages: ReleasePackage[];
     readVersion: ReadVersion;
+    // The version of the latest release TaskPilot recorded.
+    lastReleased?: string | null;
   },
 ): Promise<ReleaseInput> => {
   const [range, changes, version] = await Promise.all([
@@ -403,7 +407,7 @@ export const collectReleaseInput = async (
   ]);
   const files = changes.filter((change) => !looksSecret(change.path));
   return {
-    currentVersion: version.value,
+    currentVersion: compareVersions(lastReleased, version.value) > 0 ? lastReleased : version.value,
     versionFile: version.file,
     startCommit,
     startLabel,
@@ -425,6 +429,7 @@ export const planRelease = async ({
   endCommit,
   packages,
   readVersion,
+  lastReleased = null,
   runAgent,
   envPath,
   signal,
@@ -435,12 +440,13 @@ export const planRelease = async ({
   endCommit: string;
   packages: ReleasePackage[];
   readVersion: ReadVersion;
+  lastReleased?: string | null;
   runAgent: RunAgent;
   envPath?: string | null;
   signal?: AbortSignal;
 }): Promise<ReleasePlanResult> => {
   throwIfCancelled(signal);
-  const input = await collectReleaseInput(root, { startCommit, startLabel, endCommit, packages, readVersion });
+  const input = await collectReleaseInput(root, { startCommit, startLabel, endCommit, packages, readVersion, lastReleased });
   if (input.commits.length === 0) throw Object.assign(new Error('There are no commits since the start point'), { code: 'release_no_changes' });
   throwIfCancelled(signal);
   const { output, costUsd } = await runAgent({

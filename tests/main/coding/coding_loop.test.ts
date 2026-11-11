@@ -48,3 +48,11 @@ test('reviewFeedback() lists QA issues with locations and unmet criteria', () =>
   assert.match(text, /\[major\] src\/a\.ts:12 未处理空输入/);
   assert.match(text, /Acceptance criterion 1 is unmet: 没有提示/);
 });
+
+test('empty automatic completion is terminal before any observer may read its workspace', () => {
+  const empty = { files: [], blocked: [] };
+  assert.deepEqual(loop.patchState('checks_failed', empty), { status: 'discarded', halt: 'no_changes' });
+  assert.deepEqual(loop.patchState('qa_rejected', empty), { status: 'discarded', halt: 'no_changes' });
+  assert.deepEqual(loop.patchState('human', empty), { status: 'ready', halt: null });
+  assert.deepEqual(loop.patchState('checks_failed', { files: [file('src/a.ts')], blocked: [] }), { status: 'ready', halt: null });
+});

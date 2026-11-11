@@ -26,7 +26,7 @@ export const STEP_ICONS: Record<StepKind, IconName> = {
 };
 
 export const STEP_HINTS: Record<StepKind, string> = {
-  setup: '安装依赖、准备工具链。只在你点击时运行。',
+  setup: '安装项目依赖，准备工具链。',
   build: '把代码编译或打包，能发现编译错误。',
   format: '检查代码格式是否符合项目的格式化规则。',
   lint: '检查写法问题，比如没用到的变量。',

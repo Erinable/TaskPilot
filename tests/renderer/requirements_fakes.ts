@@ -193,7 +193,16 @@ export const installApi = (state: { list: requirementTypes.Requirement[] }) =>
       pickRoot: () => ok<string | null>('/Users/me/sched-lab'),
       info: () => ok({ configured: false } as workspaceTypes.WorkspaceInfo),
       get: () =>
-        ok({ root: null, steps: [], project: { status: 'missing' }, course: defaultCourse(), detected: [], presets: [] } as workspaceTypes.WorkspaceView),
+        ok({
+          root: null,
+          steps: [],
+          project: { status: 'missing' },
+          course: defaultCourse(),
+          detected: [],
+          blank: false,
+          missingDependencies: [],
+          presets: [],
+        } as workspaceTypes.WorkspaceView),
     },
     tasks: { list: () => ok([]) },
     // Placing a lab switches repositories, which reloads the activity overview.

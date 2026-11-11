@@ -133,7 +133,7 @@ Apply 前应特别审查这些高风险路径。界面要求人工确认高风�
 
 TaskPilot 不自动创建 commit 或执行 push。编码 prompt 要求模型不 commit / push；
 运行环境不注入 `GH_TOKEN`、`GITHUB_TOKEN`、`SSH_AUTH_SOCK` 等主账号的 push 凭据。
-Codex 使用 `workspace-write` 和非交互的 `--ask-for-approval never`，不使用
+Codex 使用 `workspace-write` 和非交互的 `-c approval_policy="never"`（Codex 0.164 起 `exec` 不再接受 `--ask-for-approval`），不使用
 `--dangerously-bypass-approvals-and-sandbox`。其他 CLI 的编码工具运行在独立用户边界内，
 不是主账号权限下的通用 shell。wrapper 限制的是启动的 CLI / 参数，不是任意模型 shell 命令的内容；
 不要给编码账号配置不必要的 Git / 云访问权限。
@@ -145,7 +145,7 @@ Codex 使用 `workspace-write` 和非交互的 `--ask-for-approval never`，不�
 ### Coding profile
 
 ```text
-codex exec --json --sandbox workspace-write --ask-for-approval never -
+codex exec --json --sandbox workspace-write -c approval_policy="never" -
 ```
 
 prompt 走 stdin。Codex 在独立 OS 用户自己的 HOME 中登录，不复用主用户

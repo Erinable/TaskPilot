@@ -101,6 +101,7 @@ export const rustPreset: Preset<RustFacts> = {
     typecheck: ['cargo check --workspace --all-targets --message-format=json'],
     test: ['cargo test --workspace --no-fail-fast', 'cargo test --workspace --no-fail-fast -- --include-ignored'],
   }),
+  dependencyDirs: [],
   tools: [
     { command: 'cargo', versionArgs: ['--version'], install: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # 或从 https://rustup.rs 安装" },
     {

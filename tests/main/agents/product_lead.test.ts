@@ -280,3 +280,17 @@ test('the redo prompt shows the plan, marks the package and fences the feedback'
   assert.deepEqual(schema.required, ['summary', 'package']);
   assert.equal(schema.properties.package, productLead.PLAN_SCHEMA.properties.packages.items);
 });
+
+test('an empty repository plans the skeleton first, and may ask about the stack', () => {
+  const files = ['README.md', '.gitignore'];
+  const plan = productLead.planPrompt({ title: '', text: '做一个记账应用', questions: [], files, linkTests: false, course: PROGRAMMING_COURSE });
+  assert.match(plan, /Package 1 sets up the project skeleton/);
+  assert.match(productLead.clarifyPrompt({ text: '做一个记账应用', files }), /which language, framework/);
+
+  const existing = ['README.md', 'package.json', 'src/index.ts'];
+  assert.doesNotMatch(
+    productLead.planPrompt({ title: '', text: 't', questions: [], files: existing, linkTests: false, course: PROGRAMMING_COURSE }),
+    /Empty repository/,
+  );
+  assert.doesNotMatch(productLead.clarifyPrompt({ text: 't', files: existing }), /which language, framework/);
+});

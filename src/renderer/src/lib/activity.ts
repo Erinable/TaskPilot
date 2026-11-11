@@ -30,7 +30,6 @@ export const TEAM: { agent: AgentId; actor: FeedActor }[] = AGENT_IDS.map((agent
 
 // What a transition reads as, and who did it.
 const TRANSITION_TEXT: Record<packageTypes.HumanTransition | packageTypes.AgentTransition | packageTypes.CodingTransition, { by: FeedActor; what: string }> = {
-  breakdown_done: { by: AGENTS['product-lead'], what: '拆解完成了工作包' },
   claim: { by: YOU, what: '开始执行' },
   release: { by: YOU, what: '把工作包放回了队列' },
   submit_for_review: { by: YOU, what: '提交了审查' },
@@ -41,6 +40,8 @@ const TRANSITION_TEXT: Record<packageTypes.HumanTransition | packageTypes.AgentT
   unblock: { by: YOU, what: '解除了阻塞' },
   accepted: { by: YOU, what: '验收通过' },
   acceptance_rejected: { by: YOU, what: '打回修改' },
+  withdraw_review: { by: YOU, what: '撤回了审查' },
+  withdraw_deviation: { by: YOU, what: '撤回了偏差' },
   review_accepted: { by: AGENTS.qa, what: '审查通过，工作包已完成' },
   review_passed: { by: AGENTS.qa, what: '审查通过，等你验收' },
   review_rejected: { by: AGENTS.qa, what: '审查未通过，退回修改' },
@@ -55,7 +56,8 @@ export const toFeedItem = (record: activityTypes.ActivityRecord, index: number):
   const key = `${record.at}-${index}`;
   switch (record.kind) {
     case 'package_transition': {
-      const text = TRANSITION_TEXT[record.transition];
+      // Lines written by older versions can name a transition that is gone.
+      const text = Object.hasOwn(TRANSITION_TEXT, record.transition) ? TRANSITION_TEXT[record.transition] : { by: YOU, what: '更新了工作包状态' };
       return { key, actor: text.by, what: text.what, detail: record.title, at: record.at };
     }
     case 'coding_run':

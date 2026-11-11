@@ -17,6 +17,7 @@ import { fail, isObject, list, oneOf, optionalText, scopePath, text } from './ou
 import type { ProfileSection } from './prompt_blocks.ts';
 import type { ProjectProfile } from '../../shared/project_profile.ts';
 import type { CoursePack, CourseRef } from '../../shared/course_pack.ts';
+import { isBlankProject } from '../../shared/blank_project.ts';
 
 export const MAX_QUESTIONS = 5;
 export const MAX_PACKAGES = 6;
@@ -117,6 +118,23 @@ const formatFileList = (files: string[] | null | undefined): string => {
   return files.join('\n');
 };
 
+// [人工决策-2026-11-10 19:40:00] 空项目（只有 README 一类文件）先搭骨架：第一个包选技术栈、建清单文件和能跑的测试脚本，其余包依赖它；需求没说技术栈时可以就此提问。
+// A repository with nothing but a README and the like committed.
+const isBlank = (files: string[] | null | undefined) => Boolean(files?.length) && isBlankProject(files!);
+
+const BLANK_CLARIFY = [
+  'This repository is empty apart from a README and similar files: there is no code, language or tooling yet.',
+  'If the requirement does not say which language, framework or kind of app to build with, and the choice would change the plan, ask about it first, with a recommended default.',
+];
+
+const BLANK_PLAN = [
+  'Empty repository:',
+  '- The repository has no code yet, only a README and similar files. Ignore the rules above about building on existing files and directories.',
+  '- Package 1 sets up the project skeleton and nothing else: the chosen language and framework, the manifest (for example `package.json`, `Cargo.toml` or `pyproject.toml`), the source and test directories, a test script with one passing example test, and a `.gitignore` for build output. Its fileScope lists every file it creates; do not list `taskpilot.toml`.',
+  '- Every later package depends on package 1, and builds on the layout package 1 creates.',
+  '- Package 1 cannot be checked by running tests yet: leave `test` out of its criteria and write criteria a reviewer can check by reading the change and running the test script.',
+];
+
 // Architect's summary, when there is one (see ./architect.ts).
 const interfaceBlock = (interfaces: string | null | undefined): string[] => {
   if (!interfaces) return [];
@@ -133,6 +151,7 @@ export const clarifyPrompt = ({ title, text, files, interfaces, profile }: Requi
     'Do not ask about things you can decide yourself with a sensible default (naming, code style, test framework, error message wording), and do not ask the developer to confirm something the requirement already states.',
     `Most requirements need 0 to 2 questions. A small, clear change needs none. Never ask more than ${MAX_QUESTIONS}; ask fewer whenever you can.`,
     'Order questions by how much the answer changes the plan.',
+    ...(isBlank(files) ? BLANK_CLARIFY : []),
     '',
     '<requirement>',
     title ? `Title: ${title}` : null,
@@ -181,6 +200,7 @@ export const planPrompt = ({
     `- Put new tests where the repository already keeps tests (${profile?.testLayout ? `for this language: ${profile.testLayout}` : 'for example a tests/ directory, or test files next to the code'}), matching existing test file names.`,
     '- Plan only what the requirement and answers ask for. Where a question was not answered, choose the simplest default that satisfies the requirement and state it in the summary.',
     '',
+    ...(isBlank(files) && !redo ? [...BLANK_PLAN, ''] : []),
     'Content:',
     '- Steps are concrete instructions. Mark code identifiers and paths with backticks, e.g. `parseConfig` in `src/config/`.',
     '- fileScope lists every file the package may create or change, as paths relative to the repository root.',

@@ -90,7 +90,7 @@ const safeName = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // they are the developer's to change. Language-specific files come
 // from the presets (PatchRules); these hold for every repository.
 const highRiskName =
-  /^(?:\.git(?:\/|$)|\.hooks(?:\/|$)|taskpilot\.toml$|\.taskpilot\/courses(?:\/|$)|package\.json$|package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.npmrc$|(?:test|tests|spec|__tests__|build|dist)(?:[./]|\/|$)|(?:Makefile|makefile|make\.bat)$|(?:\.github|\.gitlab|\.circleci)(?:\/|$))/i;
+  /^(?:\.git(?:\/|$)|\.gitattributes$|\.gitmodules$|\.hooks(?:\/|$)|taskpilot\.toml$|\.taskpilot\/courses(?:\/|$)|package\.json$|package-lock\.json$|npm-shrinkwrap\.json$|yarn\.lock$|pnpm-lock\.yaml$|\.npmrc$|(?:test|tests|spec|__tests__|build|dist)(?:[./]|\/|$)|(?:Makefile|makefile|make\.bat)$|(?:\.github|\.gitlab|\.circleci)(?:\/|$))/i;
 const secretName = /(?:^|\/)(?:\.env(?:\.|$)|\.npmrc$|(?:id|identity)_rsa(?:\.pub)?$|.*\.(?:pem|key|p12|pfx)$|credentials?(?:\.|\/|$))/i;
 const highRiskPath = (filePath: string, rules: PatchRules) => highRiskName.test(filePath) || rules.protectedFiles.some((rule) => rule.test(filePath));
 const secretPath = (filePath: string, rules: PatchRules) => secretName.test(filePath) || rules.secretFiles.some((rule) => rule.test(filePath));
@@ -107,7 +107,9 @@ const pathReason = (value: string): string | null => {
   if (!normalized || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || normalized.includes('\0')) return 'absolute or empty path';
   const parts = normalized.split('/');
   if (parts.some((part) => !part || part === '.' || part === '..')) return 'path traversal';
-  if (parts[0].startsWith('.git')) return 'git metadata path';
+  // Only git's own directory. `.gitignore` is ordinary project content;
+  // `.gitattributes`, `.gitmodules` and `.github/` are high-risk (highRiskName).
+  if (parts[0].toLowerCase() === '.git') return 'git metadata path';
   return null;
 };
 
@@ -199,7 +201,9 @@ const parsePatchFiles = (patch: string, fileScope: FileScope, rules: PatchRules)
   }
   finish();
   if (!files.length && patch.trim()) throw new CodingWorkspaceError('Patch contains no file entries', 'workspace_invalid_patch');
-  return { files, blocked };
+  // The old path, the new path and the file can each report the same reason.
+  const unique = [...new Map(blocked.map((entry) => [`${entry.path}\0${entry.reason}`, entry])).values()];
+  return { files, blocked: unique };
 };
 
 const runWrapper = async (

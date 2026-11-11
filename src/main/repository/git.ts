@@ -304,6 +304,13 @@ export const recentCommits = async (cwd: string, { limit }: { limit: number }): 
   }
 };
 
+// git's empty tree: a start before the first commit, so a range from it
+// covers the whole history (a project's first release).
+export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
+// `start..end` as revision arguments; from the empty tree, everything up to end.
+const rangeArgs = (start: string, end: string) => (start === EMPTY_TREE ? [end] : [`${start}..${end}`]);
+
 // Commits in start..end, newest first, at most `limit`; `truncated` when more exist.
 export const commitRange = async (
   cwd: string,
@@ -311,13 +318,13 @@ export const commitRange = async (
   end: string,
   { limit }: { limit: number },
 ): Promise<{ commits: CommitInfo[]; truncated: boolean }> => {
-  const commits = parseCommits(await git(cwd, ['log', `--max-count=${limit + 1}`, COMMIT_FORMAT, `${start}..${end}`, '--']));
+  const commits = parseCommits(await git(cwd, ['log', `--max-count=${limit + 1}`, COMMIT_FORMAT, ...rangeArgs(start, end), '--']));
   return { commits: commits.slice(0, limit), truncated: commits.length > limit };
 };
 
 // How many commits start..end holds, counting at most `limit`.
 export const countRange = async (cwd: string, start: string, end: string, { limit }: { limit: number }): Promise<number> =>
-  Number((await git(cwd, ['rev-list', '--count', `--max-count=${limit}`, `${start}..${end}`, '--'])).trim());
+  Number((await git(cwd, ['rev-list', '--count', `--max-count=${limit}`, ...rangeArgs(start, end), '--'])).trim());
 
 // Per-file line counts between two commits, committed history only. Renames
 // are reported under their new path.

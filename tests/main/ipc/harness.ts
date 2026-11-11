@@ -476,9 +476,10 @@ export const settleReview = async (call, id) => {
 };
 
 export const ENV_PLAN = {
+  configuration: null,
   summary: '无依赖项目，安装后即可运行测试。',
   install: { mode: 'install', reason: '没有 lockfile' },
-  scripts: { test: 'test', lint: 'lint', build: '' },
+  scripts: { test: 'test', lint: 'lint', build: '', typecheck: '', format: '', coverage: '' },
   issues: [],
 };
 

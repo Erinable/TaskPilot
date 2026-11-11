@@ -14,15 +14,15 @@ const waitingOn = (blocking: boolean): packageTypes.PackageDependency => ({
 });
 
 test('every status lands in one column; deviation and blocked stay with the developer', () => {
-  const statuses: packageTypes.WorkPackageStatus[] = ['clarifying', 'pending', 'in_progress', 'deviation', 'blocked', 'in_review', 'accepting', 'done'];
+  const statuses: packageTypes.WorkPackageStatus[] = ['pending', 'in_progress', 'deviation', 'blocked', 'in_review', 'accepting', 'done'];
   assert.deepEqual(
     statuses.map((status) => board.columnOf({ status })),
-    ['todo', 'todo', 'doing', 'doing', 'doing', 'review', 'accept', 'done'],
+    ['todo', 'doing', 'doing', 'doing', 'review', 'accept', 'done'],
   );
   const grouped = board.groupByColumn(statuses.map((status, index) => taskView({ id: `t${index}`, status })));
   assert.deepEqual(
     Object.values(grouped).map((column) => column.length),
-    [2, 3, 1, 1, 1],
+    [1, 3, 1, 1, 1],
   );
 });
 

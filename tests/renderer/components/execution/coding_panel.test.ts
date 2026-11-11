@@ -75,13 +75,18 @@ test('a failed round explains itself in plain words and folds the raw message', 
   useExecutionStore().current = { ...useExecutionStore().current!, codingRun: run };
   api.coding.get.mockResolvedValue({ ok: true, data: useExecutionStore().current } as never);
   const wrapper = await render();
-  const error = wrapper.get('.coding-error');
+  // The failure leads, above the form to start again.
+  const error = wrapper.get('.coding-failure');
+  expect(error.get('strong').text()).toBe('这一轮没有完成');
   expect(error.find('span').text()).toContain('中途出错退出');
   expect(error.text()).not.toContain('coding_exit_failed');
   expect(error.find('.coding-raw pre').text()).toContain('not logged in');
-  // Runtime details are folded; elapsed time and cost lead.
-  expect(wrapper.find('.coding-summary').text()).toContain('费用');
-  expect(wrapper.find('.coding-summary details summary').text()).toBe('运行详情');
+  const order = wrapper.findAll('.coding-failure, .coding-start').map((node) => node.classes()[0]);
+  expect(order).toEqual(['coding-error', 'coding-start']);
+  expect(wrapper.get('.coding-actions .primary-button').text()).toContain('重新开始编码');
+  // Nothing ran: no empty transcript; the runtime details stay folded.
+  expect(wrapper.find('.coding-transcript').exists()).toBe(false);
+  expect(wrapper.find('details.coding-details summary').text()).toBe('运行详情');
 });
 
 test('the instruction starts prefilled, so starting needs no typing', async () => {
@@ -106,4 +111,51 @@ test('the patch review shows a coloured diff per file', async () => {
   const wrapper = await render();
   expect(wrapper.findAll('.coding-files .diff-line.add').map((line) => line.text())).toEqual(['+new']);
   expect(wrapper.findAll('.coding-files .diff-line.del').map((line) => line.text())).toEqual(['-old']);
+});
+
+test('an infrastructure run waiting for local dependencies offers installation and resumes the same round', async () => {
+  const run = codingRun({ status: 'applied', halt: 'setup_required' });
+  useExecutionStore().current = { ...useExecutionStore().current!, codingRun: run };
+  api.coding.get.mockResolvedValue({ ok: true, data: useExecutionStore().current } as never);
+  const wrapper = await render();
+  expect(wrapper.find('.coding-start').exists()).toBe(false);
+  expect(wrapper.get('[data-action="install-config-dependencies"]').text()).toBe('去安装依赖');
+  await wrapper.get('[data-action="resume-after-setup"]').trigger('click');
+  await flushPromises();
+  expect(api.coding.resume).toHaveBeenCalledWith(useExecutionStore().current!.id);
+  expect(api.coding.start).not.toHaveBeenCalled();
+});
+
+test('a first-open coding panel is quiet and one start click creates the first run', async () => {
+  const current = { task: taskView() };
+  api = installApi(current);
+  useExecutionStore().current = current.task;
+  api.coding.start.mockImplementation(async () => {
+    current.task = taskView({ codingRun: codingRun({ status: 'running' }) });
+    return { ok: true, data: current.task };
+  });
+  const wrapper = await render();
+  expect(wrapper.find('.coding-error').exists()).toBe(false);
+  expect(api.coding.events).not.toHaveBeenCalled();
+  const button = wrapper.get('.coding-actions .primary-button');
+  expect(button.text()).toBe('开始编码');
+  await button.trigger('click');
+  await flushPromises();
+  expect(api.coding.start).toHaveBeenCalledTimes(1);
+  expect(wrapper.get('.coding-status').text()).toBe('编码中');
+  expect(wrapper.find('.coding-error').exists()).toBe(false);
+  wrapper.unmount();
+});
+
+test.each(['accepting', 'done', 'in_review'] as const)('a submitted run in %s offers history without a new coding form', async (status) => {
+  const task = taskView({ status, codingRun: codingRun({ status: 'submitted' }) });
+  useExecutionStore().current = task;
+  api.coding.get.mockResolvedValue({ ok: true, data: task });
+  const wrapper = await render();
+  expect(wrapper.find('.coding-start').exists()).toBe(false);
+  expect(wrapper.text()).not.toContain('重新开始编码');
+  expect(wrapper.find('.coding-status').text()).toBe('已提交审查');
+  expect(wrapper.text()).toContain('运行记录保留');
+  expect(api.coding.start).not.toHaveBeenCalled();
+  wrapper.unmount();
 });

@@ -112,6 +112,9 @@ export type ReleaseState = {
 
 export type ReleaseCommit = { sha: string; subject: string; date: string };
 
+// release:generate's start for a project's first release: the whole history.
+export const FROM_FIRST_COMMIT = 'root';
+
 export type ReleaseDraftInput = { notes?: string; checked?: number[] };
 
 // Relative to the workspace root, ending in .md.

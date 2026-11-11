@@ -44,17 +44,26 @@ export type SkipReason = 'out_of_scope' | 'secret' | 'rename';
 // and what is held back. Renames show as
 // "old → new" and are held back, as are secret-looking paths: the developer
 // commits those by hand if they mean to.
+// TaskPilot's project configuration can accompany a reviewed package commit.
+// npm installation also creates or updates a lockfile outside a skeleton's
+// original scope. Offer it only with a package that owns the root manifest.
+export const PROJECT_CONFIG_FILES = ['taskpilot.toml'];
+const NPM_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json'];
+
 export const classifyChanges = (changes: { path: string }[], fileScope: string[]) => {
   const scope = new Set(fileScope);
+  const companions = new Set([...PROJECT_CONFIG_FILES, ...(scope.has('package.json') ? NPM_LOCKFILES : [])]);
   const committable: string[] = [];
+  const optional: string[] = [];
   const skipped: { path: string; reason: SkipReason }[] = [];
   for (const change of changes) {
     if (change.path.includes(' → ')) skipped.push({ path: change.path, reason: 'rename' });
     else if (looksSecret(change.path)) skipped.push({ path: change.path, reason: 'secret' });
-    else if (!scope.has(change.path)) skipped.push({ path: change.path, reason: 'out_of_scope' });
-    else committable.push(change.path);
+    else if (scope.has(change.path)) committable.push(change.path);
+    else if (companions.has(change.path)) optional.push(change.path);
+    else skipped.push({ path: change.path, reason: 'out_of_scope' });
   }
-  return { committable, skipped };
+  return { committable, optional, skipped };
 };
 
 // What may be committed for a package right now.
@@ -62,23 +71,25 @@ export const preview = async (root: string, fileScope: string[]) => classifyChan
 
 // Commits exactly the files the developer reviewed, recomputed here: if the
 // list changed since they looked, nothing is committed and they look again.
+// `extra` are the optional project files they ticked; each must still be one.
 // Stages the paths (additions, edits and deletions) and commits them with the
 // developer's own git identity. Anything they had staged before is left out:
 // `--only` commits the listed paths alone. `--no-verify` is never passed, so
 // their hooks still run.
-export const commitPaths = async (root: string, fileScope: string[], reviewed: string[], message: string): Promise<string> => {
-  const { committable: paths } = await preview(root, fileScope);
-  if (paths.length === 0) return fail('There is nothing to commit', 'nothing_to_commit');
-  if (paths.length !== reviewed.length || paths.some((file) => !reviewed.includes(file))) {
+export const commitPaths = async (root: string, fileScope: string[], reviewed: string[], message: string, extra: string[] = []): Promise<string> => {
+  const { committable: paths, optional } = await preview(root, fileScope);
+  if (paths.length === 0 && extra.length === 0) return fail('There is nothing to commit', 'nothing_to_commit');
+  if (paths.length !== reviewed.length || paths.some((file) => !reviewed.includes(file)) || extra.some((file) => !optional.includes(file))) {
     return fail('The changed files are not the ones reviewed', 'changes_changed');
   }
-  return commitExactly(root, paths, message);
+  return commitExactly(root, [...paths, ...extra], message);
 };
 
 // A course lab repository (./lab_service.ts): TaskPilot writes the files a
 // lab adds and commits them itself, since tests/, Makefile and
-// taskpilot.toml are paths a Coding Agent patch may not touch. `initRepository`
-// starts the repository in the empty folder the student picked.
+// taskpilot.toml are paths a Coding Agent patch may not touch. A new project
+// (./new_repository.ts) is started the same way. `initRepository` starts the
+// repository in the empty folder the user picked.
 export const initRepository = async (root: string) => {
   await run('git', ['init', '-q'], { cwd: root });
 };

@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 
 import SideBar from '../../../src/renderer/src/components/SideBar.vue';
 import { SIDEBAR_STORAGE_KEY, useAppStore } from '../../../src/renderer/src/stores/app.ts';
@@ -26,7 +27,7 @@ describe('SideBar', () => {
   });
 
   test('collapses to an icon rail and remembers it on this machine', async () => {
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     const toggle = wrapper.find('button.sidebar-toggle');
     expect(toggle.attributes('aria-expanded')).toBe('true');
     expect(toggle.text()).toBe('收起侧栏');
@@ -39,14 +40,14 @@ describe('SideBar', () => {
 
     // A fresh app start reads the saved choice.
     setActivePinia(createPinia());
-    const fresh = mount(SideBar);
+    const fresh = mount(SideBar, { global: { plugins: [ElementPlus] } });
     expect(fresh.find('button.sidebar-toggle').attributes('aria-expanded')).toBe('false');
   });
 
   test('collapsed items keep their names for tooltips and screen readers', async () => {
     useTasksStore().tasks = [taskView({ status: 'pending' })];
     useAppStore().toggleSidebar();
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     await wrapper.vm.$nextTick();
 
     const queue = wrapper.find('nav button.nav-item');
@@ -56,7 +57,7 @@ describe('SideBar', () => {
   });
 
   test('expanded items carry no tooltip, since the label is visible', () => {
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     for (const item of wrapper.findAll('nav button.nav-item')) expect(item.attributes('title')).toBeUndefined();
   });
 
@@ -75,7 +76,7 @@ describe('SideBar', () => {
     ['settings', '设置'],
   ] as const)('%s exposes one current destination before and after collapsing the sidebar', async (view, label) => {
     const app = useAppStore();
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     expect(wrapper.get('nav.main-nav').attributes('aria-label')).toBe('工作区导航');
     await app.navigate(view);
     await wrapper.vm.$nextTick();
@@ -100,7 +101,7 @@ describe('SideBar', () => {
     vi.restoreAllMocks();
   });
   test('掌握度 and 课程 are top-level views beside the notes', async () => {
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     const labels = wrapper.findAll('nav.main-nav .nav-label').map((node) => node.text());
     expect(labels.slice(labels.indexOf('学习笔记'), labels.indexOf('学习笔记') + 3)).toEqual(['学习笔记', '掌握度', '课程']);
     await wrapper.get('[data-nav="mastery"]').trigger('click');
@@ -112,7 +113,7 @@ describe('SideBar', () => {
   });
 
   test('members, activity and cost share one entry', () => {
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     const labels = wrapper.findAll('.nav-item .nav-label').map((node) => node.text());
     expect(labels).not.toContain('活动记录');
     expect(labels).not.toContain('成本');
@@ -129,7 +130,7 @@ describe('SideBar', () => {
       work,
     });
     app.activity = { team: team([]) } as ActivityOverview;
-    const wrapper = mount(SideBar);
+    const wrapper = mount(SideBar, { global: { plugins: [ElementPlus] } });
     expect(wrapper.findAll('button.team-member')).toHaveLength(0);
     expect(wrapper.findAll('.team-stack-avatar')).toHaveLength(7);
     expect(wrapper.find('.team-entry-work').exists()).toBe(false);

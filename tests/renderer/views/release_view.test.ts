@@ -87,10 +87,12 @@ describe('ReleaseView', () => {
     await view.find('.start-select .el-select__wrapper').trigger('click');
     await flushPromises();
     const options = document.querySelectorAll('.el-select-dropdown__item');
-    expect(options).toHaveLength(2);
-    expect(options[0].textContent).toContain('<b>初始提交</b>');
+    // The whole history comes first, then the recent commits.
+    expect(options).toHaveLength(3);
+    expect(options[0].textContent).toContain('从项目的第一个提交开始');
+    expect(options[1].textContent).toContain('<b>初始提交</b>');
     expect(document.querySelector('.el-select-dropdown__item b')).toBeNull();
-    (options[1] as HTMLElement).click();
+    (options[2] as HTMLElement).click();
     await flushPromises();
     await view.find('.generate-release').trigger('click');
     await flushPromises();

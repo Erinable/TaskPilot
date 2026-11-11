@@ -95,6 +95,8 @@ const workspaceView = (overrides: Partial<workspaceTypes.WorkspaceView> = {}): w
   project: { status: 'missing' },
   course: defaultCourse(),
   detected: [{ manifest: 'package.json', language: 'TypeScript / JavaScript', preset: 'typescript' }],
+  blank: false,
+  missingDependencies: [],
   presets: [{ id: 'typescript', label: 'TypeScript / JavaScript' }],
   ...overrides,
 });
@@ -113,7 +115,7 @@ export const envState = (overrides: Partial<envTypes.EnvState> = {}): envTypes.E
   status: 'ready',
   stale: false,
   facts: {
-    manifest: { valid: true, name: 'app', scripts: { test: 'vitest' }, engines: {}, packageManager: null },
+    manifest: { valid: true, name: 'app', scripts: { test: 'vitest' }, engines: {}, packageManager: null, dependencies: {}, devDependencies: {} },
     lockfiles: ['package-lock.json'],
     managers: ['npm'],
     nodeModules: false,
@@ -121,9 +123,12 @@ export const envState = (overrides: Partial<envTypes.EnvState> = {}): envTypes.E
     workflows: [],
     tools: { node: 'v22.0.0', npm: '10.0.0' },
     installScripts: [],
+    configFiles: [],
   },
   blockers: [],
+  configurationPackage: null,
   plan: {
+    configuration: null,
     summary: '先安装依赖再跑测试。',
     install: 'ci',
     installReason: '有 lockfile',
@@ -164,6 +169,7 @@ export const installApi = (overrides: Overrides = {}) => {
         ),
       check: () => ok(workspaceCheck()),
       createProject: (preset: string) => ok(workspaceView({ project: { status: 'ok', preset } })),
+      setProjectPreset: (preset: string) => ok(workspaceView({ project: { status: 'ok', preset } })),
       confirmCourse: () => ok(workspaceView()),
       pickRoot: () => ok(null),
       info: () => ok({ configured: false }),

@@ -167,18 +167,37 @@ const onSubmitAnswers = () => report(store.runStep(props.item, 'plan', [...answe
         </div>
       </template>
 
+      <!-- A requirement whose first clarification never started (it failed
+           to launch, or the app closed in between) waits here to be started. -->
+      <template v-else-if="item.status === 'draft'">
+        <AgentBubble text="这个需求还没开始澄清。点下面的按钮，让 Architect 和 Product Lead 开始阅读。" />
+        <div class="req-actions">
+          <button
+            class="primary-button"
+            type="button"
+            data-action="start-clarify"
+            :disabled="store.acting !== null"
+            :aria-busy="store.acting === 'clarify'"
+            @click="report(store.runStep(item, 'clarify'))"
+          >
+            <AppIcon :name="store.acting === 'clarify' ? 'spinner' : 'play'" :class="{ spin: store.acting === 'clarify' }" />
+            {{ course ? '开始访谈' : '开始澄清' }}
+          </button>
+        </div>
+      </template>
+
       <template v-else-if="course">
         <DraftNotice
-          v-if="item.status === 'answering' || item.status === 'draft'"
+          v-if="item.status === 'answering'"
           :state="answerState"
           :busy="store.acting !== null"
           @restore="store.restoreAnswers(item)"
           @discard="store.discardAnswers(item)"
         />
-        <div :inert="(item.status === 'answering' || item.status === 'draft') && draftBlocked"><CourseInterview :item="item" :course="course" /></div>
+        <div :inert="item.status === 'answering' && draftBlocked"><CourseInterview :item="item" :course="course" /></div>
       </template>
 
-      <template v-else-if="item.status === 'answering' || item.status === 'draft'">
+      <template v-else-if="item.status === 'answering'">
         <AgentBubble v-if="item.summary" :text="`我理解的需求：${item.summary}`" />
         <AgentBubble v-if="item.questions.length === 0" text="需求已经足够清楚，没有需要澄清的问题。可以直接拆解。" />
         <AgentBubble

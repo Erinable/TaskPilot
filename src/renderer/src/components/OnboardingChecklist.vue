@@ -18,7 +18,7 @@ const repositories = useRepositoriesStore();
 const requirements = useRequirementsStore();
 const settings = useSettingsStore();
 const checks = useOnboardingStore();
-const { agent, checksReady, checking, loadError, path } = storeToRefs(checks);
+const { agent, checksReady, blank, checking, loadError, path } = storeToRefs(checks);
 const recheck = () => checks.recheck();
 const shownCommand = ref<onboarding.OnboardingStepId | null>(null);
 const paths: { id: onboarding.OnboardingPath; label: string }[] = [
@@ -31,6 +31,7 @@ const steps = computed(() =>
     agent: agent.value,
     workspace: app.workspaceInfo,
     checksReady: checksReady.value,
+    blank: blank.value,
     requirementCount: requirements.items.filter((item) => item.kind !== 'course').length,
     courseRequirementCount: requirements.items.filter((item) => item.kind === 'course').length,
     path: path.value,

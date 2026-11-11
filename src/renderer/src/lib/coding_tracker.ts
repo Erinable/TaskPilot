@@ -33,7 +33,9 @@ export const codingOutcome = (task: packageTypes.TaskView): CodingOutcome | null
     if (run.halt === 'high_risk') return { text: `${title}改到了高风险文件，等你确认。`, tone: 'info', qa: false };
     return { text: `Coding Agent 写好了${title}，等你逐个文件确认。`, tone: 'success', qa: false };
   }
+  if (run.halt === 'setup_required') return { text: `${title}配置已应用，先安装本机依赖，再继续检查。`, tone: 'info', qa: false };
   if (run.halt === 'attempts_exhausted') return { text: `${title}自动重试 ${MAX_AUTO_ATTEMPTS} 轮仍未通过，交给你处理。`, tone: 'error', qa: false };
+  if (run.halt === 'blocked') return { text: `${title}这一轮改到的文件都被拦下了，自动流程已停止。`, tone: 'info', qa: false };
   if (run.halt === 'no_changes') return { text: `${title}这一轮没有产生改动，自动流程已停止。`, tone: 'info', qa: false };
   if (run.status === 'failed') return { text: `${title}编码失败：${describeErrorInfo(run.error)}`, tone: 'error', qa: false };
   if (run.status !== 'submitted') return null;

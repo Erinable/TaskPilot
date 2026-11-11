@@ -27,7 +27,8 @@ export type CodingTrigger = 'human' | 'checks_failed' | 'qa_rejected';
 // `conflict`: an automatic round's patch conflicts with the developer's
 // edits. `markers`: conflict markers were written and must be cleared before
 // the checks run.
-export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'stopped' | 'timed_out' | 'conflict' | 'markers';
+// blocked: every changed file was refused (outside the scope, a secret or unsafe path).
+export type CodingHalt = 'attempts_exhausted' | 'high_risk' | 'no_changes' | 'blocked' | 'stopped' | 'timed_out' | 'conflict' | 'markers' | 'setup_required';
 export type CodingRound = { attempt: number; trigger: CodingTrigger; status: CodingRunStatus; costUsd: number | null; files: number };
 // Automatic rounds a chain gets after the developer's, shared by failed checks and QA rejections.
 export const MAX_AUTO_ATTEMPTS = 3;
@@ -38,11 +39,19 @@ export type CodingUsage = {
   reasoningTokens: number | null;
   costUsd: number | null;
 };
+// One step the CLI took, when it reports structured items (Codex). A step is
+// reported again as it progresses; the same id replaces the earlier report.
+export type CodingItem =
+  | { id: string; kind: 'command'; status: 'running' | 'done' | 'failed'; command: string; exitCode: number | null; output: string; outputTruncated: boolean }
+  | { id: string; kind: 'files'; status: 'running' | 'done' | 'failed'; files: { path: string; change: 'add' | 'delete' | 'update' }[] }
+  | { id: string; kind: 'notice'; message: string };
 export type CodingEvent = {
   sequence: number;
   at: string;
   type: 'status' | 'text' | 'thinking' | 'tool' | 'error';
+  // A plain summary: the screen reader line and the fallback rendering.
   text: string;
+  item?: CodingItem;
 };
 export type CodingEventPage = { events: CodingEvent[]; next: number; truncated: boolean };
 export type CodingPatchFile = { path: string; added: number; removed: number; binary: boolean; highRisk: boolean };

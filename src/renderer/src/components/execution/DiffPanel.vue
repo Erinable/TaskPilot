@@ -20,7 +20,7 @@ const changes = computed(() => execution.diff?.changes ?? []);
         <span class="panel-icon"><AppIcon name="diff" /></span>
         <div>
           <h2>改动</h2>
-          <p>{{ execution.diffHint }}</p>
+          <p>{{ execution.diffHint }}；包含已提交的改动，当前待提交文件见「保存到 git」。</p>
         </div>
       </div>
     </div>

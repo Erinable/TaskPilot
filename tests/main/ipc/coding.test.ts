@@ -308,3 +308,133 @@ test('coding isolation: sandbox mode runs under userData as the current user, an
   await h.call(CHANNELS.codingCancel, 'auth-edge-tests');
   assert.ok(seen.clean.at(-1), 'the run is cleaned as a sandbox run');
 });
+
+test('coding: a package written by hand is refused until it is handed to Coding Agent', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  assert.equal((await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim', { mode: 'self' })).ok, true);
+  assert.equal((await h.call(CHANNELS.codingStart, 'auth-edge-tests', { instruction: 'x' })).error.code, 'self_mode');
+  const handed = await h.call(CHANNELS.packagesHandToAi, 'auth-edge-tests');
+  assert.equal(handed.data.mode, 'ai');
+  assert.equal((await h.call(CHANNELS.packagesHandToAi, 'auth-edge-tests')).error.code, 'invalid_state', 'only self mode can be handed over');
+});
+
+test('coding: a CLI that exits with an error keeps its own message on the run', async () => {
+  const failure = new CodingExecError('Codex exited with status 2', 'coding_exit_failed', {
+    stderr: "error: unexpected argument '--ask-for-approval' found\n",
+    exitCode: 2,
+  });
+  const h = await coding.loopHarness({ failWith: failure });
+  await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  const task = await fixtures.settleCoding(h.call, 'auth-email-login');
+  assert.equal(task.codingRun?.error?.code, 'coding_exit_failed');
+  assert.match(task.codingRun?.error?.message ?? '', /Codex exited with status 2\nerror: unexpected argument '--ask-for-approval'/);
+});
+
+test('coding loop: an automatic round whose files were all refused stops as blocked, not as no changes', async () => {
+  const h = await coding.loopHarness({ outOfScope: (round) => round === 2 });
+  h.setCommands({ test: coding.LOGIN_TESTS_FAIL });
+  assert.equal((await coding.applyFirstRound(h)).ok, true);
+  const task = await coding.settleLoop(h.call, 'auth-email-login', (view) => Boolean(view.codingRun?.halt));
+  assert.equal(task.codingRun?.halt, 'blocked');
+  assert.equal(task.codingRun?.status, 'ready', 'the round is kept so the refused files can be seen');
+  assert.deepEqual(
+    task.codingRun?.blocked.map((entry) => entry.path),
+    ['src/elsewhere.ts'],
+  );
+});
+
+test('coding: an empty automatic round is discarded before cleanup and never exposes a readable patch', async () => {
+  const h = await coding.loopHarness({ noChanges: (round) => round === 2 });
+  h.setCommands({ test: coding.LOGIN_TESTS_FAIL });
+  assert.equal((await coding.applyFirstRound(h)).ok, true);
+  const stopped = await coding.settleLoop(h.call, 'auth-email-login', (task) => task.codingRun?.status === 'discarded');
+  assert.equal(stopped.codingRun?.halt, 'no_changes');
+  assert.equal(stopped.codingRun?.attempt, 2);
+  const reads = h.reads.length;
+  assert.equal((await h.call(CHANNELS.codingPatch, 'auth-email-login')).error.code, 'coding_not_ready');
+  assert.equal(h.reads.length, reads, 'a discarded run must not touch the cleaned workspace');
+  assert.equal(h.prompts.length, 2);
+  assert.equal(await fs.readFile(path.join(h.root, h.file), 'utf8'), 'export const round = 1;\n');
+});
+
+test('coding: manifest and lockfile share the effective scope through retry, high-risk review and commit', async () => {
+  const prompts: string[] = [];
+  const readScopes: string[][] = [];
+  const locked = '{"lockfileVersion":3}';
+  const changed = '{"lockfileVersion":3,"dependencies":{"feed":"1.0.0"}}';
+  const manifest = '{"name":"news","dependencies":{"feed":"1.0.0"}}';
+  const h = await fixtures.harness({
+    agent: fixtures.fakeAgent(),
+    coding: {
+      codingProbe: async () => fixtures.codingRuntime(),
+      codingPrepare: async (_root, _baseline, options) => ({ runName: options!.runName!, directory: options!.runName! }),
+      codingRun: async (options) => {
+        prompts.push(options.prompt);
+        return {
+          output: 'done',
+          usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: null, reasoningTokens: null, costUsd: 0 },
+          events: [],
+          sessionId: null,
+        };
+      },
+      codingReadPatch: async (_name, scope) => {
+        readScopes.push([...(scope as string[])]);
+        return fixtures.filePatch(prompts.length === 1 ? 'package.json' : 'package-lock.json', prompts.length === 1 ? manifest : changed, scope as string[]);
+      },
+      codingApplyPatch: async (root, patch) => {
+        const file = patch.includes('diff --git a/package-lock.json ') ? 'package-lock.json' : 'package.json';
+        await fs.writeFile(path.join(root, file), `${file === 'package.json' ? manifest : changed}\n`);
+        return { written: [file], markers: [], kept: [] };
+      },
+      codingClean: async () => {},
+    },
+  });
+  const g = (args: string[]) => fixtures.run('git', args, { cwd: h.root });
+  await fs.writeFile(path.join(h.root, 'package.json'), '{"name":"news"}\n');
+  await fs.writeFile(path.join(h.root, 'package-lock.json'), `${locked}\n`);
+  await g(['add', 'package.json', 'package-lock.json']);
+  await g(['commit', '-qm', 'npm baseline']);
+  const task = { ...SAMPLE_TASKS[0], id: 'rss', title: 'RSS 抓取解析', fileScope: ['package.json'] };
+  await h.requirements.publishPackages('rss-requirement', { title: task.title, text: task.title }, [task]);
+  h.store.add([task]);
+  assert.deepEqual(h.requirements.getTask('rss')?.fileScope, ['package.json'], 'the original plan is preserved');
+  assert.deepEqual((await h.call(CHANNELS.tasksGet, 'rss')).data.fileScope, ['package.json', 'package-lock.json']);
+  assert.deepEqual((await h.call(CHANNELS.tasksList)).data.find((entry) => entry.id === 'rss').fileScope, ['package.json', 'package-lock.json']);
+  h.setCommands({ test: coding.LOGIN_TESTS_FAIL });
+  assert.equal((await h.call(CHANNELS.packagesTransition, 'rss', 'claim', { mode: 'ai' })).ok, true);
+  await h.idle();
+  assert.equal((await h.call(CHANNELS.codingStart, 'rss', { instruction: '同步依赖并实现 RSS' })).ok, true);
+  await h.idle();
+  const first = (await h.call(CHANNELS.codingPatch, 'rss')).data;
+  assert.equal((await h.call(CHANNELS.codingApply, 'rss', { digest: first.mergeDigest, files: ['package.json'], allowHighRisk: true })).ok, true);
+  await h.idle();
+  const second = (await h.call(CHANNELS.codingGet, 'rss')).data.codingRun;
+  assert.equal(second.attempt, 2);
+  assert.equal(second.halt, 'high_risk', 'a lockfile is never auto-applied');
+  assert.match(prompts[1], /Requested files: package.json, package-lock.json/);
+  assert.ok(readScopes.every((scope) => scope.includes('package-lock.json')));
+  assert.ok(!second.blocked.some((entry) => entry.reason === 'outside requested file scope'));
+  const secondPreview = (await h.call(CHANNELS.codingPatch, 'rss')).data;
+  h.setCommands({ test: coding.LOGIN_TESTS_PASS });
+  assert.equal((await h.call(CHANNELS.codingApply, 'rss', { digest: secondPreview.mergeDigest, files: ['package-lock.json'], allowHighRisk: true })).ok, true);
+  await h.idle();
+  const reviewed = (await h.call(CHANNELS.tasksGet, 'rss')).data;
+  if (reviewed.status === 'accepting') assert.equal((await h.call(CHANNELS.packagesTransition, 'rss', 'accepted')).ok, true);
+  const commit = (await h.call(CHANNELS.commitPreview, 'rss')).data;
+  assert.deepEqual(commit.files.sort(), ['package-lock.json', 'package.json']);
+  assert.ok(!commit.skipped.some((entry) => entry.path === 'package-lock.json'));
+  assert.equal(prompts.length, 2);
+});
+
+test('coding: an unstarted package has no transcript, and its first start creates exactly one run', async () => {
+  const h = await coding.loopHarness();
+  assert.equal((await h.call(CHANNELS.codingGet, 'auth-email-login')).data.codingRun, null);
+  assert.equal((await h.call(CHANNELS.codingEvents, 'auth-email-login', -1)).error.code, 'coding_not_running');
+  const started = await h.call(CHANNELS.codingStart, 'auth-email-login', { instruction: '实现登录' });
+  assert.equal(started.ok, true, JSON.stringify(started.error));
+  const ready = await fixtures.settleCoding(h.call, 'auth-email-login');
+  assert.equal(ready.codingRun?.status, 'ready');
+  assert.equal(ready.codingRun?.attempt, 1);
+  assert.equal(h.prompts.length, 1);
+  assert.equal((await h.call(CHANNELS.codingEvents, 'auth-email-login', -1)).ok, true);
+});

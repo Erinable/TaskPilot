@@ -9,9 +9,10 @@ import type { AppContext } from '../app/app_context.ts';
 import type { TaskDefinition } from '../work_packages/tasks.ts';
 import type { IpcMainLike } from './handler.ts';
 
-// Only once the work is accepted: committing earlier would put unreviewed
-// code in history, and claiming the next package wants a clean tree.
-const COMMITTABLE: packageTypes.WorkPackageStatus[] = ['accepting', 'done'];
+// Only once the work is accepted (done): a package waiting for acceptance
+// still has items a human must check, so committing earlier would put
+// unaccepted code in history. Claiming the next package wants a clean tree.
+const COMMITTABLE: packageTypes.WorkPackageStatus[] = ['done'];
 
 // The package title as the subject (git's 72-column habit), its id below.
 const suggestedMessage = (task: TaskDefinition) => {
@@ -29,17 +30,21 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   registerContract(ipcMain, commitContract, {
     preview: async (rawId) => {
       const task = requireCommittable(requireString(rawId, 'id'));
-      const { committable, skipped } = await gitCommit.preview(ctx.requireRoot(), task.fileScope);
-      return { files: committable, skipped, message: suggestedMessage(task) };
+      const { committable, optional, skipped } = await gitCommit.preview(ctx.requireRoot(), task.fileScope);
+      return { files: committable, optional, skipped, message: suggestedMessage(task) };
     },
-    create: async (rawId, rawMessage, rawFiles) => {
+    create: async (rawId, rawMessage, rawFiles, rawExtra) => {
       const task = requireCommittable(requireString(rawId, 'id'));
       const message = gitCommit.validateMessage(rawMessage);
       if (!Array.isArray(rawFiles) || rawFiles.some((file) => typeof file !== 'string')) failWith('files must be a list of paths', 'invalid_argument');
       const files = rawFiles as string[];
-      const commit = await gitCommit.commitPaths(ctx.requireRoot(), task.fileScope, files, message);
-      logger.debug(`[commit] package=${task.id} files=${files.length} commit=${commit.slice(0, 8)}`);
-      return { commit, files };
+      const extra = rawExtra ?? [];
+      if (!Array.isArray(extra) || extra.some((file) => typeof file !== 'string')) failWith('extra must be a list of paths', 'invalid_argument');
+      const commit = await gitCommit.commitPaths(ctx.requireRoot(), task.fileScope, files, message, extra);
+      logger.debug(`[commit] package=${task.id} files=${files.length} extra=${extra.length} commit=${commit.slice(0, 8)}`);
+      // What is tracked changed: a committed skeleton gives the project a language.
+      ctx.changed('workspace');
+      return { commit, files: [...files, ...extra] };
     },
   });
 };

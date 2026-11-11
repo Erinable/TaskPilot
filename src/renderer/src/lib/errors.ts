@@ -24,6 +24,8 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   not_a_repo: '该目录不在 git 仓库中。',
   root_not_absolute: '请填写绝对路径。',
   root_not_found: '目录不存在。',
+  root_not_empty: '请选择一个空文件夹。',
+  root_in_repository: '这个文件夹已经在一个 git 仓库里了，请改用「添加项目」。',
   no_reference: '没有找到参考答案。',
   shell_syntax: '不支持 shell 语法，请改用 package.json 脚本。',
   unterminated_quote: '引号没有闭合。',
@@ -80,6 +82,7 @@ export const ERROR_HINTS: Partial<Record<ErrorCode, string>> = {
   toolchain_missing: '工具链不完整，请按下方安装命令安装缺少的工具后重新检查。',
   toolchain_unset: '这份课程要求没有选择工具链，请新建课程要求并选择一种工具链。',
   toolchain_mismatch: '课程包不适用于所选工具链，请换课程包或重新选择工具链。',
+  self_mode: '这个工作包选的是自己写。先点「改为交给 Coding Agent」，再让它写。',
   lab_outdated: '这个 lab 创建于工具链切换前，请在新的实验仓库中重新生成。',
 };
 

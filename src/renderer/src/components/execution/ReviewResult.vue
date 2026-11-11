@@ -3,7 +3,6 @@ import { computed } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
 import InlineCode from '@/components/InlineCode.vue';
-import { describeErrorInfo } from '@/lib/errors.ts';
 import * as reviewModel from '@/lib/review_model.ts';
 import { openWorkspaceFile } from '@/lib/open_file.ts';
 import { businessDateTime } from '@/lib/time_zone.ts';
@@ -13,17 +12,12 @@ import FailureExplain from './FailureExplain.vue';
 
 export type ReviewOutcome = Extract<packageTypes.Review, { status: 'passed' | 'rejected' }>;
 
-const props = defineProps<{ task: packageTypes.TaskView; review: ReviewOutcome }>();
+const props = defineProps<{ task: packageTypes.TaskView; review: ReviewOutcome; decisionShown?: boolean }>();
 
 const report = computed(() => props.review.report);
 const verification = computed(() => props.review.verification);
 
-const testLine = computed(() => {
-  const run = verification.value;
-  if (!run) return '未配置测试命令';
-  if ('error' in run) return `测试运行失败：${describeErrorInfo(run.error)}`;
-  return `测试 ${run.summary.passed}/${run.summary.total} 通过${run.summary.ok ? '' : `（退出码 ${run.exitCode}${run.timedOut ? '，超时' : ''}）`}`;
-});
+const testLine = computed(() => reviewModel.reviewTestLine(verification.value));
 const failing = computed(() => (verification.value && 'failing' in verification.value ? verification.value.failing : []));
 // A test run that failed, explained from the output tail the review kept.
 const failedRun = computed(() => {
@@ -45,14 +39,15 @@ const issueLocation = (issue: packageTypes.QaReport['issues'][number]) => (issue
   </ul>
   <template v-if="report">
     <p class="review-summary"><InlineCode :text="report.summary" /></p>
-    <div v-if="report.criteria.length" class="review-section">
-      <h3>验收条件</h3>
+    <div v-if="report.criteria.length && !decisionShown" class="review-section">
+      <h3>QA 对照代码的判断</h3>
+      <p class="review-evidence-note">人工实测结果以验收确认为准。</p>
       <div v-for="(criterion, index) in report.criteria" :key="index" class="review-criterion" :class="criterion.status">
         <AppIcon :name="reviewModel.CRITERION_ICONS[criterion.status]" />
         <div>
           <span class="criterion-text">{{ criterionText(criterion.index) }}</span>
           <small>
-            {{ reviewModel.CRITERION_LABELS[criterion.status] }}{{ criterion.note ? '：' : '' }}
+            QA 判断{{ reviewModel.CRITERION_LABELS[criterion.status] }}{{ criterion.note ? '：' : '' }}
             <InlineCode v-if="criterion.note" :text="criterion.note" />
           </small>
         </div>
@@ -84,11 +79,11 @@ const issueLocation = (issue: packageTypes.QaReport['issues'][number]) => (issue
       </p>
     </div>
   </template>
-  <div v-if="review.checks?.length" class="review-section">
+  <div v-if="review.checks?.length && !decisionShown" class="review-section">
     <h3>检查证据</h3>
     <EvidenceRow v-for="(item, index) in review.checks" :key="index" :item="item" />
   </div>
-  <div v-if="review.attention?.length" class="review-section">
+  <div v-if="review.attention?.length && !decisionShown" class="review-section">
     <h3>需要人工确认</h3>
     <div v-for="(item, index) in review.attention" :key="index" class="review-attention">
       <AppIcon name="alert" />
@@ -126,5 +121,38 @@ const issueLocation = (issue: packageTypes.QaReport['issues'][number]) => (issue
       {{ name }}
     </div>
   </div>
+  <details v-if="verification && !('error' in verification)" class="review-check-output">
+    <summary>测试命令与输出</summary>
+    <code>{{ verification.command }}</code>
+    <pre v-if="verification.outputTail">{{ verification.outputTail }}</pre>
+    <p v-else>这次审查未保留命令输出。</p>
+  </details>
   <FailureExplain v-if="failedRun" :input="failedRun" output-label="查看测试输出的最后部分" />
 </template>
+
+<style scoped>
+.review-evidence-note {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.review-check-output {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.review-check-output summary {
+  cursor: pointer;
+  padding-block: var(--space-2);
+}
+.review-check-output code {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.review-check-output pre {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-xs)/1.65 var(--font-mono);
+}
+</style>

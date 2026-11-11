@@ -9,11 +9,15 @@
 //
 // Without taskpilot.toml there is no preset, so only the local steps run:
 // exactly how TaskPilot behaved before presets existed.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { indexEntries } from '../repository/repo_reader.ts';
 import { orderSteps } from '../../shared/check_steps.ts';
 import { defaultsFor } from './step_config.ts';
 import { WorkspaceError } from './command_line.ts';
 import * as projectConfig from '../repository/project_config.ts';
+import { isBlankProject } from '../../shared/blank_project.ts';
 import * as presets from './presets/index.ts';
 import type { ErrorCode } from '../../shared/error_codes.ts';
 import type { CheckStep, StepPatch } from './step_config.ts';
@@ -41,6 +45,11 @@ export type Resolution = {
   project: ProjectState;
   // Recognised languages, for recommending a preset when there is no file.
   detected: Detection[];
+  // No project skeleton is committed yet (../../shared/blank_project.ts).
+  blank: boolean;
+  // The preset's dependency folders missing from this checkout (node_modules,
+  // .venv): dependencies were never installed here.
+  missingDependencies: string[];
   // Command lines to offer per step, from the preset (or the detected one).
   suggestions: Partial<Record<StepId, string[]>>;
 };
@@ -90,7 +99,8 @@ const projectError = (error: unknown) => {
 // PATH steps run with, where a preset looks for optional tools.
 export const resolve = async (config: WorkspaceConfig, { always = [] as readonly StepId[], envPath = null as string | null } = {}): Promise<Resolution> => {
   const local: Layer = { source: 'local', steps: config.steps };
-  if (!config.root) return { steps: mergeSteps([local], always), project: { status: 'missing' }, detected: [], suggestions: {} };
+  if (!config.root)
+    return { steps: mergeSteps([local], always), project: { status: 'missing' }, detected: [], blank: false, missingDependencies: [], suggestions: {} };
   const root = config.root;
   const tracked = new Set((await indexEntries(root).catch(() => new Map())).keys());
   const detected = presets.detectLanguages(tracked);
@@ -114,10 +124,15 @@ export const resolve = async (config: WorkspaceConfig, { always = [] as readonly
   if (preset) layers.push({ source: 'preset', steps: preset.steps(suggestionFacts) });
   if (file) layers.push({ source: 'project', steps: file.steps });
   layers.push(local);
+  const present = await Promise.all(
+    (suggestionSource?.dependencyDirs ?? []).map(async (dir) => ((await fs.stat(path.join(root, dir)).catch(() => null))?.isDirectory() ? null : dir)),
+  );
   return {
     steps: mergeSteps(layers, always),
     project,
     detected,
+    blank: isBlankProject(tracked),
+    missingDependencies: present.filter((dir) => dir !== null),
     suggestions: suggestionSource ? suggestionSource.suggestions(suggestionFacts) : {},
   };
 };

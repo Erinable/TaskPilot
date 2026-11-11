@@ -2,6 +2,8 @@
 // IPC channels of the requirements domain (src/main/ipc/requirements.ts).
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
@@ -195,4 +197,24 @@ test('requirements: a redo whose output does not validate fails with the plan un
   const item = await fixtures.settle(call, data.id);
   assert.equal(item.redo.error.code, 'agent_bad_output');
   assert.deepEqual(item.plan, planned.plan);
+});
+
+test('requirements: planning re-reads the code only when commits landed since Architect read it', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  const architectCalls = () => h.agentCalls.filter((call) => ['select', 'summarize'].includes(fixtures.stepOf(call.schema))).length;
+  const { data } = await h.call(CHANNELS.requirementsCreate, { text: '加一个注销接口' });
+  await fixtures.settle(h.call, data.id);
+  const afterClarify = architectCalls();
+  assert.ok(afterClarify > 0);
+
+  await h.call(CHANNELS.requirementsPlan, data.id, ['5 次']);
+  await fixtures.settle(h.call, data.id);
+  assert.equal(architectCalls(), afterClarify, 'the same HEAD reuses the summary');
+
+  await fs.writeFile(path.join(h.root, 'src/auth/session.ts'), 'export const logout = () => {};\n');
+  await fixtures.run('git', ['add', '.'], { cwd: h.root });
+  await fixtures.run('git', ['commit', '-qm', 'session'], { cwd: h.root });
+  await h.call(CHANNELS.requirementsPlan, data.id);
+  await fixtures.settle(h.call, data.id);
+  assert.ok(architectCalls() > afterClarify, 'a new commit is read before replanning');
 });

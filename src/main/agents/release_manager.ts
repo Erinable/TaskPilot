@@ -18,6 +18,8 @@ export const MAX_NOTE_ITEMS = 8;
 export const MAX_NOTE_CHARS = 200;
 export const MAX_CHECKLIST = 10;
 export const MAX_EVIDENCE = 6;
+// Work packages described in the prompt; every one is still released.
+export const MAX_PROMPT_PACKAGES = 50;
 const MAX_REASON = 300;
 const MAX_CHECK_TEXT = 200;
 const MAX_EVIDENCE_CHARS = 300;
@@ -38,6 +40,8 @@ export interface ReleasePlan {
 }
 
 export interface ReleaseInput {
+  // The newer of the manifest's version and the last version released
+  // through TaskPilot, so an unchanged manifest never repeats a version.
   currentVersion: string | null;
   // The manifest currentVersion is read from, e.g. package.json or Cargo.toml.
   versionFile: string;
@@ -113,16 +117,20 @@ export const planPrompt = (input: ReleaseInput): string => {
   if (input.commitsTruncated) commits.push(`(only the newest ${input.commits.length} commits are listed)`);
   const files = input.files.map((file) => `${escape(file.path)} ${file.binary ? '(binary)' : `+${file.added} -${file.removed}`}`);
   if (input.filesTruncated) files.push(`(only the first ${input.files.length} changed files are listed)`);
-  const packages = input.packages.map((item) =>
-    [
-      `<package id="${escape(item.id)}">`,
-      `title: ${escape(item.title)}`,
-      `description: ${escape(item.description)}`,
-      'acceptance:',
-      ...item.acceptance.map((text) => `- ${escape(text)}`),
-      '</package>',
-    ].join('\n'),
-  );
+  const packages = input.packages
+    .slice(0, MAX_PROMPT_PACKAGES)
+    .map((item) =>
+      [
+        `<package id="${escape(item.id)}">`,
+        `title: ${escape(item.title)}`,
+        `description: ${escape(item.description)}`,
+        'acceptance:',
+        ...item.acceptance.map((text) => `- ${escape(text)}`),
+        '</package>',
+      ].join('\n'),
+    );
+  if (input.packages.length > MAX_PROMPT_PACKAGES)
+    packages.push(`(only the first ${MAX_PROMPT_PACKAGES} of ${input.packages.length} finished work packages are listed)`);
   return [
     'Prepare the release for the changes below.',
     '',

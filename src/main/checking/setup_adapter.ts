@@ -45,8 +45,12 @@ export interface SetupAdapter<Facts = unknown> {
   prompt: (facts: Facts) => { rules: string[]; sections: FactSection[] };
   // Install modes the plan may pick, 'skip' included.
   installModes: readonly string[];
+  // A configuration package changed dependencies in the working tree.
+  configurationInstallMode: string;
   // Step kinds the plan names a script for, a subset of STEP_KINDS.
   stepKinds: readonly StepKind[];
+  // The configuration paths an infrastructure work package may change.
+  configurationFiles: readonly string[];
   // Takes the plan's install mode (already one of installModes) and trimmed
   // script names per step kind; corrects what the facts contradict.
   validate: (raw: { install: string; scripts: Partial<Record<StepKind, string>> }, facts: Facts) => SetupChoice & { adjustments: EnvAdjustment[] };

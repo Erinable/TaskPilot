@@ -16,14 +16,21 @@ import { expectConsole } from '../../fixtures/expected_console.ts';
 import type { IpcResult } from '@shared/ipc/envelope.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 
-vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), announceAgent: vi.fn(), confirmAction: vi.fn(async () => true), openDialogs: { value: 0 } }));
+vi.mock('@/lib/feedback.ts', () => ({
+  showToast: vi.fn(),
+  announceAgent: vi.fn(),
+  confirmAction: vi.fn(async () => true),
+  confirmChoice: vi.fn(async () => 'alternate'),
+  openDialogs: { value: 0 },
+}));
 
 let api: ReturnType<typeof installApi>;
 let current: Ref<packageTypes.TaskView | null>;
 const reloadCurrent = vi.fn(async () => {});
+const open = vi.fn(async (_id: string) => {});
 const actionsFor = (task: packageTypes.TaskView) => {
   current = ref<packageTypes.TaskView | null>(task);
-  return createExecutionActions({ current, reloadCurrent, open: vi.fn(async () => {}), adoptTask: vi.fn(() => true) });
+  return createExecutionActions({ current, reloadCurrent, open, adoptTask: vi.fn(() => true) });
 };
 
 beforeEach(() => {
@@ -118,4 +125,50 @@ test('a failed review action toasts and does not reload', async () => {
   expect(logged).toHaveLength(1);
   expect(reloadCurrent).not.toHaveBeenCalled();
   expect(feedback.showToast).toHaveBeenCalledWith(expect.stringMatching(/^操作失败：/));
+});
+
+test('a dirty tree after a finished package offers to go and commit it instead of claiming', async () => {
+  useTasksStore().tasks = [
+    taskView({ id: 'older', title: '旧包', status: 'done', completedAt: '2026-11-01T00:00:00Z' }),
+    taskView({ id: 'latest', title: '刚完成', status: 'done', completedAt: '2026-11-02T00:00:00Z' }),
+  ];
+  api.workspace.info.mockReturnValue(ok({ configured: true, root: '/r', commit: 'a', branch: 'main', dirty: true, changedFiles: 1 }));
+  vi.mocked(feedback.confirmChoice).mockResolvedValueOnce('accept');
+  const actions = actionsFor(taskView({ status: 'pending' }));
+  await actions.runTransition('claim');
+  expect(vi.mocked(feedback.confirmChoice).mock.calls[0][0].body).toContain('刚完成');
+  expect(open).toHaveBeenCalledWith('latest');
+  expect(actions.claimOpen.value).toBe(false);
+
+  await actions.runTransition('claim');
+  expect(actions.claimOpen.value).toBe(true);
+});
+
+test('a dirty claim skips a recently completed package whose commit panel has nothing left', async () => {
+  useTasksStore().tasks = [
+    taskView({ id: 'older', title: '骨架', status: 'done', completedAt: '2026-11-01T00:00:00Z' }),
+    taskView({ id: 'latest', title: '已提交完的包', status: 'done', completedAt: '2026-11-02T00:00:00Z' }),
+  ];
+  api.workspace.info.mockReturnValue(ok({ configured: true, root: '/r', commit: 'a', branch: 'main', dirty: true, changedFiles: 1 }));
+  api.commit.preview.mockImplementation((id) => ok({ files: [], optional: id === 'older' ? ['package-lock.json'] : [], skipped: [], message: 'm' }));
+  vi.mocked(feedback.confirmChoice).mockResolvedValueOnce('accept');
+  const actions = actionsFor(taskView({ status: 'pending' }));
+  await actions.runTransition('claim');
+  expect(open).toHaveBeenCalledWith('older');
+  expect(vi.mocked(feedback.confirmChoice).mock.calls[0][0].body).toContain('package-lock.json');
+  expect(actions.claimOpen.value).toBe(false);
+});
+
+test('a dirty claim with only excluded files does not send the developer to an empty commit panel', async () => {
+  useTasksStore().tasks = [taskView({ id: 'done', title: '骨架', status: 'done', completedAt: '2026-11-01T00:00:00Z' })];
+  api.workspace.info.mockReturnValue(ok({ configured: true, root: '/r', commit: 'a', branch: 'main', dirty: true, changedFiles: 1 }));
+  api.commit.preview.mockReturnValue(ok({ files: [], optional: [], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: 'm' }));
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(false);
+  const actions = actionsFor(taskView({ status: 'pending' }));
+  await actions.runTransition('claim');
+  expect(feedback.confirmChoice).not.toHaveBeenCalled();
+  expect(feedback.confirmAction).toHaveBeenCalledWith(expect.objectContaining({ body: expect.stringContaining('Git 工具或终端处理') }));
+  expect(open).not.toHaveBeenCalled();
+  expect(actions.claimOpen.value).toBe(false);
+  expect(api.packages.transition).not.toHaveBeenCalled();
 });

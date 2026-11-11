@@ -114,9 +114,9 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     });
   };
 
-  // Shared by switch and add: confirm, cancel, then reload. False when the
+  // Shared by switch, add, create and remove: confirm, cancel, then reload. False when the
   // user backed out or the main process refused.
-  const runSwitch = async (action: () => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>) => {
+  const runSwitch = async (action: () => Promise<envelopeTypes.IpcResult<repositoryTypes.RepositoryList>>, failure = '切换仓库失败') => {
     if (switching.value) return false;
     switching.value = true;
     try {
@@ -128,7 +128,7 @@ export const useRepositoriesStore = defineStore('repositories', () => {
       return true;
     } catch (error) {
       console.error('[repositories] switch failed', error);
-      showToast(`切换仓库失败：${describeError(error)}`);
+      showToast(`${failure}：${describeError(error)}`);
       return false;
     } finally {
       switching.value = false;
@@ -208,6 +208,44 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     }
   };
 
+  // Picks an empty folder, makes it a git repository with a first commit and
+  // opens it like any switch.
+  const create = async () => {
+    const root = await pickFolder();
+    if (!root) return false;
+    const created = await runSwitch(() => window.taskpilot.repositories.create(root), '新建项目失败');
+    if (created) showToast(`已新建并打开 ${current.value?.name ?? '项目'}`);
+    return created;
+  };
+
+  // Takes a repository off the list after the user confirms; nothing on disk
+  // is deleted. Removing the open one switches to another (or to none).
+  const remove = async (id: string) => {
+    const repo = repositories.value.find((entry) => entry.id === id);
+    if (!repo) return false;
+    const confirmed = await confirmAction({
+      title: `移除项目「${repo.name}」？`,
+      body: '只是从 TaskPilot 的列表里移除，项目文件夹和它在 TaskPilot 里的需求、进度都不会删除。以后再添加同一个文件夹，这些记录会回来。',
+      accept: '移除',
+      danger: true,
+    });
+    if (!confirmed) return false;
+    if (id === currentId.value) {
+      const removed = await runSwitch(() => window.taskpilot.repositories.remove(id), '移除项目失败');
+      if (removed) showToast(`已移除 ${repo.name}`);
+      return removed;
+    }
+    try {
+      apply(await call(window.taskpilot.repositories.remove(id)));
+      showToast(`已移除 ${repo.name}`);
+      return true;
+    } catch (error) {
+      console.error('[repositories] remove failed', error);
+      showToast(`移除项目失败：${describeError(error)}`);
+      return false;
+    }
+  };
+
   // ========== Lab repository ==========
   // Writes a course's lab whose self-check passed into its lab repository.
   // The first one asks for an empty folder, creates the repository there and
@@ -252,6 +290,8 @@ export const useRepositoriesStore = defineStore('repositories', () => {
     switchWith,
     // Adding and relocating
     add,
+    create,
+    remove,
     relocate,
     // Lab repository
     placeLab,

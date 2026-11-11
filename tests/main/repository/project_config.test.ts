@@ -7,6 +7,7 @@ import { tempDir } from '../../fixtures/temp_dir.ts';
 import * as projectConfig from '../../../src/main/repository/project_config.ts';
 
 const PRESETS = ['typescript'];
+const PRESETS_WITH_RUST = ['typescript', 'rust'];
 const parse = (text: string) => projectConfig.parseProject(text, PRESETS);
 const fails = (text: string, field: string) => assert.throws(() => parse(text), { code: 'invalid_project', field }, field);
 
@@ -156,4 +157,23 @@ test("labs lists a lab repository's labs; files without it read as before", () =
   const template = projectConfig.projectTemplate('none', { lint: null, custom: null }).split('\n');
   const example = template.slice(template.indexOf('# [[labs]]'), template.indexOf('# [[labs]]') + 5).map((line) => line.replace(/^# /, ''));
   assert.deepEqual(parse(example.join('\n')).labs, [{ id: 'round-robin', stage: 1, dir: 'labs/01-round-robin', concepts: ['round-robin'] }]);
+});
+
+test('a file without a preset can be pointed at one; its steps and comments stay', async () => {
+  const root = await tempDir('taskpilot-project-');
+  await projectConfig.createProjectFile(root, 'none', { lint: null, custom: null });
+  const file = path.join(root, projectConfig.PROJECT_FILENAME);
+  await fs.appendFile(file, '\n[steps.lint]\ncommands = ["npm run lint"]\n');
+  await projectConfig.setPreset(root, 'typescript', PRESETS);
+  const text = (await projectConfig.readProjectText(root)) as string;
+  assert.equal(parse(text).preset, 'typescript');
+  assert.ok(parse(text).steps.lint);
+  assert.match(text, /^# TaskPilot checks/);
+  await assert.rejects(() => projectConfig.setPreset(root, 'typescript', PRESETS), { code: 'invalid_project', field: 'preset' });
+
+  // A hand-written file without a preset line gets one at the top.
+  const bare = await tempDir('taskpilot-project-');
+  await fs.writeFile(path.join(bare, projectConfig.PROJECT_FILENAME), 'course = "programming"\n');
+  await projectConfig.setPreset(bare, 'rust', PRESETS_WITH_RUST);
+  assert.equal(projectConfig.parseProject((await projectConfig.readProjectText(bare)) as string, PRESETS_WITH_RUST).preset, 'rust');
 });

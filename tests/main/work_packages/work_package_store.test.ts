@@ -419,3 +419,43 @@ test('practice records drop late writes from a replaced run and clear on release
   assert.equal(released.grade, null);
   assert.equal(await store.setReferenceRun('a', { ...run, status: 'ready' }, 'r1'), null, 'the released run cannot write back');
 });
+
+test('a review that failed can be withdrawn to keep working; a running one cannot', async () => {
+  const { store } = await newStore();
+  await inReview(store);
+  await store.beginReview('a');
+  assert.ok(!humanTransitions(store.get('a')).includes('withdraw_review'));
+  await assert.rejects(() => store.transition('a', 'withdraw_review', 'human'), { code: 'invalid_state' });
+  await store.failReview('a', { message: 'cancelled', code: 'agent_cancelled' });
+  assert.ok(humanTransitions(store.get('a')).includes('withdraw_review'));
+  const back = await store.transition('a', 'withdraw_review', 'human');
+  assert.equal(back.status, 'in_progress');
+  assert.equal(back.baseline, 'abc123');
+  assert.equal(back.review!.status, 'failed', 'the failed review stays on record');
+});
+
+test('a deviation Architect could not rule on can be withdrawn, dropping the report', async () => {
+  const { store } = await newStore();
+  await inDeviation(store);
+  assert.ok(!humanTransitions(store.get('a')).includes('withdraw_deviation'));
+  await store.failAdjudication('a', { message: 'boom', code: 'agent_timeout' });
+  const back = await store.transition('a', 'withdraw_deviation', 'human');
+  assert.equal(back.status, 'in_progress');
+  assert.deepEqual(back.deviations, []);
+  assert.equal(back.adjudication, null);
+  assert.deepEqual(back.completedSteps, [0]);
+});
+
+test("withdrawing a contested dismissal keeps Architect's ruling and allows contesting again", async () => {
+  const { store } = await newStore();
+  await inDeviation(store);
+  await store.completeAdjudication('a', dismissal);
+  await store.transition('a', 'override_dismissal', 'human');
+  await store.beginAdjudication('a');
+  await store.failAdjudication('a', { message: 'boom', code: 'agent_failed' });
+  const back = await store.transition('a', 'withdraw_deviation', 'human');
+  assert.equal(back.deviations.length, 1);
+  assert.equal(back.deviations[0].resolution!.decision, 'dismiss');
+  assert.equal(back.deviations[0].resolution!.contested, false);
+  assert.ok(humanTransitions(back).includes('override_dismissal'));
+});

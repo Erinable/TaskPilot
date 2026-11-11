@@ -24,8 +24,9 @@ beforeEach(() => {
 const mountWith = (component: Parameters<typeof h>[0], props: Record<string, unknown>) => mountView(defineComponent({ render: () => h(component, props) }));
 
 test('the coding transcript times each event in the business time zone', async () => {
-  const wrapper = await mountWith(CodingTranscript, { events: [{ sequence: 1, at: AT, type: 'status', text: '开始' }] });
-  expect(wrapper.get('.coding-event time').text()).toBe('01:05:09');
+  const item = { id: 'c', kind: 'command' as const, status: 'done' as const, command: 'npm test', exitCode: 0, output: '', outputTruncated: false };
+  const wrapper = await mountWith(CodingTranscript, { events: [{ sequence: 1, at: AT, type: 'tool', text: 'npm test', item }] });
+  expect(wrapper.get('.t-commands time').text()).toBe('01:05:09');
 });
 
 test('deviations and the plan revision are dated in the business time zone', async () => {
@@ -55,4 +56,40 @@ test('a finished review shows when it finished in the business time zone', async
   };
   const wrapper = await mountWith(ReviewResult, { task: taskView(), review });
   expect(wrapper.text()).toContain('2026-10-01 01:05:09');
+});
+
+test('the coding transcript opens a failed command with its output, and keeps passing ones folded', async () => {
+  const done = {
+    id: 'a',
+    kind: 'command' as const,
+    status: 'done' as const,
+    command: "/bin/zsh -lc 'ls'",
+    exitCode: 0,
+    output: 'App.tsx',
+    outputTruncated: false,
+  };
+  const failed = {
+    id: 'b',
+    kind: 'command' as const,
+    status: 'failed' as const,
+    command: "/bin/zsh -lc 'npm test'",
+    exitCode: 127,
+    output: 'jest: command not found',
+    outputTruncated: false,
+  };
+  const wrapper = await mountWith(CodingTranscript, {
+    events: [
+      { sequence: 1, at: AT, type: 'text', text: '先看看 `package.json`。' },
+      { sequence: 2, at: AT, type: 'tool', text: 'ls', item: done },
+      { sequence: 3, at: AT, type: 'tool', text: 'npm test', item: failed },
+    ],
+  });
+  expect(wrapper.get('.t-message code').text()).toBe('package.json');
+  expect(wrapper.get('.t-commands summary').text()).toContain('运行了 2 条命令，1 条失败');
+  const rows = wrapper.findAll('.t-command');
+  expect(rows.map((row) => row.get('.t-cmd').text())).toEqual(['ls', 'npm test']);
+  expect(rows[0].get('details').attributes('open')).toBeUndefined();
+  expect(rows[1].get('details').attributes('open')).toBeDefined();
+  expect(rows[1].get('.t-badge').text()).toBe('退出码 127');
+  expect(rows[1].get('.t-output').text()).toContain('jest: command not found');
 });

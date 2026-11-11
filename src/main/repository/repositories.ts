@@ -41,6 +41,8 @@ interface Registry {
   version: number;
   current: string | null;
   repositories: RepositoryEntry[];
+  // Optional in saved v1 registries; removed entries reserve their identity.
+  removedRepositories: RepositoryEntry[];
 }
 
 // Directory names come from the path hash; the registry is the authority on
@@ -70,7 +72,7 @@ const exists = async (file: string) =>
 
 export class RepositoryRegistry {
   #configDir: string;
-  #registry: Registry = { version: REGISTRY_VERSION, current: null, repositories: [] };
+  #registry: Registry = { version: REGISTRY_VERSION, current: null, repositories: [], removedRepositories: [] };
   #now: () => Date;
 
   constructor(configDir: string, { now = () => new Date() }: { now?: () => Date } = {}) {
@@ -85,7 +87,10 @@ export class RepositoryRegistry {
       const saved = raw as Partial<Registry> | null;
       const repositories = (Array.isArray(saved?.repositories) ? saved.repositories : []).filter(isEntry);
       const current = repositories.some((entry) => entry.id === saved?.current) ? saved!.current! : null;
-      this.#registry = { version: REGISTRY_VERSION, current, repositories };
+      const removedRepositories = (Array.isArray(saved?.removedRepositories) ? saved.removedRepositories : [])
+        .filter(isEntry)
+        .filter((entry) => !repositories.some((active) => active.id === entry.id));
+      this.#registry = { version: REGISTRY_VERSION, current, repositories, removedRepositories };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         await this.#migrate();
@@ -115,7 +120,7 @@ export class RepositoryRegistry {
     const target = this.dataDir(entry?.id ?? UNASSIGNED_ID);
     await fs.mkdir(target, { recursive: true });
     for (const name of legacy) await fs.rename(path.join(this.#configDir, name), path.join(target, name));
-    this.#registry = { version: REGISTRY_VERSION, current: entry?.id ?? null, repositories: entry ? [entry] : [] };
+    this.#registry = { version: REGISTRY_VERSION, current: entry?.id ?? null, repositories: entry ? [entry] : [], removedRepositories: [] };
     await this.#persist();
     logger.debug(`[repositories] migrated files=${legacy.length} target=${entry?.id ?? UNASSIGNED_ID}`);
   }
@@ -123,8 +128,9 @@ export class RepositoryRegistry {
   #newEntry(root: string): RepositoryEntry {
     const at = this.#now().toISOString();
     let id = repositoryId(root);
-    // A relocated repository keeps its old id, which can be this path's hash.
-    while (this.#registry.repositories.some((entry) => entry.id === id)) id = crypto.randomBytes(8).toString('hex');
+    // Relocated and removed repositories keep their ids.
+    const reserved = [...this.#registry.repositories, ...this.#registry.removedRepositories];
+    while (reserved.some((entry) => entry.id === id)) id = crypto.randomBytes(8).toString('hex');
     return { id, root, addedAt: at, lastOpenedAt: at };
   }
 
@@ -162,15 +168,28 @@ export class RepositoryRegistry {
     return workspace.save(this.dataDir(), { ...raw, root: this.current?.root ?? null });
   }
 
-  // Registers a validated root (an existing one is returned as is). The first
-  // repository adopts the unassigned data. It does not open the repository.
+  // Registers a validated root (an existing one is returned as is). Only the
+  // first new repository adopts unassigned data. Removed identities are restored.
+  // It does not open the repository.
   async add(root: string): Promise<RepositoryEntry> {
+    root = await realPath(root);
     const known = await findByRoot(this.#registry.repositories, root);
     if (known) return known;
-    const entry = this.#newEntry(root);
+    const removed = await findByRoot(this.#registry.removedRepositories, root);
+    const entry = removed ? { ...removed, root } : this.#newEntry(root);
     const unassigned = this.dataDir(UNASSIGNED_ID);
+    const target = this.dataDir(entry.id);
     await fs.mkdir(path.dirname(unassigned), { recursive: true });
-    if (this.#registry.repositories.length === 0 && (await exists(unassigned))) await fs.rename(unassigned, this.dataDir(entry.id));
+    if (
+      !removed &&
+      this.#registry.repositories.length === 0 &&
+      this.#registry.removedRepositories.length === 0 &&
+      (await exists(unassigned)) &&
+      !(await exists(target))
+    ) {
+      await fs.rename(unassigned, target);
+    }
+    this.#registry.removedRepositories = this.#registry.removedRepositories.filter((candidate) => candidate.id !== entry.id);
     this.#registry.repositories.push(entry);
     await this.#persist();
     if (this.#registry.current === null) await this.#syncRoot(entry);
@@ -189,12 +208,33 @@ export class RepositoryRegistry {
     return entry;
   }
 
+  // Leaves no repository open; the unassigned data is what is loaded.
+  async close(): Promise<void> {
+    this.#registry.current = null;
+    await this.#persist();
+  }
+
+  // Takes a repository off the list. Its folder is not touched and its data
+  // directory stays, so adding the same folder again brings its work back.
+  // Close it first when it is the open one.
+  async remove(id: string): Promise<void> {
+    const entry = this.get(id);
+    if (!entry) throw Object.assign(new Error(`Unknown repository: ${id}`), { code: 'unknown_repository' });
+    if (this.#registry.current === id) throw Object.assign(new Error('Close the repository before removing it'), { code: 'invalid_state' });
+    // Keep the real root even if the alias used to add it later disappears.
+    this.#registry.removedRepositories.push({ ...entry, root: await realPath(entry.root) });
+    this.#registry.repositories = this.#registry.repositories.filter((entry) => entry.id !== id);
+    await this.#persist();
+    logger.debug(`[repositories] removed id=${id}`);
+  }
+
   // Points a repository at its new location (it was moved or renamed).
   async relocate(id: string, root: string): Promise<RepositoryEntry> {
     const entry = this.get(id);
     if (!entry) throw Object.assign(new Error(`Unknown repository: ${id}`), { code: 'unknown_repository' });
+    root = await realPath(root);
     const other = await findByRoot(
-      this.#registry.repositories.filter((candidate) => candidate.id !== id),
+      [...this.#registry.repositories, ...this.#registry.removedRepositories].filter((candidate) => candidate.id !== id),
       root,
     );
     if (other) throw Object.assign(new Error(`Already added: ${root}`), { code: 'repository_exists', field: 'root' });

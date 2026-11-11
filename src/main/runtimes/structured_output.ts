@@ -1,6 +1,7 @@
 import { AgentRunError } from './claude_cli.ts';
 import { isObject } from '../agents/output_validation.ts';
 import { codexTokens } from './model_usage.ts';
+import { redact } from './cli_environment.ts';
 import type { CliId } from '../../shared/agent_runtime.ts';
 
 export const hasToolContent = (content: unknown) =>
@@ -16,9 +17,24 @@ const CODEX_TEXT_ITEMS = new Set(['agent_message', 'reasoning', 'reasoning_summa
 const CODEX_EVENTS = new Set(['thread.started', 'turn.started', 'turn.completed', 'turn.failed', 'error', ...CODEX_ITEM_EVENTS]);
 const codexEvent = (type: string) => ['thread.', 'turn.', 'item.'].some((prefix) => type.startsWith(prefix));
 
+// Keep the CLI/provider's reason (schema, transport, authentication, etc.)
+// while bounding and redacting it before it reaches logs or the renderer.
+const reportedFailure = (event: Record<string, unknown>, fallback: string) => {
+  const message = isJsonRecord(event.message) ? event.message : {};
+  const details = [event.error, message.error, event.message]
+    .map((value) => (typeof value === 'string' ? value : isJsonRecord(value) && typeof value.message === 'string' ? value.message : ''))
+    .find((value) => value.trim());
+  const safe = details
+    ? redact(details)
+        .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[redacted]')
+        .slice(0, 2000)
+    : '';
+  return new AgentRunError(safe ? `${fallback}: ${safe}` : fallback, 'agent_failed');
+};
+
 const assertCodexEvent = (event: Record<string, unknown>, type: string) => {
   if (!CODEX_EVENTS.has(type)) throw new AgentRunError('Codex emitted an unknown analysis event', 'agent_bad_output');
-  if (type === 'turn.failed' || type === 'error') throw new AgentRunError('Codex reported a failed analysis turn', 'agent_failed');
+  if (type === 'turn.failed' || type === 'error') throw reportedFailure(event, 'Codex reported a failed analysis turn');
   if (hasTools(event.tools)) throw new AgentRunError('Codex initialized tools in isolated analysis mode', 'agent_unavailable');
   if (type === 'turn.completed' && codexTokens(event.usage) === null)
     throw new AgentRunError('Codex completed a turn without valid token usage', 'agent_bad_output');
@@ -41,7 +57,7 @@ export const assertAnalysisEvent = (event: unknown, cli?: CliId): void => {
   const type = typeof event.type === 'string' ? event.type : '';
   const message = isObject(event.message) ? event.message : event;
   if (type === 'error' || event.is_error === true || message.stopReason === 'error' || (typeof event.subtype === 'string' && event.subtype.startsWith('error')))
-    throw new AgentRunError('Agent CLI reported a failed turn', 'agent_failed');
+    throw reportedFailure(event, 'Agent CLI reported a failed turn');
   if (initializesAnalysis(type, event) && hasTools(event.tools))
     throw new AgentRunError('CLI initialized tools in isolated analysis mode', 'agent_unavailable');
   if (type === 'tool' || type === 'tool_execution_start' || type === 'tool_execution_end')
