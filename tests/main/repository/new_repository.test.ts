@@ -6,16 +6,34 @@ import path from 'node:path';
 
 import { tempDir } from '../../fixtures/temp_dir.ts';
 import { gitRepo } from '../../fixtures/git_repo.ts';
+import { useGitIdentity } from '../../fixtures/git_identity.ts';
+import { expectConsole } from '../../fixtures/expected_console.ts';
 import * as git from '../../../src/main/repository/git.ts';
 import { createRepository } from '../../../src/main/repository/new_repository.ts';
 
 test('an empty folder becomes a repository with one commit and a clean tree', async () => {
+  await useGitIdentity();
   const root = await fs.realpath(await tempDir('tp-new-repo-'));
   await createRepository(root);
   assert.equal(await git.isRepo(root), true);
   assert.match(await git.head(root), /^[0-9a-f]{40}$/);
+  assert.equal((await git.recentCommits(root, { limit: 2 })).length, 1);
   assert.deepEqual(await git.status(root), []);
   assert.equal(await fs.readFile(path.join(root, 'README.md'), 'utf8'), `# ${path.basename(root)}\n`);
+});
+
+test('missing Git identity leaves the folder empty and allows retry after configuring an author', async () => {
+  await useGitIdentity({ configured: false });
+  const root = await fs.realpath(await tempDir('tp-new-repo-'));
+  const logged = expectConsole('error', /\[git_commit\] commit failed/);
+  await assert.rejects(createRepository(root), { code: 'git_identity' });
+  assert.equal(logged.length, 1);
+  assert.deepEqual(await fs.readdir(root), []);
+  assert.equal(await git.isRepo(root), false);
+  await useGitIdentity();
+  await createRepository(root);
+  assert.equal((await git.recentCommits(root, { limit: 2 })).length, 1);
+  assert.deepEqual(await git.status(root), []);
 });
 
 test('a folder with files, inside a repository or missing is refused untouched', async () => {

@@ -13,6 +13,8 @@ import { until } from '../../fixtures/until.ts';
 import { captureExpectedErrors } from '../../fixtures/expected_errors.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { STATE_FILENAME } from '../../../src/main/work_packages/work_package_store.ts';
+import { useGitIdentity } from '../../fixtures/git_identity.ts';
+import { tempDir } from '../../fixtures/temp_dir.ts';
 
 test.each([
   ['/definitely/not/here', 'root_not_found'],
@@ -225,16 +227,38 @@ test('repositories: a switch resets the Environment Steward session made for the
 });
 
 test('repositories:create starts a repository in an empty folder and opens it', async () => {
+  await useGitIdentity();
   const h = await fixtures.harness();
-  const folder = await fs.realpath(await fs.mkdtemp(path.join(path.dirname(h.root), 'taskpilot-new-')));
-  onTestFinished(() => fs.rm(folder, { recursive: true, force: true }));
-  const { data } = await h.call(CHANNELS.repositoriesCreate, folder);
+  const folder = await fs.realpath(await tempDir('taskpilot-new-'));
+  const created = await h.call(CHANNELS.repositoriesCreate, folder);
+  assert.equal(created.ok, true, JSON.stringify(created.error));
+  const { data } = created;
   assert.equal(data.repositories.length, 2);
   assert.equal(data.repositories.find((repo) => repo.current).root, folder);
   assert.equal((await h.call(CHANNELS.workspaceInfo)).data.root, folder);
   assert.deepEqual((await h.call(CHANNELS.tasksList)).data, []);
   // A second try on the same, now non-empty, folder is refused.
   assert.equal((await h.call(CHANNELS.repositoriesCreate, folder)).error.code, 'root_not_empty');
+});
+
+test('repositories:create without Git identity preserves the open repository and can be retried', async () => {
+  const h = await fixtures.harness();
+  const first = h.repositories.current!.id;
+  const folder = await fs.realpath(await tempDir('taskpilot-new-'));
+  await useGitIdentity({ configured: false });
+  const logged = expectConsole('error', /\[git_commit\] commit failed/);
+  const refused = await h.call(CHANNELS.repositoriesCreate, folder);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, 'git_identity');
+  assert.equal(logged.length, 1);
+  assert.equal(h.repositories.current?.id, first);
+  assert.equal(h.repositories.list().length, 1);
+  assert.deepEqual(await fs.readdir(folder), []);
+  await useGitIdentity();
+  const created = await h.call(CHANNELS.repositoriesCreate, folder);
+  assert.equal(created.ok, true, JSON.stringify(created.error));
+  assert.equal(created.data.repositories.length, 2);
+  assert.equal(created.data.repositories.find((repo) => repo.current).root, folder);
 });
 
 test('repositories:remove takes another off the list, and removing the open one opens the next or none', async () => {
