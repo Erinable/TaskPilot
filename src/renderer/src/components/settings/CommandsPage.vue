@@ -27,6 +27,13 @@ const groups = computed(() => {
   ].filter((group) => group.steps.length);
 });
 
+// A file without a preset (a new project's, written before its skeleton)
+// is offered the preset of the language now detected.
+const upgrade = computed(() => (project.value.status === 'ok' && project.value.preset === null ? recommended.value : null));
+const upgradePreset = (preset: string) => {
+  settings.setProjectPreset(preset).catch((error) => console.error(error));
+};
+
 const create = (preset: string) => {
   settings.createProject(preset).catch((error) => console.error(error));
 };
@@ -57,6 +64,9 @@ const course = computed(() => view.value?.course ?? null);
           <span class="scope-badge">{{ presetLabel(project.preset) }}</span>
           没在文件和本机里设置的步骤，用预设的默认命令。
         </p>
+        <p v-if="upgrade" class="project-note" data-upgrade-preset>
+          现在检测到 {{ upgrade.manifest }}，可以改用「{{ presetLabel(upgrade.preset) }}」预设，自动补齐构建、测试等检查。
+        </p>
       </template>
       <template v-else-if="project.status === 'invalid'">
         <strong class="warn-text">taskpilot.toml 有错误，暂时没有使用</strong>
@@ -82,6 +92,10 @@ const course = computed(() => view.value?.course ?? null);
     <button v-if="project.status === 'missing'" id="createProject" class="primary-button small" type="button" @click="create(recommended?.preset ?? 'none')">
       <AppIcon name="plus" />
       {{ recommended ? '用推荐预设创建' : '创建 taskpilot.toml' }}
+    </button>
+    <button v-else-if="upgrade" id="upgradePreset" class="primary-button small" type="button" @click="upgradePreset(upgrade.preset!)">
+      <AppIcon name="check" />
+      改用推荐预设
     </button>
   </div>
 

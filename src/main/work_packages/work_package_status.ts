@@ -2,7 +2,6 @@
 // which actions to offer, and so an agent can never move a package through a
 // step that belongs to the human (or the reverse).
 export const STATUSES = {
-  clarifying: { label: '澄清中', humanActionable: false },
   pending: { label: '待执行', humanActionable: true },
   in_progress: { label: '执行中', humanActionable: true },
   in_review: { label: '待审查', humanActionable: false },
@@ -20,7 +19,6 @@ export type WorkPackageStatus = keyof typeof STATUSES;
 export type Actor = 'human' | 'agent' | 'coding-agent';
 
 export type TransitionName =
-  | 'breakdown_done'
   | 'claim'
   | 'revert_replan'
   | 'release'
@@ -36,6 +34,8 @@ export type TransitionName =
   | 'deviation_dismissed'
   | 'accepted'
   | 'acceptance_rejected'
+  | 'withdraw_review'
+  | 'withdraw_deviation'
   | 'unblock';
 
 export interface Transition {
@@ -56,7 +56,6 @@ export type TransitionErrorCode = 'unknown_status' | 'not_allowed' | 'wrong_acto
 // [人工决策-2026-10-12 15:08:39] 编码闭环全自动：补丁应用、提交前检查通过后，Coding Agent 自己提交审查
 // （coding_submitted），人工的 submit_for_review 保留。这是 Coding Agent 唯一能触发的业务流转。
 export const TRANSITIONS: Transition[] = [
-  { from: 'clarifying', to: 'pending', actor: 'agent', name: 'breakdown_done' },
   { from: 'pending', to: 'in_progress', actor: 'human', name: 'claim' },
   { from: 'pending', to: 'in_progress', actor: 'human', name: 'revert_replan' },
   { from: 'in_progress', to: 'pending', actor: 'human', name: 'release' },
@@ -73,6 +72,10 @@ export const TRANSITIONS: Transition[] = [
   { from: 'accepting', to: 'done', actor: 'human', name: 'accepted' },
   { from: 'accepting', to: 'in_progress', actor: 'human', name: 'acceptance_rejected' },
   { from: 'blocked', to: 'in_progress', actor: 'human', name: 'unblock' },
+  // A QA review or Architect ruling that failed or was cancelled leaves the
+  // package waiting on nobody: the developer takes it back to keep working.
+  { from: 'in_review', to: 'in_progress', actor: 'human', name: 'withdraw_review' },
+  { from: 'deviation', to: 'in_progress', actor: 'human', name: 'withdraw_deviation' },
 ];
 
 export class TransitionError extends Error {

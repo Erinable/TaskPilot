@@ -8,6 +8,7 @@ import CodingPatchReview from '@/components/execution/CodingPatchReview.vue';
 import CodingRoundHistory from '@/components/execution/CodingRoundHistory.vue';
 import CodingTranscript from '@/components/execution/CodingTranscript.vue';
 import { useCodingStore } from '@/stores/coding.ts';
+import { useSettingsStore } from '@/stores/settings.ts';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { describeErrorInfo } from '@/lib/errors.ts';
 import { CODING_SETUP_TEXT, codingSetupIssue } from '@shared/coding_setup.ts';
@@ -38,7 +39,9 @@ const HALT_TEXT: Record<codingTypes.CodingHalt, string> = {
   attempts_exhausted: '已自动重试 3 轮仍未通过，交给你处理：可以自己修改，或补充说明后重新开始。',
   high_risk: '这一轮改到了高风险文件（项目配置、脚本或测试），自动流程停在这里，请检查后再决定是否应用。',
   no_changes: '这一轮 AI 没有产生可以应用的改动，自动流程已停止。',
+  blocked: '这一轮改到的文件都不允许写入（原因见下面被拦下的文件），自动流程已停止。可以调整工作包的文件范围，或自己改完后提交审查。',
   stopped: '自动流程已停止。',
+  setup_required: '基础设施配置已应用，等待本机安装依赖后继续检查。',
   conflict: '这一轮的改动和你在这段时间里改的内容撞在了同一处，自动流程停下了，没有覆盖你的改动。请在下面为冲突的文件选怎么处理。',
   markers: '有文件写入了冲突标记（<<<<<<< 你的改动 / >>>>>>> Coding Agent 那几行）。在编辑器里保留想要的内容、删掉标记并保存，再点「冲突已解决，继续」。',
   timed_out:
@@ -54,7 +57,9 @@ const runErrorDetail = computed(() => (runError.value?.message && runError.value
 const elapsed = computed(() => (coding.active || coding.loopActive ? elapsedSince(coding.run?.startedAt, now.value) : null));
 // Why the runtime is unavailable, in plain words; the raw reason sits folded below.
 const setup = computed(() => (coding.runtime && !coding.runtime.available ? CODING_SETUP_TEXT[codingSetupIssue(coding.runtime.reason)] : null));
-const restartable = computed(() => !!coding.run && RESTARTABLE.includes(coding.run.status) && !coding.loopActive);
+const restartable = computed(
+  () => coding.eligible && !!coding.run && coding.run.halt !== 'setup_required' && RESTARTABLE.includes(coding.run.status) && !coding.loopActive,
+);
 const applyDisabled = computed(
   () =>
     !coding.patch || !coding.selectedFiles.length || (coding.highRisk && !highRiskConsent.value) || coding.unresolved.length > 0 || coding.operation !== null,
@@ -85,6 +90,10 @@ const retry = () => coding.start(coding.instruction, true).catch((error) => cons
 const cancel = () => coding.cancel().catch((error) => console.error(error));
 const apply = () => coding.apply(coding.highRisk && highRiskConsent.value).catch((error) => console.error(error));
 const resume = () => coding.resume().catch((error) => console.error(error));
+const openSetup = () =>
+  useSettingsStore()
+    .open('setup')
+    .catch((error) => console.error(error));
 </script>
 
 <template>
@@ -94,16 +103,17 @@ const resume = () => coding.resume().catch((error) => console.error(error));
         <span class="panel-icon"><AppIcon name="terminal" /></span>
         <div>
           <h2 id="codingTitle">Coding Agent</h2>
-          <p>
+          <p v-if="task.status === 'in_progress'">
             {{ coding.runtime?.boundary === 'separate-user' ? '独立账号执行' : '沙箱内执行' }}；写完自动跑检查和 QA，没过会带着问题自动重写（最多
             {{ MAX_AUTO_ATTEMPTS }} 次）；第一轮和改到高风险文件时等你确认，验收和保存到 git 由你来做
           </p>
+          <p v-else>编码已结束，运行记录保留在这里。</p>
         </div>
       </div>
       <span v-if="coding.run" class="coding-status" :class="coding.run.status">{{ STATUS_LABELS[coding.run.status] }}</span>
     </div>
 
-    <div v-if="coding.runtime && !coding.runtime.available && setup" class="coding-offline" role="status">
+    <div v-if="coding.eligible && coding.runtime && !coding.runtime.available && setup" class="coding-offline" role="status">
       <AppIcon name="alert" />
       <div class="coding-setup">
         <strong>{{ setup.title }}</strong>
@@ -126,11 +136,11 @@ const resume = () => coding.resume().catch((error) => console.error(error));
         </details>
       </div>
     </div>
-    <p v-else-if="coding.runtimeLoading" class="empty-hint">
+    <p v-else-if="coding.eligible && coding.runtimeLoading" class="empty-hint">
       <AppIcon name="spinner" class="spin" />
       正在刷新运行时状态…
     </p>
-    <p v-else-if="coding.runtimeError" class="coding-error">
+    <p v-else-if="coding.eligible && coding.runtimeError" class="coding-error">
       <AppIcon name="alert" />
       {{ coding.runtimeError }}
     </p>
@@ -158,7 +168,20 @@ const resume = () => coding.resume().catch((error) => console.error(error));
       {{ HALT_TEXT[coding.run.halt] }}
     </p>
 
-    <div v-if="!coding.run || restartable" class="coding-start">
+    <!-- Why the last round stopped comes first, then what to do about it. -->
+    <div v-if="runError && restartable" class="coding-error coding-failure" role="alert">
+      <AppIcon name="alert" />
+      <div class="coding-failure-body">
+        <strong>{{ coding.run?.status === 'cancelled' ? '这一轮已取消' : '这一轮没有完成' }}</strong>
+        <span>{{ runErrorText }}</span>
+        <details v-if="runErrorDetail" class="coding-raw">
+          <summary>CLI 原始信息</summary>
+          <pre>{{ runErrorDetail }}</pre>
+        </details>
+      </div>
+    </div>
+
+    <div v-if="coding.eligible && (!coding.run || restartable)" class="coding-start">
       <label for="codingInstruction">给 Coding Agent 的说明</label>
       <textarea
         id="codingInstruction"
@@ -171,16 +194,8 @@ const resume = () => coding.resume().catch((error) => console.error(error));
       <p class="coding-hint">
         AI 在项目副本里写，写好后由你逐个文件确认。之后自动检查、交给 QA，没通过会自动交回 AI 重试，最多 {{ coding.maxAutoAttempts }} 轮。不会提交或推送。
       </p>
-      <div v-if="runError" class="coding-error">
-        <AppIcon name="alert" />
-        <span>{{ runErrorText }}</span>
-        <details v-if="runErrorDetail" class="coding-raw">
-          <summary>原始信息</summary>
-          <pre>{{ runErrorDetail }}</pre>
-        </details>
-      </div>
       <div class="coding-actions">
-        <button v-if="coding.run" class="secondary-button" type="button" :disabled="!coding.canStart" @click="retry">
+        <button v-if="coding.run" class="primary-button" type="button" :disabled="!coding.canStart" @click="retry">
           <AppIcon name="refresh" />
           重新开始编码
         </button>
@@ -192,7 +207,7 @@ const resume = () => coding.resume().catch((error) => console.error(error));
     </div>
 
     <template v-if="coding.run">
-      <div class="coding-summary" role="status">
+      <div v-if="elapsed || coding.run.usage.costUsd !== null || coding.run.usage.inputTokens !== null" class="coding-summary" role="status">
         <span v-if="elapsed">已用 {{ elapsed }}</span>
         <span>费用 {{ cost }}</span>
         <details class="coding-details">
@@ -209,7 +224,14 @@ const resume = () => coding.resume().catch((error) => console.error(error));
           </div>
         </details>
       </div>
-      <div class="coding-actions">
+      <details v-else class="coding-details">
+        <summary>运行详情</summary>
+        <div class="coding-meta">
+          <span>CLI：{{ coding.run.cli }}</span>
+          <span>模型：{{ coding.run.model || 'CLI 默认模型' }}</span>
+        </div>
+      </details>
+      <div v-if="coding.active || coding.run.status === 'ready'" class="coding-actions">
         <button
           v-if="coding.active || coding.run.status === 'ready'"
           class="secondary-button danger"
@@ -228,7 +250,7 @@ const resume = () => coding.resume().catch((error) => console.error(error));
         AI 写代码时，尽量别改这个工作包范围内的文件（{{ task.fileScope.slice(0, 3).join('、') }}{{ task.fileScope.length > 3 ? ' 等' : '' }}）。
         改了也没关系：应用时会先合并，撞在同一处才需要你来选。
       </p>
-      <CodingTranscript :events="coding.events" />
+      <CodingTranscript v-if="coding.events.length || coding.active" :events="coding.events" :live="coding.active" />
 
       <CodingPatchReview
         v-if="coding.run.status === 'ready' && (coding.run.trigger === 'human' || coding.run.halt)"
@@ -271,6 +293,18 @@ const resume = () => coding.resume().catch((error) => console.error(error));
           </button>
         </div>
       </div>
+      <div v-else-if="coding.run.status === 'applied' && coding.run.halt === 'setup_required'" class="coding-applied" role="status">
+        <AppIcon name="box" />
+        <div class="coding-setup">
+          <p>新增依赖还需要安装到这台电脑上的项目。安装完成后再继续检查，不会因为缺少工具而自动重写代码。</p>
+          <div class="coding-actions">
+            <button class="secondary-button small" type="button" data-action="install-config-dependencies" @click="openSetup">去安装依赖</button>
+            <button class="primary-button small" type="button" data-action="resume-after-setup" :disabled="coding.operation !== null" @click="resume">
+              依赖已安装，继续检查
+            </button>
+          </div>
+        </div>
+      </div>
       <div v-else-if="coding.run.status === 'applied'" class="coding-applied" role="alert">
         <AppIcon name="alert" />
         改动已写入工作区，自动流程停在这里。你可以自己修改后提交审查，或补充说明后重新开始编码。
@@ -292,9 +326,26 @@ const resume = () => coding.resume().catch((error) => console.error(error));
 .coding-panel {
   display: grid;
   gap: 14px;
+  padding-bottom: var(--panel-pad);
+}
+/* The heading pads itself; everything below lines up with its text. */
+.coding-panel > :not(.panel-heading) {
+  margin-inline: var(--panel-pad);
+}
+.coding-panel > .panel-heading {
+  flex-wrap: wrap;
+}
+.coding-panel .panel-title {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.coding-panel .panel-title > div {
+  min-width: 0;
 }
 .coding-status {
-  color: var(--accent);
+  flex: none;
+  white-space: nowrap;
+  color: var(--accent-strong);
   font-size: var(--text-xs);
   font-weight: 700;
 }
@@ -406,8 +457,28 @@ div.coding-error {
   gap: 4px 8px;
   font-size: var(--text-sm);
 }
-div.coding-error .coding-raw {
-  grid-column: 2;
+.coding-failure {
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+.coding-failure > .icon {
+  margin-top: 2px;
+}
+.coding-failure-body {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--text);
+}
+.coding-failure-body strong {
+  color: var(--danger);
+}
+.coding-failure .coding-raw pre {
+  max-height: 160px;
+  overflow: auto;
+  font-family: var(--font-mono);
 }
 .coding-halt {
   font-size: var(--text-sm);

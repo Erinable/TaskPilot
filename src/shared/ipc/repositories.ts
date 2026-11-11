@@ -31,5 +31,12 @@ export const repositoriesContract = {
   // Cancels running work first; ask with busy() before calling.
   switch: invoke<[id: string], RepositoryList>('repositories:switch'),
   relocate: invoke<[id: string, root: string], RepositoryList>('repositories:relocate'),
+  // Starts a git repository with a first commit in an empty folder, registers
+  // and opens it. Cancels running work like a switch.
+  create: invoke<[root: string], RepositoryList>('repositories:create'),
+  // Takes a repository off the list; its folder and saved data stay. Removing
+  // the open one closes it (cancels running work) and opens the most recently
+  // used other one, or none.
+  remove: invoke<[id: string], RepositoryList>('repositories:remove'),
   busy: invoke<[], BusyRun[]>('repositories:busy'),
 } satisfies Contract;

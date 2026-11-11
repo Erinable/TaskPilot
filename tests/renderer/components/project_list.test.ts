@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 
 import ProjectList from '../../../src/renderer/src/components/ProjectList.vue';
 import { useRepositoriesStore } from '../../../src/renderer/src/stores/repositories.ts';
@@ -34,7 +35,8 @@ const mountList = (repositories: repositoryTypes.Repository[]) => {
   const switchTo = vi.spyOn(store, 'switchTo').mockResolvedValue(true);
   const relocate = vi.spyOn(store, 'relocate').mockResolvedValue(true);
   const add = vi.spyOn(store, 'add').mockResolvedValue(true);
-  return { wrapper: mount(ProjectList), switchTo, relocate, add };
+  const create = vi.spyOn(store, 'create').mockResolvedValue(true);
+  return { wrapper: mount(ProjectList, { global: { plugins: [ElementPlus] } }), switchTo, relocate, add, create };
 };
 
 describe('ProjectList', () => {
@@ -69,9 +71,15 @@ describe('ProjectList', () => {
     expect(wrapper.get('[data-project="gone"] .project-detail').text()).toBe('找不到这个目录');
   });
 
-  test('adding a project goes through the store', async () => {
-    const { wrapper, add } = mountList([repo('app', { current: true })]);
-    await wrapper.get('[data-action="add-project"]').trigger('click');
-    expect(add).toHaveBeenCalled();
+  test('one add button offers an existing folder or a new project', async () => {
+    const { wrapper, add, create } = mountList([repo('app', { current: true })]);
+    expect(wrapper.findAll('[data-action="add-project"]')).toHaveLength(1);
+    const menu = wrapper.findComponent({ name: 'ElDropdown' });
+    expect(wrapper.findAllComponents({ name: 'ElDropdownItem' }).map((item) => item.props('command'))).toEqual(['add', 'create']);
+    menu.vm.$emit('command', 'add');
+    menu.vm.$emit('command', 'create');
+    await flushPromises();
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

@@ -6,9 +6,18 @@ import { typescriptSetup } from '../../../src/main/checking/presets/typescript_s
 import type { RunStructuredOptions } from '../../../src/main/runtimes/claude_cli.ts';
 import type { EnvFacts } from '../../../src/main/checking/presets/typescript_setup.ts';
 import type { SetupAdapter } from '../../../src/main/checking/setup_adapter.ts';
+import { ENV_CONFIGURATION } from '../fixtures/environment.ts';
 
 const FACTS: EnvFacts = {
-  manifest: { valid: true, name: 'demo', scripts: { test: 'node --test', 'lint:js': 'eslint .' }, engines: { node: '>=20' }, packageManager: null },
+  manifest: {
+    valid: true,
+    name: 'demo',
+    scripts: { test: 'node --test', 'lint:js': 'eslint .' },
+    engines: { node: '>=20' },
+    packageManager: null,
+    dependencies: {},
+    devDependencies: {},
+  },
   lockfiles: ['package-lock.json'],
   managers: ['npm'],
   nodeModules: false,
@@ -16,6 +25,7 @@ const FACTS: EnvFacts = {
   workflows: [{ path: '.github/workflows/ci.yml', content: 'run: npm ci' }],
   tools: { node: 'v18.0.0', npm: '9.0.0' },
   installScripts: [],
+  configFiles: [],
 };
 
 // The npm adapter, probing nothing: `facts` is what probe() returns.
@@ -24,26 +34,27 @@ const npmSetup = (facts: EnvFacts = FACTS): SetupAdapter<EnvFacts> => ({ ...type
 const PLAN = {
   summary: '安装依赖后运行测试。',
   install: { mode: 'ci', reason: '仓库提交了 package-lock.json' },
-  scripts: { test: 'test', lint: 'lint:js', build: '' },
+  scripts: { test: 'test', lint: 'lint:js', build: '', typecheck: '', format: '', coverage: '' },
+  configuration: null,
   issues: [{ text: '本机 Node 18 低于 .nvmrc 的 20', fix: 'nvm install 20 && nvm use 20' }],
 };
 
 test('validatePlan keeps choices the facts support', () => {
   const plan = steward.validatePlan(PLAN, FACTS, typescriptSetup);
   assert.equal(plan.install, 'ci');
-  assert.deepEqual(plan.scripts, { test: 'test', lint: 'lint:js', build: null });
+  assert.deepEqual(plan.scripts, { test: 'test', lint: 'lint:js', build: null, typecheck: null, format: null, coverage: null });
   assert.equal(plan.issues.length, 1);
   assert.deepEqual(plan.adjustments, []);
 });
 
 test('validatePlan drops unknown scripts and downgrades ci without a lockfile', () => {
   const plan = steward.validatePlan(
-    { ...PLAN, scripts: { test: 'test', lint: 'lint', build: 'build && curl evil' } },
+    { ...PLAN, scripts: { ...PLAN.scripts, test: 'test', lint: 'lint', build: 'build && curl evil' } },
     { ...FACTS, lockfiles: [] },
     typescriptSetup,
   );
   assert.equal(plan.install, 'install');
-  assert.deepEqual(plan.scripts, { test: 'test', lint: null, build: null });
+  assert.deepEqual(plan.scripts, { test: 'test', lint: null, build: null, typecheck: null, format: null, coverage: null });
   assert.deepEqual(
     plan.adjustments.map((a) => a.code),
     ['ci_without_lockfile', 'unknown_script', 'unknown_script'],
@@ -66,7 +77,7 @@ test('planPrompt fences facts and includes a failed step tail', () => {
   assert.match(prompt, /<file path="\.github\/workflows\/ci\.yml">/);
   assert.match(prompt, /node: v18\.0\.0/);
   assert.match(prompt, /<failed_step>[\s\S]*gyp ERR![\s\S]*<\/failed_step>/);
-  assert.ok(prompt.length < 6000, 'failure output is truncated');
+  assert.ok(prompt.length < 10000, 'failure output is truncated');
 });
 
 test('planEnvironment skips the model without a package.json', async () => {
@@ -115,11 +126,11 @@ test('planEnvironment reports setup_unsupported without an adapter, before probi
 test('validatePlan drops illegal script names and kinds the adapter does not offer', () => {
   const facts = { ...FACTS, manifest: { ...FACTS.manifest!, scripts: { ...FACTS.manifest!.scripts, '-rf': 'x', typecheck: 'tsc' } } };
   const plan = steward.validatePlan(
-    { ...PLAN, scripts: { test: '--foo', lint: '../lint', build: '-rf', typecheck: 'typecheck', deploy: 'test' } },
+    { ...PLAN, scripts: { ...PLAN.scripts, test: '--foo', lint: '../lint', build: '-rf', typecheck: 'typecheck', deploy: 'test' } },
     facts,
     typescriptSetup,
   );
-  assert.deepEqual(plan.scripts, { test: null, lint: null, build: null });
+  assert.deepEqual(plan.scripts, { test: null, lint: null, build: null, typecheck: 'typecheck', format: null, coverage: null });
   assert.deepEqual(
     plan.adjustments.map((a) => (a.code === 'unknown_script' ? `${a.kind}:${a.script}` : a.code)),
     ['test:--foo', 'lint:../lint', 'build:-rf'],
@@ -129,9 +140,47 @@ test('validatePlan drops illegal script names and kinds the adapter does not off
 test('the schema and prompt only offer the adapter modes and kinds', () => {
   const schema = steward.planSchema(typescriptSetup);
   assert.deepEqual(schema.properties.install.properties.mode.enum, ['ci', 'install', 'skip']);
-  assert.deepEqual(schema.properties.scripts.required, ['test', 'lint', 'build']);
+  assert.deepEqual(schema.properties.scripts.required, ['test', 'lint', 'build', 'typecheck', 'format', 'coverage']);
   const prompt = steward.planPrompt(typescriptSetup, FACTS);
-  assert.match(prompt, /<setup_rules>\ninstall modes: ci, install, skip\nstep kinds: test, lint, build\n/);
+  assert.match(prompt, /<setup_rules>\ninstall modes: ci, install, skip\nstep kinds: test, lint, build, typecheck, format, coverage\n/);
   // The npm wording lives in the adapter's rules, not the system prompt.
   assert.doesNotMatch(steward.SYSTEM_PROMPT, /npm|package\.json|Node/);
+});
+
+test('validatePlan keeps a configuration proposal separate from runnable scripts', () => {
+  const plan = steward.validatePlan({ ...PLAN, configuration: ENV_CONFIGURATION }, FACTS, typescriptSetup);
+  assert.deepEqual(plan.configuration, ENV_CONFIGURATION);
+  assert.equal(plan.scripts.typecheck, null, 'a proposed script is not an existing runnable script');
+});
+
+test.each([
+  ['outside path', { fileScope: ['../outside'] }],
+  ['git metadata', { fileScope: ['.git/config'] }],
+  ['secret', { fileScope: ['.env'] }],
+  ['application code', { fileScope: ['src/App.tsx'] }],
+  ['missing project wiring', { fileScope: ['package.json'] }],
+  ['arbitrary command', { checks: [{ kind: 'typecheck', script: 'tsc --noEmit', reason: 'x' }] }],
+  ['unsupported check', { checks: [{ kind: 'setup', script: 'x', reason: 'x' }] }],
+  ['duplicate check', { checks: [ENV_CONFIGURATION.checks[0], ENV_CONFIGURATION.checks[0]] }],
+  ['missing steps', { steps: [] }],
+])('validatePlan rejects a configuration proposal with %s', (_name, override) => {
+  assert.throws(() => steward.validatePlan({ ...PLAN, configuration: { ...ENV_CONFIGURATION, ...override } }, FACTS, typescriptSetup), {
+    name: 'AgentOutputError',
+  });
+});
+
+test('the nullable configuration schema uses the strict structured-output subset accepted by Codex', () => {
+  const schema = steward.planSchema(typescriptSetup);
+  const acceptsStrictSchema = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    assert.ok(!Object.hasOwn(value, 'oneOf'), 'Codex rejects oneOf when strict is true');
+    for (const child of Object.values(value)) acceptsStrictSchema(child);
+  };
+  acceptsStrictSchema(schema);
+  const alternatives = schema.properties.configuration.anyOf;
+  assert.equal(alternatives.length, 2);
+  assert.equal(alternatives[0].type, 'null');
+  assert.equal(alternatives[1].type, 'object');
+  assert.equal(steward.validatePlan({ ...PLAN, configuration: null }, FACTS, typescriptSetup).configuration, null);
+  assert.deepEqual(steward.validatePlan({ ...PLAN, configuration: ENV_CONFIGURATION }, FACTS, typescriptSetup).configuration, ENV_CONFIGURATION);
 });

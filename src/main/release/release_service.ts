@@ -11,6 +11,7 @@ import { looksSecret } from '../repository/repo_reader.ts';
 import { env as appEnv } from '../infrastructure/env.ts';
 import * as presets from '../checking/presets/index.ts';
 import { planRelease, throwIfCancelled, RELEASE_MAX_COMMITS } from '../agents/pipeline.ts';
+import { FROM_FIRST_COMMIT } from '../../shared/ipc/release.ts';
 import type * as releaseTypes from '../../shared/ipc/release.ts';
 import type { ReleasePackage } from '../agents/pipeline.ts';
 import type { AppContext } from '../app/app_context.ts';
@@ -34,7 +35,6 @@ type ReleaseServiceContext = Pick<
 >;
 
 const RECENT_COMMITS = 30;
-const MAX_RELEASE_PACKAGES = 50;
 const MAX_PACKAGE_TEXT = 500;
 const NO_START: releaseTypes.ReleaseStartPoint = { kind: 'none', commit: null, label: null, commitCount: 0, commitsTruncated: false, packageCount: 0 };
 export interface ReleaseService {
@@ -58,12 +58,14 @@ export const createReleaseService = (ctx: ReleaseServiceContext): ReleaseService
     return ctx.releases;
   };
   const knownRequirements = () => new Set((ctx.requirements?.list() ?? []).map((item) => item.id));
+  // Every done package not released yet. All of them are recorded as
+  // released when the release finishes; Release Manager's prompt describes
+  // the first MAX_PROMPT_PACKAGES and says how many it left out.
   const unreleasedPackages = (store: ReleaseStore): ReleasePackage[] => {
     const state = workPackages.all();
     return catalog
       .listTasks()
       .filter((task) => state[task.id]?.status === 'done' && !store.isReleased(task.id))
-      .slice(0, MAX_RELEASE_PACKAGES)
       .map((task) => {
         const effective = workPackages.effective(task);
         return {
@@ -139,7 +141,11 @@ export const createReleaseService = (ctx: ReleaseServiceContext): ReleaseService
     const point = await findStart(root, store);
     let startCommit = point?.commit ?? null;
     let startLabel = point?.label ?? null;
-    if (rawStart !== undefined && rawStart !== null && rawStart !== startCommit) {
+    if (rawStart === FROM_FIRST_COMMIT) {
+      // A project's first release: everything committed so far.
+      startCommit = git.EMPTY_TREE;
+      startLabel = '项目的第一个提交';
+    } else if (rawStart !== undefined && rawStart !== null && rawStart !== startCommit) {
       const recent = (await git.recentCommits(root, { limit: RECENT_COMMITS })).find((commit) => commit.sha === rawStart);
       if (!recent) return failWith('Pick the start point or one of the recent commits', 'release_bad_start', 'startCommit');
       startCommit = recent.sha;
@@ -163,6 +169,7 @@ export const createReleaseService = (ctx: ReleaseServiceContext): ReleaseService
           endCommit,
           packages,
           readVersion,
+          lastReleased: store.latest()?.version ?? null,
           runAgent: releaseRunner,
           envPath,
           signal: controller.signal,

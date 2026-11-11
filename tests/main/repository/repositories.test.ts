@@ -178,3 +178,205 @@ test('a registry entry with a bad id or relative root is dropped on load', async
   );
   assert.equal(registry.current, null);
 });
+
+test('removing a repository keeps its data, and adding the folder again brings it back', async () => {
+  const configDir = await tempDir('tp-repos-');
+  const registry = await new RepositoryRegistry(configDir).load();
+  const root = await tempDir('tp-repos-root-');
+  const entry = await registry.add(root);
+  await registry.open(entry.id);
+  await fs.writeFile(path.join(registry.dataDir(entry.id), 'requirements.json'), '[]');
+  await assert.rejects(registry.remove(entry.id), { code: 'invalid_state' });
+
+  await registry.close();
+  assert.equal(registry.current, null);
+  await registry.remove(entry.id);
+  assert.deepEqual(registry.list(), []);
+  assert.equal(registry.get(entry.id), null);
+  const restarted = await new RepositoryRegistry(configDir).load();
+  assert.deepEqual(restarted.list(), []);
+  assert.equal(restarted.get(entry.id), null);
+  assert.equal(restarted.current, null);
+  await assert.rejects(restarted.open(entry.id), { code: 'unknown_repository' });
+  await assert.rejects(registry.remove(entry.id), { code: 'unknown_repository' });
+
+  await fs.mkdir(registry.dataDir(UNASSIGNED_ID), { recursive: true });
+  const again = await restarted.add(root);
+  assert.equal(again.id, entry.id);
+  assert.equal(again.addedAt, entry.addedAt);
+  assert.equal(await fs.readFile(path.join(restarted.dataDir(again.id), 'requirements.json'), 'utf8'), '[]');
+});
+
+for (const moved of [false, true]) {
+  test(`readding through a real path alias restores all data after restart${moved ? ' and relocation' : ''}`, async () => {
+    const configDir = await tempDir('tp-repos-');
+    const folders = await tempDir('tp-repos-roots-');
+    const original = path.join(folders, 'original');
+    const alias = path.join(folders, 'alias');
+    await fs.mkdir(original);
+    await fs.symlink(original, alias);
+    const registry = await new RepositoryRegistry(configDir).load();
+    const entry = await registry.add(alias);
+    await registry.open(entry.id);
+    await registry.saveConfig(workspace.normalize({ checks: { test: { command: 'npm', args: ['test'] } } }));
+    const data = {
+      'requirements.json': '{"requirements":[{"id":"original-requirement"}]}',
+      'work-packages.json': '{"packages":{"original-package":{"status":"done"}}}',
+      'releases.json': '{"releases":[{"version":"1.0.0"}]}',
+      'tutor.json': '{"original-package":"explanation"}',
+      'course_trust.json': '{"trusted":"course-hash"}',
+      'events/2026-10-01.jsonl': '{"type":"original-event"}\n',
+      'labs/original-lab/reference.patch': 'original private reference',
+      'labs/original-lab/hidden/test.sh': 'original private test',
+    };
+    for (const [name, contents] of Object.entries(data)) {
+      const file = path.join(registry.dataDir(entry.id), name);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, contents);
+    }
+    let root = original;
+    if (moved) {
+      root = path.join(folders, 'moved');
+      await fs.rename(original, root);
+      const movedAlias = path.join(folders, 'moved-alias');
+      await fs.symlink(root, movedAlias);
+      await registry.relocate(entry.id, movedAlias);
+      await fs.unlink(movedAlias);
+    }
+    await registry.close();
+    await registry.remove(entry.id);
+    await fs.unlink(alias);
+    const restarted = await new RepositoryRegistry(configDir).load();
+    assert.deepEqual(restarted.list(), []);
+    const readdAlias = path.join(folders, 'readd-alias');
+    await fs.symlink(root, readdAlias);
+    const restored = await restarted.add(readdAlias);
+    assert.equal(restored.id, entry.id);
+    assert.equal(restored.addedAt, entry.addedAt);
+    assert.equal(restored.lastOpenedAt, entry.lastOpenedAt);
+    assert.equal(restored.root, await fs.realpath(root));
+    assert.equal((await restarted.add(root)).id, entry.id);
+    assert.equal(restarted.list().length, 1);
+    await restarted.open(restored.id);
+    const config = await restarted.loadConfig();
+    assert.equal(config.root, await fs.realpath(root));
+    assert.equal(config.steps.test?.commands[0].command, 'npm');
+    for (const [name, contents] of Object.entries(data)) assert.equal(await fs.readFile(path.join(restarted.dataDir(), name), 'utf8'), contents);
+    const reopened = await new RepositoryRegistry(configDir).load();
+    assert.equal(reopened.current?.id, entry.id);
+    await reopened.close();
+    await reopened.remove(entry.id);
+    assert.equal((await new RepositoryRegistry(configDir).load().then((saved) => saved.add(root))).id, entry.id);
+  });
+}
+
+for (const removed of [false, true]) {
+  test(`a new repository at a relocated repository's old root cannot take its ${removed ? 'removed' : 'active'} identity`, async () => {
+    const configDir = await tempDir('tp-repos-');
+    const folders = await tempDir('tp-repos-roots-');
+    const original = path.join(folders, 'original');
+    const moved = path.join(folders, 'moved');
+    await fs.mkdir(original);
+    const registry = await new RepositoryRegistry(configDir).load();
+    const entry = await registry.add(original);
+    await fs.writeFile(path.join(registry.dataDir(entry.id), 'requirements.json'), 'original requirements');
+    await fs.rename(original, moved);
+    await registry.relocate(entry.id, moved);
+    if (removed) await registry.remove(entry.id);
+    await fs.mkdir(original);
+    const restarted = await new RepositoryRegistry(configDir).load();
+    const replacement = await restarted.add(original);
+    assert.notEqual(replacement.id, entry.id);
+    await assert.rejects(fs.access(path.join(restarted.dataDir(replacement.id), 'requirements.json')), { code: 'ENOENT' });
+    await fs.writeFile(path.join(restarted.dataDir(replacement.id), 'requirements.json'), 'replacement requirements');
+    const reloaded = await new RepositoryRegistry(configDir).load();
+    const restored = await reloaded.add(moved);
+    assert.equal(restored.id, entry.id);
+    assert.equal(await fs.readFile(path.join(reloaded.dataDir(restored.id), 'requirements.json'), 'utf8'), 'original requirements');
+    assert.equal(await fs.readFile(path.join(reloaded.dataDir(replacement.id), 'requirements.json'), 'utf8'), 'replacement requirements');
+  });
+}
+
+for (const missingData of [false, true]) {
+  test(`restoring a removed identity does not adopt unassigned data${missingData ? ' when its data directory is missing' : ''}`, async () => {
+    const configDir = await tempDir('tp-repos-');
+    const root = await tempDir('tp-repos-root-');
+    const registry = await new RepositoryRegistry(configDir).load();
+    const entry = await registry.add(root);
+    await registry.remove(entry.id);
+    if (missingData) await fs.rename(registry.dataDir(entry.id), path.join(configDir, 'saved-data'));
+    const unassigned = registry.dataDir(UNASSIGNED_ID);
+    await fs.mkdir(unassigned, { recursive: true });
+    await fs.writeFile(path.join(unassigned, 'requirements.json'), 'unassigned requirements');
+    const restarted = await new RepositoryRegistry(configDir).load();
+    const restored = await restarted.add(root);
+    assert.equal(restored.id, entry.id);
+    await assert.rejects(fs.access(path.join(restarted.dataDir(restored.id), 'requirements.json')), { code: 'ENOENT' });
+    const otherRoot = await tempDir('tp-repos-other-');
+    await restarted.remove(restored.id);
+    const other = await restarted.add(otherRoot);
+    await assert.rejects(fs.access(path.join(restarted.dataDir(other.id), 'requirements.json')), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(path.join(unassigned, 'requirements.json'), 'utf8'), 'unassigned requirements');
+  });
+}
+
+test('a removed identity stays reserved even when its data directory is missing', async () => {
+  const configDir = await tempDir('tp-repos-');
+  const folders = await tempDir('tp-repos-roots-');
+  const original = path.join(folders, 'original');
+  const moved = path.join(folders, 'moved');
+  await fs.mkdir(original);
+  const registry = await new RepositoryRegistry(configDir).load();
+  const entry = await registry.add(original);
+  await fs.rename(original, moved);
+  await registry.relocate(entry.id, moved);
+  await registry.remove(entry.id);
+  await fs.rename(registry.dataDir(entry.id), path.join(configDir, 'saved-data'));
+  await fs.mkdir(original);
+  const restarted = await new RepositoryRegistry(configDir).load();
+  const replacement = await restarted.add(original);
+  assert.notEqual(replacement.id, entry.id);
+  const restored = await restarted.add(moved);
+  assert.equal(restored.id, entry.id);
+  assert.notEqual(restarted.dataDir(replacement.id), restarted.dataDir(restored.id));
+});
+
+test('relocating onto a removed root is refused, including through a symlink', async () => {
+  const configDir = await tempDir('tp-repos-');
+  const root = await tempDir('tp-repos-root-');
+  const alias = path.join(await tempDir('tp-repos-alias-'), 'alias');
+  await fs.symlink(root, alias);
+  const registry = await new RepositoryRegistry(configDir).load();
+  const removed = await registry.add(root);
+  await registry.remove(removed.id);
+  const other = await registry.add(await tempDir('tp-repos-other-'));
+  await assert.rejects(registry.relocate(other.id, alias), { code: 'repository_exists', field: 'root' });
+  assert.equal((await registry.add(alias)).id, removed.id);
+});
+
+test('legacy registries without removed entries remain readable with or without version 1', async () => {
+  for (const version of [undefined, 1]) {
+    const configDir = await tempDir('tp-repos-');
+    const root = await tempDir('tp-repos-root-');
+    const entry = { id: repositoryId(root), root, addedAt: '2026-10-01T00:00:00Z', lastOpenedAt: '2026-10-02T00:00:00Z' };
+    await fs.writeFile(path.join(configDir, REGISTRY_FILENAME), JSON.stringify({ version, current: entry.id, repositories: [entry] }));
+    const registry = await new RepositoryRegistry(configDir).load();
+    assert.deepEqual(registry.current, entry);
+    await registry.close();
+    await registry.remove(entry.id);
+    const restarted = await new RepositoryRegistry(configDir).load();
+    assert.equal((await restarted.add(root)).id, entry.id);
+  }
+});
+
+test('future registry versions are refused on load and before replacing a loaded registry', async () => {
+  const configDir = await tempDir('tp-repos-');
+  const registry = await new RepositoryRegistry(configDir).load();
+  const entry = await registry.add(await tempDir('tp-repos-root-'));
+  const file = path.join(configDir, REGISTRY_FILENAME);
+  const before = JSON.stringify({ version: 2, current: entry.id, repositories: [entry], future: 'keep this data' });
+  await fs.writeFile(file, before);
+  await assert.rejects(new RepositoryRegistry(configDir).load(), { code: 'unsupported_version' });
+  await assert.rejects(registry.remove(entry.id), { code: 'unsupported_version' });
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+});

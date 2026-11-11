@@ -298,6 +298,21 @@ export const projectTemplate = (preset: string, examples: TemplateExamples) =>
     '',
   ].join('\n');
 
+// Points an existing file without a preset (`preset = "none"` or none
+// written) at `preset`, e.g. once a new project's skeleton is committed.
+// Only that line changes, so the file's own steps and comments stay; a file
+// that already names a preset is refused rather than switched.
+export const setPreset = async (root: string, preset: string, presets: readonly string[]) => {
+  const text = await readProjectText(root);
+  if (text === null) throw new WorkspaceError(`${PROJECT_FILENAME} does not exist`, 'invalid_project', 'toml');
+  if (parseProject(text, presets).preset !== null) throw new WorkspaceError(`${PROJECT_FILENAME} already names a preset`, 'invalid_project', 'preset');
+  const line = `preset = "${preset}"`;
+  const pattern = /^preset\s*=\s*"none"[^\n]*$/m;
+  const next = pattern.test(text) ? text.replace(pattern, line) : `${line}\n${text}`;
+  if (parseProject(next, presets).preset !== preset) throw new WorkspaceError(`Could not set the preset in ${PROJECT_FILENAME}`, 'invalid_project', 'preset');
+  await fs.writeFile(path.join(root, PROJECT_FILENAME), next);
+};
+
 // Writes a new file; an existing one is never overwritten.
 export const createProjectFile = async (root: string, preset: string, examples: TemplateExamples) => {
   const file = path.join(root, PROJECT_FILENAME);

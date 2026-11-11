@@ -105,6 +105,34 @@ test('a failed step offers a replan with the failure', async () => {
   expect(resultText(failed)).toBe('失败（退出码 1）· 2.5s');
 });
 
+test('a recovered configuration install runs by id without analysis or lifecycle-script permission', async () => {
+  const base = envState();
+  api.env.get.mockReturnValue(
+    ok(
+      envState({
+        configurationPackage: { id: 'env-1', title: '配置检查', status: 'in_progress', needsCommit: false, installPending: true },
+        plan: { ...base.plan!, scripts: {}, configuration: null },
+        stepKinds: [],
+        facts: { ...base.facts!, installScripts: ['electron'] },
+        steps: [{ ...base.steps[0], line: 'npm install --ignore-scripts --no-audit --no-fund' }],
+      }),
+    ),
+  );
+  const setup = await onSetupPage();
+  expect(setup.ready).toBe(true);
+  expect(setup.installationOnly).toBe(true);
+  expect(setup.applyItems).toEqual([]);
+  expect(setup.notices.some((notice) => notice.text.includes('运行必需的安装脚本'))).toBe(false);
+  expect(await setup.setAllowScripts(true)).toBe(false);
+  expect(api.env.setAllowScripts).not.toHaveBeenCalled();
+  expect(feedback.confirmAction).not.toHaveBeenCalled();
+  expect(await setup.runStep('install')).toBe(true);
+  expect(api.env.runStep).toHaveBeenCalledWith('install');
+  expect(api.env.plan).not.toHaveBeenCalled();
+  await setup.plan();
+  expect(api.env.plan).toHaveBeenCalledWith();
+});
+
 test('a successful unconfigured script is ticked for writing by default', async () => {
   const setup = await onSetupPage();
   const passed = { line: 'npm run test', ok: true, exitCode: 0, timedOut: false, durationMs: 1000, summary: null, output: '', at: '' };
@@ -206,8 +234,32 @@ test('the rebuild step names its packages before it runs', async () => {
 test('a repository without setup support says so and offers nothing to apply', async () => {
   api.env.get.mockReturnValue(ok(envState({ blockers: ['setup_unsupported'], facts: null, plan: null, steps: [], stepKinds: [], configured: {} })));
   const setup = await onSetupPage();
-  expect(setup.notices.map((item) => item.text)).toEqual([expect.stringContaining('暂不支持自动环境规划')]);
+  expect(setup.notices.map((item) => item.text)).toEqual([expect.stringContaining('目前只会规划 Node/npm 项目')]);
   expect(setup.facts).toEqual([]);
   expect(setup.applyItems).toEqual([]);
   expect(setup.selectedKinds).toEqual([]);
+});
+
+test('a project without a skeleton is told what comes first, as information rather than an error', async () => {
+  api.env.get.mockReturnValue(ok(envState({ blockers: ['no_skeleton'], facts: null, plan: null, steps: [], stepKinds: [], configured: {} })));
+  const setup = await onSetupPage();
+  expect(setup.notices).toEqual([expect.objectContaining({ tone: 'info', text: expect.stringContaining('先写下第一个需求') })]);
+});
+
+test('package progress refreshes the linked work package without resetting command selections', async () => {
+  const setup = await onSetupPage();
+  setup.selectedKinds = ['test'];
+  const before = api.env.get.mock.calls.length;
+  api.emitState({ repositoryId: null, domains: ['packages'] });
+  await flushPromises();
+  expect(api.env.get.mock.calls.length).toBe(before + 1);
+  expect(setup.selectedKinds).toEqual(['test']);
+});
+
+test('an asynchronous analysis failure shows the CLI reason rather than hiding it behind the code hint', async () => {
+  const message = "Codex reported a failed analysis turn: Invalid schema: 'configuration.oneOf' is not permitted when strict is true.";
+  api.env.get.mockReturnValue(ok(envState({ status: 'failed', error: { code: 'agent_failed', message } })));
+  const setup = await onSetupPage();
+  expect(setup.statusText).toContain('分析失败：智能体运行失败：');
+  expect(setup.statusText).toContain(message);
 });

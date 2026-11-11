@@ -1,6 +1,8 @@
 /** @module-tag integration */
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import { gitRepo } from '../../fixtures/git_repo.ts';
 import * as effectiveSteps from '../../../src/main/checking/effective_steps.ts';
@@ -138,4 +140,15 @@ test('the typescript preset picks scripts by name and parses tsc for typecheck',
   assert.deepEqual(Object.keys(steps).sort(), ['coverage', 'setup', 'test', 'typecheck']);
   assert.deepEqual(steps.typecheck?.commands, [npm('run', '--silent', 'type-check')]);
   assert.deepEqual(typescriptPreset.steps({ manifest: null }), {});
+});
+
+test('the preset dependency folders missing from the checkout are reported until installed', async () => {
+  const root = await repo({ 'package.json': PACKAGE, 'taskpilot.toml': 'preset = "typescript"\n' });
+  const config = workspace.normalize({ version: 3, root, steps: {} });
+  assert.deepEqual((await effectiveSteps.resolve(config)).missingDependencies, ['node_modules']);
+  await fs.mkdir(path.join(root, 'node_modules'));
+  assert.deepEqual((await effectiveSteps.resolve(config)).missingDependencies, []);
+  // A blank project has no preset to ask.
+  const blank = await repo({ 'README.md': '# x\n' });
+  assert.deepEqual((await effectiveSteps.resolve(workspace.normalize({ version: 3, root: blank, steps: {} }))).missingDependencies, []);
 });

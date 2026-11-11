@@ -18,17 +18,7 @@ import type { RunInfo } from '../app/background_runs.ts';
 
 type RequirementServiceContext = Pick<
   AppContext,
-  | 'backgroundRuns'
-  | 'commandPath'
-  | 'course'
-  | 'getConfig'
-  | 'onPackagesPublished'
-  | 'profile'
-  | 'record'
-  | 'requirements'
-  | 'runnableSteps'
-  | 'runnerFor'
-  | 'store'
+  'backgroundRuns' | 'commandPath' | 'course' | 'getConfig' | 'profile' | 'record' | 'requirements' | 'runnableSteps' | 'runnerFor' | 'store'
 >;
 
 type RequirementItem = Awaited<ReturnType<RequirementStore['get']>>;
@@ -92,6 +82,8 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     };
     void backgroundRuns.run(info, async (controller) => {
       let outcome: { output: Output; costUsd: number; course: CourseRef } | { error: unknown };
+      // Spent before Product Lead; counted on the requirement even if it fails.
+      let architectCost = 0;
       try {
         // Inside the try: a failure before the agents start still fails the run.
         const files = await repositoryFiles(root);
@@ -99,16 +91,18 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
         const profile = await ctx.profile(config);
         const course = await ctx.course(config);
         let interfaces = item.interfaces?.text ?? null;
-        let architectCost = 0;
-        if (step === 'clarifying') {
+        // Architect reads the code when clarifying, and again before a plan
+        // once commits landed since (e.g. the skeleton of a new project).
+        const head = root ? await git.head(root).catch(() => null) : null;
+        if (step === 'clarifying' || (head && item.interfaces?.commit !== head)) {
           await store.setPhase(id, 'architect');
           const result = await summarizeForRequirement(item, { runAgent: architectRunner, root, files, profile, envPath, signal: controller.signal });
           architectCost = result.costUsd;
           await store.setInterfaces(
             id,
             result.summary
-              ? { summary: result.summary, text: result.text, read: result.read, skipped: result.skipped, error: null }
-              : { summary: null, text: null, read: [], skipped: result.skipped, error: result.error },
+              ? { commit: head, summary: result.summary, text: result.text, read: result.read, skipped: result.skipped, error: null }
+              : { commit: head, summary: null, text: null, read: [], skipped: result.skipped, error: result.error },
           );
           interfaces = result.text;
           await store.setPhase(id, 'product-lead');
@@ -127,12 +121,12 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
       }
       backgroundRuns.finish('requirement', id, controller);
       const title = store.get(id).title || item.text.slice(0, 40);
-      const fail = (error: unknown) => {
+      const fail = (error: unknown, spent = 0) => {
         const agentError = asAgentError(error);
         record({ kind: 'requirement_failed', requirementId: id, title, step, code: agentError.code ?? 'unknown' });
-        return store.failRun(id, step, agentError).catch(() => {});
+        return store.failRun(id, step, agentError, spent).catch(() => {});
       };
-      if ('error' in outcome) await fail(outcome.error);
+      if ('error' in outcome) await fail(outcome.error, architectCost);
       else {
         const { costUsd } = outcome;
         await finish(id, outcome.output, costUsd, outcome.course)
@@ -257,7 +251,6 @@ export const createRequirementService = (ctx: RequirementServiceContext, { cours
     const definitions = productLead.toTaskDefinitions(item, item.plan.packages, item.plan.course);
     const published = await store.publish(item.id, definitions);
     ctx.store.add(definitions);
-    ctx.onPackagesPublished?.(definitions);
     record({ kind: 'requirement_published', requirementId: item.id, title: published.title || item.text.slice(0, 40), packageCount: definitions.length });
     return published;
   };

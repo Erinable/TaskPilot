@@ -14,6 +14,7 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import { useAppStore } from './app.ts';
 import { useTasksStore } from './tasks.ts';
+import { useRepositoryIdentityStore } from './repository_identity.ts';
 import { createStateWatcher } from './state_watcher.ts';
 
 export type ActionSpec = { name: packageTypes.HumanTransition; label: string; icon: IconName; primary?: boolean; danger?: boolean };
@@ -28,6 +29,8 @@ export const ACTIONS: ActionSpec[] = [
   { name: 'override_dismissal', label: '不同意驳回，要求重新规划', icon: 'flag', danger: true },
   { name: 'acceptance_rejected', label: '打回修改', icon: 'undo', danger: true },
   { name: 'revert_replan', label: '撤销重新规划', icon: 'undo' },
+  { name: 'withdraw_review', label: '撤回审查，继续修改', icon: 'undo' },
+  { name: 'withdraw_deviation', label: '撤回偏差，按原计划继续', icon: 'undo' },
   { name: 'block', label: '标记阻塞', icon: 'ban' },
   { name: 'release', label: '放回队列', icon: 'undo' },
 ];
@@ -39,6 +42,7 @@ const DEFAULT_VERIFY_STEPS: { id: workspaceTypes.CheckKind; label: string | null
 ];
 
 export const useExecutionStore = defineStore('execution', () => {
+  const repository = useRepositoryIdentityStore();
   // ========== Current package ==========
   const current = ref<packageTypes.TaskView | null>(null);
   // Acceptance evidence from the last verification run; falls back to the review's.
@@ -96,6 +100,7 @@ export const useExecutionStore = defineStore('execution', () => {
     referenceError.value = null;
     referenceLoading.value = false;
     referenceRequest = null;
+    verifyRunning.value = false;
     actions.deviationOpen.value = false;
   };
 
@@ -174,13 +179,15 @@ export const useExecutionStore = defineStore('execution', () => {
   // only by the notification center's watcher.
   const watcher = createStateWatcher({
     name: 'execution',
-    domains: ['packages', 'workspace'],
+    domains: ['packages', 'workspace', 'environment'],
     initialRead: false,
     read: async () => {
       const before = current.value;
       const token = generation;
       if (!before) return;
-      const task = await call(window.taskpilot.tasks.get(before.id));
+      // Await both reads so the next notification cannot overtake this
+      // workspace refresh after an install or commit.
+      const [task] = await Promise.all([call(window.taskpilot.tasks.get(before.id)), loadVerifySteps()]);
       if (generation !== token || current.value?.id !== before.id) return;
       current.value = task;
       useTasksStore().adoptTask(task);
@@ -231,37 +238,55 @@ export const useExecutionStore = defineStore('execution', () => {
   // The steps that run in this repository, for the verify buttons; the
   // fixed ones until the workspace answers.
   const verifySteps = ref<{ id: workspaceTypes.CheckKind; label: string | null }[]>(DEFAULT_VERIFY_STEPS);
+  // Dependency folders this checkout lacks (node_modules): a Coding Agent
+  // round installs only in its own copy, so the developer installs here.
+  const missingDependencies = ref<string[]>([]);
+  let verifyStepsRequest = 0;
   const loadVerifySteps = async () => {
+    const request = ++verifyStepsRequest;
+    const token = generation;
+    const repositoryId = repository.currentId;
+    const isCurrent = () => request === verifyStepsRequest && token === generation && repositoryId === repository.currentId;
     try {
       const view = await call(window.taskpilot.workspace.get());
+      if (!isCurrent()) return;
       verifySteps.value = view.steps.filter((step) => step.effective && step.id !== 'setup').map((step) => ({ id: step.id, label: step.label }));
+      missingDependencies.value = view.missingDependencies;
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       verifySteps.value = DEFAULT_VERIFY_STEPS;
+      missingDependencies.value = [];
     }
   };
   const verifyKind = ref<workspaceTypes.CheckKind | null>(null);
   const verifyRunning = ref(false);
   const verifyResult = ref<workspaceTypes.VerifyRun | null>(null);
   const verifyError = ref<string | null>(null);
+  let verificationRequest = 0;
 
   const runVerification = async (kind: workspaceTypes.CheckKind) => {
     const task = current.value;
     if (!task || verifyRunning.value) return;
+    const request = ++verificationRequest;
+    const token = generation;
+    const repositoryId = repository.currentId;
+    const isCurrent = () => request === verificationRequest && token === generation && repositoryId === repository.currentId && current.value?.id === task.id;
     verifyKind.value = kind;
     verifyRunning.value = true;
     verifyResult.value = null;
     verifyError.value = null;
     try {
       const result = await call(window.taskpilot.verify.run(kind, task.id));
-      if (current.value?.id !== task.id) return;
+      if (!isCurrent()) return;
       verifyResult.value = result;
       if (result.acceptance) acceptanceOverride.value = result.acceptance;
     } catch (error) {
+      if (!isCurrent()) return;
       console.error(error);
       verifyError.value = describeError(error);
     } finally {
-      verifyRunning.value = false;
+      if (isCurrent()) verifyRunning.value = false;
     }
   };
 
@@ -359,12 +384,14 @@ export const useExecutionStore = defineStore('execution', () => {
     // Verification
     verifySteps,
     loadVerifySteps,
+    missingDependencies,
     verifyKind,
     verifyRunning,
     verifyResult,
     verifyError,
     runVerification,
     // Transitions
+    handToAi: actions.handToAi,
     transitioning: actions.transitioning,
     runTransition: actions.runTransition,
     // Practice

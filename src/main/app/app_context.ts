@@ -8,6 +8,7 @@ import path from 'node:path';
 import { logger } from '../infrastructure/logger.ts';
 import { codedError, failWith, requireString } from '../infrastructure/coded_error.ts';
 import * as tasks from '../work_packages/tasks.ts';
+import { withDependencyScope } from '../work_packages/dependency_scope.ts';
 import * as git from '../repository/git.ts';
 import * as preferences from './preferences.ts';
 import * as claudeCli from '../runtimes/claude_cli.ts';
@@ -37,6 +38,7 @@ import type { StateChange, StateDomain } from '../../shared/ipc/state.ts';
 import type { Requirement } from '../requirements/requirement_store.ts';
 import type { NoteStore } from '../notes/note_store.ts';
 import type { MasteryStore } from '../courses/mastery_store.ts';
+import { UNASSIGNED_ID } from '../repository/repositories.ts';
 import type { RepositoryRegistry } from '../repository/repositories.ts';
 import type { TaskDefinition } from '../work_packages/tasks.ts';
 import * as cliSignIn from '../runtimes/cli_sign_in.ts';
@@ -97,8 +99,6 @@ export type AppDeps = {
   appVersion?: string;
   // Enables the requirement flow.
   requirements?: RequirementStore | null;
-  // Called after generated packages are added to the queue.
-  onPackagesPublished?: (definitions: TaskDefinition[]) => void;
   // Records state changes for metrics and the activity feed.
   activity?: ActivityLog | null;
   // Enables Release Manager.
@@ -179,7 +179,6 @@ export const createAppContext = (deps: AppDeps) => {
     onPreferencesChanged,
     appVersion,
     requirements = null,
-    onPackagesPublished,
     activity = null,
     releases = null,
     tutor = null,
@@ -328,7 +327,7 @@ export const createAppContext = (deps: AppDeps) => {
   // The definition as currently planned, including Architect's replans.
   const effectiveTask = (id: string) => {
     const task = catalog.getTask(id);
-    return task ? store.effective(task) : null;
+    return task ? withDependencyScope(store.effective(task), getConfig().root) : null;
   };
 
   const requireTask = (id: string) => {
@@ -362,7 +361,7 @@ export const createAppContext = (deps: AppDeps) => {
   // A blocked package does not offer `claim`, so no screen shows a button the guard would refuse.
   const viewOf = (task: TaskDefinition, state: PackageState) => {
     const dependencies = dependenciesOf(task, state);
-    const view = buildTaskView(task, state, dependencies);
+    const view = buildTaskView(withDependencyScope(task, getConfig().root), state, dependencies);
     return dependencies.some((dependency) => dependency.blocking)
       ? { ...view, humanTransitions: view.humanTransitions.filter((name) => name !== 'claim') }
       : view;
@@ -436,9 +435,10 @@ export const createAppContext = (deps: AppDeps) => {
     await activity?.open(dir);
     await tutor?.open(dir);
   };
-  const openRepository = async (id: string) => {
-    if (!repositories.get(id)) failWith(`Unknown repository: ${id}`, 'unknown_repository');
-    const dir = repositories.dataDir(id);
+  // `null` closes the open repository and loads the unassigned data, as on a
+  // start with no repository (the last one was removed).
+  const switchRepository = async (id: string | null) => {
+    const dir = repositories.dataDir(id ?? UNASSIGNED_ID);
     await workspace.load(dir);
     const scratch = requirements ? await new RequirementStore(dir).load() : null;
     await new WorkPackageStore(dir).load(scratch?.listTasks() ?? []);
@@ -450,7 +450,8 @@ export const createAppContext = (deps: AppDeps) => {
     const previous = repositories.current?.id ?? null;
     const previousConfig = getConfig();
     try {
-      await repositories.open(id);
+      if (id) await repositories.open(id);
+      else await repositories.close();
       setConfig(await repositories.loadConfig());
       await rebind(repositories.dataDir());
     } catch (error) {
@@ -466,8 +467,13 @@ export const createAppContext = (deps: AppDeps) => {
     activity?.prune().catch((error) => logger.error('[activity] prune failed', error));
     repositoryOpened();
     changed('workspace', 'courses', 'packages', 'requirements', 'release', 'tutor', 'activity');
-    logger.debug(`[repositories] switched id=${id} packages=${catalog.listTasks().length}`);
+    logger.debug(`[repositories] switched id=${id ?? 'none'} packages=${catalog.listTasks().length}`);
   };
+  const openRepository = async (id: string) => {
+    if (!repositories.get(id)) failWith(`Unknown repository: ${id}`, 'unknown_repository');
+    await switchRepository(id);
+  };
+  const closeRepository = () => switchRepository(null);
 
   return {
     store,
@@ -482,7 +488,6 @@ export const createAppContext = (deps: AppDeps) => {
     onPreferencesChanged,
     appVersion,
     requirements,
-    onPackagesPublished,
     activity,
     releases,
     tutor,
@@ -520,6 +525,7 @@ export const createAppContext = (deps: AppDeps) => {
     repositoryOpened,
     flushStores,
     openRepository,
+    closeRepository,
   };
 };
 

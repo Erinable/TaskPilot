@@ -5,9 +5,9 @@ export type QueueFilter = 'active' | 'mine' | 'waiting' | 'done' | 'all';
 
 // 'mine' is what the human can act on now; 'waiting' is with the agents.
 const FILTER_STATUSES: Record<Exclude<QueueFilter, 'all'>, packageTypes.WorkPackageStatus[]> = {
-  active: ['pending', 'in_progress', 'accepting', 'blocked', 'clarifying', 'in_review', 'deviation'],
+  active: ['pending', 'in_progress', 'accepting', 'blocked', 'in_review', 'deviation'],
   mine: ['pending', 'in_progress', 'accepting', 'blocked'],
-  waiting: ['clarifying', 'in_review', 'deviation'],
+  waiting: ['in_review', 'deviation'],
   done: ['done'],
 };
 

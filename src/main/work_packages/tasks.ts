@@ -1,6 +1,5 @@
-// Work package definitions. The queue holds only packages Product Lead
-// generated and the user published from the requirement center; there are no
-// built-in samples. Inline code in `steps` is marked with backticks and
+// Work package definitions. The queue holds published requirement, course
+// lab and environment configuration packages; there are no built-in samples. Inline code in `steps` is marked with backticks and
 // rendered as <code>.
 import type { LabRef, ModeRecommendation, PackageDifficulty } from '../../shared/ipc/packages.ts';
 import type { WorkPackageStatus } from './work_package_status.ts';
@@ -53,6 +52,9 @@ export interface TaskDefinition {
   concepts?: string[];
   // Set on a course lab (./lab_service.ts); absent on project packages.
   lab?: LabRef;
+  // The Environment Steward published this infrastructure work package.
+  // Kept with the definition, so it can be found after restarting the app.
+  environment?: { revision: string };
 }
 
 // The part of a definition Architect can replan.

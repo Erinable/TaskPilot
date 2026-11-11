@@ -114,6 +114,7 @@ export const typescriptPreset: Preset<TypeScriptFacts> = {
     suggestions.format = [...(suggestions.format ?? []), 'npx prettier --check .'];
     return suggestions;
   },
+  dependencyDirs: ['node_modules'],
   tools: [
     { command: 'node', versionArgs: ['--version'], install: 'brew install node   # 或从 https://nodejs.org 安装' },
     { command: 'npm', versionArgs: ['--version'], install: 'npm 随 Node.js 一起安装' },

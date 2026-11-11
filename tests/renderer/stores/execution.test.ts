@@ -11,7 +11,8 @@ import * as feedback from '../../../src/renderer/src/lib/feedback.ts';
 import type * as packageTypes from '../../../src/shared/ipc/packages.ts';
 import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 import type { IpcResult } from '../../../src/shared/ipc/envelope.ts';
-import { installApi, taskView } from '../execution_fakes.ts';
+import { useRepositoryIdentityStore } from '../../../src/renderer/src/stores/repository_identity.ts';
+import { installApi, taskView, testStepWorkspace } from '../execution_fakes.ts';
 import { fail, ok } from '../ipc_fakes.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 
@@ -283,6 +284,98 @@ describe('execution store', () => {
     expect(feedback.showToast).toHaveBeenCalledWith('保存进度失败：当前状态下不能执行这个操作。');
     expect(await execution.setStepDone(1, true)).toBe(true);
     expect(execution.current?.completedSteps).toEqual([1]);
+  });
+
+  test('workspace refreshes stay serialized through environment changes and finish on the newest dependency state', async () => {
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    const held = Promise.withResolvers<IpcResult<workspaceTypes.WorkspaceView>>();
+    const oldWorkspace = { ...testStepWorkspace('/repo'), missingDependencies: ['node_modules'] };
+    api.workspace.get.mockClear();
+    api.workspace.get.mockReturnValueOnce(held.promise).mockResolvedValueOnce({ ok: true, data: testStepWorkspace('/repo') });
+    api.emitState({ repositoryId: null, domains: ['environment'] });
+    await flushPromises();
+    api.emitState({ repositoryId: null, domains: ['environment'] });
+    await flushPromises();
+    expect(api.workspace.get).toHaveBeenCalledTimes(1);
+    held.resolve({ ok: true, data: oldWorkspace });
+    await flushPromises();
+    expect(api.workspace.get).toHaveBeenCalledTimes(2);
+    expect(execution.missingDependencies).toEqual([]);
+    execution.close();
+  });
+
+  test.each(['success', 'failure'] as const)('a late workspace %s cannot overwrite the next repository, even for the same package id', async (outcome) => {
+    const identity = useRepositoryIdentityStore();
+    identity.currentId = 'old-repo';
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    const held = Promise.withResolvers<IpcResult<workspaceTypes.WorkspaceView>>();
+    api.workspace.get.mockReturnValueOnce(held.promise);
+    api.emitState({ repositoryId: 'old-repo', domains: ['environment'] });
+    await flushPromises();
+    execution.close();
+    identity.currentId = 'new-repo';
+    current.task = taskView({ title: '新项目工作包' });
+    const newWorkspace = testStepWorkspace('/new-repo');
+    newWorkspace.steps[0] = { ...newWorkspace.steps[0], id: 'custom:new', label: '新项目检查' };
+    api.workspace.get.mockResolvedValue({ ok: true, data: newWorkspace });
+    await execution.open('t1');
+    held.resolve(
+      outcome === 'success'
+        ? { ok: true, data: { ...testStepWorkspace('/old-repo'), steps: [], missingDependencies: ['node_modules'] } }
+        : { ok: false, error: { code: 'unknown', message: 'obsolete workspace failure' } },
+    );
+    await flushPromises();
+    expect(execution.current?.title).toBe('新项目工作包');
+    expect(execution.verifySteps).toEqual([{ id: 'custom:new', label: '新项目检查' }]);
+    expect(execution.missingDependencies).toEqual([]);
+    execution.close();
+  });
+
+  test.each(['success', 'failure'] as const)('an obsolete manual recheck %s cannot replace evidence or stop a new recheck after reopening', async (outcome) => {
+    const identity = useRepositoryIdentityStore();
+    identity.currentId = 'old-repo';
+    const execution = useExecutionStore();
+    await execution.open('t1');
+    const held = Promise.withResolvers<IpcResult<workspaceTypes.VerifyRun>>();
+    api.verify.run.mockReturnValueOnce(held.promise);
+    const oldRun = execution.runVerification('test');
+    execution.close();
+    identity.currentId = 'new-repo';
+    current.task = taskView({ title: '新项目工作包' });
+    await execution.open('t1');
+    const pending = Promise.withResolvers<IpcResult<workspaceTypes.VerifyRun>>();
+    api.verify.run.mockReturnValueOnce(pending.promise);
+    const newRun = execution.runVerification('custom:new');
+    const result: workspaceTypes.VerifyRun = {
+      kind: 'test',
+      command: 'old-test',
+      exitCode: 1,
+      timedOut: false,
+      durationMs: 1,
+      output: '',
+      results: [],
+      diagnostics: [],
+      summary: { total: 0, passed: 0, failed: 0, skipped: 0, ok: false },
+      report: { format: 'stdout', trusted: true, problem: null },
+      check: { stage: 'submit', blocking: true },
+      acceptance: [{ text: '登录成功', status: 'failed', verified: false, manual: false }],
+    };
+    held.resolve(outcome === 'success' ? { ok: true, data: result } : { ok: false, error: { code: 'unknown', message: 'obsolete recheck failure' } });
+    await oldRun;
+    expect(execution.verifyRunning).toBe(true);
+    expect(execution.verifyKind).toBe('custom:new');
+    expect(execution.verifyResult).toBeNull();
+    expect(execution.acceptanceOverride).toBeNull();
+    expect(execution.verifyError).toBeNull();
+    const fresh: workspaceTypes.VerifyRun = { ...result, kind: 'custom:new', command: 'new-check', acceptance: [] };
+    pending.resolve({ ok: true, data: fresh });
+    await newRun;
+    expect(execution.verifyResult?.command).toBe('new-check');
+    expect(execution.acceptanceOverride).toEqual([]);
+    expect(execution.verifyRunning).toBe(false);
+    execution.close();
   });
 
   test('verification acceptance evidence overrides the review until the next reload', async () => {

@@ -211,3 +211,58 @@ test('runCoding rejects native model errors even after a zero exit', async () =>
     (error: unknown) => error instanceof CodingExecError && error.code === 'coding_protocol' && error.message.includes('model unavailable'),
   );
 });
+
+test('runCoding turns Codex command and file steps into structured, redacted items', async () => {
+  const lines = [
+    { type: 'item.completed', item: { id: 'item_0', type: 'error', message: 'Codex is ignoring 1 unrecognized configuration setting.' } },
+    {
+      type: 'item.started',
+      item: { id: 'item_1', type: 'command_execution', command: "/bin/zsh -lc 'npm test'", aggregated_output: '', exit_code: null, status: 'in_progress' },
+    },
+    {
+      type: 'item.completed',
+      item: {
+        id: 'item_1',
+        type: 'command_execution',
+        command: "/bin/zsh -lc 'npm test'",
+        aggregated_output: 'token=abc\nsh: jest: command not found\n',
+        exit_code: 127,
+        status: 'failed',
+      },
+    },
+    { type: 'item.completed', item: { id: 'item_2', type: 'file_change', changes: [{ path: '/run/.gitignore', kind: 'update' }], status: 'completed' } },
+    { type: 'item.completed', item: { id: 'item_3', type: 'agent_message', text: 'done' } },
+  ];
+  const result = await runCoding({
+    runName: '/Users/taskpilot-coder/TaskPilotRuns/run-1',
+    prompt: 'p',
+    spawnFn: (() => {
+      const process = new FakeProcess();
+      queueMicrotask(() => {
+        for (const line of lines) process.stdout.write(`${JSON.stringify(line)}\n`);
+        process.stdout.end();
+        process.emit('close', 0, null);
+      });
+      return process;
+    }) as unknown as SpawnFn,
+    config,
+  });
+  const items = result.events.flatMap((event) => (event.item ? [event.item] : []));
+  assert.deepEqual(
+    items.map((item) => [item.id, item.kind, 'status' in item ? item.status : null]),
+    [
+      ['item_0', 'notice', null],
+      ['item_1', 'command', 'running'],
+      ['item_1', 'command', 'failed'],
+      ['item_2', 'files', 'done'],
+    ],
+  );
+  const failed = items[2];
+  assert.ok(failed.kind === 'command');
+  assert.equal(failed.exitCode, 127);
+  assert.match(failed.output, /jest: command not found/);
+  assert.doesNotMatch(failed.output, /abc/, 'output is redacted');
+  // A config warning is not a failed run.
+  assert.equal(result.output, 'done');
+  assert.equal(result.events.find((event) => event.item?.id === 'item_0')?.type, 'status');
+});

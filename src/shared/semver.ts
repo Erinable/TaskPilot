@@ -16,3 +16,12 @@ export const parseVersion = (value: unknown) => {
 
 // `value` trimmed when it is a semver string, else null.
 export const semverOrNull = (value: unknown) => (typeof value === 'string' && parseVersion(value) ? value.trim() : null);
+
+// Orders release versions (major, minor, patch; a prerelease before its
+// release). Unparsable versions sort first.
+export const compareVersions = (left: string | null, right: string | null): number => {
+  const a = parseVersion(left);
+  const b = parseVersion(right);
+  if (!a || !b) return a ? 1 : b ? -1 : 0;
+  return a.major - b.major || a.minor - b.minor || a.patch - b.patch || (a.prerelease ? (b.prerelease ? 0 : -1) : b.prerelease ? 1 : 0);
+};

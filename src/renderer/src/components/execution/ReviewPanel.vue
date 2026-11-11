@@ -10,6 +10,7 @@ import { useCommitStore } from '@/stores/commit.ts';
 import { useExecutionStore } from '@/stores/execution.ts';
 import type * as packageTypes from '@shared/ipc/packages.ts';
 import ReviewResult from './ReviewResult.vue';
+import AcceptanceReview from './AcceptanceReview.vue';
 
 const props = defineProps<{ task: packageTypes.TaskView; review: packageTypes.Review }>();
 
@@ -25,13 +26,14 @@ const view = computed((): { hint: string; tone: string; icon: IconName } => {
       review.humanVerdict === 'acceptance_rejected'
         ? '已通过，但你在验收时打回了。'
         : props.task.status === 'accepting'
-          ? '已通过，请确认「需要人工确认」各项后验收。'
+          ? '已通过，请完成下方人工确认后验收。'
           : '已通过，工作包已完成。';
     return { hint, tone: 'success', icon: 'check-circle' };
   }
   return { hint: '未通过，已退回给你修改。修改后可再次提交审查。', tone: 'danger', icon: 'x-circle' };
 });
 const outcome = computed(() => (props.review.status === 'passed' || props.review.status === 'rejected' ? props.review : null));
+const deciding = computed(() => props.task.status === 'accepting' && outcome.value?.status === 'passed');
 const summary = computed(() =>
   props.review.status === 'passed' ? reviewModel.deliverySummary(props.review, props.task.status, commit.unsavedFiles(props.task.id)) : null,
 );
@@ -74,16 +76,40 @@ const run = (action: 'cancel' | 'retry') => {
           <dt>证据</dt>
           <dd>{{ summary.evidence }}</dd>
         </div>
-        <div>
+        <div v-if="!deciding">
           <dt>要你判断</dt>
           <dd>{{ summary.judge }}</dd>
         </div>
-        <div>
+        <div v-if="!deciding">
           <dt>下一步</dt>
           <dd>{{ summary.next }}</dd>
         </div>
       </dl>
-      <ReviewResult v-if="outcome" :task="task" :review="outcome" />
+      <template v-if="deciding && outcome">
+        <AcceptanceReview :task="task" :review="outcome" />
+        <details class="review-full-report">
+          <summary>完整 QA 报告{{ outcome.report?.issues.length ? ` · ${outcome.report.issues.length} 个问题` : '' }}与测试输出</summary>
+          <div class="review-report-body"><ReviewResult :task="task" :review="outcome" decision-shown /></div>
+        </details>
+      </template>
+      <ReviewResult v-else-if="outcome" :task="task" :review="outcome" />
     </div>
   </section>
 </template>
+
+<style scoped>
+.review-full-report {
+  border-top: 1px solid var(--line-soft);
+}
+.review-full-report > summary {
+  padding-block: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.review-report-body {
+  display: grid;
+  gap: var(--space-4);
+  padding-bottom: var(--space-2);
+}
+</style>

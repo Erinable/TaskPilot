@@ -45,6 +45,15 @@ const {
 
 export const STATE_FILENAME = 'work-packages.json';
 
+// A withdrawn deviation nobody ruled on is dropped; a contested dismissal
+// stands as Architect ruled it, and can be contested again.
+const withdrawDeviation = (entry: WorkPackageState) => {
+  const last = lastDeviation(entry);
+  if (last && !last.resolution) entry.deviations.pop();
+  else if (last?.resolution) last.resolution.contested = false;
+  entry.adjudication = null;
+};
+
 export class WorkPackageStore {
   #file: string;
   #state = new Map<string, WorkPackageState>();
@@ -206,6 +215,8 @@ export class WorkPackageStore {
       entry.adjudication = null;
     }
     if (name === 'revert_replan') revertReplan(entry);
+    // A failed review stays on record (withdraw_review changes nothing else).
+    if (name === 'withdraw_deviation') withdrawDeviation(entry);
     if (name === 'accepted' || name === 'acceptance_rejected') {
       // The human's call on QA's pass; the review itself stays as QA wrote it.
       entry.review = { ...(entry.review as Review), humanVerdict: name, humanAt: new Date().toISOString() };
@@ -514,6 +525,18 @@ export class WorkPackageStore {
       throw new StoreError('Coding run identity cannot change', 'invalid_argument');
     }
     entry.codingRun = { ...entry.codingRun, ...structuredClone(patch) };
+    this.#state.set(id, entry);
+    await this.#persist();
+    return structuredClone(entry);
+  }
+
+  // A package the developer writes themselves (self) handed to Coding Agent
+  // while in progress. Practice stays the developer's: release it instead.
+  async handToAi(id: string): Promise<WorkPackageState> {
+    const entry = this.get(id);
+    if (entry.status !== 'in_progress' || entry.mode !== 'self')
+      throw new StoreError('Only a package you are writing yourself can be handed to Coding Agent', 'invalid_state');
+    entry.mode = 'ai';
     this.#state.set(id, entry);
     await this.#persist();
     return structuredClone(entry);

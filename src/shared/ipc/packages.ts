@@ -9,7 +9,7 @@ import type { HintUse } from '../hint_ladder.ts';
 import { invoke } from './contract.ts';
 import type { Contract } from './contract.ts';
 
-export type WorkPackageStatus = 'clarifying' | 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
+export type WorkPackageStatus = 'pending' | 'in_progress' | 'in_review' | 'deviation' | 'accepting' | 'done' | 'blocked';
 
 // Transitions the renderer may request; the actor is always 'human'.
 export type HumanTransition =
@@ -22,9 +22,11 @@ export type HumanTransition =
   | 'block'
   | 'accepted'
   | 'acceptance_rejected'
+  | 'withdraw_review'
+  | 'withdraw_deviation'
   | 'unblock';
 
-export type AgentTransition = 'breakdown_done' | 'review_accepted' | 'review_passed' | 'review_rejected' | 'replanned' | 'deviation_dismissed';
+export type AgentTransition = 'review_accepted' | 'review_passed' | 'review_rejected' | 'replanned' | 'deviation_dismissed';
 
 // The one transition Coding Agent triggers: its applied patch passed the submit checks.
 export type CodingTransition = 'coding_submitted';
@@ -375,6 +377,8 @@ export const packagesContract = {
   waiveDependency: invoke<[id: string, dependency: string], TaskView>('package:waive-dependency'),
   measureBaseline: invoke<[id: string], TaskView>('baseline:measure'),
   setStepDone: invoke<[id: string, stepIndex: number, done: boolean], WorkPackageState>('package:set-step-done'),
+  // An in-progress package written by hand (mode self) becomes Coding Agent's (ai).
+  handToAi: invoke<[id: string], TaskView>('package:hand-to-ai'),
 } satisfies Contract;
 
 export const reviewContract = {

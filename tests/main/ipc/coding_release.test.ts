@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { applyPatch } from '../../../src/main/coding/coding_workspace.ts';
+import { applyPatch, CodingWorkspaceError } from '../../../src/main/coding/coding_workspace.ts';
 import { WorkPackageStore } from '../../../src/main/work_packages/work_package_store.ts';
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import { until } from '../../fixtures/until.ts';
@@ -44,7 +44,7 @@ const releaseHarness = async (overrides: fixtures.CodingOverrides = {}) => {
 const releaseAndClaim = async (h: Awaited<ReturnType<typeof fixtures.harness>>) => {
   assert.equal((await h.call(CHANNELS.packagesTransition, ID, 'release')).ok, true);
   assert.equal(h.store.get(ID).codingRun, null);
-  assert.equal((await h.call(CHANNELS.packagesTransition, ID, 'claim', { mode: 'self' })).ok, true);
+  assert.equal((await h.call(CHANNELS.packagesTransition, ID, 'claim', { mode: 'ai' })).ok, true);
   assert.equal(h.store.get(ID).codingRun, null);
 };
 
@@ -95,7 +95,7 @@ test('coding release: cancellation and late CLI completion cannot recreate a pat
   finish.resolve();
   await h.idle();
   assert.equal(h.store.get(ID).status, 'in_progress');
-  assert.equal(h.store.get(ID).mode, 'self');
+  assert.equal(h.store.get(ID).mode, 'ai');
   assert.equal(h.store.get(ID).codingRun, null);
   assert.ok(h.cleaned.includes(runName));
   assert.deepEqual((await h.call(CHANNELS.codingActive)).data, []);
@@ -327,4 +327,31 @@ test('coding release: apply already inside the workspace writer rechecks before 
   assert.equal(await fs.readFile(path.join(h.root, FILE), 'utf8'), 'export {};\n');
   assert.equal(h.store.get(ID).codingRun, null);
   assert.equal(h.store.get(ID).review, null);
+});
+
+test('coding: a patch read overtaken by cancellation reports the lifecycle change instead of the cleaned directory', async () => {
+  const entered = Promise.withResolvers<void>();
+  const finish = Promise.withResolvers<void>();
+  let hold = false;
+  const h = await releaseHarness({
+    codingReadPatch: async () => {
+      if (hold) {
+        entered.resolve();
+        await finish.promise;
+        throw new CodingWorkspaceError('The run was cleaned', 'workspace_process_failed');
+      }
+      return fixtures.filePatch(FILE, 'export const ready = true;');
+    },
+  });
+  await h.call(CHANNELS.codingStart, ID, { instruction: 'first round' });
+  await h.idle();
+  hold = true;
+  const reading = h.call(CHANNELS.codingPatch, ID);
+  await entered.promise;
+  assert.equal((await h.call(CHANNELS.codingCancel, ID)).ok, true);
+  assert.equal(h.store.get(ID).codingRun?.status, 'discarded');
+  finish.resolve();
+  const response = await reading;
+  assert.equal(response.error.code, 'coding_not_ready');
+  assert.equal(h.store.get(ID).codingRun?.status, 'discarded');
 });

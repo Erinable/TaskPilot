@@ -8,6 +8,7 @@ import path from 'node:path';
 
 import { CHANNELS } from '../../../src/shared/ipc_channels.ts';
 import * as fixtures from './harness.ts';
+import { FROM_FIRST_COMMIT } from '../../../src/shared/ipc/release.ts';
 import { until } from '../../fixtures/until.ts';
 
 // ========== Release Manager ==========
@@ -198,4 +199,14 @@ test('release: a running generation shows Release Manager busy and can be cancel
   assert.equal(state.draft.status, 'failed');
   assert.equal(state.draft.error.code, 'agent_cancelled');
   assert.equal((await h.call(CHANNELS.releaseCancel)).data, false);
+});
+
+test('release: a project without releases or tags can release everything from its first commit', async () => {
+  const h = await fixtures.harness({ agent: fixtures.fakeAgent() });
+  const response = await h.call(CHANNELS.releaseGenerate, FROM_FIRST_COMMIT);
+  assert.equal(response.ok, true, JSON.stringify(response.error));
+  await h.idle();
+  const draft = (await h.call(CHANNELS.releaseGet)).data.draft;
+  assert.equal(draft.status, 'ready', JSON.stringify(draft.error));
+  assert.equal(draft.input.commitCount, 1, 'the first commit is in range');
 });

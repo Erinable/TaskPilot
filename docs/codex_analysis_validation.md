@@ -47,3 +47,17 @@
 - [模型目录管理源码](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/models-manager/src/manager.rs)：静态目录保持权威，不通过远端刷新重新添加工具元数据。
 
 本轮验证协议/隔离/界面，没有对真实模型的规划质量、判卷质量或所有provider做收费评测；这些仍受账户、所选模型、CLI版本和模型服务能力影响。受管理的企业环境可能需要管理员确认兼容性，应用不会删除或绕过系统策略。本分支提交不会自动更新已发布的v0.1.1安装包。
+
+
+## 2026-11-11 环境管家 Schema 兼容修复
+
+新增基础设施提案后，环境管家在实际 Codex 调用中收到：
+
+```text
+Invalid schema for response_format 'codex_output_schema':
+'schema.properties.configuration.oneOf' is not permitted when strict is true.
+```
+
+这是模型开始推理前的 Schema 拒绝。可空配置提案改用 `anyOf`，保留互斥的 null / object 两种分支及现有内容校验。使用当前 Codex 运行配置和实际 Expo + TypeScript 项目再次分析成功，返回「补齐 Expo 项目的提交检查与可复现依赖安装」方案，包含 test、lint、typecheck 和 format；未生成或执行工作包，未修改项目文件。
+
+同时修正诊断链：Codex JSONL 的 error / turn.failed 保留脱敏后的服务端原因，环境管家的失败日志保留该原因和 CLI stderr，页面不再仅显示「智能体运行失败」。回归测试覆盖严格 Schema 的可空分支、原始错误保留、敏感值脱敏及长度限制、后台失败日志和页面提示。完整付费模型评测套件仍未运行。

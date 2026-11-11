@@ -3,6 +3,7 @@
 import type { IpcFailure } from './envelope.ts';
 import type { RunSummary } from './workspace.ts';
 import type { StepKind } from '../check_steps.ts';
+import type { WorkPackageStatus } from './packages.ts';
 import { invoke } from './contract.ts';
 import type { Contract } from './contract.ts';
 
@@ -10,7 +11,9 @@ import type { Contract } from './contract.ts';
 // repository's setup adapter.
 export type ScriptKind = StepKind;
 // setup_unsupported: no setup adapter for the repository's languages yet.
-export type EnvBlocker = 'setup_unsupported' | 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
+// no_skeleton: nothing but a README and the like is committed, so there is
+// no toolchain to set up until the first package builds the skeleton.
+export type EnvBlocker = 'no_skeleton' | 'setup_unsupported' | 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
 
 export type EnvManifest = {
   valid: boolean;
@@ -18,6 +21,8 @@ export type EnvManifest = {
   scripts: Record<string, string>;
   engines: Record<string, string>;
   packageManager: string | null;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
 };
 
 // The npm adapter's facts (presets/typescript_setup.ts), with workflow files
@@ -32,10 +37,33 @@ export type EnvFacts = {
   tools: { node: string | null; npm: string | null };
   // Dependencies that only work after their install scripts run.
   installScripts: string[];
+  // Existing configuration files, read through the repository reader.
+  configFiles: { path: string; content: string }[];
 };
 
 // Corrections TaskPilot made to the steward's plan.
 export type EnvAdjustment = { code: 'install_without_manifest' | 'ci_without_lockfile' } | { code: 'unknown_script'; kind: ScriptKind; script: string };
+
+// A proposal only: publishing creates a normal pending work package, and
+// never writes these files or runs any of the model's instructions here.
+export type EnvConfiguration = {
+  title: string;
+  reason: string;
+  checks: { kind: ScriptKind; script: string; reason: string }[];
+  fileScope: string[];
+  steps: string[];
+  acceptance: string[];
+};
+
+export type EnvConfigurationPackage = {
+  id: string;
+  title: string;
+  status: WorkPackageStatus;
+  // A done configuration package still has changes to save to git.
+  needsCommit: boolean;
+  // Applied package changes need an explicit local install before QA checks.
+  installPending: boolean;
+};
 
 export type EnvPlan = {
   summary: string;
@@ -46,6 +74,7 @@ export type EnvPlan = {
   // Suggested fixes are shown, never run.
   issues: { text: string; fix: string }[];
   adjustments: EnvAdjustment[];
+  configuration: EnvConfiguration | null;
 };
 
 export type EnvStepResult = {
@@ -80,11 +109,12 @@ export type EnvStatus = 'idle' | 'planning' | 'ready' | 'failed';
 export type EnvState = {
   root: string | null;
   status: EnvStatus;
-  // The plan was made for a different workspace root.
+  // The workspace or tracked repository contents changed since planning.
   stale: boolean;
   facts: EnvFacts | null;
   blockers: EnvBlocker[];
   plan: EnvPlan | null;
+  configurationPackage: EnvConfigurationPackage | null;
   error: IpcFailure | null;
   costUsd: number;
   allowScripts: boolean;
@@ -111,5 +141,6 @@ export const envContract = {
   setAllowScripts: invoke<[allow: boolean], EnvState>('env:set-allow-scripts'),
   runStep: invoke<[stepId: string], EnvState>('env:run-step'),
   apply: invoke<[kinds: ScriptKind[]], EnvApplyResult>('env:apply'),
+  createConfiguration: invoke<[], EnvConfigurationPackage>('env:create-configuration'),
   cancel: invoke<[], boolean>('env:cancel'),
 } satisfies Contract;

@@ -256,6 +256,16 @@ describe('RequirementsView', () => {
     wrapper.unmount();
   });
 
+  test('a requirement left in draft offers to start clarifying instead of an empty answer form', async () => {
+    state.list = [requirement({ status: 'draft' })];
+    const { wrapper } = await render();
+    expect(wrapper.find('.req-questions').exists()).toBe(false);
+    await wrapper.get('[data-action="start-clarify"]').trigger('click');
+    await flushPromises();
+    expect(api.requirements.clarify).toHaveBeenCalledWith('r1');
+    wrapper.unmount();
+  });
+
   test('the interface summary lists modules, sections and skipped files', async () => {
     state.list = [
       requirement({

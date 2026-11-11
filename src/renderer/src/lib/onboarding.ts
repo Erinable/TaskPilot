@@ -29,6 +29,8 @@ export type OnboardingFacts = {
   workspace: workspaceTypes.WorkspaceInfo | null;
   // Null until the effective workspace steps have been read.
   checksReady: boolean | null;
+  // The repository has no project skeleton yet (@shared/blank_project.ts).
+  blank?: boolean;
   requirementCount: number;
   courseRequirementCount?: number;
   path?: OnboardingPath;
@@ -157,37 +159,51 @@ export const buildSteps = (facts: OnboardingFacts): OnboardingStep[] => {
       },
     ];
   const repository = facts.workspace?.configured === true;
-  return [
-    cli,
-    codingStep(facts.agent),
-    {
-      id: 'repository',
-      title: '添加你的项目',
-      why: '选择项目所在的文件夹。它需要是一个 git 仓库，TaskPilot 用它来比较你改了哪些文件。',
-      icon: 'folder',
-      done: repository,
-      waiting: false,
-      action: '选择文件夹',
-    },
-    {
-      id: 'checks',
-      title: '设置自动检查',
-      why: '配置至少一项提交时运行的阻塞检查，例如构建、测试或 lab 的评分检查，TaskPilot 会在审查前执行。',
-      icon: 'flask',
-      done: facts.checksReady === true,
-      waiting: !repository,
-      action: '设置检查步骤',
-    },
-    {
-      id: 'requirement',
-      title: '写下第一个需求',
-      why: '用大白话描述你想做的功能，Product Lead 会问清细节，再拆成一步步能照着做的任务。',
-      icon: 'sparkle',
-      done: facts.requirementCount > 0,
-      waiting: !cli.done || !repository,
-      action: '写需求',
-    },
-  ];
+  const repositoryStep: OnboardingStep = {
+    id: 'repository',
+    title: '添加你的项目',
+    why: '选择项目所在的文件夹。它需要是一个 git 仓库，TaskPilot 用它来比较你改了哪些文件。还没有项目？在侧栏点「添加项目 → 新建空项目」，选一个空文件夹即可。',
+    icon: 'folder',
+    done: repository,
+    waiting: false,
+    action: '选择文件夹',
+  };
+  const requirementStep: OnboardingStep = {
+    id: 'requirement',
+    title: facts.blank ? '写下项目要做什么' : '写下第一个需求',
+    why: facts.blank
+      ? '这是一个空项目。描述你想做出什么，Product Lead 会先安排一个搭建项目骨架的工作包（选技术栈、建好测试脚本），再拆后面的功能。'
+      : '用大白话描述你想做的功能，Product Lead 会问清细节，再拆成一步步能照着做的任务。',
+    icon: 'sparkle',
+    done: facts.requirementCount > 0,
+    waiting: !cli.done || !repository,
+    action: '写需求',
+  };
+  // A blank project has no language to check yet: its checks come once the
+  // skeleton package is committed, so the step waits instead of blocking.
+  const checksStep: OnboardingStep = facts.blank
+    ? {
+        id: 'checks',
+        title: '骨架提交后设置自动检查',
+        why: '项目还没有骨架，暂时没有可运行的检查。第一个工作包搭好骨架并提交后，TaskPilot 会认出项目语言，那时再来设置。',
+        icon: 'flask',
+        done: false,
+        waiting: true,
+        optional: true,
+        action: '设置检查步骤',
+      }
+    : {
+        id: 'checks',
+        title: '设置自动检查',
+        why: '配置至少一项提交时运行的阻塞检查，例如构建、测试或 lab 的评分检查，TaskPilot 会在审查前执行。',
+        icon: 'flask',
+        done: facts.checksReady === true,
+        waiting: !repository,
+        action: '设置检查步骤',
+      };
+  return facts.blank
+    ? [cli, codingStep(facts.agent), repositoryStep, requirementStep, checksStep]
+    : [cli, codingStep(facts.agent), repositoryStep, checksStep, requirementStep];
 };
 
 export const isComplete = (steps: OnboardingStep[]) => steps.every((step) => step.done || step.optional);

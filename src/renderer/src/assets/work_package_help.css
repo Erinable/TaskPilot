@@ -115,6 +115,28 @@
   height: 14px;
   color: var(--text-tertiary);
 }
+.commit-optional {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.commit-optional p {
+  margin: 0;
+}
+.commit-optional-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  cursor: pointer;
+}
+.commit-optional-item input {
+  accent-color: var(--accent);
+}
+.commit-optional-item span {
+  color: var(--text-tertiary);
+}
 .commit-label {
   color: var(--text-muted);
   font-size: var(--text-sm);

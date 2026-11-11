@@ -3,10 +3,13 @@
 // checks config. The repository's languages pick the setup adapter; this
 // file only passes it on.
 import { failWith, requireString } from '../infrastructure/coded_error.ts';
+import { logger } from '../infrastructure/logger.ts';
+import { AgentRunError } from '../runtimes/claude_cli.ts';
 import * as workspace from '../repository/workspace.ts';
 import { formatCommandLine } from '../checking/command_line.ts';
 import * as verification from '../checking/verification.ts';
 import * as presets from '../checking/presets/index.ts';
+import { createEnvironmentConfigurationService, environmentRevision } from '../checking/environment_configuration_service.ts';
 import { buildProfile } from '../repository/project_profile.ts';
 import { planEnvironment } from '../agents/pipeline.ts';
 import { registerContract, toFailure } from './handler.ts';
@@ -21,6 +24,7 @@ import type { RunInfo } from '../app/background_runs.ts';
 
 type EnvSession = {
   root: string | null;
+  revision: string | null;
   status: envTypes.EnvStatus;
   // The adapter the plan was made with; its facts are of its own shape.
   setup: SetupAdapter | null;
@@ -34,17 +38,21 @@ type EnvSession = {
   running: envTypes.EnvStepId | null;
   // The running step's output so far (its tail) and when it started.
   live: { output: string; startedAt: string } | null;
+  installPackageId: string | null;
+  installOnly: boolean;
 };
 
 const ENV_OUTPUT_CHARS = 4000;
 
 export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   const { getConfig, backgroundRuns } = ctx;
+  const configuration = createEnvironmentConfigurationService(ctx);
 
-  // One session per app run, in memory only: the plan is cheap to redo and
-  // must not outlive the toolchain it was made for.
-  let env: EnvSession = {
+  // Analysis plans live only in memory. A persisted setup_required halt can
+  // recover a fixed install without restoring model-selected scripts.
+  const emptySession = (): EnvSession => ({
     root: null,
+    revision: null,
     status: 'idle',
     setup: null,
     facts: null,
@@ -56,59 +64,107 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     results: {},
     running: null,
     live: null,
-  };
+    installPackageId: null,
+    installOnly: false,
+  });
+  let env = emptySession();
+  let repositoryGeneration = 0;
   // The steward's plan described the previous repository's toolchain.
   ctx.onRepositoryOpened(() => {
-    env = {
-      ...env,
-      root: null,
-      status: 'idle',
-      setup: null,
-      facts: null,
-      blockers: [],
-      plan: null,
-      error: null,
-      costUsd: 0,
-      results: {},
-      running: null,
-      live: null,
-    };
+    repositoryGeneration += 1;
+    env = emptySession();
   });
+
+  let restoring: { session: EnvSession; work: Promise<void> } | null = null;
+  const restoreInstall = async () => {
+    const session = env;
+    const packageId = configuration.waitingForInstall();
+    if (!packageId) {
+      if (session.installOnly && !session.running) env = emptySession();
+      return;
+    }
+    if (session.status === 'planning' || session.running || session.installPackageId === packageId) return;
+    const work =
+      restoring?.session === session
+        ? restoring.work
+        : configuration.restoreInstall(packageId).then((restored) => {
+            if (env !== session || getConfig().root !== restored.root || configuration.waitingForInstall() !== packageId) return;
+            env = { ...emptySession(), ...restored, status: 'ready', installPackageId: packageId, installOnly: true };
+          });
+    restoring = { session, work };
+    try {
+      await work;
+    } catch (error) {
+      if (env === session) throw error;
+    } finally {
+      if (restoring?.work === work) restoring = null;
+    }
+  };
 
   // A plan only exists alongside the facts it was made from.
-  const envSteps = () => (env.plan && env.setup ? env.setup.buildSteps(env.plan, env.facts, { allowScripts: env.allowScripts }) : []);
+  const effectivePlan = () =>
+    env.plan && env.setup && !env.installOnly && configuration.waitingForInstall()
+      ? { ...env.plan, install: env.setup.configurationInstallMode, installReason: '配置工作包已更新依赖，需要在本机重新安装；安装脚本仍由下面的开关控制。' }
+      : env.plan;
+  const envSteps = () => {
+    const plan = effectivePlan();
+    return plan && env.setup
+      ? env.setup
+          .buildSteps(plan, env.facts, { allowScripts: env.installOnly ? false : env.allowScripts })
+          .filter((step) => !env.installOnly || step.id === 'install')
+      : [];
+  };
 
-  const envView = (): envTypes.EnvState => ({
-    root: env.root,
-    status: env.status,
-    stale: Boolean(env.root && env.root !== getConfig().root),
-    facts: env.setup && env.facts ? env.setup.view(env.facts) : null,
-    blockers: env.blockers,
-    plan: env.plan,
-    error: env.error,
-    costUsd: env.costUsd,
-    allowScripts: env.allowScripts,
-    running: env.running,
-    live: env.live,
-    steps: envSteps().map((step) => ({
-      id: step.id,
-      kind: step.kind,
-      script: step.script,
-      packages: step.packages,
-      replacesInstall: step.replacesInstall,
-      line: formatCommandLine(step),
-      result: env.results[step.id] ?? null,
-    })),
-    stepKinds: [...(env.setup?.stepKinds ?? [])],
-    configured: Object.fromEntries(
-      (env.setup?.stepKinds ?? []).map((kind) => [kind, (getConfig().steps[kind]?.commands ?? []).map(formatCommandLine).join(' && ')]),
-    ),
-  });
+  const envView = async (): Promise<envTypes.EnvState> => {
+    await restoreInstall();
+    const session = env;
+    const currentRoot = getConfig().root;
+    const revision = currentRoot && session.root === currentRoot && session.revision ? await environmentRevision(currentRoot) : null;
+    const configurationPackage = await configuration.current();
+    if (env !== session || getConfig().root !== currentRoot) return envView();
+    return {
+      root: env.root,
+      status: env.status,
+      stale: Boolean(env.root && (env.root !== currentRoot || (env.revision && revision !== env.revision))),
+      facts: env.setup && env.facts ? env.setup.view(env.facts) : null,
+      blockers: env.blockers,
+      plan: effectivePlan(),
+      configurationPackage,
+      error: env.error,
+      costUsd: env.costUsd,
+      allowScripts: env.allowScripts,
+      running: env.running,
+      live: env.live,
+      steps: envSteps().map((step) => ({
+        id: step.id,
+        kind: step.kind,
+        script: step.script,
+        packages: step.packages,
+        replacesInstall: step.replacesInstall,
+        line: formatCommandLine(step),
+        result: env.results[step.id] ?? null,
+      })),
+      stepKinds: env.installOnly ? [] : [...(env.setup?.stepKinds ?? [])],
+      configured: Object.fromEntries(
+        (env.setup?.stepKinds ?? []).map((kind) => [kind, (getConfig().steps[kind]?.commands ?? []).map(formatCommandLine).join(' && ')]),
+      ),
+    };
+  };
+
+  const restoreForAction = async () => {
+    const generation = repositoryGeneration;
+    const root = getConfig().root;
+    await restoreInstall();
+    if (generation !== repositoryGeneration || root !== getConfig().root) failWith('The repository changed while preparing setup', 'env_stale');
+  };
 
   // A plan only exists alongside the adapter that made it.
-  const requireEnvPlan = () => {
+  const requireEnvPlan = async () => {
+    await restoreForAction();
     if (env.status !== 'ready' || !env.plan || !env.setup) return failWith('No environment plan is ready', 'env_no_plan');
-    if (env.root !== getConfig().root) failWith('The workspace changed since this plan was made', 'env_stale');
+    const session = env;
+    if (!session.root || session.root !== getConfig().root || (await environmentRevision(session.root)) !== session.revision || env !== session)
+      failWith('The repository changed since this plan was made', 'env_stale');
     if (env.running) failWith('A setup step is already running', 'env_busy');
     return { plan: env.plan, setup: env.setup };
   };
@@ -122,10 +178,11 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
   };
 
   registerContract(ipcMain, envContract, {
-    get: (): envTypes.EnvState => envView(),
+    get: () => envView(),
 
     plan: async (options): Promise<envTypes.EnvState> => {
       const root = ctx.requireRoot();
+      const generation = repositoryGeneration;
       const stewardRunner = ctx.runnerFor('env-steward');
       if (env.status === 'planning' || env.running) failWith('The Environment Steward is busy', 'env_busy');
       const withFailure = (options as { withFailure?: unknown } | null | undefined)?.withFailure === true && env.root === root;
@@ -133,9 +190,13 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const keepResults = failure !== null;
       // Resolved fresh, not from the cached profile: a manifest committed since
       // still counts.
-      const setup = presets.setupOf(buildProfile(await ctx.resolveSteps()).languages.map((language) => language.id));
+      const resolution = await ctx.resolveSteps();
+      const setup = presets.setupOf(buildProfile(resolution).languages.map((language) => language.id));
+      const revision = await environmentRevision(root);
+      if (ctx.requireRoot() !== root || repositoryGeneration !== generation) failWith('The workspace changed while preparing the plan', 'env_stale');
       env = {
         root,
+        revision,
         status: 'planning',
         setup,
         facts: null,
@@ -147,6 +208,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
         results: keepResults ? env.results : {},
         running: null,
         live: null,
+        installPackageId: configuration.waitingForInstall(),
+        installOnly: false,
       };
       ctx.changed('environment');
       const session = env;
@@ -154,7 +217,9 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       void backgroundRuns.run(info, async (controller) => {
         try {
           const { path: envPath } = await ctx.commandPath();
-          const outcome = await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
+          const outcome = resolution.blank
+            ? { facts: null, blockers: ['no_skeleton' as const], plan: null, costUsd: 0 }
+            : await planEnvironment({ root, runAgent: stewardRunner, envPath, signal: controller.signal, failure, setup });
           Object.assign(session, { status: 'ready', facts: outcome.facts, blockers: outcome.blockers, plan: outcome.plan, costUsd: outcome.costUsd });
           ctx.changed('environment');
           // Results only carry over for steps the new plan still runs unchanged.
@@ -163,15 +228,23 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
             if (session.results[id]?.line !== lines.get(id)) delete session.results[id];
           }
         } catch (error) {
-          Object.assign(session, { status: 'failed', error: toFailure(error).error });
+          const failure = toFailure(error).error;
+          // Nonzero CLI exits can put the useful stderr on detail. It is
+          // already redacted at the runtime boundary.
+          if (error instanceof AgentRunError && error.detail?.trim() && !failure.message.includes(error.detail.trim()))
+            failure.message += `\n${error.detail.trim()}`;
+          if (failure.code !== 'agent_cancelled') logger.error('[environment] analysis failed', failure);
+          Object.assign(session, { status: 'failed', error: failure });
           ctx.changed('environment');
         }
       });
       return envView();
     },
 
-    setAllowScripts: (allow): envTypes.EnvState => {
+    setAllowScripts: async (allow): Promise<envTypes.EnvState> => {
+      await restoreForAction();
       if (env.running) failWith('A setup step is already running', 'env_busy');
+      if (env.installOnly && allow === true) failWith('Recovered installation does not allow lifecycle scripts; analyze explicitly first', 'env_blocked');
       env.allowScripts = allow === true;
       delete env.results.install;
       ctx.changed('environment');
@@ -183,7 +256,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
 
     runStep: async (stepId): Promise<envTypes.EnvState> => {
       requireString(stepId, 'stepId');
-      const { setup } = requireEnvPlan();
+      const { setup } = await requireEnvPlan();
       const step = envSteps().find((candidate) => candidate.id === stepId);
       if (!step) return failWith(`Unknown setup step: ${stepId}`, 'invalid_argument');
       const blocking = setup.blocking(env.blockers, step.kind);
@@ -232,7 +305,7 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
     // the kinds the user ticked. Lines are rebuilt here, as in envRunStep.
 
     apply: async (kinds): Promise<envTypes.EnvApplyResult> => {
-      const { plan, setup } = requireEnvPlan();
+      const { plan, setup } = await requireEnvPlan();
       if (!Array.isArray(kinds) || kinds.some((kind) => !setup.stepKinds.includes(kind))) {
         failWith(`kinds must be a list of ${setup.stepKinds.join(', ')}`, 'invalid_argument');
       }
@@ -250,6 +323,12 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       ctx.setConfig(await ctx.repositories.saveConfig(workspace.normalize({ ...config, version: workspace.CONFIG_VERSION, steps })));
       ctx.changed('workspace', 'environment');
       return envView();
+    },
+
+    createConfiguration: async () => {
+      const { plan } = await requireEnvPlan();
+      if (!plan.configuration || !env.revision) return failWith('This plan has no infrastructure work to publish', 'invalid_state');
+      return configuration.create(plan.configuration, env.revision);
     },
 
     cancel: (): boolean => {

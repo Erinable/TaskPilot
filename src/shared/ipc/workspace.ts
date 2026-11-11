@@ -84,6 +84,7 @@ export type CriterionEvidence = AcceptanceCriterion & {
 };
 
 export type AttentionItem =
+  | { code: 'no_checks' }
   | { code: 'check_unverifiable'; kind: CheckKind; reason: string | null; blocking: boolean }
   | { code: 'preexisting_failures'; kind: CheckKind; count: number }
   | { code: 'no_baseline'; kind: CheckKind }
@@ -203,6 +204,12 @@ export type WorkspaceView = {
   project: ProjectFileState;
   course: CourseView;
   detected: DetectedLanguage[];
+  // Nothing but a README and the like is committed: the project's skeleton
+  // (and so its language and checks) comes from the first requirement.
+  blank: boolean;
+  // Dependency folders the project's preset expects but this checkout lacks
+  // (node_modules): installing is the next step before checks can run.
+  missingDependencies: string[];
   presets: PresetInfo[];
 };
 
@@ -231,6 +238,8 @@ export const workspaceContract = {
   info: invoke<[], WorkspaceInfo>('workspace:info'),
   // Writes taskpilot.toml naming `preset`; refuses when one exists.
   createProject: invoke<[preset: string], WorkspaceView>('workspace:create-project'),
+  // Names `preset` in a taskpilot.toml that has none (preset = "none").
+  setProjectPreset: invoke<[preset: string], WorkspaceView>('workspace:set-project-preset'),
   // Confirms the repository's course pack with the content hash the user saw.
   confirmCourse: invoke<[id: string, contentHash: string], WorkspaceView>('workspace:confirm-course'),
   openFile: invoke<[filePath: string, line?: number | null], OpenedWith>('workspace:open-file'),

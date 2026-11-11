@@ -39,7 +39,6 @@ const emptyByAgent = <Value>(make: () => Value) => Object.fromEntries(AGENT_IDS.
 
 // Which agent makes each agent transition; human transitions have none.
 const TRANSITION_AGENTS: Record<AgentTransition | CodingTransition, AgentId> = {
-  breakdown_done: 'product-lead',
   review_accepted: 'qa',
   review_passed: 'qa',
   review_rejected: 'qa',

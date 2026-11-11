@@ -182,6 +182,7 @@ export const pythonPreset: Preset<PythonFacts> = {
     suggestions.coverage = ['uv run --no-sync pytest --cov', `${VENV_PYTHON} -m pytest --cov`];
     return suggestions;
   },
+  dependencyDirs: ['.venv'],
   tools: [
     { command: PYTHON, versionArgs: ['--version'], install: 'brew install python   # 或从 https://www.python.org/downloads/ 安装' },
     { command: 'uv', versionArgs: ['--version'], install: 'curl -LsSf https://astral.sh/uv/install.sh | sh   # 可选；没有 uv 时用 venv + pip' },

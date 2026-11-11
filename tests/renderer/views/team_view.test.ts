@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { flushPromises, mount } from '@vue/test-utils';
+import ElementPlus from 'element-plus';
 import type { VueWrapper } from '@vue/test-utils';
 
 import TeamView from '../../../src/renderer/src/views/TeamView.vue';
@@ -162,7 +163,7 @@ describe('TeamView', () => {
   test('the sidebar entry opens the team page', async () => {
     const app = useAppStore();
     app.activity = overview();
-    const sidebar = mount(SideBar);
+    const sidebar = mount(SideBar, { global: { plugins: [ElementPlus] } });
     await sidebar.find('button.team-entry').trigger('click');
     await flushPromises();
     expect(app.view).toBe('team');

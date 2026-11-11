@@ -484,6 +484,28 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   };
 
+  // Names the detected language's preset in a taskpilot.toml that has none,
+  // typically once a new project's skeleton is committed.
+  const setProjectPreset = async (preset: string) => {
+    const label = workspaceView.value?.presets.find((entry) => entry.id === preset)?.label ?? preset;
+    const confirmed = await confirmAction({
+      title: `改用「${label}」预设？`,
+      body: `只改 taskpilot.toml 里 preset 这一行，文件里你写的步骤和注释都保留。它是仓库的文件，要提交到 git 才对其他人生效。`,
+      accept: '改用预设',
+    });
+    if (!confirmed) return;
+    try {
+      workspaceView.value = await call(window.taskpilot.workspace.setProjectPreset(preset));
+      const draft = workspaceDraft.value;
+      savedWorkspace.value = workspaceForm(workspaceView.value);
+      fillWorkspace(draft ? { ...savedWorkspace.value, steps: { ...savedWorkspace.value.steps, ...draft.steps } } : savedWorkspace.value);
+      showToast(`已改用「${label}」预设。`);
+    } catch (error) {
+      console.error(error);
+      showToast(`修改失败：${describeError(error)}`);
+    }
+  };
+
   // ========== Saving ==========
   const saving = ref(false);
   // Shown beside the workspace group label in the nav.
@@ -669,6 +691,7 @@ export const useSettingsStore = defineStore('settings', () => {
     tools,
     stepView,
     createProject,
+    setProjectPreset,
     // Environment
     environmentLoading,
     environmentError,

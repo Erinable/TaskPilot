@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { failWith, requireString } from '../infrastructure/coded_error.ts';
 import * as git from '../repository/git.ts';
+import * as newRepository from '../repository/new_repository.ts';
 import { readCounts } from '../repository/repository_summary.ts';
 import { countStatuses } from '../../shared/repository_counts.ts';
 import { registerContract } from './handler.ts';
@@ -67,6 +68,26 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       await repositories.relocate(id, root);
       if (repositories.current?.id === id) ctx.setConfig({ ...ctx.getConfig(), root });
       if (repositories.current?.id === id) ctx.changed('workspace');
+      return repositoryList();
+    },
+
+    create: async (rawRoot): Promise<repositoryTypes.RepositoryList> => {
+      const root = requireString(rawRoot, 'root').trim();
+      await newRepository.createRepository(root);
+      const entry = await repositories.add((await ctx.validateRoot(root)).root);
+      await openRepository(entry.id);
+      return repositoryList();
+    },
+
+    remove: async (rawId): Promise<repositoryTypes.RepositoryList> => {
+      const id = requireString(rawId, 'id');
+      if (!repositories.get(id)) return failWith(`Unknown repository: ${id}`, 'unknown_repository');
+      if (repositories.current?.id === id) {
+        const next = repositories.list().find((entry) => entry.id !== id);
+        if (next) await openRepository(next.id);
+        else await ctx.closeRepository();
+      }
+      await repositories.remove(id);
       return repositoryList();
     },
   });

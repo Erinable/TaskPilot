@@ -75,7 +75,7 @@ export const SAMPLE_TASKS: TaskDefinition[] = [
   },
   {
     id: 'release-v0-9-0',
-    status: 'clarifying',
+    status: 'pending',
     title: '准备 v0.9.0 发布清单',
     description: '检查迁移、监控和回滚步骤是否完整',
     intro: 'Release Manager 需要你确认发布清单中的工程步骤。',

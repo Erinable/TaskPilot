@@ -223,3 +223,42 @@ test('repositories: a switch resets the Environment Steward session made for the
   assert.equal(reset.plan, null);
   assert.deepEqual(reset.steps, []);
 });
+
+test('repositories:create starts a repository in an empty folder and opens it', async () => {
+  const h = await fixtures.harness();
+  const folder = await fs.realpath(await fs.mkdtemp(path.join(path.dirname(h.root), 'taskpilot-new-')));
+  onTestFinished(() => fs.rm(folder, { recursive: true, force: true }));
+  const { data } = await h.call(CHANNELS.repositoriesCreate, folder);
+  assert.equal(data.repositories.length, 2);
+  assert.equal(data.repositories.find((repo) => repo.current).root, folder);
+  assert.equal((await h.call(CHANNELS.workspaceInfo)).data.root, folder);
+  assert.deepEqual((await h.call(CHANNELS.tasksList)).data, []);
+  // A second try on the same, now non-empty, folder is refused.
+  assert.equal((await h.call(CHANNELS.repositoriesCreate, folder)).error.code, 'root_not_empty');
+});
+
+test('repositories:remove takes another off the list, and removing the open one opens the next or none', async () => {
+  const h = await fixtures.harness();
+  await h.call(CHANNELS.packagesTransition, 'auth-edge-tests', 'claim');
+  const first = (await h.call(CHANNELS.repositoriesList)).data.current;
+  const added = (await h.call(CHANNELS.repositoriesAdd, await fixtures.gitRepo(), false)).data;
+  const other = added.repositories.find((entry) => !entry.current).id;
+
+  const removedOther = (await h.call(CHANNELS.repositoriesRemove, other)).data;
+  assert.deepEqual(
+    removedOther.repositories.map((entry) => entry.id),
+    [first],
+  );
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'in_progress', 'the open repository is untouched');
+
+  const closed = (await h.call(CHANNELS.repositoriesRemove, first)).data;
+  assert.deepEqual(closed, { current: null, repositories: [] });
+  assert.deepEqual((await h.call(CHANNELS.workspaceInfo)).data, { configured: false });
+  assert.deepEqual((await h.call(CHANNELS.tasksList)).data, []);
+  await fs.access(h.root);
+
+  // Adding the folder again brings its work back.
+  await h.call(CHANNELS.repositoriesAdd, h.root, true);
+  assert.equal((await h.call(CHANNELS.tasksGet, 'auth-edge-tests')).data.status, 'in_progress');
+  assert.equal((await h.call(CHANNELS.repositoriesRemove, 'nope')).error.code, 'unknown_repository');
+});

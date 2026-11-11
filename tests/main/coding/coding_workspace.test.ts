@@ -204,3 +204,19 @@ test('course packs in .taskpilot/courses/ are high-risk; other .taskpilot files 
   assert.deepEqual(reasons('.taskpilot/coursesx.toml'), []);
   assert.deepEqual(reasons('docs/.taskpilot/courses/os.toml'), []);
 });
+
+test('.gitignore is ordinary project content; git config files are high-risk and .git/ is never written', () => {
+  assert.deepEqual(reasons('.gitignore'), []);
+  assert.deepEqual(reasons('src/.gitignore'), []);
+  assert.deepEqual(reasons('.gitattributes'), [HIGH_RISK]);
+  assert.deepEqual(reasons('.gitmodules'), [HIGH_RISK]);
+  assert.ok(reasons('.git/hooks/pre-commit').includes('git metadata path'));
+  assert.ok(reasons('.GIT/config').includes('git metadata path'));
+});
+
+test('a refused file is listed once per reason', () => {
+  const preview = parsePatchPreview(patch('.git/config'), ['src/a.ts']);
+  const keys = preview.blocked.map((entry) => `${entry.path}:${entry.reason}`);
+  assert.deepEqual(keys, [...new Set(keys)]);
+  assert.ok(keys.includes('.git/config:git metadata path'));
+});

@@ -4,6 +4,7 @@ import type * as packageTypes from '@shared/ipc/packages.ts';
 import type * as workspaceTypes from '@shared/ipc/workspace.ts';
 import type { IconName } from './icons.ts';
 import { stepLabel } from './check_steps.ts';
+import { describeErrorInfo } from './errors.ts';
 
 export type EvidenceTone = 'done' | 'blocked' | 'in_review' | '';
 
@@ -79,6 +80,8 @@ export const CRITERION_EVIDENCE: Record<workspaceTypes.CriterionStatus, string> 
 export const attentionText = (item: workspaceTypes.AttentionItem, acceptance: workspaceTypes.AcceptanceCriterion[] = []) => {
   const criterion = (index: number) => `「${acceptance[index]?.text ?? `条件 ${index + 1}`}」`;
   switch (item.code) {
+    case 'no_checks':
+      return '没有运行任何检查，只有 QA 读过改动，请自己运行一下确认';
     case 'check_unverifiable':
       return `${stepLabel(item.kind)}无法验证：${REASONS[item.reason ?? ''] ?? item.reason}`;
     case 'preexisting_failures':
@@ -236,4 +239,13 @@ export const deliverySummary = (
             : '已交付，可以领下一个工作包'
           : '你在验收时打回了，改完后重新提交审查',
   };
+};
+
+// A successful command does not imply the runner parsed any test cases.
+export const reviewTestLine = (run: workspaceTypes.CompactRun | null): string => {
+  if (!run) return '未配置测试命令';
+  if ('error' in run) return `测试运行失败：${describeErrorInfo(run.error)}`;
+  if (run.timedOut) return '测试命令超时';
+  if (!run.summary.total) return `测试命令${run.summary.ok && run.exitCode === 0 ? '通过' : '失败'}，用例数量未解析（退出码 ${run.exitCode}）`;
+  return `测试 ${run.summary.passed}/${run.summary.total} 通过${run.summary.ok ? '' : `（退出码 ${run.exitCode}）`}`;
 };

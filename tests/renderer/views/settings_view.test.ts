@@ -14,6 +14,7 @@ import type { Preferences } from '@shared/ipc/settings.ts';
 import { AGENT_IDS } from '@shared/agent_runtime.ts';
 import { expectConsole } from '../../fixtures/expected_console.ts';
 import { until } from '../../fixtures/until.ts';
+import type * as workspaceTypes from '../../../src/shared/ipc/workspace.ts';
 
 vi.mock('@/lib/feedback.ts', () => ({ showToast: vi.fn(), confirmAction: vi.fn(), confirmChoice: vi.fn(), openDialogs: { value: 0 } }));
 
@@ -318,5 +319,19 @@ test('setup steps run only on click, sending just the step id', async () => {
   await flushPromises();
   expect(api.env.runStep).toHaveBeenCalledTimes(1);
   expect(api.env.runStep).toHaveBeenCalledWith('test');
+  wrapper.unmount();
+});
+
+test('a taskpilot.toml without a preset offers the preset of the language now detected', async () => {
+  const shown = (await window.taskpilot.workspace.get()) as { ok: true; data: workspaceTypes.WorkspaceView };
+  api.workspace.get.mockImplementation(() => ok({ ...shown.data, project: { status: 'ok', preset: null } }));
+  const wrapper = await openView('commands');
+  expect(wrapper.find('#createProject').exists()).toBe(false);
+  expect(wrapper.get('[data-upgrade-preset]').text()).toContain('package.json');
+  vi.mocked(feedback.confirmAction).mockResolvedValueOnce(true);
+  await wrapper.get('#upgradePreset').trigger('click');
+  await flushPromises();
+  expect(api.workspace.setProjectPreset).toHaveBeenCalledWith('typescript');
+  expect(wrapper.find('#upgradePreset').exists()).toBe(false);
   wrapper.unmount();
 });

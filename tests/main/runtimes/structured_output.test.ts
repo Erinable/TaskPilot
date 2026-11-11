@@ -152,3 +152,31 @@ test('strict Codex checks leave the other analysis envelope formats unchanged', 
   assert.deepEqual(parseStructuredOutput('{"result":{"grok":true}}'), { grok: true });
   assert.deepEqual(parseStructuredOutput('{"raw":true}'), { raw: true });
 });
+
+test.each([
+  { type: 'error', message: "Invalid schema: 'schema.properties.configuration.oneOf' is not permitted when strict is true." },
+  { type: 'turn.failed', error: { message: "Invalid schema: 'schema.properties.configuration.oneOf' is not permitted when strict is true." } },
+])('Codex $type retains the provider reason rather than only a generic failure', (event) => {
+  assert.throws(
+    () => assertAnalysisEvent(event, 'codex'),
+    (error: unknown) => {
+      assert.equal((error as { code: string }).code, 'agent_failed');
+      assert.match((error as Error).message, /configuration.oneOf.*not permitted/);
+      return true;
+    },
+  );
+});
+
+test('provider failure messages are bounded and credentials are redacted', () => {
+  const message = `request rejected api_key=fixture-api-key Authorization: Bearer fixture-bearer ${'x'.repeat(5000)}`;
+  assert.throws(
+    () => assertAnalysisEvent({ type: 'error', message }, 'codex'),
+    (error: unknown) => {
+      const failure = error as Error;
+      assert.match(failure.message, /request rejected/);
+      assert.doesNotMatch(failure.message, /fixture-api-key|fixture-bearer/);
+      assert.ok(failure.message.length < 2100);
+      return true;
+    },
+  );
+});

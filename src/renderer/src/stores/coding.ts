@@ -18,6 +18,10 @@ const ACTIVE_STATUSES: codingTypes.CodingRun['status'][] = ['preparing', 'runnin
 export const DEFAULT_INSTRUCTION = '按工作包的执行指令完成全部步骤，满足验收条件，只改文件范围内的文件。';
 const TERMINAL_STATUSES: codingTypes.CodingRun['status'][] = ['ready', 'applied', 'submitted', 'failed', 'cancelled', 'discarded'];
 
+// Automatic rounds own the ready -> apply interval; only a stopped one asks
+// the developer to inspect its patch. All terminal directories are cleaned.
+const hasReviewablePatch = (run: codingTypes.CodingRun | null | undefined) => run?.status === 'ready' && (run.trigger === 'human' || Boolean(run.halt));
+
 // The loop is still moving on its own: a round is working, an automatic
 // round's patch is about to be applied, or QA is reviewing its submission.
 export const looping = (task: packageTypes.TaskView) => {
@@ -49,13 +53,15 @@ export const useCodingStore = defineStore('coding', () => {
   let runtimeGeneration = 0;
   // The round whose events and patch are shown.
   let roundId: string | null = null;
+  let patchRequest: { runId: string; token: number; promise: Promise<void> } | null = null;
+  let patchFailure: string | null = null;
   // Patch paths the developer accepts; all applicable files by default.
   const selectedFiles = ref<string[]>([]);
   // The developer's choice for each conflicted file.
   const resolutions = ref<Partial<Record<string, codingTypes.CodingResolution>>>({});
 
   const run = computed(() => execution.current?.codingRun ?? null);
-  const eligible = computed(() => execution.current?.status === 'in_progress' || !!run.value);
+  const eligible = computed(() => execution.current?.status === 'in_progress' && execution.current.mode !== 'practice' && execution.current.mode !== 'self');
   const active = computed(() => {
     const codingRun = run.value;
     return codingRun ? ACTIVE_STATUSES.includes(codingRun.status) : false;
@@ -94,24 +100,66 @@ export const useCodingStore = defineStore('coding', () => {
 
   const adopt = (task: packageTypes.TaskView, id: string, token: number) => {
     if (!sameSelection(id, token)) return false;
+    const nextRound = task.codingRun?.id ?? null;
+    const roundChanged = roundId !== nextRound;
     execution.adoptTask(task);
+    if (roundChanged) {
+      roundId = nextRound;
+      events.value = [];
+      eventCursor.value = -1;
+    }
+    if (roundChanged || !hasReviewablePatch(task.codingRun)) {
+      patch.value = null;
+      patchLoading.value = false;
+      selectedFiles.value = [];
+      resolutions.value = {};
+      if (error.value === patchFailure) error.value = null;
+      patchFailure = null;
+    }
     return true;
   };
 
-  const loadPatch = async (id: string, token = generation) => {
+  const loadPatch = (id: string, token = generation): Promise<void> => {
+    const round = run.value;
+    if (!hasReviewablePatch(round) || !round || !sameSelection(id, token)) return Promise.resolve();
+    if (patchRequest?.runId === round.id && patchRequest.token === token) return patchRequest.promise;
+    const isCurrent = () => sameSelection(id, token) && run.value?.id === round.id && hasReviewablePatch(run.value);
     patchLoading.value = true;
-    try {
-      const value = await call(window.taskpilot.coding.patch(id));
-      if (sameSelection(id, token)) {
+    const promise = Promise.resolve().then(async () => {
+      try {
+        const value = await call(window.taskpilot.coding.patch(id));
+        if (!isCurrent()) return;
         patch.value = value;
         resolutions.value = {};
         selectedFiles.value = value.files.filter((file) => applicable(file) && !file.highRisk).map((file) => file.path);
+        if (error.value === patchFailure) error.value = null;
+        patchFailure = null;
+      } catch (cause) {
+        // A reply can arrive after automatic application/discard or replacement
+        // by the next round. Re-read its lifecycle before presenting a failure.
+        if (!isCurrent()) return;
+        try {
+          const before = execution.current;
+          const fresh = await call(window.taskpilot.coding.get(id));
+          if (!isCurrent()) return;
+          const task = execution.current === before ? fresh : execution.current;
+          if (!task || !adopt(task, id, token) || !isCurrent()) return;
+        } catch {
+          // A real error on the same retained round must still be visible.
+        }
+        if (isCurrent()) {
+          patchFailure = `读取补丁失败：${describeError(cause)}`;
+          error.value = patchFailure;
+        }
+      } finally {
+        if (patchRequest?.promise === promise) {
+          patchRequest = null;
+          if (sameSelection(id, token)) patchLoading.value = false;
+        }
       }
-    } catch (cause) {
-      if (sameSelection(id, token)) error.value = `读取补丁失败：${describeError(cause)}`;
-    } finally {
-      if (sameSelection(id, token)) patchLoading.value = false;
-    }
+    });
+    patchRequest = { runId: round.id, token, promise };
+    return promise;
   };
 
   // Follows the selected package; selecting another bumps the generation.
@@ -124,37 +172,49 @@ export const useCodingStore = defineStore('coding', () => {
     onChange: (change) => {
       if (change.domains.includes('packages')) packageStale = true;
     },
-    read: async () => {
+    read: async (isCurrent) => {
       const id = selectedId.value;
       const token = generation;
-      if (!id || !sameSelection(id, token)) return;
+      const currentRead = () => isCurrent() && Boolean(id) && sameSelection(id!, token);
+      if (!id || !currentRead()) return;
       const rereadPackage = packageStale;
       packageStale = false;
       eventsLoading.value = true;
       try {
+        // The package exists before its first Coding Agent round. Read its
+        // lifecycle first: events requires a run, and a released claim has none.
+        if (rereadPackage) {
+          const before = execution.current;
+          const fresh = await call(window.taskpilot.coding.get(id));
+          if (!currentRead()) return;
+          // Execution can finish its own refresh first. Keep that newer task,
+          // but still reconcile our round, cursor and patch before reading events.
+          const replaced = execution.current !== before;
+          const task = replaced ? execution.current : fresh;
+          if (!task || !adopt(task, id, token)) return;
+          if (replaced) {
+            // Neither response has a revision: reread after the competing
+            // update so an unrelated local edit cannot hide a newer lifecycle.
+            packageStale = true;
+            void watcher.refresh();
+          }
+        }
+        const round = run.value;
+        if (!round) return;
         const page = await call(window.taskpilot.coding.events(id, eventCursor.value));
-        if (!sameSelection(id, token)) return;
+        if (!currentRead() || run.value?.id !== round.id) return;
         if (page.events.length) {
           events.value = [...events.value, ...page.events].slice(-200);
           eventCursor.value = page.next;
         }
-        if (!rereadPackage) return;
-        const task = await call(window.taskpilot.coding.get(id));
-        if (!adopt(task, id, token)) return;
-        if (task.codingRun && task.codingRun.id !== roundId) {
-          roundId = task.codingRun.id;
-          events.value = [];
-          eventCursor.value = -1;
-          patch.value = null;
-        }
-        if (task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
+        if (hasReviewablePatch(round) && !patch.value) await loadPatch(id, token);
       } catch (cause) {
-        if (sameSelection(id, token)) {
+        if (currentRead()) {
           packageStale ||= rereadPackage;
           error.value = `刷新编码进度失败：${describeError(cause)}`;
         }
       } finally {
-        if (sameSelection(id, token)) eventsLoading.value = false;
+        if (currentRead()) eventsLoading.value = false;
       }
     },
   });
@@ -190,7 +250,7 @@ export const useCodingStore = defineStore('coding', () => {
       instruction.value = task.codingRun?.instruction ?? DEFAULT_INSTRUCTION;
       roundId = task.codingRun?.id ?? null;
       startWatching();
-      if (!looping(task) && task.codingRun?.status === 'ready' && !patch.value) await loadPatch(id, token);
+      if (hasReviewablePatch(task.codingRun) && !patch.value) await loadPatch(id, token);
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `读取编码任务失败：${describeError(cause)}`;
     }
@@ -210,6 +270,10 @@ export const useCodingStore = defineStore('coding', () => {
     if (!id || !text.trim() || operation.value || !eligible.value) return false;
     if (runtime.value && !runtime.value.available) return false;
     operation.value = retry ? 'retry' : 'start';
+    // A pre-start read can still be waiting on IPC. Invalidate it before the
+    // first run is created so its null result/error cannot erase this start.
+    stopWatching();
+    eventsLoading.value = false;
     error.value = null;
     const token = generation;
     try {
@@ -222,13 +286,15 @@ export const useCodingStore = defineStore('coding', () => {
       events.value = [];
       eventCursor.value = -1;
       patch.value = null;
-      startWatching();
       return true;
     } catch (cause) {
       if (sameSelection(id, token)) error.value = `启动编码失败：${describeError(cause)}`;
       return false;
     } finally {
-      operation.value = null;
+      if (sameSelection(id, token)) {
+        operation.value = null;
+        startWatching();
+      }
     }
   };
 

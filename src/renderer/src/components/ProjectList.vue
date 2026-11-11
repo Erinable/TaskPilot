@@ -35,6 +35,11 @@ const projects = computed(() =>
   }),
 );
 
+// An existing git folder, or a new git repository in an empty folder.
+const addProject = (command: 'add' | 'create') => {
+  (command === 'add' ? repositories.add() : repositories.create()).catch((error) => console.error(error));
+};
+
 const open = (repo: repositoryTypes.Repository) => {
   if (repo.missing) repositories.relocate(repo.id).catch((error) => console.error(error));
   else if (!repo.current) repositories.switchTo(repo.id).catch((error) => console.error(error));
@@ -64,17 +69,31 @@ const open = (repo: repositoryTypes.Repository) => {
       </span>
       <span v-if="attention && !repo.current" class="nav-count">{{ attention }}</span>
     </button>
-    <button
-      class="nav-item project-add"
-      type="button"
-      :disabled="repositories.switching"
-      :title="app.sidebarCollapsed ? '添加项目' : undefined"
-      data-action="add-project"
-      @click="repositories.add()"
-    >
-      <AppIcon name="plus" class="nav-icon" />
-      <span class="nav-label">添加项目</span>
-    </button>
+    <el-dropdown class="project-add-menu" trigger="click" placement="right-start" @command="addProject">
+      <button
+        class="nav-item project-add"
+        type="button"
+        :disabled="repositories.switching"
+        :title="app.sidebarCollapsed ? '添加项目' : undefined"
+        aria-haspopup="menu"
+        data-action="add-project"
+      >
+        <AppIcon name="plus" class="nav-icon" />
+        <span class="nav-label">添加项目</span>
+      </button>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <el-dropdown-item command="add" data-action="open-existing">
+            <AppIcon name="folder" />
+            打开已有文件夹…
+          </el-dropdown-item>
+          <el-dropdown-item command="create" data-action="create-project">
+            <AppIcon name="sparkle" />
+            新建空项目…
+          </el-dropdown-item>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
   </div>
 </template>
 
@@ -90,6 +109,9 @@ const open = (repo: repositoryTypes.Repository) => {
   height: auto;
   min-height: 44px;
   padding-block: 4px;
+}
+.project-add-menu {
+  display: block;
 }
 .project-text {
   display: flex;

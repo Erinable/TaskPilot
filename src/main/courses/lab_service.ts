@@ -28,7 +28,7 @@ import type { RepositoryEntry } from '../repository/repositories.ts';
 
 type LabServiceContext = Pick<
   AppContext,
-  'course' | 'coursePlaces' | 'onPackagesPublished' | 'openRepository' | 'record' | 'repositories' | 'requireRoot' | 'requirements' | 'store' | 'validateRoot'
+  'course' | 'coursePlaces' | 'openRepository' | 'record' | 'repositories' | 'requireRoot' | 'requirements' | 'store' | 'validateRoot'
 >;
 
 // Every lab of a repository is published under this one requirement.
@@ -62,7 +62,6 @@ export const createLabService = (ctx: LabServiceContext) => {
     const text = `课程「${pack.title}」的 lab，由 TaskPilot 写入实验仓库。`;
     const item = await requireRequirements().publishPackages(LAB_REQUIREMENT_ID, { title: '课程 lab', text }, definitions);
     ctx.store.add(definitions);
-    ctx.onPackagesPublished?.(definitions);
     ctx.record({ kind: 'requirement_published', requirementId: item.id, title: item.title, packageCount: definitions.length });
     logger.debug(`[labs] published course=${ref.id} packages=${definitions.map((definition) => definition.id).join(',')}`);
     return definitions;

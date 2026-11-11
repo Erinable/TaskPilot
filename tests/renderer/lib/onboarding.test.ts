@@ -55,6 +55,14 @@ describe('onboarding steps', () => {
     expect(state(steps)).toMatchObject({ checks: 'done', requirement: 'waiting' });
   });
 
+  test('a blank project writes its requirement first, and checks wait for the skeleton without holding the list', () => {
+    const steps = buildSteps(facts({ blank: true, checksReady: false, requirementCount: 0 }));
+    expect(steps.map((step) => step.id)).toEqual(['cli', 'coding', 'repository', 'requirement', 'checks']);
+    expect(state(steps)).toMatchObject({ requirement: 'todo', checks: 'waiting' });
+    expect(steps.find((step) => step.id === 'checks')).toMatchObject({ optional: true, title: '骨架提交后设置自动检查' });
+    expect(isComplete(buildSteps(facts({ blank: true, checksReady: false, requirementCount: 1 })))).toBe(true);
+  });
+
   test('missing effective blocking checks do not count as set up', () => {
     expect(state(buildSteps(facts({ checksReady: false }))).checks).toBe('todo');
   });

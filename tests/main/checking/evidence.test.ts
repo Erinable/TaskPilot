@@ -122,3 +122,15 @@ test('attention() collects what a human should look at', () => {
   const codes = evidence.attention(items, [{ status: 'manual' }]).map((a) => a.code);
   assert.deepEqual(codes, ['preexisting_failures', 'check_unverifiable', 'criterion_manual']);
 });
+
+test('attention() asks a human to look when no check ran at all', () => {
+  assert.deepEqual(
+    evidence.attention([], []).map((a) => a.code),
+    ['no_checks'],
+  );
+  const skipped = { ...evidence.evaluate(CHECK, run({ exitCode: 0 }), null), status: 'skipped' as const };
+  assert.deepEqual(
+    evidence.attention([skipped], [{ status: 'manual' }]).map((a) => a.code),
+    ['no_checks', 'criterion_manual'],
+  );
+});

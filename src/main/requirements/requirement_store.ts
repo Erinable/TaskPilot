@@ -87,6 +87,8 @@ export type PackageRedoState = { index: number; status: 'running' | 'failed'; er
 
 // Architect's interface summary for a requirement, or why there isn't one.
 export interface RequirementInterfaces {
+  // HEAD when Architect read the code; absent on summaries from before.
+  commit?: string | null;
   summary: InterfaceSummary | null;
   text: string | null;
   read: { path: string; sha?: string }[];
@@ -502,9 +504,11 @@ export class RequirementStore implements TaskCatalog {
     });
   }
 
-  async failRun(id: string, step: RequirementStep, error: { code?: ErrorCode; message: string }): Promise<Requirement> {
-    this.#mustGet(id);
+  // `costUsd` is what the run spent before failing (Architect's turn).
+  async failRun(id: string, step: RequirementStep, error: { code?: ErrorCode; message: string }, costUsd = 0): Promise<Requirement> {
+    const item = this.#mustGet(id);
     return this.#update(id, {
+      costUsd: item.costUsd + costUsd,
       status: 'failed',
       phase: null,
       failedStep: step,
@@ -546,8 +550,8 @@ export class RequirementStore implements TaskCatalog {
     return published;
   }
 
-  // Publishes packages Product Lead did not plan (a course lab repository's
-  // labs, ../lab_service.ts) under requirement `id`, created on first use
+  // Publishes packages Product Lead did not plan (course labs or infrastructure
+  // configuration) under requirement `id`, created on first use
   // with no plan; later calls append. An id already in the catalog is refused.
   async publishPackages(id: string, { title, text }: { title: string; text: string }, definitions: TaskDefinition[]): Promise<Requirement> {
     const known = this.#items.get(id);

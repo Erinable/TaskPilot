@@ -2,6 +2,7 @@
 import { nextTick, ref, watch } from 'vue';
 
 import AppIcon from '@/components/AppIcon.vue';
+import SetupConfiguration from '@/components/settings/SetupConfiguration.vue';
 import { elapsedSince, useNow } from '@/lib/elapsed.ts';
 import { KIND_LABEL, resultText, useSetupStore } from '@/stores/setup.ts';
 import type * as envTypes from '@shared/ipc/environment.ts';
@@ -38,8 +39,8 @@ const stepState = (step: envTypes.EnvStep) => {
     </span>
   </header>
   <p class="settings-page-intro">
-    环境管家读取仓库里已提交的 package.json、lockfile、版本文件和 CI 配置，给出安装与验证步骤。每一步都要你点击确认后才由 TaskPilot 运行，命令只会从 npm
-    的固定选项和 package.json 脚本名中拼出。
+    环境管家分析项目依赖、工具和检查配置，给出安装步骤，并把缺失的基础设施规划为工作包交给 Coding
+    Agent。安装和现有检查由你点击运行，配置改动走工作包的确认、审查和提交流程。
   </p>
   <div class="setup-toolbar">
     <p id="setupStatus" class="setup-status" :class="{ 'warn-text': setup.statusWarn }" aria-live="polite">{{ setup.statusText }}</p>
@@ -54,6 +55,7 @@ const stepState = (step: envTypes.EnvStep) => {
       </button>
     </div>
   </div>
+  <SetupConfiguration />
   <div v-if="setup.ready && setup.view" id="setupBody">
     <h3 class="settings-section-title">仓库事实</h3>
     <div class="settings-card glass">
@@ -86,13 +88,14 @@ const stepState = (step: envTypes.EnvStep) => {
       <div class="setting-row">
         <label class="setting-label" for="setupAllowScripts">
           <strong>允许依赖的安装脚本</strong>
-          <small>默认带 --ignore-scripts 安装，依赖包的 preinstall/postinstall 不会运行。原生模块（如 node-gyp 编译）可能因此失败。</small>
+          <small v-if="setup.installationOnly">恢复的安装步骤固定关闭安装脚本；需要调整时请点击「重新分析」。</small>
+          <small v-else>默认带 --ignore-scripts 安装，依赖包的 preinstall/postinstall 不会运行。原生模块（如 node-gyp 编译）可能因此失败。</small>
         </label>
         <div class="setting-control end">
           <el-switch
             id="setupAllowScripts"
             :model-value="setup.view.allowScripts"
-            :disabled="setup.busy || setup.view.stale"
+            :disabled="setup.busy || setup.view.stale || setup.installationOnly"
             @update:model-value="onAllowScripts"
           />
         </div>

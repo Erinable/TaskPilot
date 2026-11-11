@@ -146,6 +146,8 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
     if (state.status !== 'in_progress') failWith('Coding Agent can only run on an in-progress package', 'invalid_state');
     // A practice package is the developer's exercise; release it to hand it over.
     if (state.mode === 'practice') failWith('This package is being practised; Coding Agent stays out', 'practice_mode');
+    // A package the developer writes themselves is handed over first (package:hand-to-ai).
+    if (state.mode === 'self') failWith('This package is written by hand; hand it to Coding Agent first', 'self_mode');
     if (activeRounds.has(id) || backgroundRuns.has('coding-checks', id)) failWith('A Coding Agent run is already active', 'coding_running');
     const claim = store.claimIdentity(id);
     const previous = state.codingRun;
@@ -234,8 +236,11 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
         await updateCoding(id, runId, { status: 'checking', output: result.output, usage: result.usage, sessionId: result.sessionId });
         ctx.changed('activity');
         const preview = await runtime.readPatch(prepared.runName, task.fileScope, { signal: controller.signal, sandbox, cli: runtimeConfig.cli });
+        // An empty automatic round never has a reviewable patch. Publish its
+        // terminal state before cleanup, so observers cannot open its directory
+        // in the short interval between ready and discarded.
         await updateCoding(id, runId, {
-          status: 'ready',
+          ...codingLoop.patchState(trigger, preview),
           finishedAt: new Date().toISOString(),
           files: preview.files,
           blocked: preview.blocked,
@@ -295,15 +300,18 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
     const preview = await runtime.readRunPatch(run.runName, task.fileScope);
     const decision = codingLoop.autoApply(preview);
     if (decision.highRisk) return void (await updateCoding(id, runId, { halt: 'high_risk' }));
+    // Changes that were all refused are not "no changes": keep the round so
+    // the developer sees which files and why.
+    if (!decision.files.length && preview.blocked.length) return void (await updateCoding(id, runId, { halt: 'blocked' }));
     if (!decision.files.length) {
-      await runtime.cleanRun(run.runName).catch((error) => logger.error(error));
-      return void (await updateCoding(id, runId, { status: 'discarded', halt: 'no_changes' }));
+      await updateCoding(id, runId, { status: 'discarded', halt: 'no_changes' });
+      return void (await runtime.cleanRun(run.runName).catch((error) => logger.error(error)));
     }
     // The developer edited the same lines meanwhile: never overwrite, ask.
     const merge = await previewOf(run, preview.patch);
     if (merge.some((file) => file.state === 'conflict')) return void (await updateCoding(id, runId, { halt: 'conflict' }));
     await applyRound(id, runId, preview, decision.files, false, {});
-    await verifyApplied(id, runId);
+    if (requireCurrentRun(id, runId).status === 'verifying') await verifyApplied(id, runId);
   };
 
   // Applies the chosen files of a ready patch to the working tree.
@@ -329,9 +337,14 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
         rules,
         assertCurrent: () => void requireCurrentRun(id, runId, ['applying']),
       });
+      // An infrastructure package can add dev dependencies. They were installed
+      // in the isolated copy, not this checkout: wait for a human to install
+      // locally before interpreting missing tools as code failures.
+      const needsSetup =
+        Boolean(task.environment) && selected.files.some((file) => ['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].includes(file.path));
       await updateCoding(id, runId, {
-        status: applied.markers.length ? 'applied' : 'verifying',
-        halt: applied.markers.length ? 'markers' : null,
+        status: applied.markers.length || needsSetup ? 'applied' : 'verifying',
+        halt: applied.markers.length ? 'markers' : needsSetup ? 'setup_required' : null,
         finishedAt: new Date().toISOString(),
         files: selected.files,
         blocked: preview.blocked,
@@ -476,16 +489,27 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
       title: ctx.catalog.getTask(packageId)?.title ?? packageId,
     }));
 
-  // The patch of a ready or applied round; a ready one with how it merges now.
+  // Only a ready round retains a patch directory. Applied and discarded
+  // rounds have already been cleaned; their files are in the host diff/history.
   const patch = async (id: string): Promise<codingTypes.CodingPatchPreview> => {
     const { task, run } = codingRunOf(id);
-    if (!['ready', 'applied'].includes(run.status)) failWith('Coding patch is not ready', 'coding_not_ready');
-    requireCurrentRun(id, run.id);
-    const preview = await runtime.readRunPatch(workspaceOf(id, run).runName, task.fileScope);
-    await updateCoding(id, run.id, { files: preview.files, blocked: preview.blocked, patchDigest: preview.digest });
-    if (run.status !== 'ready') return preview;
+    const assertReadable = () => {
+      const current = requireCurrentRun(id, run.id, ['ready']);
+      if (current.trigger !== 'human' && !current.halt) failWith('The automatic round is still applying its patch', 'coding_not_ready');
+    };
+    assertReadable();
+    let preview: codingTypes.CodingPatchPreview;
+    try {
+      preview = await runtime.readRunPatch(workspaceOf(id, run).runName, task.fileScope);
+    } catch (error) {
+      // Cleanup may have won a race while the read was in flight. Report the
+      // changed lifecycle, not an alarming workspace error for a deleted folder.
+      assertReadable();
+      throw error;
+    }
+    assertReadable();
     const merge = await previewOf(run, preview.patch);
-    requireCurrentRun(id, run.id, ['ready']);
+    assertReadable();
     return { ...preview, merge, mergeDigest: patchMerge.mergeDigest(preview.patch, merge) };
   };
 
@@ -514,7 +538,7 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
     const applied = await applyRound(id, run.id, preview, files, allowHighRisk, resolutions);
     activeRounds.delete(id);
     // Conflict markers left in a file hold the checks until they are cleared.
-    if (!applied.markers.length) continueLoop(id, run.id, () => verifyApplied(id, run.id));
+    if (requireCurrentRun(id, run.id).status === 'verifying') continueLoop(id, run.id, () => verifyApplied(id, run.id));
     return applied;
   };
 
@@ -523,13 +547,22 @@ export const createCodingService = (ctx: CodingServiceContext, runtime: CodingRu
   const resume = async (id: string): Promise<packageTypes.TaskView> => {
     const { task, run } = codingRunOf(id);
     requireCurrentRun(id, run.id);
-    if (run.status !== 'applied' || run.halt !== 'markers') failWith('Nothing is waiting on conflict markers', 'coding_not_ready');
+    if (run.status !== 'applied' || !['markers', 'setup_required'].includes(run.halt ?? ''))
+      failWith('Nothing is waiting to resume checks', 'coding_not_ready');
     const left = await patchMerge.filesWithMarkers(
       requireRoot(),
       run.files.map((file) => file.path),
     );
     if (left.length) failWith(`Conflict markers remain in ${left.join(', ')}`, 'merge_markers_left');
     requireCurrentRun(id, run.id, ['applied']);
+    const needsSetup =
+      run.halt === 'markers' &&
+      Boolean(task.environment) &&
+      run.files.some((file) => ['package.json', 'package-lock.json', 'npm-shrinkwrap.json'].includes(file.path));
+    if (needsSetup) {
+      await updateCoding(id, run.id, { halt: 'setup_required' });
+      return ctx.viewOf(task, store.get(id));
+    }
     await updateCoding(id, run.id, { status: 'verifying', halt: null });
     continueLoop(id, run.id, () => verifyApplied(id, run.id));
     return ctx.viewOf(task, store.get(id));

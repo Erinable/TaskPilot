@@ -233,6 +233,10 @@ export const GUARDS: Partial<Record<string, (entry: WorkPackageState) => boolean
     return resolution?.decision === 'dismiss' && !resolution.contested;
   },
   revert_replan: (entry) => entry.replanUndo !== null,
+  // Only once the agent has stopped: a running review or ruling finishes
+  // first. A cancelled one is recorded as failed (agent_cancelled).
+  withdraw_review: (entry) => entry.review?.status === 'failed',
+  withdraw_deviation: (entry) => entry.adjudication?.status === 'failed',
 };
 export const allowed = (entry: WorkPackageState, name: string) => GUARDS[name]?.(entry) ?? true;
 

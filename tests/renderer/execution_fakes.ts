@@ -7,7 +7,7 @@ import type * as packageTypes from '../../src/shared/ipc/packages.ts';
 import type * as tutorTypes from '../../src/shared/ipc/tutor.ts';
 import type * as workspaceTypes from '../../src/shared/ipc/workspace.ts';
 import { defaultCourse } from './settings_fakes.ts';
-import { installFakeApi, ok } from './ipc_fakes.ts';
+import { installFakeApi, ok, fail } from './ipc_fakes.ts';
 import { PROGRAMMING_COURSE } from '../fixtures/builtin_courses.ts';
 
 export const taskView = (overrides: Partial<packageTypes.TaskView> = {}): packageTypes.TaskView => ({
@@ -80,6 +80,8 @@ export const testStepWorkspace = (root: string): workspaceTypes.WorkspaceView =>
   project: { status: 'missing' },
   course: defaultCourse(),
   detected: [],
+  blank: false,
+  missingDependencies: [],
   presets: [],
 });
 
@@ -87,7 +89,8 @@ export const testStepWorkspace = (root: string): workspaceTypes.WorkspaceView =>
 export const installApi = (current: { task: packageTypes.TaskView }) => {
   return installFakeApi({
     commit: {
-      preview: () => ok({ files: ['src/auth.ts'], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
+      preview: () =>
+        ok({ files: ['src/auth.ts'], optional: [], skipped: [{ path: 'notes.md', reason: 'out_of_scope' }], message: '邮箱登录\n\nTaskPilot 工作包 t1' }),
       create: (_id, _message, files) => ok({ commit: 'c0ffee1234', files }),
     },
     tasks: { list: () => ok([current.task]), get: () => ok(current.task) },
@@ -120,7 +123,11 @@ export const installApi = (current: { task: packageTypes.TaskView }) => {
         }),
       start: (_id: string, _input: codingTypes.CodingStart) => ok(current.task),
       get: () => ok(current.task),
-      events: (_id: string, _after: number) => ok<codingTypes.CodingEventPage>({ events: [], next: -1, truncated: false }),
+      // Match main IPC: transcript events do not exist until coding.start creates a run.
+      events: (_id: string, _after: number) =>
+        current.task.codingRun
+          ? ok<codingTypes.CodingEventPage>({ events: [], next: -1, truncated: false })
+          : fail('coding_not_running', 'No coding run exists'),
       cancel: () => ok(true),
       patch: () => ok<codingTypes.CodingPatchPreview>({ digest: 'test-digest', files: [], patch: '', blocked: [] }),
       apply: (_id: string, _input: codingTypes.CodingApply) => ok<codingTypes.CodingApplyResult>({ files: [], markers: [], kept: [] }),
@@ -207,3 +214,21 @@ export const codingRun = (overrides: Partial<codingTypes.CodingRun> = {}): codin
     ...overrides,
   };
 };
+
+export const passedReview = (
+  overrides: Partial<Extract<packageTypes.Review, { status: 'passed' | 'rejected' }>> = {},
+): Extract<packageTypes.Review, { status: 'passed' | 'rejected' }> => ({
+  status: 'passed',
+  error: null,
+  startedAt: '2026-11-11T10:10:00.000Z',
+  finishedAt: '2026-11-11T10:12:00.000Z',
+  reasons: [],
+  attention: [{ code: 'criterion_manual', index: 0 }],
+  checks: [],
+  verification: null,
+  acceptance: [{ text: '断网时仍能阅读', status: 'manual', verified: false, manual: true }],
+  report: { verdict: 'pass', summary: '缓存逻辑符合计划', criteria: [{ index: 0, status: 'met', note: '代码实现了缓存回退；需要真机验证。' }], issues: [] },
+  diff: { files: [{ path: 'src/cache.ts', bytes: 100, untracked: true }], skipped: [], outOfScope: [] },
+  costUsd: 0,
+  ...overrides,
+});

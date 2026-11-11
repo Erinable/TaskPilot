@@ -532,7 +532,9 @@ export const cliArgs = (config: AgentRuntimeConfig): string[] => {
   const withModel = (args: string[], flag = '--model') => (model ? [...args, flag, model] : args);
   switch (cli) {
     case 'codex': {
-      const args = withModel(['exec', '--json', '--sandbox', 'danger-full-access', '--ask-for-approval', 'never', '--skip-git-repo-check']);
+      // Codex 0.164 removed `exec --ask-for-approval` (an unknown argument
+      // exits with status 2); the config key works on every version.
+      const args = withModel(['exec', '--json', '--sandbox', 'danger-full-access', '-c', 'approval_policy="never"', '--skip-git-repo-check']);
       return [...args, ...(thinking === 'default' ? [] : ['-c', `model_reasoning_effort=${thinking}`]), '-'];
     }
     case 'claude':

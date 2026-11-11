@@ -37,7 +37,7 @@ const codingChip = computed(() => {
 });
 const openCoding = (packageId: string) => execution.open(packageId).catch((error) => console.error(error));
 
-type RepoCommand = { kind: 'switch' | 'relocate'; id: string } | { kind: 'add' | 'settings' };
+type RepoCommand = { kind: 'switch' | 'relocate'; id: string } | { kind: 'add' | 'create' | 'settings' };
 
 const onCommand = (command: RepoCommand) => {
   const action =
@@ -47,7 +47,9 @@ const onCommand = (command: RepoCommand) => {
         ? repositories.relocate(command.id)
         : command.kind === 'add'
           ? repositories.add()
-          : settings.open('repository');
+          : command.kind === 'create'
+            ? repositories.create()
+            : settings.open('repository');
   action.catch((error) => console.error(error));
 };
 // The list is cheap; reading it on open shows a folder that went missing.
@@ -98,6 +100,10 @@ const workspaceName = computed(() => {
           <el-dropdown-item :divided="repositories.repositories.length > 0" :command="{ kind: 'add' }" data-action="add-repository">
             <AppIcon name="plus" />
             添加仓库…
+          </el-dropdown-item>
+          <el-dropdown-item :command="{ kind: 'create' }" data-action="create-repository">
+            <AppIcon name="folder" />
+            新建项目…
           </el-dropdown-item>
           <el-dropdown-item :command="{ kind: 'settings' }" data-action="repository-settings">
             <AppIcon name="sliders" />

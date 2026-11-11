@@ -33,7 +33,51 @@ const MAX_WORKFLOWS = 3;
 const MAX_WORKFLOW_CHARS = 4000;
 const INSTALL_MODES = ['ci', 'install', 'skip'] as const;
 // The step kinds a plan names a package.json script for.
-const SCRIPT_KINDS = ['test', 'lint', 'build'] as const satisfies readonly StepKind[];
+const SCRIPT_KINDS = ['test', 'lint', 'build', 'typecheck', 'format', 'coverage'] as const satisfies readonly StepKind[];
+
+// This boundary is for an infrastructure proposal, not application code.
+// Coding Agent still applies its scope, secret and high-risk checks.
+const CONFIGURATION_FILES = [
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'taskpilot.toml',
+  '.gitignore',
+  'README.md',
+  '.nvmrc',
+  '.node-version',
+  '.tool-versions',
+  'tsconfig.json',
+  'tsconfig.node.json',
+  'tsconfig.app.json',
+  'eslint.config.js',
+  'eslint.config.mjs',
+  'eslint.config.cjs',
+  'eslint.config.ts',
+  '.eslintrc',
+  '.eslintrc.json',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.eslintignore',
+  '.prettierrc',
+  '.prettierrc.json',
+  '.prettierrc.yaml',
+  '.prettierrc.yml',
+  'prettier.config.js',
+  'prettier.config.mjs',
+  'prettier.config.cjs',
+  '.prettierignore',
+  'jest.config.js',
+  'jest.config.cjs',
+  'jest.config.ts',
+  'vitest.config.ts',
+  'vitest.config.js',
+  'babel.config.js',
+  'babel.config.cjs',
+  'metro.config.js',
+  '.github/workflows/ci.yml',
+  '.github/workflows/ci.yaml',
+];
 
 type ScriptKind = (typeof SCRIPT_KINDS)[number];
 
@@ -44,6 +88,8 @@ export interface Manifest {
   scripts: Record<string, string>;
   engines: Record<string, string>;
   packageManager: string | null;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
 }
 
 export interface FactFile {
@@ -64,6 +110,7 @@ export interface EnvFacts {
   // (platform-only builds such as fsevents). With --ignore-scripts they are
   // installed but unusable.
   installScripts: string[];
+  configFiles: FactFile[];
 }
 
 export type Blocker = 'no_manifest' | 'invalid_manifest' | 'unsupported_manager' | 'node_missing' | 'npm_missing';
@@ -88,12 +135,23 @@ export class EnvSetupError extends Error {
   }
 }
 
+// Names and versions only, so framework-specific configuration can be planned.
+const dependencyMap = (raw: unknown): Record<string, string> =>
+  raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? Object.fromEntries(
+        Object.entries(raw)
+          .filter(([name, version]) => PACKAGE_NAME.test(name) && typeof version === 'string')
+          .slice(0, 150)
+          .map(([name, version]) => [name, String(version).slice(0, 100)]),
+      )
+    : {};
+
 export const parseManifest = (content: string): Manifest => {
   let raw: LooseJson | null;
   try {
     raw = JSON.parse(content);
   } catch {
-    return { valid: false, name: null, scripts: {}, engines: {}, packageManager: null };
+    return { valid: false, name: null, scripts: {}, engines: {}, packageManager: null, dependencies: {}, devDependencies: {} };
   }
   const scripts: Record<string, string> = {};
   for (const [name, body] of Object.entries(raw?.scripts ?? {})) {
@@ -109,6 +167,8 @@ export const parseManifest = (content: string): Manifest => {
     scripts,
     engines,
     packageManager: typeof raw?.packageManager === 'string' ? raw.packageManager.slice(0, 60) : null,
+    dependencies: dependencyMap(raw?.dependencies),
+    devDependencies: dependencyMap(raw?.devDependencies),
   };
 };
 
@@ -140,7 +200,10 @@ export const probe = async (root: string, { envPath, version = toolVersion }: { 
     .filter((file) => WORKFLOW.test(file))
     .sort()
     .slice(0, MAX_WORKFLOWS);
-  const wanted = ['package.json', ...VERSION_FILES, ...workflows];
+  const configPaths = CONFIGURATION_FILES.filter(
+    (file) => tracked.includes(file) && file !== 'package.json' && !Object.hasOwn(LOCKFILES, file) && !VERSION_FILES.includes(file) && !WORKFLOW.test(file),
+  );
+  const wanted = ['package.json', ...VERSION_FILES, ...workflows, ...configPaths];
   const { files } = await readTracked(root, wanted, { maxFiles: wanted.length, maxFileBytes: 64 * 1024, maxTotalBytes: 256 * 1024 });
   const content = new Map(files.map((file) => [file.path, file.content]));
   // Only called for paths content has.
@@ -171,6 +234,7 @@ export const probe = async (root: string, { envPath, version = toolVersion }: { 
       npm: await version('npm', ['--version'], envPath),
     },
     installScripts: lock ? parseInstallScripts(lock.content) : [],
+    configFiles: configPaths.filter((file) => content.has(file)).map((file) => ({ path: file, content: read(file).slice(0, MAX_WORKFLOW_CHARS) })),
   };
 };
 
@@ -249,6 +313,13 @@ const RULES = [
   '  package.json without a lockfile, "skip" when nothing needs installing.',
   '- scripts: a package.json script name per step kind.',
   '- A Node version that does not satisfy the pin or engines range is an issue.',
+  '- configuration: choose tools that match the dependencies (e.g. Expo ESLint for an Expo app). Preserve existing working scripts and config.',
+  '- TypeScript projects should have a non-emitting typecheck script; add a check-only format script and lint config when missing.',
+  '- Build and coverage depend on the project: do not invent a web build for a native app, or require a coverage threshold without a reason.',
+  '- A new script uses the conventional name for its kind (format:check for format). The format check must not rewrite files.',
+  '- Include the package manifest, the npm lockfile and the exact config paths you need. Never name node_modules or secret files.',
+  '- The work package must wire the selected scripts into taskpilot.toml submit checks, with parsers suited to each check; do not disable checks.',
+  '- CI, runtime version pins and setup docs may be configured when the facts justify them. Do not add deployment or cloud services without a requirement.',
 ];
 
 const factSections = (facts: EnvFacts): FactSection[] => {
@@ -269,9 +340,12 @@ const factSections = (facts: EnvFacts): FactSection[] => {
             `packageManager: ${manifest.packageManager ?? '(none)'}`,
             'scripts:',
             scripts,
+            `dependencies: ${JSON.stringify(manifest.dependencies)}`,
+            `devDependencies: ${JSON.stringify(manifest.devDependencies)}`,
           ].join('\n')
         : '(no package.json)',
     },
+    { tag: 'configuration_files', body: facts.configFiles.map((file) => `<file path="${file.path}">\n${file.content}\n</file>`).join('\n') || '(none)' },
     { tag: 'lockfiles', body: facts.lockfiles.length ? facts.lockfiles.join('\n') : '(none)' },
     { tag: 'node_modules', body: facts.nodeModules ? 'present' : 'absent' },
     { tag: 'version_pins', body: facts.versionFiles.length ? facts.versionFiles.map((file) => `${file.path}: ${file.content}`).join('\n') : '(none)' },
@@ -319,7 +393,9 @@ export const typescriptSetup: SetupAdapter<EnvFacts> = {
   blocking: (found, kind) => found.filter((code) => code !== 'unsupported_manager' || kind === 'install'),
   prompt: (facts) => ({ rules: RULES, sections: factSections(facts) }),
   installModes: INSTALL_MODES,
+  configurationInstallMode: 'install',
   stepKinds: SCRIPT_KINDS,
+  configurationFiles: CONFIGURATION_FILES,
   validate: validateChoice,
   commandFor: (kind, choice) => {
     if (!isScriptKind(kind)) throw new EnvSetupError(`No package.json script runs ${kind}`, 'invalid_kind');

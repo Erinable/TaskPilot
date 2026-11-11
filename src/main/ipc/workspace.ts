@@ -34,6 +34,8 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       project: resolution.project,
       course,
       detected: resolution.detected,
+      blank: resolution.blank,
+      missingDependencies: resolution.missingDependencies,
       presets: presets.PRESETS.map((preset) => ({ id: preset.id, label: preset.label })),
     };
   };
@@ -114,6 +116,17 @@ export const register = (ipcMain: IpcMainLike, ctx: AppContext) => {
       const source = presets.presetById(preset);
       const suggestions = source ? source.suggestions(await source.facts(root, { envPath: (await ctx.commandPath()).path })) : {};
       await projectConfig.createProjectFile(root, preset, { lint: suggestions.lint?.[0] ?? null, custom: suggestions.typecheck?.[0] ?? null });
+      ctx.changed('workspace', 'environment');
+      return viewOf(getConfig());
+    },
+
+    // After a new project's skeleton is committed: the file says "none" and a
+    // language is now detected. Only on the user's click.
+
+    setProjectPreset: async (rawPreset): Promise<workspaceTypes.WorkspaceView> => {
+      const preset = requireString(rawPreset, 'preset');
+      if (!presets.PRESET_IDS.includes(preset)) failWith(`Unknown preset: ${preset}`, 'invalid_argument', 'preset');
+      await projectConfig.setPreset(requireRoot(), preset, presets.PRESET_IDS);
       ctx.changed('workspace', 'environment');
       return viewOf(getConfig());
     },

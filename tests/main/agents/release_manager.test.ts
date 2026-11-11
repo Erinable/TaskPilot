@@ -163,3 +163,31 @@ test('planRelease refuses an empty range before calling the model', async () => 
   );
   assert.equal(called, false);
 });
+
+test('planRelease never proposes a version at or below the last one released, when the manifest was not bumped', async () => {
+  const { dir, start, end } = await makeRepo();
+  const result = await planRelease({
+    root: dir,
+    startCommit: start,
+    startLabel: 'v1.1.0',
+    endCommit: end,
+    packages: [],
+    readVersion: typescriptPreset.version,
+    lastReleased: '1.1.0',
+    runAgent: async () => ({ output: { ...PLAN, bump: 'patch' }, costUsd: 0 }),
+  });
+  assert.equal(result.input.currentVersion, '1.1.0');
+  assert.equal(result.plan.nextVersion, '1.1.1');
+});
+
+test('planPrompt lists at most MAX_PROMPT_PACKAGES packages and says how many it left out', () => {
+  const packages = Array.from({ length: release.MAX_PROMPT_PACKAGES + 2 }, (_, index) => ({
+    id: `wp${index}`,
+    title: `包 ${index}`,
+    description: '',
+    acceptance: [],
+  }));
+  const prompt = release.planPrompt({ ...INPUT, packages });
+  assert.equal(prompt.match(/<package id=/g)?.length, release.MAX_PROMPT_PACKAGES);
+  assert.match(prompt, new RegExp(`only the first ${release.MAX_PROMPT_PACKAGES} of ${release.MAX_PROMPT_PACKAGES + 2}`));
+});

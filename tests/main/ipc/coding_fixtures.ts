@@ -22,6 +22,8 @@ export const loopHarness = async ({
   timesOut = null,
   hold = null,
   failWith = null,
+  outOfScope = null,
+  noChanges = null,
 }: {
   agent?: fixtures.FakeAgent | null;
   highRisk?: boolean;
@@ -31,12 +33,18 @@ export const loopHarness = async ({
   failWith?: Error | null;
   // Rounds (1-based) whose CLI run times out after writing its patch.
   timesOut?: ((round: number) => boolean) | null;
+  // Rounds (1-based) whose patch only touches a file outside the package's scope.
+  outOfScope?: ((round: number) => boolean) | null;
+  noChanges?: ((round: number) => boolean) | null;
 } = {}) => {
   const prompts: string[] = [];
   const timeouts: number[] = [];
   const reads: Parameters<NonNullable<CodingDeps['readPatch']>>[2][] = [];
   const file = highRisk ? 'tests/auth/login-user.test.ts' : 'src/auth/application/login-user.ts';
-  const preview = () => fixtures.filePatch(file, `export const round = ${prompts.length};`, SAMPLE_TASKS[0].fileScope);
+  const preview = () =>
+    noChanges?.(prompts.length)
+      ? { digest: 'empty', files: [], blocked: [], patch: '' }
+      : fixtures.filePatch(outOfScope?.(prompts.length) ? 'src/elsewhere.ts' : file, `export const round = ${prompts.length};`, SAMPLE_TASKS[0].fileScope);
   let root = '';
   const h = await fixtures.harness({
     agent,

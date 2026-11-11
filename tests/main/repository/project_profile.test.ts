@@ -95,6 +95,8 @@ test('buildProfile() names a custom step by its label', () => {
     steps: [{ id: step.id, step, source: 'project', skipped: null }],
     project: { status: 'missing' },
     detected: [],
+    blank: false,
+    missingDependencies: [],
     suggestions: {},
   });
   assert.deepEqual(profile.checks, [{ id: 'custom:docs', label: '文档', stage: 'manual', blocking: false, commandLine: 'node docs.js', reports: 'exit' }]);
